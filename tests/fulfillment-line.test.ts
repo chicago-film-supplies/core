@@ -7,14 +7,15 @@ import {
   substitutionRootZeroPriced,
 } from "../src/utils/fulfillment-items.ts";
 import { catalogComponentAt, retypedLinePrice } from "../src/utils/order-lines.ts";
-import type { PriceFormulaType } from "../src/schemas/mod.ts";
+import type { PriceFormulaRef } from "../src/schemas/mod.ts";
+import { FDW_REF, FIVE_DAY_WEEK, FIXED, FIXED_REF, tier } from "./helpers/formulas.ts";
 
 type RetypeFixture = {
-  formula: PriceFormulaType;
-  chargeable_days: number | null;
+  price_formula: PriceFormulaRef | null;
+  rates: { rate_key: string; amount_cents: number }[];
+  counts: unknown[];
   replacement_cents?: number | null;
   taxes: unknown[];
-  base_cents: number;
 };
 
 /**
@@ -161,12 +162,17 @@ Deno.test("catalogComponentAt resolves BY PATH, never by first uid", () => {
   assertStrictEquals(catalogComponentAt(KIT, ["X", "C"], "C"), undefined);
 });
 
-Deno.test("retypedLinePrice: formula and chargeable days follow the type; replacement only where the key exists", () => {
-  const order: RetypeFixture = { formula: "fixed", chargeable_days: null, replacement_cents: null, taxes: [{ x: 1 }], base_cents: 500 };
-  assertEquals(retypedLinePrice(order, "rental", 3), { formula: "five_day_week", chargeable_days: 3, replacement_cents: 0, taxes: [], base_cents: 500 });
-  const rental: RetypeFixture = { formula: "five_day_week", chargeable_days: 3, replacement_cents: 0, taxes: [], base_cents: 500 };
-  assertEquals(retypedLinePrice(rental, "sale", 3), { formula: "fixed", chargeable_days: null, replacement_cents: null, taxes: [], base_cents: 500 });
+Deno.test("retypedLinePrice: the formula follows the type, rates move by key, replacement only where the key exists", () => {
+  const order: RetypeFixture = { price_formula: FIXED_REF, rates: [{ rate_key: "flat", amount_cents: 500 }], counts: [tier("flat", 1, 1)], replacement_cents: null, taxes: [{ x: 1 }] };
+  // Fixed → Five-day week: the `week` key is new, so it takes the line's first amount; counts clear for the pricer.
+  assertEquals(retypedLinePrice(order, "rental", FIVE_DAY_WEEK), {
+    price_formula: FDW_REF, rates: [{ rate_key: "week", amount_cents: 500 }], counts: [], replacement_cents: 0, taxes: [],
+  });
+  const rental: RetypeFixture = { price_formula: FDW_REF, rates: [{ rate_key: "week", amount_cents: 500 }], counts: [tier("week", 3, 5)], replacement_cents: 0, taxes: [] };
+  assertEquals(retypedLinePrice(rental, "sale", FIXED), {
+    price_formula: FIXED_REF, rates: [{ rate_key: "flat", amount_cents: 500 }], counts: [], replacement_cents: null, taxes: [],
+  });
   // An invoice line has no `replacement_cents`, and retyping must not add one.
-  const invoice: RetypeFixture = { formula: "fixed", chargeable_days: null, taxes: [], base_cents: 500 };
-  assert(!("replacement_cents" in retypedLinePrice(invoice, "rental", null)));
+  const invoice: RetypeFixture = { price_formula: FIXED_REF, rates: [{ rate_key: "flat", amount_cents: 500 }], counts: [], taxes: [] };
+  assert(!("replacement_cents" in retypedLinePrice(invoice, "rental", FIVE_DAY_WEEK)));
 });

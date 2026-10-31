@@ -45,7 +45,7 @@ export {
   validateItemPaths,
   validateItemUniqueness,
 } from "./orders.ts";
-import { type PairChargeWindows, priceLine, windowChargeableDays } from "./price-document.ts";
+import { meteredLineCounts, type PairChargeWindows, priceLine, type PricingFormulas } from "./price-document.ts";
 
 /**
  * The **shared document sub-interface** — helpers a template partial may call
@@ -89,7 +89,7 @@ import {
 } from "./substitutions.ts";
 import { closestAncestor, mapPathsAcrossRebuild, pairItemsAcrossRebuild } from "./item-pairing.ts";
 import { interleaveStoredOnlyRows } from "./stored-only-rows.ts";
-import type { COARevenueType, CreditNoteStatusType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, PriceFormulaType, SettlementReasonType, SettlementTargetType, SettlementTypeType, SubstitutedForEntryType, PurchaseCreditStatusType } from "../schemas/mod.ts";
+import type { COARevenueType, CreditNoteStatusType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, SettlementReasonType, SettlementTargetType, SettlementTypeType, SubstitutedForEntryType, PurchaseCreditStatusType } from "../schemas/mod.ts";
 import {
   getSettlementMultiplier,
   INVOICE_FIELD_FREEZE,
@@ -774,7 +774,7 @@ const XERO_QTY_SCALE = 10_000n;
 
 /**
  * Compute the Xero unit amount from subtotal and quantity.
- * Bakes duration (chargeable_days × formula) into per-unit price,
+ * Bakes duration (the line's formula counts) into per-unit price,
  * since Xero has no concept of rental duration.
  *
  * ## The round trip does not close, and that is a property, not a bug
@@ -816,7 +816,7 @@ const XERO_QTY_SCALE = 10_000n;
  * half-done.
  *
  * @param subtotalCents - Pre-discount subtotal in integer cents
- *   (base_cents × days × formula × quantity)
+ *   (Σ rate × quantity × count, the line's formula money)
  * @param quantity - Item quantity. May be fractional; scaled rather than
  *   narrowed, so a non-integer cannot throw on the Xero push path.
  * @returns Per-unit amount for Xero **in dollars**, or 0 if quantity is 0
@@ -1191,12 +1191,12 @@ export function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: s
     description: item.description ?? "",
     quantity: item.quantity ?? 0,
     price: {
-      base_cents: p.base_cents ?? 0,
-      // Carried across so a `percent_of_total` fee line keeps its rate; the
+      price_formula: p.price_formula ?? null,
+      rates: p.rates ?? [],
+      counts: p.counts ?? [],
+      // Carried across so a percent-of-total fee line keeps its rate; the
       // exactly-one-of refinement rejects the projection otherwise.
       base_percent: p.base_percent ?? null,
-      chargeable_days: p.chargeable_days ?? null,
-      formula: (p.formula ?? "five_day_week") as PriceFormulaType,
       subtotal_cents: p.subtotal_cents ?? 0,
       subtotal_discounted_cents: p.subtotal_discounted_cents ?? 0,
       discount: p.discount ?? null,
@@ -1343,7 +1343,7 @@ function stableStringify(value: unknown): string {
  *
  * **Absent ≡ null, with no list of which keys it applies to.** A null-valued
  * key is dropped from both sides before comparing, so the rule holds for every
- * nullable price key there is or will be (`base_percent`, `chargeable_days`,
+ * nullable price key there is or will be (`base_percent`, `price_formula`,
  * `discount`) and cannot go stale. It is safe for the rest by construction: a
  * key that is not nullable cannot hold `null`, so dropping nulls can never
  * erase one of its values. A key present on one side and absent on the other
@@ -1392,7 +1392,7 @@ function invoicePriceDifferences(expected: unknown, current: unknown): string[] 
  * {@link invoiceItemsMatch}, and the reason there is only one comparator.
  *
  * Returns sorted, qualified field names (`name`, `price.taxes`,
- * `price.chargeable_days`); `[]` means the rows agree. Invoice-only fields
+ * `price.counts`); `[]` means the rows agree. Invoice-only fields
  * ({@link INVOICE_ONLY_ITEM_FIELDS}) are filtered out of both sides first, so an
  * override is never a difference.
  *
@@ -1512,6 +1512,13 @@ export interface InvoiceSyncContext {
    * arm then never fires.
    */
   invoiceChargeWindows: readonly PairChargeWindows[];
+  /**
+   * Every formula the invoice's lines name, and the holiday list — what
+   * re-metering a line at the invoice's windows reads (ruling 8: a window no
+   * longer stores a count).
+   */
+  formulas: PricingFormulas;
+  holidays: readonly string[];
 }
 
 /** Whole-cent tax a line carries. Integer addition — closed under the quantum, exact. */
@@ -1551,7 +1558,7 @@ const TAX_EXPLAINABLE_FIELDS = new Set(["price.taxes", "price.taxes_base", "pric
  * it rewrites.
  */
 const WINDOW_EXPLAINABLE_FIELDS = new Set([
-  "price.chargeable_days",
+  "price.counts",
   "price.subtotal_cents",
   "price.subtotal_discounted_cents",
   "price.discount",
@@ -1573,8 +1580,8 @@ function priceKeyAgrees(a: InvoiceItem, b: InvoiceItem, field: string): boolean 
  * **The projected order line, re-priced at the INVOICE's own charge windows**
  * (core#112) — or `undefined` when that question does not arise.
  *
- * Since charge-windows beta A a rental line's days and money derive from *its own
- * document's* pair windows ({@link windowChargeableDays}), so an invoice that
+ * A time-formula line's counts and money derive from *its own document's* pair
+ * windows ({@link meteredLineCounts}), so an invoice that
  * states its own — a partial bill, charge-windows decision 3 — differs from its
  * order on the day count and every money field below it. This re-derives what the
  * order line WOULD be if billed at the invoice's windows, and the caller explains
@@ -1605,14 +1612,26 @@ function reprojectAtInvoiceWindows(
   expected: InvoiceItem,
   context: InvoiceSyncContext,
 ): InvoiceItem | undefined {
-  const days = windowChargeableDays(expected as unknown as LineItem, context.invoiceChargeWindows);
-  if (days === null) return undefined;
   const price = (expected as unknown as { price?: PriceObject }).price;
-  // Nothing to explain: the invoice's windows bill what the order's already did.
-  if (!price || days === price.chargeable_days) return undefined;
-  const item = { ...expected, price: { ...price, chargeable_days: days } } as unknown as LineItem;
+  if (!price || price.price_formula?.basis !== "time") return undefined;
+  let counts;
+  try {
+    counts = meteredLineCounts(expected as unknown as LineItem, {
+      charge_windows: context.invoiceChargeWindows,
+      formulas: context.formulas,
+      holidays: context.holidays,
+    });
+  } catch {
+    // A formula the context does not carry: a comparator explains nothing
+    // rather than taking the badge down.
+    return undefined;
+  }
+  if (counts === null) return undefined;
+  // Nothing to explain: the invoice's windows meter what the order's already did.
+  if (stableStringify(counts) === stableStringify(price.counts)) return undefined;
+  const item = { ...expected, price: { ...price, counts } } as unknown as LineItem;
   const ownRates: Tax[] = (price.taxes ?? []).map((t) => ({ uid: t.uid, name: t.name, rate: t.rate, type: t.type }));
-  return { ...expected, price: { ...price, chargeable_days: days, ...priceLine(item, ownRates) } } as InvoiceItem;
+  return { ...expected, price: { ...price, counts, ...priceLine(item, ownRates) } } as InvoiceItem;
 }
 
 /**

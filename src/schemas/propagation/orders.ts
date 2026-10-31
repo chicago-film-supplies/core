@@ -299,9 +299,9 @@ const createOrderRules: CollectionRule[] = [
       { source: ["type"], target: ["items", "type"] },
       { source: ["stock_method"], target: ["items", "stock_method"] },
       {
-        source: ["price", "base_cents"],
-        target: ["items", "price", "base_cents"],
-        transform: "fallback — used only when input omits price",
+        source: ["price", "rates"],
+        target: ["items", "price", "rates"],
+        transform: "fallback — used only when input omits price: the rows in force at the order's pricing date, snapshotted (D4)",
       },
       {
         source: ["price", "replacement_cents"],
@@ -373,7 +373,7 @@ const createOrderRules: CollectionRule[] = [
         source: ["destinations"],
         target: ["destinations"],
         transform:
-          "per-destination dates: each ISO string gets a Firestore timestamp companion (*_fs); applyDateEdit → canonicalChargeWindows counts charge_windows[].days and days_active",
+          "per-destination dates: each ISO string gets a Firestore timestamp companion (*_fs); applyDateEdit → canonicalChargeWindows canonicalizes charge_windows and counts days_active; priceDocument meters each line's counts",
       },
       {
         source: [],

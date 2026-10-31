@@ -521,7 +521,7 @@ const recomputeHolidayDraftOrderRules: CollectionRule[] = [
         source: [],
         target: ["destinations", "dates"],
         transform:
-          "recanonicalize each pair (canonicalChargeWindows recounts charge_windows[].days and days_active) with the new holiday set, then priceDocument re-derives line chargeable_days + totals",
+          "recanonicalize each pair (canonicalChargeWindows recounts days_active) with the new holiday set, then priceDocument re-meters each line's counts + totals",
       },
     ],
   },
@@ -534,17 +534,17 @@ const recomputeHolidayDraftInvoiceRules: CollectionRule[] = [
     target: "invoices",
     mode: "fan-out",
     invariant:
-      "A recomputed draft order must re-sync its draft invoices' chargeable_days/prices; terminal invoices (any unreversed settlement, or status in {paid, void}) stay frozen",
+      "A recomputed draft order must re-sync its draft invoices' counts/prices; terminal invoices (any unreversed settlement, or status in {paid, void}) stay frozen",
     trigger:
       "draft-order recompute — transitive via updateOrder's existing draft-invoice sync (projectOrderItemToInvoiceItem inherits the recomputed durations)",
     fields: [
-      // ⚠️ One segment short on both sides until 2026-08-17 — `chargeable_days`
+      // ⚠️ One segment short on both sides until 2026-08-17 — the day count
       // lives under the item's `price`, on the order and on the invoice alike.
       // The same shape as the `enforced_by` drift the campaign measured: a ref
       // that names the right thing and stops just above it.
       {
-        source: ["items", "price", "chargeable_days"],
-        target: ["items", "price", "chargeable_days"],
+        source: ["items", "price", "counts"],
+        target: ["items", "price", "counts"],
         transform:
           "inherited via projectOrderItemToInvoiceItem; draft invoices only — terminal ones skipped",
       },

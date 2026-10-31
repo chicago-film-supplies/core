@@ -6,7 +6,7 @@
  * engine, each with a companion that is ASSERTED to disagree (`cfs-money` § The
  * sweep discipline) and one counter per arm:
  *
- * (i)   the money step reproduces `calculateItemSubtotal` for every shape it has
+ * (i)   the money step reproduces `the retired calculateItemSubtotal` for every shape it has
  *       today (Five-day week ↔ `five_day_week`, Fixed ↔ `fixed`, percent and flat
  *       discounts, negative bases, several windows), and an exact rational
  *       oracle that rounds by the DEFINITION;
@@ -41,8 +41,44 @@ import {
   PriceFormulaSchema,
   UpdatePriceFormulaInput,
 } from "../src/schemas/price-formula.ts";
-import { calculateItemSubtotal } from "../src/utils/orders.ts";
-import { billableDays, countCfsBusinessDays } from "../src/utils/dates.ts";
+import { countCfsBusinessDays } from "../src/utils/dates.ts";
+import { roundDivHalfAwayFromZero, toCentsBig } from "../src/utils/money.ts";
+
+/** Σ max(d, 5) — the retired `billableDays`, frozen here as an oracle. */
+const billableDays = (days: readonly number[]) => days.reduce((sum, d) => sum + Math.max(d, 5), 0);
+
+/**
+ * **The retired `the retired calculateItemSubtotal`**, frozen as a test oracle (ruling 8
+ * replaced it with the engine): `base × qty × max(days/5, 1)` on
+ * `five_day_week`, `base × qty` on `fixed`, an extension's signed day count
+ * with the floor skipped, and the discount scaled by the same factor. What the
+ * ruling-8 backfill must reproduce byte for byte, so the engine is held to it.
+ */
+function retiredSubtotal(
+  item: { quantity: number; price: { base_cents: number; formula: "five_day_week" | "fixed"; chargeable_days: number | null; discount: { type: "percent" | "flat"; rate: number } | null } },
+  opts: { extensionDays?: number } = {},
+): { subtotal_cents: number; subtotal_discounted_cents: number } {
+  const QTY = 10_000n, RATE = 1_000_000n;
+  const { base_cents, formula, chargeable_days, discount } = item.price;
+  const quantity = BigInt(Math.round(item.quantity * Number(QTY)));
+  const ext = opts.extensionDays;
+  const days = Math.round(ext ?? chargeable_days ?? 0);
+  const useDays = ext !== undefined || (formula === "five_day_week" && days > 5);
+  let num = BigInt(base_cents) * quantity, den = QTY;
+  if (useDays) { num *= BigInt(days); den *= 5n; }
+  const subtotal = roundDivHalfAwayFromZero(num, den);
+  if (!discount) return { subtotal_cents: Number(subtotal), subtotal_discounted_cents: Number(subtotal) };
+  let discounted: bigint;
+  if (discount.type === "percent") {
+    const rate = BigInt(Math.round(discount.rate * Number(RATE)));
+    discounted = roundDivHalfAwayFromZero(subtotal * (100n * RATE - rate), 100n * RATE);
+  } else {
+    let dNum = toCentsBig(discount.rate) * quantity, dDen = QTY;
+    if (useDays) { dNum *= BigInt(days); dDen *= 5n; }
+    discounted = subtotal - roundDivHalfAwayFromZero(dNum, dDen);
+  }
+  return { subtotal_cents: Number(subtotal), subtotal_discounted_cents: Number(discounted) };
+}
 
 function lcg(seed: number): () => number {
   let s = seed;
@@ -266,7 +302,7 @@ Deno.test("the create input runs the rule; the update input cannot express a rul
   assertEquals(Object.keys(upd).sort(), ["name", "uid"]);
 });
 
-// ── (i) The money step vs calculateItemSubtotal and an exact rational oracle ──
+// ── (i) The money step vs the retired calculateItemSubtotal and an exact rational oracle ──
 
 type Discount = { rate: number; type: "percent" | "flat" } | null;
 
@@ -329,7 +365,7 @@ function randomDiscount(rand: () => number): Discount {
   return { type: "flat", rate: int(rand, 0, 50_000) / 100 };
 }
 
-Deno.test("(i) the money step reproduces calculateItemSubtotal and the rational oracle — 300k lines, one counter per arm", () => {
+Deno.test("(i) the money step reproduces the retired calculateItemSubtotal and the rational oracle — 300k lines, one counter per arm", () => {
   const rand = lcg(20261031);
   let vsLegacy = 0, vsOracle = 0;
   let fiveDay = 0,
@@ -358,8 +394,7 @@ Deno.test("(i) the money step reproduces calculateItemSubtotal and the rational 
       discount,
     );
 
-    const legacy = calculateItemSubtotal({
-      type: "rental",
+    const legacy = retiredSubtotal({
       quantity,
       price: {
         base_cents: base,
@@ -401,7 +436,7 @@ Deno.test("(i) the money step reproduces calculateItemSubtotal and the rational 
     if (discount?.type === "flat") flat++;
   }
 
-  assertEquals(vsLegacy, 0, "the engine disagrees with calculateItemSubtotal");
+  assertEquals(vsLegacy, 0, "the engine disagrees with the retired calculateItemSubtotal");
   assertEquals(
     vsOracle,
     0,
@@ -434,7 +469,7 @@ Deno.test("(i) the money step reproduces calculateItemSubtotal and the rational 
   );
 });
 
-Deno.test("(i) an extension section passes a signed count with no minimum, as calculateItemSubtotal's extensionDays does", () => {
+Deno.test("(i) an extension section passes a signed count with no minimum, as the retired calculateItemSubtotal's extensionDays does", () => {
   for (const ext of [-7, -2, 0, 2, 4, 9]) {
     const tiers = statedUnits(FIVE_DAY_WEEK, ext, { minimum: false });
     const got = priceFromFormula(
@@ -443,9 +478,8 @@ Deno.test("(i) an extension section passes a signed count with no minimum, as ca
       3,
       { type: "flat", rate: 1.5 },
     );
-    const legacy = calculateItemSubtotal(
+    const legacy = retiredSubtotal(
       {
-        type: "rental",
         quantity: 3,
         price: {
           base_cents: 12_345,
@@ -514,8 +548,7 @@ Deno.test("(i) metered windows: each window counts like countCfsBusinessDays, an
       2,
       null,
     );
-    const legacy = calculateItemSubtotal({
-      type: "rental",
+    const legacy = retiredSubtotal({
       quantity: 2,
       price: {
         base_cents: base,

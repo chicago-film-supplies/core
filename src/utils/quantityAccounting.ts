@@ -39,17 +39,18 @@
  *
  * An order whose dates were extended after it was billed has no quantity left to
  * bill and still has money left to bill. That remainder is each billed row priced
- * as a D7 EXTENSION (api-cloudrun#997): for
- * `billableDays(order windows) − billableDays(billed windows)` days with the
- * one-week minimum skipped, through `priceDocument`'s line pricer — so it is
- * exactly what an extension section on an invoice bills (#997 D11).
+ * as a D7 EXTENSION (api-cloudrun#997): at the counts
+ * `meter(order windows) − meter(billed windows)`, both metered through the
+ * billed row's formula (each side carries its own minimum, so the difference
+ * skips it), through `priceDocument`'s line pricer — so it is exactly what an
+ * extension section on an invoice bills (#997 D11, Phase 2 ruling 8).
  *
  * 🔴 **An extension is a change of WINDOW SET, and its days are the PAIRS' days.**
  * A billed row is extended, or shortened, only when the order pair's windows
  * cover DIFFERENT Chicago calendar dates than the windows that billed it; the
- * amount is then `billableDays(order windows) − billed days`, sign and all, from
- * the two pairs' stored window days — never a line's `chargeable_days`. A
- * {@link BilledWindow} carries that pair's last window end, its window days, and
+ * amount is then `meter(order windows) − billed counts`, sign and all, from the
+ * two pairs' windows metered through the row's formula — never a line's own
+ * stored counts. A {@link BilledWindow} carries that pair's last window end and
  * each window's bounds.
  *
  * ⚠️ **This widened on 2026-09-17 (api-cloudrun#1028 phase 1a), and the widening
@@ -59,7 +60,7 @@
  * are now asked separately in {@link extensionGroups}; the first is answered by
  * dates ({@link sameWindowDates}) and the second by day counts.
  *
- * Both cuts reverse the first one, which read line `chargeable_days` on both sides.
+ * Both cuts reverse the first one, which read the line's stored days on both sides.
  * The 2026-09-16 census (prod and dev agree) found ONE genuine extension in the
  * corpus (#898) against 34 orders reading a positive extension on an UNMOVED
  * window — $59.6k — and 60 remainder sections charging from the day after their
@@ -75,7 +76,7 @@
  * it billed. A row billed on no pair — no `destinations` entry, or no end —
  * extends by nothing: an unknown window is not a later one.
  *
- * 🔴 **Never price "the extra days" as an ordinary line.** `five_day_week` floors
+ * 🔴 **Never price "the extra days" as an ordinary line.** Five-day week floors
  * at one week, so `price(3 days)` charges a week the billed row already paid.
  * The D7 day count floors each SIDE at the week instead, and skips the floor on
  * the difference. A `fixed` row never read its days and extends by nothing.
@@ -86,8 +87,8 @@
  * {@link accountLine} subtracts its money, priced at its own added days, from
  * what the order's days add to the unit rows.
  *
- * ⚠️ **A line's `chargeable_days` is read for its RATE terms only**, never for
- * the extension's days — see above.
+ * ⚠️ **A billed line is read for its RATE terms and formula only**, never for
+ * the extension's counts — see above.
  *
  * ## Money is PRE-TAX, in integer cents
  *
@@ -140,7 +141,8 @@ import {
 import { isAtOrBelow, standInUnits, substitutionCredit } from "./substitutions.ts";
 
 export { substitutionCredit };
-import { billableDays, chargeEnvelope, chicagoDayAtTimeOf, toChicagoYmd } from "./dates.ts";
+import { chargeEnvelope, chicagoDayAtTimeOf, toChicagoYmd } from "./dates.ts";
+import { meterUnits, priceFromFormula, type PricingFormulas, type TierCount } from "./price-formulas.ts";
 import { isPreTaxItem, type LineItem } from "./orders.ts";
 import { priceLine } from "./price-document.ts";
 
@@ -171,33 +173,104 @@ export interface WindowBounds {
   end: string;
 }
 
-/** A pair's charge windows, as an extension compares them: where the last one ends, each one's days, and each one's bounds. */
+/** A pair's charge windows, as an extension compares them: where the last one ends, and each one's bounds. */
 export interface BilledWindow {
   /** The last window's end. */
   end: string;
-  /** Each window's stored `days`, in order. */
-  days: readonly number[];
   /**
-   * Each window's bounds, in order — parallel to {@link days}.
+   * Each window's bounds, in order.
    *
-   * 🔴 **This, not {@link days}, is what says whether a window MOVED.** A stored
-   * `days` is frozen at write while the order's is recounted against the holiday
-   * calendar, so a day delta under an identical set of dates is always an
-   * artefact of that recount and never a shortening. See {@link extensionGroups}.
+   * 🔴 **These DATES are what say whether a window MOVED.** A day delta under an
+   * identical set of dates is an artefact (a holiday recount, a hand-held count)
+   * and never a shortening. See {@link extensionGroups}.
    */
   windows: readonly WindowBounds[];
 }
 
 /** A pair's {@link BilledWindow}, or `null` when it has no windows. */
 export function pairWindow(pair: { dates?: unknown } | undefined): BilledWindow | null {
-  const dates = pair?.dates as { charge_windows?: readonly { start: string; end: string; days: number }[] } | undefined;
+  const dates = pair?.dates as { charge_windows?: readonly { start: string; end: string }[] } | undefined;
   const envelope = chargeEnvelope({ charge_windows: dates?.charge_windows });
   if (envelope === null || Number.isNaN(Date.parse(envelope.end))) return null;
   return {
     end: envelope.end,
-    days: dates!.charge_windows!.map((w) => w.days),
     windows: dates!.charge_windows!.map((w) => ({ start: w.start, end: w.end })),
   };
+}
+
+/**
+ * What metering a window set needs (ruling 8): every formula the order's and
+ * invoices' lines name, and the holiday list.
+ */
+export interface AccountingContext {
+  formulas: PricingFormulas;
+  holidays: readonly string[];
+}
+
+/**
+ * **What `item`'s formula meters from `windows`** — `null` when the line is not
+ * on a time formula, or its formula is not loaded. Both sides of an extension
+ * are metered here, through the BILLED row's formula, against today's holidays,
+ * so their difference is a difference of like with like.
+ */
+function meterWindows(item: LineItem, windows: readonly WindowBounds[], ctx: AccountingContext): TierCount[] | null {
+  if (item.price?.price_formula?.basis !== "time" || windows.length === 0) return null;
+  const formula = ctx.formulas.get(item.price.price_formula.uid);
+  if (!formula) return null;
+  const span = { start: windows[0].start, end: windows[windows.length - 1].end };
+  return meterUnits(formula, { windows, span, holidays: ctx.holidays }).tiers;
+}
+
+function gcdN(a: number, b: number): number {
+  a = Math.abs(a);
+  b = Math.abs(b);
+  while (b) [a, b] = [b, a % b];
+  return a || 1;
+}
+
+/** Tier-wise `a + sign × b` over the union of rate keys, each tier reduced. */
+function combineCounts(a: readonly TierCount[], b: readonly TierCount[], sign: 1 | -1): TierCount[] {
+  const keys = [...new Set([...a.map((t) => t.rate_key), ...b.map((t) => t.rate_key)])];
+  return keys.map((rate_key) => {
+    const x = a.find((t) => t.rate_key === rate_key) ?? { rate_key, num: 0, den: 1 };
+    const y = b.find((t) => t.rate_key === rate_key) ?? { rate_key, num: 0, den: 1 };
+    const num = x.num * y.den + sign * y.num * x.den;
+    const den = x.den * y.den;
+    const g = gcdN(num, den);
+    return { rate_key, num: num / g, den: den / g };
+  });
+}
+
+/** Every tier is zero. */
+function countsAreZero(counts: readonly TierCount[]): boolean {
+  return counts.every((t) => t.num === 0);
+}
+
+/** Two count lists name the same value per key. */
+function sameCountValues(a: readonly TierCount[], b: readonly TierCount[]): boolean {
+  return countsAreZero(combineCounts(a, b, -1));
+}
+
+/**
+ * The DIRECTION of a count delta: the sign of the money it prices to at the
+ * line's own rates, or — on a $0 line — the sign of its summed periods. `+1`
+ * is an extension still owed, `−1` a shortening, `0` nothing.
+ */
+export function countsDirection(item: LineItem, counts: readonly TierCount[]): -1 | 0 | 1 {
+  if (countsAreZero(counts)) return 0;
+  try {
+    const money = priceFromFormula(item.price?.rates ?? [], counts, 1, null).subtotal_cents;
+    if (money !== 0) return money > 0 ? 1 : -1;
+  } catch {
+    // a key the rates lack: fall through to the periods
+  }
+  const periods = counts.reduce((sum, t) => sum + t.num / t.den, 0);
+  return periods > 0 ? 1 : periods < 0 ? -1 : 0;
+}
+
+/** The magnitude of a count delta — every tier's sign flipped when the direction is negative. */
+export function countsMagnitude(item: LineItem, counts: readonly TierCount[]): TierCount[] {
+  return countsDirection(item, counts) < 0 ? counts.map((t) => ({ ...t, num: -t.num })) : [...counts];
 }
 
 /**
@@ -378,9 +451,9 @@ const key = (path: readonly string[]): string => path.join("/");
  * every descendant crediting units their parent no longer bills.
  *
  * ⚠️ **Units only. Days are NOT netted here** — a credited shortening is reported
- * as a suppressed offer instead. `billed_days` is derived inside
+ * as a suppressed offer instead. `billed_counts` is derived inside
  * {@link extensionGroups}, where extension rows split and merge groups, so a
- * `(path, quantity, days)` triple cannot say which group loses the days.
+ * `(path, quantity, counts)` triple cannot say which group loses the time.
  *
  * @param orderUid - The order's uid, which is its divider's uid on every invoice
  * @param orderItems - The order's CURRENT `items`, dividers included
@@ -715,10 +788,13 @@ export interface LineAccount {
  * The line's tax refs are dropped first: only the pre-tax subtotal is read, and
  * the pricer resolves every ref it is handed against the catalog it is given.
  */
-function subtotalCents(item: LineItem, extensionDays?: number): number {
+function subtotalCents(item: LineItem, extensionCounts?: readonly TierCount[]): number {
   if (!isPreTaxItem(item)) return 0;
-  const untaxed = { ...item, price: { ...item.price, taxes: [] } } as LineItem;
-  return priceLine(untaxed, [], extensionDays).subtotal_discounted_cents;
+  const untaxed = {
+    ...item,
+    price: { ...item.price, taxes: [], ...(extensionCounts ? { counts: [...extensionCounts] } : {}) },
+  } as LineItem;
+  return priceLine(untaxed, [], extensionCounts !== undefined).subtotal_discounted_cents;
 }
 
 /**
@@ -727,12 +803,14 @@ function subtotalCents(item: LineItem, extensionDays?: number): number {
  * @param orderLine - The order line, at its current quantity
  * @param billed - {@link invoicedByPath}'s entry for the line's path, if any
  * @param orderWindow - {@link orderLineWindow} for the line; `null` extends nothing
+ * @param ctx - the formulas and holidays the extension meters with
  * @param fulfilled - the FULFILLMENT row's quantity at this line's path, if one exists
  */
 export function accountLine(
   orderLine: LineItem,
   billed: InvoicedAtPath | undefined,
   orderWindow: BilledWindow | null,
+  ctx: AccountingContext,
   fulfilled?: number,
 ): LineAccount {
   const ordered = orderLine.quantity ?? 0;
@@ -741,8 +819,8 @@ export function accountLine(
 
   // The pricer rounds a non-negative quantity; an over-billed remainder is
   // priced at its magnitude and given back its sign.
-  // The line's own days: `priceDocument` stamps a 2+ window pair's line with its
-  // billable days (core#114), so they already carry every window's minimum.
+  // The line's own counts: `priceDocument` meters a 2+ window pair's line with
+  // every window's minimum already in them (core#114).
   const quantityCents = quantity === 0
     ? 0
     : Math.sign(quantity) * subtotalCents({ ...orderLine, quantity: Math.abs(quantity) });
@@ -751,8 +829,8 @@ export function accountLine(
   // the ONE extension line that would bill it — so a remainder invoice built
   // from {@link extensionGroups} nets this to exactly zero, cent for cent.
   let extensionCents = 0;
-  for (const group of extensionGroups(orderLine, billed, orderWindow)) {
-    extensionCents += subtotalCents({ ...group.item, quantity: group.quantity } as LineItem, group.extension_days);
+  for (const group of extensionGroups(orderLine, billed, orderWindow, ctx)) {
+    extensionCents += subtotalCents({ ...group.item, quantity: group.quantity } as LineItem, group.extension_counts);
   }
 
   // The same pricing basis as `quantity_cents` — the ORDER line's current
@@ -789,10 +867,10 @@ export interface ExtensionGroup {
   /** Units in the group. */
   quantity: number;
   /**
-   * Billable days billed so far: `billableDays` of the row's pair's windows, plus
-   * every extension applied to these units.
+   * The counts billed so far: what the row's formula meters from its pair's
+   * windows, plus every extension applied to these units (their stated counts).
    */
-  billed_days: number;
+  billed_counts: readonly TierCount[];
   /** Where the billed window ends: the row's pair's end, or the last extension's. */
   billed_end: string;
   /**
@@ -801,8 +879,14 @@ export interface ExtensionGroup {
    * window MOVED at all — see {@link BilledWindow.windows}.
    */
   billed_set: readonly WindowBounds[];
-  /** `billableDays(order pair windows) − billed_days`. Never 0; negative is a shortening. */
-  extension_days: number;
+  /**
+   * What the row's formula meters from the order pair's windows, less
+   * {@link billed_counts}. Never all-zero; {@link countsDirection} says which
+   * way — negative is a shortening.
+   */
+  extension_counts: readonly TierCount[];
+  /** {@link countsDirection} of {@link extension_counts}: `1` owed, `−1` a shortening. */
+  extension_direction: -1 | 1;
   /** The invoice section that last billed these units: `[invoiceUid, section divider uid]`. */
   section: [string, string];
   /**
@@ -821,7 +905,7 @@ export interface ExtensionGroup {
  * The extension still owed on an order line, as groups of billed units that
  * share their terms and their cumulative billed days (api-cloudrun#680 R1).
  *
- * The walk: every `five_day_week` unit row on a known {@link BilledWindow}
+ * The walk: every time-formula unit row on a known {@link BilledWindow}
  * starts a group at its pair's billable days and end. Each extension row then moves its
  * quantity from the groups whose window ENDS earliest (then fewest days), in
  * invoice order, to `billed days + the extension pair's days`, ending where the
@@ -840,17 +924,17 @@ export interface ExtensionGroup {
  *
  * 1. **Did the window move?** {@link sameWindowDates} compares the order pair's
  *    windows against the group's {@link ExtensionGroup.billed_set}, window for
- *    window, as Chicago calendar dates. Identical ⇒ `extension_days = 0`,
+ *    window, as Chicago calendar dates. Identical ⇒ no extension,
  *    whatever the day counts say. 🔴 This is the holiday-recount guard, and it is
  *    why the comparison is of DATES and not of `days`: a stored `days` is frozen
  *    at write while the order's is recounted, so a delta under an identical date
  *    set is always an artefact of the recount.
- * 2. **How much, and which way?** `billableDays(order pair windows) − billed_days`,
+ * 2. **How much, and which way?** `meter(order pair windows) − billed_counts`,
  *    sign and all. Negative is a shortening — over-billing, for the credit-note
  *    flow — and positive is an extension still owed.
  *
  * ⚠️ **There is deliberately no sub-cover test.** A window set that shrinks by
- * date while `billableDays` RISES (one window split into several, each floored to
+ * date while the metered count RISES (one window split into several, each floored to
  * a week) is a genuine extension, and by owner ruling an invoice stating its own
  * windows is never over-billing — so a bill inside a narrower or split cover
  * credits nothing.
@@ -862,26 +946,28 @@ export function extensionGroups(
   orderLine: LineItem,
   billed: InvoicedAtPath | undefined,
   orderWindow: BilledWindow | null,
+  ctx: AccountingContext,
 ): ExtensionGroup[] {
-  // A RENTAL only (api-cloudrun#1154): days are a rental's, and a sale, service
-  // or fee stored as `five_day_week` — 360 of them on prod invoices — bills at
-  // factor 1 (`daysFromWindows`), so it has nothing to extend or credit.
-  if (!isPreTaxItem(orderLine) || orderLine.type !== "rental" || orderWindow === null) return [];
-  const groups: Array<Omit<ExtensionGroup, "extension_days">> = [];
+  // A time-formula line only: a flat-formula row never read its time, so it has
+  // nothing to extend or credit.
+  if (!isPreTaxItem(orderLine) || orderWindow === null) return [];
+  const groups: Array<Omit<ExtensionGroup, "extension_counts" | "extension_direction">> = [];
   const extensions: InvoicedRow[] = [];
   for (const row of billed?.rows ?? []) {
-    if (!isPreTaxItem(row.item) || row.item.type !== "rental" || row.item.price.formula !== "five_day_week") continue;
+    if (!isPreTaxItem(row.item) || row.item.price.price_formula?.basis !== "time") continue;
     if (row.via === "extension") {
       extensions.push(row);
       continue;
     }
     const quantity = row.quantity;
     if (quantity <= 0 || row.window === null) continue;
+    const billedCounts = meterWindows(row.item, row.window.windows, ctx);
+    if (billedCounts === null) continue;
     groups.push({
       item: row.item,
       via: row.via,
       quantity,
-      billed_days: billableDays(row.window.days),
+      billed_counts: billedCounts,
       billed_end: row.window.end,
       billed_set: row.window.windows,
       section: [row.invoiceUid, (row.item.path ?? [])[1] ?? ""],
@@ -891,8 +977,8 @@ export function extensionGroups(
   for (const row of extensions) {
     if (row.window === null) continue;
     let left = row.item.quantity ?? 0;
-    // An extension pair's one window stores the days it ADDED: no floor.
-    const added = row.window.days.reduce((total, d) => total + d, 0);
+    // An extension line STATES the counts it added, minimum skipped.
+    const added = row.item.price?.counts ?? [];
     const billedEnd = row.window.end;
     const section: [string, string] = [row.invoiceUid, (row.item.path ?? [])[1] ?? ""];
     while (left > 0) {
@@ -900,10 +986,12 @@ export function extensionGroups(
       if (open.length === 0) break;
       const earliest = open.reduce((a, b) => {
         const byEnd = Date.parse(b.billed_end) - Date.parse(a.billed_end);
-        return byEnd < 0 || (byEnd === 0 && b.billed_days < a.billed_days) ? b : a;
+        return byEnd < 0 || (byEnd === 0 && countsDirection(a.item, combineCounts(b.billed_counts, a.billed_counts, -1)) < 0)
+          ? b
+          : a;
       });
       const moved = Math.min(left, earliest.quantity);
-      const billedDays = earliest.billed_days + added;
+      const billedCounts = combineCounts(earliest.billed_counts, added, 1);
       // The extension bills its own window ON TOP of what the group already carried.
       const billedSet = [...earliest.billed_set, ...row.window.windows];
       earliest.quantity -= moved;
@@ -912,7 +1000,7 @@ export function extensionGroups(
       // and their end and still have been billed across different windows, and
       // merging those would hand the shortening gate a set neither of them has.
       const same = groups.find((g) =>
-        g.item === earliest.item && g.billed_days === billedDays && g.billed_end === billedEnd &&
+        g.item === earliest.item && sameCountValues(g.billed_counts, billedCounts) && g.billed_end === billedEnd &&
         g.section[0] === section[0] && g.section[1] === section[1] && sameWindowDates(g.billed_set, billedSet)
       );
       if (same) same.quantity += moved;
@@ -920,7 +1008,7 @@ export function extensionGroups(
         groups.push({
           ...earliest,
           quantity: moved,
-          billed_days: billedDays,
+          billed_counts: billedCounts,
           billed_end: billedEnd,
           billed_set: billedSet,
           section,
@@ -929,15 +1017,19 @@ export function extensionGroups(
       }
     }
   }
-  const orderDays = billableDays(orderWindow.days);
-  return groups
-    .filter((g) => g.quantity > 0)
-    .map((g) => ({
-      ...g,
-      // (1) did the window move? (2) if so, by how much and which way?
-      extension_days: sameWindowDates(g.billed_set, orderWindow.windows) ? 0 : orderDays - g.billed_days,
-    }))
-    .filter((g) => g.extension_days !== 0);
+  const out: ExtensionGroup[] = [];
+  for (const g of groups) {
+    if (g.quantity <= 0) continue;
+    // (1) did the window move? (2) if so, by how much and which way?
+    if (sameWindowDates(g.billed_set, orderWindow.windows)) continue;
+    const ordered = meterWindows(g.item, orderWindow.windows, ctx);
+    if (ordered === null) continue;
+    const extension = combineCounts(ordered, g.billed_counts, -1);
+    const direction = countsDirection(g.item, extension);
+    if (direction === 0) continue;
+    out.push({ ...g, extension_counts: extension, extension_direction: direction });
+  }
+  return out;
 }
 
 /** One order line with something left to bill, or billed beyond the order. */
@@ -1006,6 +1098,7 @@ export function remainingForOrder(
   orderItems: readonly LineItem[],
   invoices: readonly AccountedInvoice[],
   orderDestinations: readonly DocDestinationType[],
+  ctx: AccountingContext,
   creditNotes: readonly AccountedCreditNote[] = [],
 ): RemainingForOrder {
   const billed = invoicedByPath(orderUid, orderItems, invoices, creditNotes);
@@ -1025,8 +1118,8 @@ export function remainingForOrder(
     const path = item.path ?? [];
     const at = billed.byPath.get(key(path));
     const window = orderLineWindow(orderDestinations, path);
-    const account = accountLine(item, at, window);
-    const bills = account.quantity > 0 || extensionGroups(item, at, window).some((g) => g.extension_days > 0);
+    const account = accountLine(item, at, window, ctx);
+    const bills = account.quantity > 0 || extensionGroups(item, at, window, ctx).some((g) => g.extension_direction > 0);
     // Zero cents is not nothing to bill: a $0 line's added days, or windows
     // netting to 0¢, are still lines the build emits.
     if (account.quantity === 0 && account.extension_cents === 0 && !bills) continue;
@@ -1048,10 +1141,10 @@ export interface OverbillingCreditLine {
   /** Whole units to credit. `0` on a days-only credit. */
   quantity: number;
   /**
-   * Billable days to credit, for a window the order SHORTENED — `−extension_days`.
-   * Absent on an ordinary unit credit.
+   * The counts to credit, for a window the order SHORTENED — the magnitude of
+   * the group's `extension_counts` (ruling 8). Absent on an ordinary unit credit.
    */
-  credited_days?: number;
+  credited_counts?: TierCount[];
   /** Pre-tax preview cents, priced from the row the note will be priced from. */
   preview_cents: number;
 }
@@ -1128,6 +1221,7 @@ export interface OverbillingCredits {
 export function buildOverbillingCredits(
   order: RemainingOrderSource,
   invoices: readonly AccountedInvoice[],
+  ctx: AccountingContext,
   creditNotes: readonly AccountedCreditNote[] = [],
 ): OverbillingCredits {
   const O = order.uid;
@@ -1155,7 +1249,7 @@ export function buildOverbillingCredits(
     if (!isLineItemType(item.type)) continue;
     const path = item.path ?? [];
     const at = billed.byPath.get(key(path));
-    const account = accountLine(item, at, orderLineWindow(order.destinations, path));
+    const account = accountLine(item, at, orderLineWindow(order.destinations, path), ctx);
 
     // ── Units billed beyond the order ──
     if (account.quantity < 0) {
@@ -1194,9 +1288,9 @@ export function buildOverbillingCredits(
     }
 
     // ── Days billed beyond the order: a SHORTENED charge window ──
-    for (const group of extensionGroups(item, at, orderLineWindow(order.destinations, path))) {
-      if (group.extension_days >= 0) continue;
-      const days = -group.extension_days;
+    for (const group of extensionGroups(item, at, orderLineWindow(order.destinations, path), ctx)) {
+      if (group.extension_direction > 0) continue;
+      const credited = countsMagnitude(group.item, group.extension_counts);
       const invoice = byUid.get(group.last_billed.invoiceUid);
       if (invoice?.status === "draft") {
         refused.push({ order_path: [...path], reason: "window shortened on a DRAFT invoice — edit the draft rather than crediting it" });
@@ -1211,8 +1305,8 @@ export function buildOverbillingCredits(
         uid_invoice_item: group.last_billed.uid,
         order_path: [...path],
         quantity: group.quantity,
-        credited_days: days,
-        preview_cents: Math.abs(subtotalCents({ ...group.item, quantity: group.quantity } as LineItem, group.extension_days)),
+        credited_counts: credited,
+        preview_cents: Math.abs(subtotalCents({ ...group.item, quantity: group.quantity } as LineItem, group.extension_counts)),
       });
     }
   }
@@ -1250,7 +1344,7 @@ export interface RemainingInvoice {
   /** Every order pair, then one pair per extension section. */
   destinations: InvoiceDocDestinationType[];
   /** The order lines and extension groups billed BEYOND the order: a credit note's to settle, never this invoice's. */
-  overbilled: { path: string[]; quantity: number; extension_days: number }[];
+  overbilled: { path: string[]; quantity: number; extension_counts: readonly TierCount[] }[];
   compared: string[];
   unaligned: string[];
   /** Live CRMS-authored invoices; non-empty ⇒ nothing is built. See the module header. */
@@ -1304,6 +1398,7 @@ export function buildRemainingInvoice(
   order: RemainingOrderSource,
   invoices: readonly RemainingInvoiceSource[],
   creditNotes: readonly AccountedCreditNote[],
+  ctx: AccountingContext,
   mintUid: () => string = () => crypto.randomUUID(),
 ): RemainingInvoice {
   const O = order.uid;
@@ -1324,10 +1419,10 @@ export function buildRemainingInvoice(
     const at = billed.byPath.get(key(path));
     const quantity = (line.quantity ?? 0) - (at?.quantity ?? 0);
     if (quantity > 0) units.set(key(path), quantity);
-    if (quantity < 0) overbilled.push({ path: [...path], quantity, extension_days: 0 });
-    for (const group of extensionGroups(line, at, orderLineWindow(order.destinations, path))) {
-      if (group.extension_days < 0) {
-        overbilled.push({ path: [...path], quantity: group.quantity, extension_days: group.extension_days });
+    if (quantity < 0) overbilled.push({ path: [...path], quantity, extension_counts: [] });
+    for (const group of extensionGroups(line, at, orderLineWindow(order.destinations, path), ctx)) {
+      if (group.extension_direction < 0) {
+        overbilled.push({ path: [...path], quantity: group.quantity, extension_counts: group.extension_counts });
         continue;
       }
       if (group.via === "substitute") {
@@ -1373,19 +1468,16 @@ export function buildRemainingInvoice(
     if (!divider || !orderPair || orderPair.dates.charge_windows === null) continue;
 
     /** One section: its billed window, and the entries keyed by order path. */
-    const sections: Array<{ billedDays: number; billedEnd: string; extensionDays: number; byPath: Map<string, { line: LineItem; group: ExtensionGroup }> }> = [];
+    // A section is one billed WINDOW SET; each line in it states its own
+    // counts, because its lines may be on different formulas (ruling 8).
+    const sections: Array<{ billedSet: readonly WindowBounds[]; billedEnd: string; byPath: Map<string, { line: LineItem; group: ExtensionGroup }> }> = [];
     for (const entry of entries) {
       const k = key(entry.line.path ?? []);
       let section = sections.find((s) =>
-        s.billedDays === entry.group.billed_days && s.billedEnd === entry.group.billed_end && !s.byPath.has(k)
+        sameWindowDates(s.billedSet, entry.group.billed_set) && s.billedEnd === entry.group.billed_end && !s.byPath.has(k)
       );
       if (!section) {
-        section = {
-          billedDays: entry.group.billed_days,
-          billedEnd: entry.group.billed_end,
-          extensionDays: entry.group.extension_days,
-          byPath: new Map(),
-        };
+        section = { billedSet: entry.group.billed_set, billedEnd: entry.group.billed_end, byPath: new Map() };
         sections.push(section);
       }
       section.byPath.set(k, entry);
@@ -1410,16 +1502,20 @@ export function buildRemainingInvoice(
           items.push({ ...projectOrderItemToInvoiceItem(item as LineItem, O), path: scoped } as InvoiceDocItemType);
           continue;
         }
-        // A billed group prices on the row that billed it; an ancestor bills
-        // nothing, and states the section's days only because every line in an
-        // extension section must.
+        // A billed group prices on the row that billed it, at the counts the
+        // order's windows add. An ancestor bills nothing (quantity 0), and states
+        // zero counts only because every line in an extension section must state
+        // some.
         const source = entry ? entry.group.item : item;
+        const counts = entry
+          ? [...entry.group.extension_counts]
+          : (source.price?.rates ?? []).slice(0, 1).map((r) => ({ rate_key: r.rate_key, num: 0, den: 1 }));
         const projected = projectOrderItemToInvoiceItem({
           ...source,
           uid: item.uid,
           path,
           quantity: entry ? entry.group.quantity : 0,
-          price: { ...source.price, formula: "five_day_week", chargeable_days: section.extensionDays },
+          price: { ...source.price, counts },
         } as LineItem, O);
         items.push({ ...projected, path: scoped } as InvoiceDocItemType);
       }
@@ -1431,7 +1527,7 @@ export function buildRemainingInvoice(
       extensionPairs.push({
         ...projectedPair,
         uid: E,
-        dates: { ...projectedPair.dates, charge_windows: [{ start, end, days: section.extensionDays }] },
+        dates: { ...projectedPair.dates, charge_windows: [{ start, end }] },
       });
     }
   }

@@ -322,7 +322,7 @@ const placedDates = () => ({
   collection_end: FRI,
   collection_end_fs: mockTimestamp,
   days_active: 5,
-  charge_windows: [{ start: MON, end: FRI, days: 5 }],
+  charge_windows: [{ start: MON, end: FRI }],
 });
 /** The same pair after it stops collecting: no leg dates, no windows. */
 const droppedDates = () => ({
@@ -533,7 +533,7 @@ Deno.test("applyDateEdit seed_collection and copy_from — the dates half of the
     if (!("dates" in r)) throw new Error(r.error);
     assertEquals(toChicagoYmd(r.dates.collection_start!), "2026-10-09");
     assertEquals(r.dates.collection_start, FRI);
-    assertEquals(r.dates.charge_windows?.map((w: { start: string; end: string; days: number }) => [w.start, w.end, w.days]), [[MON, FRI, 5]]);
+    assertEquals(r.dates.charge_windows?.map((w) => [w.start, w.end]), [[MON, FRI]]);
   });
   await t.step("seed_collection counts holidays", () => {
     const r = applyDateEdit(droppedDates() as ChargeDates, { type: "seed_collection" }, { holidays: ["2026-10-07"] });

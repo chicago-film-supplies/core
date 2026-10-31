@@ -35,10 +35,11 @@
  * @module
  */
 import type {
+  PriceFormulaRef,
   PriceFormulaRule,
   PriceFormulaSegment,
 } from "../schemas/price-formula.ts";
-import { priceFormulaRuleIssues } from "../schemas/price-formula.ts";
+import { priceFormulaBasis, priceFormulaRuleIssues } from "../schemas/price-formula.ts";
 import { toChicagoYmd } from "./dates.ts";
 
 // ── Calendar days as integers ────────────────────────────────────────
@@ -491,5 +492,70 @@ export function snapshotRates(
       throw new Error(`No "${s.rate_key}" rate in force at ${asOf}`);
     }
     return { rate_key: s.rate_key, amount_cents: row.amount_cents };
+  });
+}
+
+// ── Formula identity and catalog snapshots ──────────────────────────
+
+/**
+ * A price formula as a pricer or a line builder reads it: the rule, plus the
+ * identity a line snapshots (`price.price_formula = { uid, name, basis }`).
+ */
+export type PricingFormula = PriceFormulaRule & { uid: string; name: string };
+
+/**
+ * **Every formula a set of lines names, keyed by uid** — build it with
+ * {@link formulaUidsOf} and a point read per uid. Retired (`active: false`)
+ * formulas included: a carried or frozen line keeps the formula it priced by.
+ */
+export type PricingFormulas = ReadonlyMap<string, PricingFormula>;
+
+/** The formula uids a set of lines name — what a caller must load into {@link PricingFormulas}. */
+export function formulaUidsOf(
+  items: readonly { price?: { price_formula?: { uid: string } | null; uid_price_formula?: string | null } | null }[],
+): string[] {
+  const uids = new Set<string>();
+  for (const item of items) {
+    const uid = item.price?.price_formula?.uid ?? item.price?.uid_price_formula;
+    if (uid) uids.add(uid);
+  }
+  return [...uids];
+}
+
+/** The snapshot a line stores for `formula` — `{ uid, name, basis }`. */
+export function priceFormulaRefOf(formula: PricingFormula): PriceFormulaRef {
+  return { uid: formula.uid, name: formula.name, basis: priceFormulaBasis(formula) };
+}
+
+/** A catalog rate row as a line builder reads it — a stored `DatedRate`, or a search hit's open row (no dates). */
+export interface CatalogRateLike {
+  rate_key: string;
+  amount_cents: number;
+  applied_from?: string | null;
+  applied_to?: string | null;
+}
+
+/**
+ * **The rates a new line snapshots off its catalog source** (D4, Q13): per
+ * `rate_key`, the row in force at `asOf` — the line's pricing date — when the
+ * source carries dates and `asOf` is known; otherwise the key's OPEN row (a
+ * Typesense hit indexes only open rows), else its last row.
+ *
+ * ⚠️ A server writer passes the real pricing date; a client building an
+ * optimistic line from a search hit gets the open rows, and the server
+ * resolves the in-force rows when it builds the line.
+ */
+export function catalogRateSnapshot(
+  rates: readonly CatalogRateLike[],
+  asOf: string | null,
+): RateSnapshot[] {
+  const keys = [...new Set(rates.map((r) => r.rate_key))];
+  return keys.map((key) => {
+    const rows = rates.filter((r) => r.rate_key === key);
+    const dated = asOf !== null && rows.every((r) => r.applied_from != null)
+      ? rateInForce(rows as DatedRateLike[], key, asOf)
+      : null;
+    const row = dated ?? rows.find((r) => r.applied_to == null) ?? rows[rows.length - 1];
+    return { rate_key: key, amount_cents: row.amount_cents };
   });
 }

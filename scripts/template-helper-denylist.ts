@@ -769,7 +769,14 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // renders — so nothing here belongs in a render context.
   "price-document": [
     // core#130 row 5: an AUTHORING-time seed for a line not yet priced.
-    "seedChargeableDays",
+    "seedLineCounts",
+    // The counts author (ruling 8) and its window half: they METER, which a
+    // render must never do — a template prints the counts the line froze.
+    "lineCounts",
+    "meteredLineCounts",
+    // Re-exported formula plumbing: a template has no formula map to pass.
+    "formulaUidsOf",
+    "priceFormulaRefOf",
     // The write-path guard for the charge-window pair invariant (core#113). It
     // answers "should this document be REFUSED", which is a question about a
     // write; by the time a template runs, the write has already been accepted.
@@ -932,6 +939,11 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // formula, windows and dated rates (purchases-as-documents D1). A template
   // renders money already written, and a render context holds no formula.
   "price-formulas": [
+    // Line-builder and pricer plumbing (ruling 8): a snapshot is taken at
+    // write, and a render prints what the line stored.
+    "catalogRateSnapshot",
+    "formulaUidsOf",
+    "priceFormulaRefOf",
     "meterUnits",
     "priceFromFormula",
     "rateInForce",

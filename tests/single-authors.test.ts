@@ -18,7 +18,8 @@ import {
   invoicePairKey,
 } from "../src/utils/invoices.ts";
 import { formatDiscriminatedRate, formatRate } from "../src/utils/money.ts";
-import { seedChargeableDays } from "../src/utils/price-document.ts";
+import { seedLineCounts } from "../src/utils/price-document.ts";
+import { businessDayWindows, FIVE_DAY_WEEK, FIXED, tier } from "./helpers/formulas.ts";
 import { cardNextStatus, cardStatusOptions, isCardFieldLocked, isEventCard } from "../src/utils/cards.ts";
 import { type Card, type Movement, takeBackReasonsFor } from "../src/schemas/mod.ts";
 import { reclassPairReversal, standaloneReversalRefusal } from "../src/utils/movements.ts";
@@ -136,9 +137,9 @@ Deno.test("row 4: a percent rate is capped at 4dp and trims to the digit", () =>
   assertEquals(formatRate(1250.5), "1250.5");
 });
 
-// ── Row 5: chargeable_days seed ──────────────────────────────────────
+// ── Row 5: the counts seed ───────────────────────────────────────────
 
-Deno.test("row 5: a 2+ window pair seeds BILLABLE days, joined by divider path", () => {
+Deno.test("row 5: a 2+ window pair seeds its METERED counts, joined by divider path", () => {
   const items = [
     { uid: "B", type: "destination", path: ["B"] },
     { uid: "A", type: "destination", path: ["A"] },
@@ -146,14 +147,16 @@ Deno.test("row 5: a 2+ window pair seeds BILLABLE days, joined by divider path",
   // `destinations[]` is in a different order from the dividers: a positional
   // join would read B's windows for A.
   const destinations = [
-    { uid: "A", dates: { charge_windows: [{ days: 8 }, { days: 3 }] } },
-    { uid: "B", dates: { charge_windows: [{ days: 2 }] } },
+    { uid: "A", dates: { charge_windows: businessDayWindows([8, 3]) } },
+    { uid: "B", dates: { charge_windows: businessDayWindows([2]) } },
   ];
-  // chargedDays (Σ) said 11; the pricer bills max(8,5) + max(3,5) = 13.
-  assertEquals(seedChargeableDays(items, destinations, "A"), 13);
-  assertEquals(seedChargeableDays(items, destinations, "B"), 2);
-  assertEquals(seedChargeableDays(items, [{ uid: "A", dates: { charge_windows: null } }], "A"), null);
-  assertEquals(seedChargeableDays(items, destinations, "nope"), null);
+  // A plain Σ says 11; the pricer meters max(8,5) + max(3,5) = 13 business days.
+  assertEquals(seedLineCounts(items, destinations, "A", FIVE_DAY_WEEK, []), [tier("week", 13, 5)]);
+  assertEquals(seedLineCounts(items, destinations, "B", FIVE_DAY_WEEK, []), [tier("week", 5, 5)]);
+  assertEquals(seedLineCounts(items, [{ uid: "A", dates: { charge_windows: null } }], "A", FIVE_DAY_WEEK, []), null);
+  assertEquals(seedLineCounts(items, destinations, "nope", FIVE_DAY_WEEK, []), null);
+  // A flat formula meters no time, wherever the line lands.
+  assertEquals(seedLineCounts(items, destinations, "nope", FIXED, []), [tier("flat", 1, 1)]);
 });
 
 // ── Row 6: card locks and status options ─────────────────────────────

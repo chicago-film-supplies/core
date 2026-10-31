@@ -959,7 +959,7 @@ export interface UpdatePurchaseBillInputType {
 const BillLineUnitInput: z.ZodType<PurchaseDocumentLineUnit> = z.object({
   uid_unit: UnitId,
   charge_windows: z.array(z.object({ start: chicagoInstant(), end: chicagoInstant() })).min(1),
-}) as unknown as z.ZodType<PurchaseDocumentLineUnit>;
+});
 
 /** Zod schema for UpdatePurchaseBillInputType. */
 export const UpdatePurchaseBillInput: z.ZodType<UpdatePurchaseBillInputType> = z.object({

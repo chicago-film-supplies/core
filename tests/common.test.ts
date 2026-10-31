@@ -12,8 +12,9 @@
  * firing and its NOT firing are both asserted.
  */
 import { assertEquals } from "@std/assert";
+import { fdwPrice } from "./helpers/formulas.ts";
 import { z } from "zod";
-import { checkItemContract, checkPriceBaseUnit } from "../src/schemas/common.ts";
+import { checkItemContract, checkLinePrice, checkLinePriceInput } from "../src/schemas/common.ts";
 
 /** Collect the issue paths a refinement emits for one input. */
 function issuePaths(
@@ -40,7 +41,7 @@ Deno.test("checkItemContract: a stocked rental WITHOUT a replacement is rejected
     issuePaths(checkItemContract, {
       type: "rental",
       stock_method: "bulk",
-      price: { formula: "five_day_week", replacement_cents: null },
+      price: { ...fdwPrice(0, 5), replacement_cents: null },
     }),
     ["price.replacement_cents"],
   );
@@ -53,7 +54,7 @@ Deno.test("checkItemContract: a stocked rental WITH a replacement is accepted", 
     issuePaths(checkItemContract, {
       type: "rental",
       stock_method: "bulk",
-      price: { formula: "five_day_week", replacement_cents: 25_000 },
+      price: { ...fdwPrice(0, 5), replacement_cents: 25_000 },
     }),
     [],
   );
@@ -64,7 +65,7 @@ Deno.test("checkItemContract: an UNSTOCKED rental needs no replacement", () => {
     issuePaths(checkItemContract, {
       type: "rental",
       stock_method: "none",
-      price: { formula: "five_day_week", replacement_cents: null },
+      price: { ...fdwPrice(0, 5), replacement_cents: null },
     }),
     [],
   );
@@ -78,7 +79,7 @@ Deno.test("checkItemContract: the `forbidden` arm fires — a fee cannot carry a
     issuePaths(checkItemContract, {
       type: "transaction_fee",
       stock_method: "none",
-      price: { formula: "percent_of_total", replacement_cents: 10_000 },
+      price: { price_formula: null, rates: [], counts: [], replacement_cents: 10_000 },
     }),
     ["price.replacement_cents"],
   );
@@ -89,88 +90,53 @@ Deno.test("checkItemContract: a fee WITHOUT a replacement is accepted", () => {
     issuePaths(checkItemContract, {
       type: "transaction_fee",
       stock_method: "none",
-      price: { formula: "percent_of_total" },
+      price: { price_formula: null, rates: [], counts: [] },
     }),
     [],
   );
 });
 
-Deno.test("checkItemContract: percent_of_total is refused on a non-fee line", () => {
+Deno.test("checkItemContract: a percent-of-total price is refused on a non-fee line", () => {
   assertEquals(
     issuePaths(checkItemContract, {
       type: "sale",
       stock_method: "none",
-      price: { formula: "percent_of_total" },
+      price: { price_formula: null, rates: [], counts: [], base_percent: 3 },
     }),
-    ["price.formula"],
+    ["price.base_percent"],
   );
 });
 
-// ── checkPriceBaseUnit: D1's exactly-one-of ─────────────────────────
+// ── checkLinePrice: a formula, or a percentage of the document — exactly one ──
 //
-// `price.base` used to carry two units — a per-unit dollar amount on every
-// line, and a PERCENTAGE of the document total on a `percent_of_total` fee.
-// One field, two units, discriminated only by a sibling. The split puts the
-// unit in the name; this is what makes the split enforceable rather than a
-// convention.
+// `price.base` once carried two units — a per-unit dollar amount on every line,
+// and a PERCENTAGE of the document total on a percent fee — discriminated only
+// by a sibling. Since ruling 8 a line prices from a formula snapshot (rates and
+// counts) or, only on a fee, from `base_percent`, and this refinement is what
+// keeps the two from mixing.
 
-Deno.test("checkPriceBaseUnit: a percent_of_total price REQUIRES base_percent", () => {
+const FDW = { uid: "FiveDayWeekFormu1aAA", name: "Five-day week", basis: "time" as const };
+
+Deno.test("checkLinePrice: a percent fee carries base_percent and NO formula, rates or counts", () => {
+  assertEquals(issuePaths(checkLinePrice, { price_formula: null, rates: [], counts: [], base_percent: 2.9 }), []);
+  // The exact 100× the split exists to prevent: a percentage beside a rate.
   assertEquals(
-    issuePaths(checkPriceBaseUnit, { formula: "percent_of_total", base_cents: 0 }),
-    ["base_percent"],
+    issuePaths(checkLinePrice, { price_formula: null, rates: [{ rate_key: "flat", amount_cents: 290 }], counts: [], base_percent: 2.9 }),
+    ["rates"],
   );
+  assertEquals(issuePaths(checkLinePrice, { price_formula: FDW, rates: [], counts: [], base_percent: 2.9 }), ["price_formula"]);
 });
 
-Deno.test("checkPriceBaseUnit: a percent_of_total price must NOT carry money in base_cents", () => {
-  // The exact 100× D1 exists to prevent: 2.9 stored as `base_cents: 290` and
-  // read back as $2.90 instead of 2.9%.
-  assertEquals(
-    issuePaths(checkPriceBaseUnit, {
-      formula: "percent_of_total",
-      base_cents: 290,
-      base_percent: 2.9,
-    }),
-    ["base_cents"],
-  );
+Deno.test("checkLinePrice: a line priced from itself names its formula", () => {
+  assertEquals(issuePaths(checkLinePrice, { price_formula: FDW, rates: [{ rate_key: "week", amount_cents: 10_000 }], counts: [] }), []);
+  assertEquals(issuePaths(checkLinePrice, { price_formula: null, rates: [], counts: [], base_percent: null }), ["price_formula"]);
+  // An INPUT may omit the formula — the writer resolves it from the product.
+  assertEquals(issuePaths(checkLinePriceInput, { rates: [{ rate_key: "week", amount_cents: 1 }] }), []);
 });
 
-Deno.test("checkPriceBaseUnit: a well-formed percent fee is accepted", () => {
-  assertEquals(
-    issuePaths(checkPriceBaseUnit, {
-      formula: "percent_of_total",
-      base_cents: 0,
-      base_percent: 2.9,
-    }),
-    [],
-  );
-});
-
-Deno.test("checkPriceBaseUnit: base_percent is refused on every other formula", () => {
-  // The converse direction, and the one a one-sided check would miss: a stray
-  // percentage sitting on an ordinary line is exactly as ambiguous as the
-  // original overload was.
-  for (const formula of ["five_day_week", "fixed"]) {
-    assertEquals(
-      issuePaths(checkPriceBaseUnit, { formula, base_cents: 10_000, base_percent: 2.9 }),
-      ["base_percent"],
-      `base_percent should be refused on "${formula}"`,
-    );
-  }
-});
-
-Deno.test("checkPriceBaseUnit: an ordinary priced line is accepted", () => {
-  for (const formula of ["five_day_week", "fixed"]) {
-    assertEquals(
-      issuePaths(checkPriceBaseUnit, { formula, base_cents: 10_000 }),
-      [],
-      `an ordinary "${formula}" line should pass`,
-    );
-  }
-});
-
-Deno.test("checkPriceBaseUnit: an absent price is not an error", () => {
+Deno.test("checkLinePrice: an absent price is not an error", () => {
   // The refinement runs on optional price objects; `null`/`undefined` is the
-  // caller's business, not a unit violation.
-  assertEquals(issuePaths(checkPriceBaseUnit, null), []);
-  assertEquals(issuePaths(checkPriceBaseUnit, undefined), []);
+  // caller's business, not a shape violation.
+  assertEquals(issuePaths(checkLinePrice, null), []);
 });
+

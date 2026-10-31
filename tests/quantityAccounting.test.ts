@@ -12,7 +12,10 @@ import {
   validateInvoiceItemUniqueness,
 } from "../src/utils/invoices.ts";
 import type { LineItem } from "../src/utils/orders.ts";
-import { addChicagoDays } from "../src/utils/dates.ts";
+import { chicagoDayAtTimeOf, getEndDateByChargePeriod } from "../src/utils/dates.ts";
+import { FIVE_DAY_WEEK, fdwCounts, fixedPrice, FORMULAS, tier } from "./helpers/formulas.ts";
+import { parseISO } from "date-fns";
+import { tz } from "@date-fns/tz";
 import type { DocDestinationType } from "../src/schemas/mod.ts";
 import {
   type AccountedCreditNote,
@@ -34,30 +37,50 @@ const LIGHT = "prod-light";
 const KIT = "prod-kit";
 const STAKE = "prod-stake";
 
+/** What metering an extension reads (ruling 8). */
+const CTX = { formulas: FORMULAS, holidays: [] as string[] };
+
+/** A line's RAW billable days, which its floored counts no longer say below 5 — read by {@link invoice}. */
+const RAW_DAYS = new WeakMap<object, number>();
+
 function line(uid: string, path: string[], quantity: number, baseCents: number, days = 5, extra: Record<string, unknown> = {}): LineItem {
-  return {
+  const it = {
     uid, type: "rental", name: uid, description: "", quantity, path,
     stock_method: "reserve", zero_priced: false, uid_tax_class: "TaxC1assDefau1tAAAAA",
     price: {
-      base_cents: baseCents, chargeable_days: days, formula: "five_day_week",
+      price_formula: { uid: FIVE_DAY_WEEK.uid, name: FIVE_DAY_WEEK.name, basis: "time" },
+      rates: [{ rate_key: "week", amount_cents: baseCents }],
+      counts: fdwCounts(days),
       subtotal_cents: 0, subtotal_discounted_cents: 0, discount: null, taxes: [], total_cents: 0, replacement_cents: 1000,
     },
     ...extra,
   } as unknown as LineItem;
+  RAW_DAYS.set(it, days);
+  return it;
 }
+
+/** A Five-day week line's billable days, off its counts (`num × 5 ÷ den`); `null` on a line with none. */
+const daysOf = (it: unknown): number | null => {
+  const t = (it as { price?: { counts?: { num: number; den: number }[] } }).price?.counts?.[0];
+  return t ? (t.num * 5) / t.den : null;
+};
 
 const DEST_ITEM = { uid: D, type: "destination", name: "Venue", description: "", path: [D] } as unknown as LineItem;
 const GROUP_ITEM = { uid: G, type: "group", name: "Grip", description: "", path: [D, G] } as unknown as LineItem;
 
 /**
- * Windows in these fixtures: every pair charges from START, and a pair charging
- * N days ends N days later — so a later end always means more days, which is
- * what an extension compares. The census shapes below break that on purpose.
+ * Windows in these fixtures: every pair charges from START (a Monday), and a
+ * pair charging N days ends on its Nth business day — so a later end always
+ * means more days, which is what an extension compares. The census shapes below
+ * break that on purpose. (Windows carry no day count, ruling 8: the line's
+ * formula meters them, against no holidays here.)
  */
-const START = "2026-09-06T00:00:00.000-05:00";
-const endFor = (days: number) => addChicagoDays(START, days);
-const pairFor = (uid: string, days: number, end = endFor(days)) =>
-  ({ uid, dates: { charge_windows: [{ start: START, end, days }] } }) as unknown as DocDestinationType;
+const START = "2026-09-07T00:00:00.000-05:00";
+const CHICAGO = tz("America/Chicago");
+const endFor = (days: number) =>
+  days < 1 ? START : chicagoDayAtTimeOf(getEndDateByChargePeriod(parseISO(START, { in: CHICAGO }), days, []).toISOString(), 0, START);
+const pairFor = (uid: string, _days: number, end = endFor(_days)) =>
+  ({ uid, dates: { charge_windows: [{ start: START, end }] } }) as unknown as DocDestinationType;
 /** The order's pairs: D charging `days`. */
 const pairs = (days = 5, end?: string): DocDestinationType[] => [pairFor(D, days, end)];
 
@@ -69,7 +92,8 @@ function invoice(
   window?: { days: number; end?: string },
 ): AccountedInvoice {
   const divider = { uid: O, type: "order", name: "Order", description: "", path: [O] } as unknown as InvoiceItem;
-  const days = window?.days ?? (items.find((it) => it.type === "rental") as { price?: { chargeable_days?: number } } | undefined)?.price?.chargeable_days ?? 5;
+  const rental = items.find((it) => it.type === "rental");
+  const days = window?.days ?? (rental ? RAW_DAYS.get(rental) : undefined) ?? 5;
   return {
     uid,
     status,
@@ -87,12 +111,12 @@ Deno.test("quantityAccounting: a split bill — 3 + 2 of 5 — sums to 5 and lea
   const billed = invoicedByPath(O, order, invoices);
   assertEquals(billed.byPath.get(lightKey)?.quantity, 5);
   assertEquals(billed.compared, ["a", "b"]);
-  assertEquals(remainingForOrder(O, order, invoices, pairs(5)).lines, []);
+  assertEquals(remainingForOrder(O, order, invoices, pairs(5), CTX).lines, []);
 });
 
 Deno.test("quantityAccounting: a remainder — 4 billed of 6 — is 2 units at the order's price", () => {
   const order = lightOrder(6);
-  const { lines } = remainingForOrder(O, order, [invoice("a", lightOrder(4))], pairs());
+  const { lines } = remainingForOrder(O, order, [invoice("a", lightOrder(4))], pairs(), CTX);
   // 2 × 1000¢ at 5 days (factor 1) = 2000¢.
   assertEquals(lines.map((l) => [l.path.join("/"), l.ordered, l.invoiced, l.quantity, l.quantity_cents, l.extension_cents, l.new]), [
     [lightKey, 6, 4, 2, 2000, 0, false],
@@ -101,7 +125,7 @@ Deno.test("quantityAccounting: a remainder — 4 billed of 6 — is 2 units at t
 
 Deno.test("quantityAccounting: a line no invoice carries comes in whole and is marked new", () => {
   const order = [...lightOrder(2), line("prod-tripod", [D, "prod-tripod"], 1, 3000)];
-  const { lines } = remainingForOrder(O, order, [invoice("a", lightOrder(2))], pairs());
+  const { lines } = remainingForOrder(O, order, [invoice("a", lightOrder(2))], pairs(), CTX);
   assertEquals(lines.map((l) => [l.path.join("/"), l.quantity, l.quantity_cents, l.new]), [[`${D}/prod-tripod`, 1, 3000, true]]);
 });
 
@@ -109,14 +133,14 @@ Deno.test("quantityAccounting: a date extension is priced as D7 extension days, 
   // Billed 2 at 3 days: five_day_week floors at a week → 2 × 1000 = 2000¢.
   // The order now charges 7 days → D7 days = max(7,5) − max(3,5) = 2 → 2 × 1000 × 2 ÷ 5 = 800¢.
   // Pricing "the extra 4 days" as an ordinary line would floor to a week: 2000¢. Wrong.
-  const { lines } = remainingForOrder(O, lightOrder(2, 7), [invoice("a", lightOrder(2, 3))], pairs(7));
+  const { lines } = remainingForOrder(O, lightOrder(2, 7), [invoice("a", lightOrder(2, 3))], pairs(7), CTX);
   assertEquals(lines.map((l) => [l.quantity, l.quantity_cents, l.extension_cents]), [[0, 0, 800]]);
 });
 
 Deno.test("quantityAccounting: an extension across a split bill prices each billed row on its own days", () => {
   // Order: 5 at 10 days. Row a: 3 at 5 days → 3000¢, at 10 days → 6000¢ (+3000).
   // Row b: 2 at 8 days → 2 × 1000 × 8 ÷ 5 = 3200¢, at 10 days → 4000¢ (+800). Total 3800¢.
-  const { lines } = remainingForOrder(O, lightOrder(5, 10), [invoice("a", lightOrder(3, 5)), invoice("b", lightOrder(2, 8))], pairs(10));
+  const { lines } = remainingForOrder(O, lightOrder(5, 10), [invoice("a", lightOrder(3, 5)), invoice("b", lightOrder(2, 8))], pairs(10), CTX);
   assertEquals(lines.map((l) => [l.invoiced, l.quantity, l.extension_cents]), [[5, 0, 3800]]);
 });
 
@@ -126,17 +150,17 @@ Deno.test("quantityAccounting: an extension rounds ONCE, as the extension invoic
   // The retired difference of two roundings gave round(466.2) − round(399.6) = 466 − 400 = 66¢.
   const order = [DEST_ITEM, line(LIGHT, [D, LIGHT], 1, 333, 7)];
   const billed = [DEST_ITEM, line(LIGHT, [D, LIGHT], 1, 333, 6)];
-  const { lines } = remainingForOrder(O, order, [invoice("a", billed)], pairs(7));
+  const { lines } = remainingForOrder(O, order, [invoice("a", billed)], pairs(7), CTX);
   assertEquals(lines.map((l) => [l.quantity, l.extension_cents]), [[0, 67]]);
 });
 
 Deno.test("quantityAccounting: a fixed-formula row extends by nothing, and does not throw", () => {
   // A `fixed` price never read its days, so an order whose days moved adds 0¢ to it.
-  // The extension pricer refuses a non-five_day_week line, so the row must be skipped, not priced.
+  // A flat-formula row forms no extension group, so it is skipped, not priced.
   const fixed = (days: number) => [DEST_ITEM, line(LIGHT, [D, LIGHT], 2, 1000, days, {})].map((it) =>
-    it.type === "rental" ? { ...it, price: { ...it.price, formula: "fixed" } } as LineItem : it
+    it.type === "rental" ? { ...it, price: { ...it.price, ...fixedPrice(1000) } } as LineItem : it
   );
-  assertEquals(remainingForOrder(O, fixed(10), [invoice("a", fixed(3))], pairs(10)).lines, []);
+  assertEquals(remainingForOrder(O, fixed(10), [invoice("a", fixed(3))], pairs(10), CTX).lines, []);
 });
 
 Deno.test("quantityAccounting: a billed row's tax refs do not reach the pre-tax pricer", () => {
@@ -147,14 +171,14 @@ Deno.test("quantityAccounting: a billed row's tax refs do not reach the pre-tax 
       ? { ...it, price: { ...it.price, taxes: [{ uid: "tax-x", name: "X", rate: 10, type: "percent", amount_cents: 0 }] } } as LineItem
       : it
   );
-  assertEquals(remainingForOrder(O, taxed(10), [invoice("a", taxed(5))], pairs(10)).lines.map((l) => l.extension_cents), [2000]);
+  assertEquals(remainingForOrder(O, taxed(10), [invoice("a", taxed(5))], pairs(10), CTX).lines.map((l) => l.extension_cents), [2000]);
 });
 
 Deno.test("quantityAccounting: over-billing is reported signed, not clamped", () => {
   // Billed 3 at 10 days (3 × 1000 × 2 = 6000¢); order now 2 at 5 days.
   // Quantity: −1 unit at the order's terms = −1000¢.
   // Extension on the billed row: 3 units at 5 days (3000¢) − at 10 days (6000¢) = −3000¢.
-  const { lines } = remainingForOrder(O, lightOrder(2, 5), [invoice("a", lightOrder(3, 10))], pairs(5));
+  const { lines } = remainingForOrder(O, lightOrder(2, 5), [invoice("a", lightOrder(3, 10))], pairs(5), CTX);
   assertEquals(lines.map((l) => [l.quantity, l.quantity_cents, l.extension_cents]), [[-1, -1000, -3000]]);
 });
 
@@ -163,7 +187,7 @@ Deno.test("quantityAccounting: a void invoice bills nothing", () => {
   const invoices = [invoice("live", lightOrder(2)), invoice("dead", lightOrder(3), "void")];
   const billed = invoicedByPath(O, order, invoices);
   assertEquals([billed.byPath.get(lightKey)?.quantity, billed.compared], [2, ["live"]]);
-  assertEquals(remainingForOrder(O, order, invoices, pairs()).lines.map((l) => l.quantity), [3]);
+  assertEquals(remainingForOrder(O, order, invoices, pairs(), CTX).lines.map((l) => l.quantity), [3]);
 });
 
 /** Replace the invoice row at `relKey` with a substitute Y naming it. */
@@ -191,7 +215,7 @@ Deno.test("quantityAccounting: an in-place substitute counts toward the line it 
   assertEquals(billed.byPath.get(lightKey)?.quantity, 4);
   assertEquals(billed.byPath.get(lightKey)?.rows.map((r) => r.via), ["substitute"]);
   assertEquals(billed.byPath.has(`${D}/${G}/prod-monopod`), false);
-  assertEquals(remainingForOrder(O, order, [inv], pairs()).lines, []);
+  assertEquals(remainingForOrder(O, order, [inv], pairs(), CTX).lines, []);
 });
 
 /** An order with a kit of 4 carrying 8 stakes — a stored ratio of 2 per kit. */
@@ -206,7 +230,7 @@ Deno.test("quantityAccounting: substituting a whole kit credits its components t
   const billed = invoicedByPath(O, kitOrder(), [inv]);
   // 4 of 4 kits → 4 × 8 ÷ 4 = 8 stakes.
   assertEquals([billed.byPath.get(`${D}/${KIT}`)?.quantity, billed.byPath.get(`${D}/${KIT}/${STAKE}`)?.quantity], [4, 8]);
-  assertEquals(remainingForOrder(O, kitOrder(), [inv], pairs()).lines, []);
+  assertEquals(remainingForOrder(O, kitOrder(), [inv], pairs(), CTX).lines, []);
 });
 
 Deno.test("quantityAccounting: a partial kit swap credits components by the ORDER's stored ratio", () => {
@@ -225,12 +249,12 @@ Deno.test("quantityAccounting: an unaligned scope fails remainingForOrder closed
   const unaligned = invoice("b", [DEST_ITEM, line(LIGHT, [D, LIGHT], 3, 1000)]);
   const billed = invoicedByPath(O, order, [aligned, unaligned]);
   assertEquals([billed.compared, billed.unaligned], [["a"], ["b"]]);
-  assertEquals(remainingForOrder(O, order, [aligned, unaligned], pairs()), { lines: [], compared: ["a"], unaligned: ["b"], crms_authored: [], credits_unkeyed: [] });
+  assertEquals(remainingForOrder(O, order, [aligned, unaligned], pairs(), CTX), { lines: [], compared: ["a"], unaligned: ["b"], crms_authored: [], credits_unkeyed: [] });
 });
 
 Deno.test("quantityAccounting: accountLine with nothing billed is the whole line", () => {
   // 3 × 1000¢ × 7 ÷ 5 = 4200¢.
-  assertEquals(accountLine(line(LIGHT, [D, LIGHT], 3, 1000, 7), undefined, null), {
+  assertEquals(accountLine(line(LIGHT, [D, LIGHT], 3, 1000, 7), undefined, null, CTX), {
     ordered: 3, invoiced: 0, quantity: 3, quantity_cents: 4200, extension_cents: 0,
   });
 });
@@ -260,7 +284,8 @@ function extensionInvoice(uid: string, quantity: number, addedDays: number, targ
     { uid: O, type: "order", name: "Order", description: "", path: [O] },
     { uid: E, type: "destination", name: "Venue", description: "", path: [O, E], path_extension_for: target },
     { uid: G, type: "group", name: "Grip", description: "", path: [O, E, G] },
-    line(LIGHT, [O, E, G, LIGHT], quantity, 1000, addedDays),
+    // A section line STATES the days it adds, minimum skipped.
+    line(LIGHT, [O, E, G, LIGHT], quantity, 1000, addedDays, { price: { ...line(LIGHT, [], 0, 1000).price, counts: fdwCounts(addedDays, { stated: true }) } }),
   ] as unknown as InvoiceItem[];
   // The section's own pair: it charges the added days, ending where the extended window now ends.
   return { uid, status: "draft", items, destinations: [{ ...pairFor(E, addedDays, endFor(endDays)), uid_order: O }] as never };
@@ -277,19 +302,19 @@ Deno.test("quantityAccounting: an extension section bills days, not units, and n
   assertEquals(billed.unaligned, []);
   assertEquals(billed.byPath.get(lightKey)?.quantity, 2);
   assertEquals(billed.byPath.get(lightKey)?.rows.map((r) => [r.invoiceUid, r.via]), [["a", "direct"], ["b", "extension"]]);
-  assertEquals(remainingForOrder(O, order, invoices, pairs(7)).lines, []);
+  assertEquals(remainingForOrder(O, order, invoices, pairs(7), CTX).lines, []);
 });
 
 Deno.test("quantityAccounting: an extension section short of the order's days leaves the rest", () => {
   // Billed 2 at 3 days, order now 10: owed 2 × 1000 × (10 − 5) ÷ 5 = 2000¢.
   // A section extending by 2 billed 800¢, so 1200¢ remains.
-  const { lines } = remainingForOrder(O, lightOrder(2, 10), [invoice("a", lightOrder(2, 3)), extensionInvoice("b", 2, 2)], pairs(10));
+  const { lines } = remainingForOrder(O, lightOrder(2, 10), [invoice("a", lightOrder(2, 3)), extensionInvoice("b", 2, 2)], pairs(10), CTX);
   assertEquals(lines.map((l) => [l.quantity, l.quantity_cents, l.extension_cents]), [[0, 0, 1200]]);
 });
 
 Deno.test("quantityAccounting: an extension naming no order divider is an unaligned scope, and fails closed", () => {
   const invoices = [invoice("a", lightOrder(2, 3)), extensionInvoice("b", 2, 2, ["dest-gone"])];
-  const result = remainingForOrder(O, lightOrder(2, 7), invoices, pairs(7));
+  const result = remainingForOrder(O, lightOrder(2, 7), invoices, pairs(7), CTX);
   assertEquals([result.lines, result.unaligned], [[], ["b"]]);
 });
 
@@ -326,9 +351,9 @@ Deno.test("buildRemainingInvoice: a new line, a quantity increase and an extensi
   // Canonical order: a destination's own lines before its groups.
   const order = [DEST_ITEM, line("prod-tripod", [D, "prod-tripod"], 1, 3000, 7), GROUP_ITEM, line(LIGHT, [D, G, LIGHT], 3, 1000, 7)];
   const billed = [billedWithPair("a", lightOrder(2, 3))];
-  const built = buildRemainingInvoice(orderSource(order, 7), billed, [], mint);
+  const built = buildRemainingInvoice(orderSource(order, 7), billed, [], CTX, mint);
 
-  const rows = built.items.map((it) => [it.path.join("/"), it.type, (it as { quantity?: number }).quantity ?? null, (it as { price?: { chargeable_days: number } }).price?.chargeable_days ?? null]);
+  const rows = built.items.map((it) => [it.path.join("/"), it.type, (it as { quantity?: number }).quantity ?? null, daysOf(it)]);
   const E = built.items.find((it) => (it as { path_extension_for?: string[] }).path_extension_for)!.uid;
   assertEquals(rows, [
     [O, "order", null, null],
@@ -340,13 +365,13 @@ Deno.test("buildRemainingInvoice: a new line, a quantity increase and an extensi
     [`${O}/${E}/${G}`, "group", null, null],
     [`${O}/${E}/${G}/${LIGHT}`, "rental", 2, 2],
   ]);
-  // The section's pair charges from the day after the billed window ended (Sep 9) to the order's end (Sep 13).
+  // The section's pair charges from the day after the billed window ended (Wed Sep 9) to the order's end (its 7th business day).
   const pair = built.destinations.find((p) => p.uid === E)!;
   // The order pair's legacy charge fields are not carried onto the section (charge-windows step 5).
   assertEquals(["charge_start", "charge_start_fs", "charge_end", "charge_end_fs", "days_charged"].filter((k) => k in pair.dates), []);
-  // ONE window holding the ADDED days, which its lines derive (owner, 2026-09-17).
-  assertEquals(pair.dates.charge_windows, [{ start: "2026-09-10T00:00:00.000-05:00", end: "2026-09-13T00:00:00.000-05:00", days: 2 }]);
-  assertEquals(remainingForOrder(O, order, [...billed, asInvoice("r", built)], pairs(7)).lines, []);
+  // ONE window, instants only; its lines STATE the added days (ruling 8).
+  assertEquals(pair.dates.charge_windows, [{ start: "2026-09-10T00:00:00.000-05:00", end: endFor(7) }]);
+  assertEquals(remainingForOrder(O, order, [...billed, asInvoice("r", built)], pairs(7), CTX).lines, []);
   // What the API's write guards assert: paths are what the one author computes, and rows are unique.
   assertEquals(validateInvoiceItemPaths(built.items as unknown as InvoiceItem[]), []);
   assertEquals(validateInvoiceItemUniqueness(built.items as unknown as InvoiceItem[]), []);
@@ -357,12 +382,12 @@ Deno.test("buildRemainingInvoice: a component increase carries its kit at quanti
   const kitOrder = (stakes: number) => [DEST_ITEM, line(KIT, [D, KIT], 2, 5000), line(STAKE, [D, KIT, STAKE], stakes, 100)];
   const order = kitOrder(10);
   const billed = [billedWithPair("a", kitOrder(8))];
-  const built = buildRemainingInvoice(orderSource(order), billed, [], mint);
+  const built = buildRemainingInvoice(orderSource(order), billed, [], CTX, mint);
   assertEquals(
     built.items.filter((it) => it.type === "rental").map((it) => [it.path.join("/"), (it as { quantity: number }).quantity]),
     [[`${O}/${D}/${KIT}`, 0], [`${O}/${D}/${KIT}/${STAKE}`, 2]],
   );
-  assertEquals(remainingForOrder(O, order, [...billed, asInvoice("r", built)], pairs()).lines, []);
+  assertEquals(remainingForOrder(O, order, [...billed, asInvoice("r", built)], pairs(), CTX).lines, []);
 });
 
 Deno.test("buildRemainingInvoice: units billed at different days extend in one section per billed window", () => {
@@ -373,38 +398,38 @@ Deno.test("buildRemainingInvoice: units billed at different days extend in one s
     billedWithPair("a", lightOrder(3, 5)),
     billedWithPair("b", lightOrder(2, 8)),
   ];
-  const built = buildRemainingInvoice(orderSource(order, 10), billed, [], mint);
-  const extensions = built.items.filter((it) => it.type === "rental").map((it) => [(it as { quantity: number }).quantity, (it as { price: { chargeable_days: number } }).price.chargeable_days]);
+  const built = buildRemainingInvoice(orderSource(order, 10), billed, [], CTX, mint);
+  const extensions = built.items.filter((it) => it.type === "rental").map((it) => [(it as { quantity: number }).quantity, daysOf(it)]);
   assertEquals(extensions, [[3, 5], [2, 2]]);
-  // a's window ended Sep 11, b's Sep 14.
-  assertEquals(built.destinations.slice(1).map((p) => p.dates.charge_windows![0].start), ["2026-09-12T00:00:00.000-05:00", "2026-09-15T00:00:00.000-05:00"]);
-  assertEquals(remainingForOrder(O, order, [...billed, asInvoice("r", built)], pairs(10)).lines, []);
+  // a's window ended Fri Sep 11 (5th business day), b's Wed Sep 16 (8th).
+  assertEquals(built.destinations.slice(1).map((p) => p.dates.charge_windows![0].start), ["2026-09-12T00:00:00.000-05:00", "2026-09-17T00:00:00.000-05:00"]);
+  assertEquals(remainingForOrder(O, order, [...billed, asInvoice("r", built)], pairs(10), CTX).lines, []);
 });
 
 Deno.test("buildRemainingInvoice: a second extension extends from the days the first one billed", () => {
   // 2 at 3 days, extended to 7 by a first remainder (2 added), then the order
   // goes to 12: the second remainder adds 12 − 7 = 5 days, not 12 − 5 = 7.
   const billed = [billedWithPair("a", lightOrder(2, 3))];
-  const first = asInvoice("r1", buildRemainingInvoice(orderSource(lightOrder(2, 7), 7), billed, [], mint));
+  const first = asInvoice("r1", buildRemainingInvoice(orderSource(lightOrder(2, 7), 7), billed, [], CTX, mint));
   const order = lightOrder(2, 12);
-  const second = buildRemainingInvoice(orderSource(order, 12), [...billed, first], [], mint);
-  assertEquals(second.items.filter((it) => it.type === "rental").map((it) => (it as { price: { chargeable_days: number } }).price.chargeable_days), [5]);
-  assertEquals(remainingForOrder(O, order, [...billed, first, asInvoice("r2", second)], pairs(12)).lines, []);
+  const second = buildRemainingInvoice(orderSource(order, 12), [...billed, first], [], CTX, mint);
+  assertEquals(second.items.filter((it) => it.type === "rental").map((it) => daysOf(it)), [5]);
+  assertEquals(remainingForOrder(O, order, [...billed, first, asInvoice("r2", second)], pairs(12), CTX).lines, []);
 });
 
 Deno.test("buildRemainingInvoice: over-billing is returned for a credit note, never netted into the remainder", () => {
   // Billed 3 at 7 days; the order is now 2 at 3 days. Nothing remains to bill.
-  const built = buildRemainingInvoice(orderSource(lightOrder(2, 3), 3), [billedWithPair("a", lightOrder(3, 7))], [], mint);
+  const built = buildRemainingInvoice(orderSource(lightOrder(2, 3), 3), [billedWithPair("a", lightOrder(3, 7))], [], CTX, mint);
   assertEquals(built.items, []);
   assertEquals(built.overbilled, [
-    { path: [D, G, LIGHT], quantity: -1, extension_days: 0 },
-    { path: [D, G, LIGHT], quantity: 3, extension_days: -2 },
+    { path: [D, G, LIGHT], quantity: -1, extension_counts: [] },
+    { path: [D, G, LIGHT], quantity: 3, extension_counts: [tier("week", -2, 5)] },
   ]);
 });
 
 Deno.test("buildRemainingInvoice: an unaligned scope fails closed", () => {
   const stray = invoice("a", [{ ...DEST_ITEM, uid: "dest-other", path: ["dest-other"] } as LineItem, line(LIGHT, ["dest-other", LIGHT], 1, 1000)]);
-  const built = buildRemainingInvoice(orderSource(lightOrder(3)), [stray], [], mint);
+  const built = buildRemainingInvoice(orderSource(lightOrder(3)), [stray], [], CTX, mint);
   assertEquals([built.items, built.unaligned], [[], ["a"]]);
 });
 
@@ -416,8 +441,8 @@ const crms = (inv: AccountedInvoice, crmsId: number | string = 4711): AccountedI
 Deno.test("quantityAccounting: a live CRMS-authored invoice fails the remainder closed, and names it", () => {
   const order = [...lightOrder(6), line("prod-tripod", [D, "prod-tripod"], 1, 3000)];
   const billedBy = [crms(invoice("a", lightOrder(4), "paid")), invoice("b", lightOrder(1), "issued")];
-  assertEquals(remainingForOrder(O, order, billedBy, pairs()), { lines: [], compared: ["a", "b"], unaligned: [], crms_authored: ["a"], credits_unkeyed: [] });
-  const built = buildRemainingInvoice(orderSource(order), billedBy, [], mint);
+  assertEquals(remainingForOrder(O, order, billedBy, pairs(), CTX), { lines: [], compared: ["a", "b"], unaligned: [], crms_authored: ["a"], credits_unkeyed: [] });
+  const built = buildRemainingInvoice(orderSource(order), billedBy, [], CTX, mint);
   assertEquals([built.items, built.destinations, built.overbilled, built.crms_authored], [[], [], [], ["a"]]);
   // The sum is not a remainder: a diff still reads what CRMS billed.
   assertEquals(invoicedByPath(O, order, billedBy).byPath.get(lightKey)?.quantity, 5);
@@ -426,9 +451,9 @@ Deno.test("quantityAccounting: a live CRMS-authored invoice fails the remainder 
 Deno.test("quantityAccounting: the same order billed natively still has a remainder — the refusal is the crms_id, nothing else", () => {
   const order = [...lightOrder(6), line("prod-tripod", [D, "prod-tripod"], 1, 3000)];
   const native = [invoice("a", lightOrder(4), "paid"), invoice("b", lightOrder(1), "issued")];
-  const { lines, crms_authored } = remainingForOrder(O, order, native, pairs());
+  const { lines, crms_authored } = remainingForOrder(O, order, native, pairs(), CTX);
   assertEquals([lines.map((l) => [l.path.at(-1), l.quantity, l.new]), crms_authored], [[[LIGHT, 1, false], ["prod-tripod", 1, true]], []]);
-  assertEquals(buildRemainingInvoice(orderSource(order), native, [], mint).items.length > 0, true);
+  assertEquals(buildRemainingInvoice(orderSource(order), native, [], CTX, mint).items.length > 0, true);
 });
 
 Deno.test("quantityAccounting: a VOID CRMS invoice, a null crms_id and an empty one do not refuse", () => {
@@ -438,9 +463,9 @@ Deno.test("quantityAccounting: a VOID CRMS invoice, a null crms_id and an empty 
     { ...invoice("a", lightOrder(2), "paid"), crms_id: null },
     crms(invoice("b", lightOrder(2), "issued"), ""),
   ];
-  const result = remainingForOrder(O, order, billedBy, pairs());
+  const result = remainingForOrder(O, order, billedBy, pairs(), CTX);
   assertEquals([result.crms_authored, result.lines.map((l) => l.quantity)], [[], [2]]);
-  assertEquals(buildRemainingInvoice(orderSource(order), billedBy, [], mint).crms_authored, []);
+  assertEquals(buildRemainingInvoice(orderSource(order), billedBy, [], CTX, mint).crms_authored, []);
 });
 
 Deno.test("quantityAccounting: a string crms_id refuses as a number does", () => {
@@ -455,8 +480,8 @@ Deno.test("quantityAccounting: an unmoved window extends nothing, whatever the b
   // retired line-day rule billed max(7,5) − max(3,5) = 2 days, 800¢, and built a
   // section charging from Sep 14 to Sep 13.
   const invoices = [invoice("a", lightOrder(2, 3), "issued", { days: 7 })];
-  assertEquals(remainingForOrder(O, lightOrder(2, 7), invoices, pairs(7)).lines, []);
-  const built = buildRemainingInvoice(orderSource(lightOrder(2, 7), 7), invoices, [], mint);
+  assertEquals(remainingForOrder(O, lightOrder(2, 7), invoices, pairs(7), CTX).lines, []);
+  const built = buildRemainingInvoice(orderSource(lightOrder(2, 7), 7), invoices, [], CTX, mint);
   assertEquals([built.items, built.overbilled], [[], []]);
 });
 
@@ -467,45 +492,43 @@ Deno.test("quantityAccounting: a long rental billed in two parts on the full win
     invoice("a", lightOrder(1, 35), "issued", { days: 45 }),
     invoice("b", lightOrder(1, 10), "issued", { days: 45 }),
   ];
-  assertEquals(remainingForOrder(O, lightOrder(2, 45), invoices, pairs(45)).lines, []);
+  assertEquals(remainingForOrder(O, lightOrder(2, 45), invoices, pairs(45), CTX).lines, []);
 });
 
 Deno.test("quantityAccounting: a recounted day total on the same window extends nothing", () => {
   // Prod #310: the same window counted 10 days on the invoice, 11 on the order.
   const invoices = [invoice("a", lightOrder(2, 10), "issued", { days: 10, end: endFor(11) })];
-  assertEquals(remainingForOrder(O, lightOrder(2, 11), invoices, pairs(11)).lines, []);
+  assertEquals(remainingForOrder(O, lightOrder(2, 11), invoices, pairs(11), CTX).lines, []);
 });
 
 Deno.test("quantityAccounting: a later window extends by the PAIRS' days, not the billed line's", () => {
-  // Prod #898: the invoice pair charged 5 days ending Sep 11; the order now ends Sep 16
-  // at 10 days. The billed row stores 11 days by hand — the pairs decide: +5 days,
+  // Prod #898: the invoice pair charged 5 days ending Fri Sep 11; the order now ends
+  // Fri Sep 18 at 10 days. The billed row stores 11 days by hand — the pairs decide: +5 days,
   // 2 × 1000 × 5 ÷ 5 = 2000¢ (owner, 2026-09-16: a hand-held row extends on top).
   const invoices = [invoice("a", lightOrder(2, 11), "issued", { days: 5 })];
-  assertEquals(remainingForOrder(O, lightOrder(2, 10), invoices, pairs(10)).lines.map((l) => [l.quantity, l.extension_cents]), [[0, 2000]]);
-  const built = buildRemainingInvoice(orderSource(lightOrder(2, 10), 10), invoices, [], mint);
+  assertEquals(remainingForOrder(O, lightOrder(2, 10), invoices, pairs(10), CTX).lines.map((l) => [l.quantity, l.extension_cents]), [[0, 2000]]);
+  const built = buildRemainingInvoice(orderSource(lightOrder(2, 10), 10), invoices, [], CTX, mint);
   const section = built.destinations.find((p) => p.uid !== D)!;
-  assertEquals([section.dates.charge_windows![0].start, section.dates.charge_windows![0].end, section.dates.charge_windows![0].days], [
-    "2026-09-12T00:00:00.000-05:00",
-    "2026-09-16T00:00:00.000-05:00",
-    5,
-  ]);
-  assertEquals(section.dates.charge_windows, [{ start: "2026-09-12T00:00:00.000-05:00", end: "2026-09-16T00:00:00.000-05:00", days: 5 }]);
+  assertEquals(section.dates.charge_windows, [{ start: "2026-09-12T00:00:00.000-05:00", end: endFor(10) }]);
+  // Its line states the 5 days the pairs add.
+  assertEquals(built.items.filter((it) => it.type === "rental").map((it) => daysOf(it)), [5]);
 });
 
 Deno.test("quantityAccounting: an earlier window is a shortening, returned for a credit note", () => {
   // Prod #910: billed 18 days ending Sep 24; the order now ends Sep 21 at 15.
   // 2 × 1000 × (15 − 18) ÷ 5 = −1200¢.
   const invoices = [invoice("a", lightOrder(2, 18))];
-  assertEquals(remainingForOrder(O, lightOrder(2, 15), invoices, pairs(15)).lines.map((l) => l.extension_cents), [-1200]);
-  assertEquals(buildRemainingInvoice(orderSource(lightOrder(2, 15), 15), invoices, [], mint).overbilled, [
-    { path: [D, G, LIGHT], quantity: 2, extension_days: -3 },
+  assertEquals(remainingForOrder(O, lightOrder(2, 15), invoices, pairs(15), CTX).lines.map((l) => l.extension_cents), [-1200]);
+  assertEquals(buildRemainingInvoice(orderSource(lightOrder(2, 15), 15), invoices, [], CTX, mint).overbilled, [
+    { path: [D, G, LIGHT], quantity: 2, extension_counts: [tier("week", -3, 5)] },
   ]);
 });
 
-Deno.test("quantityAccounting: a window and a day count that disagree in direction extend nothing", () => {
-  // The order ends later but charges no more days (e.g. a weekend added under the week floor).
-  const invoices = [invoice("a", lightOrder(2, 7), "issued", { days: 7 })];
-  assertEquals(remainingForOrder(O, lightOrder(2, 7), invoices, pairs(7, endFor(9))).lines, []);
+Deno.test("quantityAccounting: a window that ends later but meters no more days extends nothing", () => {
+  // The order's window now runs over a weekend past its 5th business day: the
+  // dates moved, the metered count did not, and a zero delta is dropped.
+  const invoices = [invoice("a", lightOrder(2, 5), "issued", { days: 5 })];
+  assertEquals(remainingForOrder(O, lightOrder(2, 5), invoices, pairs(5, chicagoDayAtTimeOf(endFor(5), 2, START)), CTX).lines, []);
 });
 
 // ── The window SET, not just its last end (api-cloudrun#1028 phase 1a) ───────
@@ -515,16 +538,16 @@ Deno.test("quantityAccounting: a window and a day count that disagree in directi
 // change at all. These fixtures carry three windows so the last end can be held
 // fixed while the set underneath it moves.
 
-/** Three 5-day windows with gaps: [day 0–5], [day 7–12], [day 14–19]. */
-const W1 = { start: START, end: endFor(5), days: 5 };
-const W2 = { start: endFor(7), end: endFor(12), days: 5 };
-const W3 = { start: endFor(14), end: endFor(19), days: 5 };
+/** Three 5-business-day windows with gaps: business days [1–5], [8–12], [15–19]. */
+const W1 = { start: START, end: endFor(5) };
+const W2 = { start: endFor(8), end: endFor(12) };
+const W3 = { start: endFor(15), end: endFor(19) };
 
-const multiPair = (uid: string, windows: readonly { start: string; end: string; days: number }[]) =>
+const multiPair = (uid: string, windows: readonly { start: string; end: string }[]) =>
   ({ uid, dates: { charge_windows: windows } }) as unknown as DocDestinationType;
 
 /** An invoice under order O whose D pair states `windows` verbatim. */
-function multiInvoice(uid: string, items: LineItem[], windows: readonly { start: string; end: string; days: number }[]): AccountedInvoice {
+function multiInvoice(uid: string, items: LineItem[], windows: readonly { start: string; end: string }[]): AccountedInvoice {
   const divider = { uid: O, type: "order", name: "Order", description: "", path: [O] } as unknown as InvoiceItem;
   return {
     uid,
@@ -542,9 +565,9 @@ Deno.test("quantityAccounting: a DROPPED MIDDLE window is a shortening, though t
   // 2 × 1000 × (10 − 15) ÷ 5 = −2000¢.
   const invoices = [multiInvoice("a", lightOrder(2, 15), [W1, W2, W3])];
   const order = { uid: O, number: 1012, items: lightOrder(2, 10), destinations: [multiPair(D, [W1, W3])] };
-  assertEquals(remainingForOrder(O, order.items, invoices, order.destinations).lines.map((l) => l.extension_cents), [-2000]);
-  assertEquals(buildRemainingInvoice(order, invoices, [], mint).overbilled, [
-    { path: [D, G, LIGHT], quantity: 2, extension_days: -5 },
+  assertEquals(remainingForOrder(O, order.items, invoices, order.destinations, CTX).lines.map((l) => l.extension_cents), [-2000]);
+  assertEquals(buildRemainingInvoice(order, invoices, [], CTX, mint).overbilled, [
+    { path: [D, G, LIGHT], quantity: 2, extension_counts: [tier("week", -1, 1)] },
   ]);
 });
 
@@ -553,20 +576,20 @@ Deno.test("quantityAccounting: a SHRUNK middle window is a shortening, though th
   // billableDays does not: 15 → 15. The set gate fires on the dates, the day delta
   // is 0, and a 0 extension is dropped — no phantom credit, no phantom extension.
   const invoices = [multiInvoice("a", lightOrder(2, 15), [W1, W2, W3])];
-  const shrunk = { ...W2, end: endFor(9), days: 2 };
+  const shrunk = { ...W2, end: endFor(9) };
   const order = { uid: O, number: 1012, items: lightOrder(2, 15), destinations: [multiPair(D, [W1, shrunk, W3])] };
-  assertEquals(remainingForOrder(O, order.items, invoices, order.destinations).lines, []);
+  assertEquals(remainingForOrder(O, order.items, invoices, order.destinations, CTX).lines, []);
 });
 
 Deno.test("quantityAccounting: an identical multi-window set extends nothing, whatever the stored days say", () => {
-  // The recount guard, across a SET rather than one window: the invoice's pair
-  // froze 5/5/5 at write and the order's has been recounted to 6/6/6 against the
-  // holiday calendar. Identical dates ⇒ 0, and the day delta of +3 is the artefact.
+  // The recount guard, across a SET rather than one window: the order LINE says
+  // 18 days while both pairs state the same dates. Identical dates ⇒ 0; a line's
+  // own count never decides an extension.
   const invoices = [multiInvoice("a", lightOrder(2, 15), [W1, W2, W3])];
-  const recounted = [{ ...W1, days: 6 }, { ...W2, days: 6 }, { ...W3, days: 6 }];
+  const recounted = [{ ...W1 }, { ...W2 }, { ...W3 }];
   const order = { uid: O, number: 1012, items: lightOrder(2, 18), destinations: [multiPair(D, recounted)] };
-  assertEquals(remainingForOrder(O, order.items, invoices, order.destinations).lines, []);
-  assertEquals(buildRemainingInvoice(order, invoices, [], mint).overbilled, []);
+  assertEquals(remainingForOrder(O, order.items, invoices, order.destinations, CTX).lines, []);
+  assertEquals(buildRemainingInvoice(order, invoices, [], CTX, mint).overbilled, []);
 });
 
 Deno.test("quantityAccounting: an invoice stating its OWN narrower windows credits nothing (owner ruling)", () => {
@@ -576,10 +599,10 @@ Deno.test("quantityAccounting: an invoice stating its OWN narrower windows credi
   // There is deliberately no sub-cover test that would read this as a shortening.
   const invoices = [multiInvoice("a", lightOrder(2, 5), [W1])];
   const order = { uid: O, number: 1012, items: lightOrder(2, 15), destinations: [multiPair(D, [W1, W2, W3])] };
-  const { lines } = remainingForOrder(O, order.items, invoices, order.destinations);
+  const { lines } = remainingForOrder(O, order.items, invoices, order.destinations, CTX);
   // 2 × 1000 × (15 − 5) ÷ 5 = +4000¢.
   assertEquals(lines.map((l) => l.extension_cents), [4000]);
-  assertEquals(buildRemainingInvoice(order, invoices, [], mint).overbilled, []);
+  assertEquals(buildRemainingInvoice(order, invoices, [], CTX, mint).overbilled, []);
 });
 
 Deno.test("quantityAccounting: a window set re-authored at a different TIME OF DAY extends nothing", () => {
@@ -588,7 +611,7 @@ Deno.test("quantityAccounting: a window set re-authored at a different TIME OF D
   const atNine = [W1, W2, W3].map((w) => ({ ...w, start: w.start.replace("T00:", "T09:"), end: w.end.replace("T00:", "T09:") }));
   const invoices = [multiInvoice("a", lightOrder(2, 15), [W1, W2, W3])];
   const order = { uid: O, number: 1012, items: lightOrder(2, 15), destinations: [multiPair(D, atNine)] };
-  assertEquals(remainingForOrder(O, order.items, invoices, order.destinations).lines, []);
+  assertEquals(remainingForOrder(O, order.items, invoices, order.destinations, CTX).lines, []);
 });
 
 // ── The offer's predicate IS the build's (core#120) ─────────────────────
@@ -656,8 +679,8 @@ const parityCases = (): Array<{ name: string; order: ReturnType<typeof orderSour
 
 Deno.test("remainingForOrder: a line `bills` exactly when buildRemainingInvoice would bill it (core#120)", () => {
   for (const { name, order, invoices, notes = [] } of parityCases()) {
-    const offered = remainingForOrder(O, order.items, invoices, order.destinations, notes).lines.some((l) => l.bills);
-    const built = buildRemainingInvoice(order, invoices, notes, mint).items.length > 0;
+    const offered = remainingForOrder(O, order.items, invoices, order.destinations, CTX, notes).lines.some((l) => l.bills);
+    const built = buildRemainingInvoice(order, invoices, notes, CTX, mint).items.length > 0;
     assertEquals(offered, built, name);
   }
 });
@@ -666,10 +689,10 @@ Deno.test("remainingForOrder: the parity cases reach both answers and every arm 
   // Without this the parity sweep could pass over a table that never bills, or
   // never refuses — and the cents-based predicate it replaced must FAIL it.
   const results = parityCases().map(({ name, order, invoices, notes = [] }) => {
-    const lines = remainingForOrder(O, order.items, invoices, order.destinations, notes).lines;
+    const lines = remainingForOrder(O, order.items, invoices, order.destinations, CTX, notes).lines;
     return {
       name,
-      built: buildRemainingInvoice(order, invoices, notes, mint).items.length > 0,
+      built: buildRemainingInvoice(order, invoices, notes, CTX, mint).items.length > 0,
       byCents: lines.some((l) => l.quantity > 0 || l.extension_cents > 0),
       overbilledOnly: lines.length > 0 && lines.every((l) => !l.bills),
     };
@@ -691,10 +714,10 @@ Deno.test("buildRemainingInvoice: units a credit gave back are billed again when
   const invoices = [invoice("a", lightOrder(7), "issued")];
   const lightRows = (built: ReturnType<typeof buildRemainingInvoice>) =>
     built.items.filter((it) => it.uid === LIGHT).map((it) => (it as { quantity?: number }).quantity);
-  assertEquals(lightRows(buildRemainingInvoice(order, invoices, [reversal("cn1", "a", 2)], mint)), [2]);
-  assertEquals(lightRows(buildRemainingInvoice(order, invoices, [], mint)), []);
+  assertEquals(lightRows(buildRemainingInvoice(order, invoices, [reversal("cn1", "a", 2)], CTX, mint)), [2]);
+  assertEquals(lightRows(buildRemainingInvoice(order, invoices, [], CTX, mint)), []);
   // A void note gave nothing back, so it nets nothing.
-  assertEquals(lightRows(buildRemainingInvoice(order, invoices, [reversal("cn1", "a", 2, { status: "void" })], mint)), []);
+  assertEquals(lightRows(buildRemainingInvoice(order, invoices, [reversal("cn1", "a", 2, { status: "void" })], CTX, mint)), []);
 });
 
 // ── Credit notes net the units they reverse (api-cloudrun#1028 phase 1b) ─────
@@ -722,9 +745,9 @@ const overBilled = () => ({ order: lightOrder(2), invoices: [invoice("a", lightO
 Deno.test("quantityAccounting: a credit note that reverses billing NETS its units, and the over-billing clears", () => {
   const { order, invoices } = overBilled();
   // Before: 5 billed against 2 ordered = −3 units, 3 × 1000 = −3000¢.
-  assertEquals(remainingForOrder(O, order, invoices, pairs()).lines.map((l) => [l.invoiced, l.quantity, l.quantity_cents]), [[5, -3, -3000]]);
+  assertEquals(remainingForOrder(O, order, invoices, pairs(), CTX).lines.map((l) => [l.invoiced, l.quantity, l.quantity_cents]), [[5, -3, -3000]]);
   // After a note reversing exactly those 3: billed 2, nothing left either way.
-  assertEquals(remainingForOrder(O, order, invoices, pairs(), [reversal("cn1", "a", 3)]).lines, []);
+  assertEquals(remainingForOrder(O, order, invoices, pairs(), CTX, [reversal("cn1", "a", 3)]).lines, []);
 });
 
 Deno.test("quantityAccounting: a credit note WITHOUT the marker does not net — a write-off is not a billing reversal", () => {
@@ -735,16 +758,16 @@ Deno.test("quantityAccounting: a credit note WITHOUT the marker does not net —
   // credits ~35 lines at full quantity.
   const { order, invoices } = overBilled();
   const writeOff = reversal("cn1", "a", 3, { reverses_billing: false });
-  assertEquals(remainingForOrder(O, order, invoices, pairs(), [writeOff]).lines.map((l) => l.quantity), [-3]);
+  assertEquals(remainingForOrder(O, order, invoices, pairs(), CTX, [writeOff]).lines.map((l) => l.quantity), [-3]);
   // …and it is not silently swallowed either: an unmarked line is simply not a
   // reversal, so it is not "unkeyed" — there is nothing to key.
-  assertEquals(remainingForOrder(O, order, invoices, pairs(), [writeOff]).credits_unkeyed, []);
+  assertEquals(remainingForOrder(O, order, invoices, pairs(), CTX, [writeOff]).credits_unkeyed, []);
 });
 
 Deno.test("quantityAccounting: only an issued or applied note nets — a draft and a void one do not", () => {
   const { order, invoices } = overBilled();
   const at = (status: AccountedCreditNote["status"]) =>
-    remainingForOrder(O, order, invoices, pairs(), [reversal("cn1", "a", 3, { status })]).lines.map((l) => l.quantity);
+    remainingForOrder(O, order, invoices, pairs(), CTX, [reversal("cn1", "a", 3, { status })]).lines.map((l) => l.quantity);
   assertEquals(at("issued"), []);
   assertEquals(at("applied"), []);
   // A draft has credited nothing yet; a void one has been taken back.
@@ -760,7 +783,7 @@ Deno.test("quantityAccounting: a reversal this cannot KEY is reported, never sil
   const noPath = { ...reversal("cn1", "a", 3), items: [{ quantity: 3, reverses_billing: true }] } as AccountedCreditNote;
   const twoInvoices = reversal("cn2", "a", 3, { sources: [{ collection: "invoices", uid: "a" }, { collection: "invoices", uid: "b" }] });
   for (const note of [noPath, twoInvoices]) {
-    const out = remainingForOrder(O, order, invoices, pairs(), [note]);
+    const out = remainingForOrder(O, order, invoices, pairs(), CTX, [note]);
     // Nothing netted — the over-billing still stands…
     assertEquals(out.lines.map((l) => l.quantity), [-3]);
     // …and the note is NAMED, which is the whole point.
@@ -773,14 +796,14 @@ Deno.test("quantityAccounting: a reversal is keyed to ONE invoice — the same p
   // the key. A note against invoice "b" must not reduce what "a" bills.
   const order = lightOrder(2);
   const invoices = [invoice("a", lightOrder(5), "issued")];
-  assertEquals(remainingForOrder(O, order, invoices, pairs(), [reversal("cn1", "b", 3)]).lines.map((l) => l.quantity), [-3]);
+  assertEquals(remainingForOrder(O, order, invoices, pairs(), CTX, [reversal("cn1", "b", 3)]).lines.map((l) => l.quantity), [-3]);
 });
 
 Deno.test("quantityAccounting: netting is capped at the row — a credit beyond what it billed does not go negative", () => {
   const order = lightOrder(2);
   const invoices = [invoice("a", lightOrder(5), "issued")];
   // Reversing 99 of a 5-unit row bills 0, never −94.
-  const { lines } = remainingForOrder(O, order, invoices, pairs(), [reversal("cn1", "a", 99)]);
+  const { lines } = remainingForOrder(O, order, invoices, pairs(), CTX, [reversal("cn1", "a", 99)]);
   assertEquals(lines.map((l) => [l.invoiced, l.quantity]), [[0, 2]]);
 });
 
@@ -798,7 +821,7 @@ const src = (items: LineItem[], days = 5) => ({ uid: O, number: 1012, items, des
 Deno.test("buildOverbillingCredits: over-billed units become one credit line against the row that billed them", () => {
   // Ordered 2, billed 5 on one invoice: credit 3 units at the INVOICE line's terms.
   const invoices = [biller("a", lightOrder(5), 2001, 5000)];
-  const out = buildOverbillingCredits(src(lightOrder(2)), invoices);
+  const out = buildOverbillingCredits(src(lightOrder(2)), invoices, CTX);
   assertEquals(out.notes.length, 1);
   assertEquals(out.notes[0].uid_invoice, "a");
   assertEquals(out.notes[0].lines.map((l) => [l.order_path.join("/"), l.quantity, l.preview_cents]), [[lightKey, 3, 3000]]);
@@ -811,8 +834,8 @@ Deno.test("buildOverbillingCredits: a credit note this feature already raised CL
   // The whole point of phase 1b's netting: taking the offer must end it.
   const invoices = [biller("a", lightOrder(5), 2001, 5000)];
   const order = src(lightOrder(2));
-  assertEquals(buildOverbillingCredits(order, invoices).notes.length, 1);
-  assertEquals(buildOverbillingCredits(order, invoices, [reversal("cn1", "a", 3)]).notes, []);
+  assertEquals(buildOverbillingCredits(order, invoices, CTX).notes.length, 1);
+  assertEquals(buildOverbillingCredits(order, invoices, CTX, [reversal("cn1", "a", 3)]).notes, []);
 });
 
 Deno.test("buildOverbillingCredits: ordering is a choice of MONEY — an invoice with a balance is offered first", () => {
@@ -821,33 +844,33 @@ Deno.test("buildOverbillingCredits: ordering is a choice of MONEY — an invoice
   // sitting as unconsumed credit — the one with a balance goes first, even though
   // it is the higher number.
   const invoices = [biller("paid", lightOrder(3), 2001, 0), biller("owing", lightOrder(3), 2002, 9000)];
-  const out = buildOverbillingCredits(src(lightOrder(2)), invoices);
+  const out = buildOverbillingCredits(src(lightOrder(2)), invoices, CTX);
   assertEquals(out.notes.map((n) => n.uid_invoice), ["owing", "paid"]);
 });
 
 Deno.test("buildOverbillingCredits: a DRAFT biller is refused — edit the draft, do not credit it", () => {
   const invoices = [{ ...invoice("a", lightOrder(5), "draft"), number: 2001, amount_due_cents: 5000 }];
-  const out = buildOverbillingCredits(src(lightOrder(2)), invoices);
+  const out = buildOverbillingCredits(src(lightOrder(2)), invoices, CTX);
   assertEquals(out.notes, []);
   assertEquals(out.refused.map((r) => [r.order_path.join("/"), r.reason.includes("DRAFT")]), [[lightKey, true]]);
 });
 
-Deno.test("buildOverbillingCredits: a shortened window credits DAYS against the row that last billed them", () => {
+Deno.test("buildOverbillingCredits: a shortened window credits TIME against the row that last billed them", () => {
   // Billed 18 days ending later; the order now charges 15 — a 3-day shortening.
-  // 2 × 1000 × 3 ÷ 5 = 1200¢, and the line carries `credited_days`, not units.
+  // 2 × 1000 × 3 ÷ 5 = 1200¢, and the line carries `credited_counts`, not units.
   const invoices = [biller("a", lightOrder(2, 18), 2001, 5000)];
-  const out = buildOverbillingCredits(src(lightOrder(2, 15), 15), invoices);
+  const out = buildOverbillingCredits(src(lightOrder(2, 15), 15), invoices, CTX);
   assertEquals(out.notes.length, 1);
   assertEquals(
-    out.notes[0].lines.map((l) => [l.quantity, l.credited_days, l.preview_cents]),
-    [[2, 3, 1200]],
+    out.notes[0].lines.map((l) => [l.quantity, l.credited_counts, l.preview_cents]),
+    [[2, [tier("week", 3, 5)], 1200]],
   );
 });
 
 Deno.test("buildOverbillingCredits: fails closed exactly as a remainder does", () => {
   // A live CRMS-authored invoice: the offer must not act, and must say why.
   const crms = { ...biller("a", lightOrder(5), 2001, 5000), crms_id: 1087 };
-  const out = buildOverbillingCredits(src(lightOrder(2)), [crms]);
+  const out = buildOverbillingCredits(src(lightOrder(2)), [crms], CTX);
   assertEquals([out.notes, out.crms_authored], [[], ["a"]]);
 });
 
@@ -855,15 +878,15 @@ Deno.test("buildOverbillingCredits: over-billing across two invoices is two note
   // A credit note belongs to ONE invoice, so this cannot be a single note.
   // Ordered 2, billed 3 + 3 = 6 → 4 units over, taken from the larger rows first.
   const invoices = [biller("a", lightOrder(3), 2001, 9000), biller("b", lightOrder(3), 2002, 9000)];
-  const out = buildOverbillingCredits(src(lightOrder(2)), invoices);
+  const out = buildOverbillingCredits(src(lightOrder(2)), invoices, CTX);
   assertEquals(out.notes.map((n) => n.uid_invoice), ["a", "b"]);
   assertEquals(out.notes.reduce((t, n) => t + n.lines.reduce((s, l) => s + l.quantity, 0), 0), 4);
 });
 
 Deno.test("quantityAccounting: a row billed on no known window extends nothing", () => {
   const bare = { ...invoice("a", lightOrder(2, 3)), destinations: undefined };
-  assertEquals(remainingForOrder(O, lightOrder(2, 10), [bare], pairs(10)).lines, []);
-  assertEquals(accountLine(line(LIGHT, [D, G, LIGHT], 2, 1000, 10), invoicedByPath(O, lightOrder(2, 10), [invoice("a", lightOrder(2, 3))]).byPath.get(lightKey), null).extension_cents, 0);
+  assertEquals(remainingForOrder(O, lightOrder(2, 10), [bare], pairs(10), CTX).lines, []);
+  assertEquals(accountLine(line(LIGHT, [D, G, LIGHT], 2, 1000, 10), invoicedByPath(O, lightOrder(2, 10), [invoice("a", lightOrder(2, 3))]).byPath.get(lightKey), null, CTX).extension_cents, 0);
 });
 
 // ── substituted_for: merges and partial swaps (manager#414, Track S1) ─────────
@@ -897,7 +920,7 @@ Deno.test("quantityAccounting: a MERGE bills both lines — the substitute's own
   assertEquals(billed.byPath.get(lightKey)?.rows.map((r) => [r.via, r.quantity]), [["direct", 2]]);
   assertEquals(billed.byPath.get(tripodKey)?.quantity, 2);
   assertEquals(billed.byPath.get(tripodKey)?.rows.map((r) => [r.via, r.quantity]), [["substitute", 2]]);
-  assertEquals(remainingForOrder(O, mergeOrder(), [inv], pairs()).lines, []);
+  assertEquals(remainingForOrder(O, mergeOrder(), [inv], pairs(), CTX).lines, []);
 });
 
 Deno.test("quantityAccounting: a merge is SPENT once the order no longer carries X — its units count at the row's own path", () => {
@@ -907,7 +930,7 @@ Deno.test("quantityAccounting: a merge is SPENT once the order no longer carries
   assertEquals(billed.byPath.get(lightKey)?.quantity, 4);
   assertEquals(billed.byPath.has(tripodKey), false);
   // 4 billed of 2 ordered: over-billed by 2.
-  assertEquals(remainingForOrder(O, mergeOrder(0), [inv], pairs()).lines.map((l) => l.quantity), [-2]);
+  assertEquals(remainingForOrder(O, mergeOrder(0), [inv], pairs(), CTX).lines.map((l) => l.quantity), [-2]);
 });
 
 Deno.test("quantityAccounting: a partial kit swap through substituted_for credits X's components by the ORDER's ratio", () => {
@@ -927,7 +950,7 @@ Deno.test("quantityAccounting: a partial kit swap through substituted_for credit
   assertEquals([billed.byPath.get(`${D}/${KIT}`)?.quantity, billed.byPath.get(`${D}/${KIT}/${STAKE}`)?.quantity], [4, 8]);
   // The alternate kit and its pegs stand in entirely, so neither bills its own path.
   assertEquals([billed.byPath.has(`${D}/${ALT}`), billed.byPath.has(`${D}/${ALT}/${PEG}`)], [false, false]);
-  assertEquals(remainingForOrder(O, kitOrder(), [inv], pairs()).lines, []);
+  assertEquals(remainingForOrder(O, kitOrder(), [inv], pairs(), CTX).lines, []);
 });
 
 Deno.test("quantityAccounting: merging a kit into a kit the order carries bills both kits and both component lines", () => {
@@ -944,7 +967,7 @@ Deno.test("quantityAccounting: merging a kit into a kit the order carries bills 
     [`${D}/${YK}`, `${D}/${YK}/${C}`, `${D}/${XK}`, `${D}/${XK}/${C2}`].map((k) => billed.byPath.get(k)?.quantity),
     [2, 4, 1, 2],
   );
-  assertEquals(remainingForOrder(O, order, [inv], pairs()).lines, []);
+  assertEquals(remainingForOrder(O, order, [inv], pairs(), CTX).lines, []);
 });
 
 

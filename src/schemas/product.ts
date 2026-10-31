@@ -5,7 +5,7 @@ import { z } from "zod";
 import { extendChecked } from "./_extend.ts";
 import { FirestoreId, ThreadId } from "./_uid.ts";
 import { uploadcareRef } from "./uploadcare/ref.ts";
-import { checkDatedRates, type DatedRate, DatedRateInput, DatedRateSchema } from "./price-formula.ts";
+import { checkDatedRates, type DatedRate, DatedRateInput, DatedRateSchema, datedRatesIssues } from "./price-formula.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -17,13 +17,8 @@ import {
   type ComponentTypeType,
   type FirestoreTimestampType,
   checkItemContract,
-  checkPriceBaseUnit,
   InclusionTypeEnum,
   type InclusionTypeType,
-  PriceFormulaEnum,
-  type PriceFormulaType,
-  ComponentPriceFormulaEnum,
-  type ComponentPriceFormulaType,
   ProductTypeEnum,
   type ProductTypeType,
   StockMethodEnum,
@@ -211,22 +206,14 @@ export interface ProductComponent {
    */
   uid_tracking_category?: string;
   price: {
-    base_cents: number;
-    /**
-     * Carried so a product price can be COPIED into a component without the
-     * strictObject refusing the key — see the Zod arm for the incident.
-     * Always `null` in practice: `ComponentTypeEnum` excludes
-     * `transaction_fee`, so a component is never itself a percent fee.
-     *
-     * ⚠️ **That was a fact about the CORPUS, not a guarantee, until core#78.**
-     * `formula` below is now {@link ComponentPriceFormulaType}, so the state
-     * this field could pair with — `percent_of_total` — is unrepresentable
-     * here rather than merely unreached. A non-null value is now always wrong.
-     */
-    base_percent?: number | null;
+    /** The component product's formula — see {@link ProductPrice.uid_price_formula}. */
+    uid_price_formula: string;
+    /** The component product's dated rates, copied (or overridden by the parent). */
+    rates: DatedRate[];
+    /** Accepted only as `null`: a copied product price carries the key, and a component is never a percent fee. */
+    base_percent?: null;
     replacement_cents?: number | null;
     coa_revenue?: COARevenueType;
-    formula: ComponentPriceFormulaType;
     discountable: boolean;
   };
 }
@@ -301,11 +288,10 @@ export interface AuthoredProductComponent extends ProductComponent {
  * could see it.
  */
 export const COMPONENT_PRICE_KEYS = [
-  "base_cents",
-  "base_percent",
+  "uid_price_formula",
+  "rates",
   "replacement_cents",
   "coa_revenue",
-  "formula",
   "discountable",
 ] as const;
 
@@ -317,20 +303,24 @@ export const ComponentPriceKeyEnum: z.ZodType<ComponentPriceKeyType> = z.enum(CO
 
 /** Pricing details for a product. */
 export interface ProductPrice {
-  base_cents: number;
   /**
-   * The `percent_of_total` percentage, at 4dp — present on exactly the fee
-   * products where `base_cents` is meaningless, and absent everywhere else.
-   * Enforced by {@link checkPriceBaseUnit}, the same biconditional the line
-   * price family carries.
-   *
-   * ⚠️ **The catalog arm satisfies that refinement through a different premise
-   * than the line arm, so do not carry the line docstring's reasoning across.**
-   * On a line `base_cents` is `.default(0)`, so the parse materializes it and
-   * the refinement can never observe it absent — which is why it asserts the
-   * value is *zero* on the fee arm rather than asserting absence. Here
-   * `base_cents` is a bare required `z.int()`, so a `percent_of_total` product
-   * must state `base_cents: 0` outright. Same guarantee, reached differently.
+   * The `price-formulas/{uid}` a line of this product prices by
+   * (purchases-as-documents D4) — `null` exactly on a percent-of-total fee
+   * product, which prices from the document ({@link checkCatalogPrice}).
+   */
+  uid_price_formula: string | null;
+  /**
+   * The formula's inputs, dated per `rate_key` (D4): `[applied_from,
+   * applied_to)`, ordered, no overlap, no gap, only the last open. A line
+   * snapshots the rows in force on its pricing date and owns them from then on
+   * (Q13). Empty exactly on a percent-of-total fee product.
+   */
+  rates: DatedRate[];
+  /**
+   * The percent-of-total percentage, at 4dp — present on exactly the fee
+   * products that carry no formula, and absent everywhere else. Enforced by
+   * {@link checkCatalogPrice}, the same biconditional the line price family
+   * carries ({@link checkLinePrice}).
    */
   base_percent?: number | null;
   replacement_cents?: number | null;
@@ -357,8 +347,52 @@ export interface ProductPrice {
    * because the public catalogue has no business carrying a ledger account.
    */
   coa_revenue: COARevenueType;
-  formula: PriceFormulaType;
   discountable: boolean;
+}
+
+/**
+ * **A catalog price is a formula with dated rates, or a percentage of the
+ * document — exactly one** (D4; the catalog twin of {@link checkLinePrice}).
+ * The rates' own ordering rules run here too ({@link checkDatedRates}). That
+ * every key the formula names has a row in force is the WRITER's check: the
+ * formula is another document.
+ */
+export function checkCatalogPrice(
+  price: { uid_price_formula?: string | null; rates?: readonly DatedRate[]; base_percent?: number | null },
+  ctx: z.RefinementCtx,
+): void {
+  const rates = price.rates ?? [];
+  if (price.base_percent != null) {
+    if (price.uid_price_formula != null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["uid_price_formula"],
+        message: "A percent-of-total price (base_percent) carries no uid_price_formula",
+      });
+    }
+    if (rates.length > 0) {
+      ctx.addIssue({ code: "custom", path: ["rates"], message: "A percent-of-total price (base_percent) carries no rates" });
+    }
+    return;
+  }
+  if (price.uid_price_formula == null) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["uid_price_formula"],
+      message: "A product priced from itself names its uid_price_formula; only a percent-of-total fee states none",
+    });
+  }
+  if (rates.length === 0) {
+    ctx.addIssue({ code: "custom", path: ["rates"], message: "A formula-priced product carries at least one rate" });
+  }
+  checkDatedRatesAt(rates, ["rates"], ctx);
+}
+
+/** {@link checkDatedRates} with its issues re-rooted under `path`. */
+function checkDatedRatesAt(rates: readonly DatedRate[], path: (string | number)[], ctx: z.RefinementCtx): void {
+  for (const issue of datedRatesIssues(rates)) {
+    ctx.addIssue({ code: "custom", path: [...path, ...issue.path], message: issue.message });
+  }
 }
 
 /**
@@ -584,6 +618,23 @@ function isAtComponentQuantityScale(n: number): boolean {
   return roundComponentQuantity(n) === n;
 }
 
+/**
+ * A component's price, less its `rates` (whose row schema differs between the
+ * stored node and the input twin). A COPY of the component product's price (or
+ * the parent's override of one of its keys, `price_overridden`). A component is
+ * never a percent fee — `ComponentTypeEnum` excludes `transaction_fee` — so it
+ * always names a formula and at least one rate.
+ */
+const componentPriceShape = {
+  uid_price_formula: FirestoreId,
+  // Declared only so a product price COPIED in by spread is not refused by the
+  // strictObject; a component is never a percent fee, so it is null or absent.
+  base_percent: z.null().optional(),
+  replacement_cents: z.int().nullable().optional().meta({ label: "Replacement" }),
+  coa_revenue: COARevenueEnum.optional(),
+  discountable: z.boolean(),
+};
+
 const ComponentObject = z.strictObject({
   uid: FirestoreId,
   path: z.array(z.string()),
@@ -604,43 +655,17 @@ const ComponentObject = z.strictObject({
   uid_tax_class: FirestoreId.optional(),
   // Same shape and same reason as `uid_tax_class` one line up.
   uid_tracking_category: FirestoreId.optional(),
-  price: z.strictObject({
-    base_cents: z.int().meta({ label: "Base Price" }),
-    // 🔴 **Declared here because a component price is a COPY of a product
-    // price, not because a component can be a percent fee — it cannot.**
-    //
-    // `ComponentTypeEnum` excludes `transaction_fee`, which makes it tempting
-    // to leave this arm alone when adding the field to the product. That
-    // reasoning answers the wrong question. `createProduct` copies a product
-    // price into `components[]` and `component_of[]` by SPREAD, so the key
-    // travels regardless of the type that may hold it, and a `z.strictObject`
-    // refuses a key it does not declare: `POST /products` returned 400 with
-    // `Unrecognized key: "base_percent"` at `components.0.price` the moment
-    // `getInitialValues` started seeding it.
-    //
-    // ⚠️ The value is therefore always `null` here. That is not a reason to
-    // omit it — under a strictObject, *absent* and *present-and-null* are
-    // different accepted sets, and only one of them survives a spread.
-    //
-    // No refinement: the component is a copy, so its formula and its rate move
-    // together and consistency is the SOURCE's to enforce. A second gate here
-    // would fail the copy rather than the authoring.
-    //
-    // ⚠️ **That reasoning is sound for the COPY path and silent about the
-    // AUTHORING path** — `AuthoredComponentSchema` exists precisely because a
-    // component can be written directly rather than copied, and nothing on that
-    // path enforced the pair. core#78. The formula below is now narrowed to
-    // `ComponentPriceFormulaEnum`, which makes the half that matters
-    // (`percent_of_total` with no rate) unrepresentable rather than merely
-    // unreached. The mirror half — a `base_percent` beside a two-member formula
-    // — is what attaching `checkPriceBaseUnit` here would still close.
-    base_percent: z.number().nullable().optional(),
-    replacement_cents: z.int().nullable().optional().meta({ label: "Replacement" }),
-    coa_revenue: COARevenueEnum.optional(),
-    formula: ComponentPriceFormulaEnum,
-    discountable: z.boolean(),
-  }).superRefine(checkPriceBaseUnit),
+  price: z.strictObject({ ...componentPriceShape, rates: z.array(DatedRateSchema).min(1).meta({ label: "Rate" }) })
+    .superRefine((price, ctx) => checkDatedRatesAt(price.rates, ["rates"], ctx)),
 });
+
+/**
+ * {@link ComponentObject}'s price for the INPUT schemas: unknown keys stripped,
+ * on the price and on each dated rate (`DatedRateInput`). Declared from the same
+ * shape rather than by `.extend()`, which zod refuses on a refined object.
+ */
+const ComponentInputPrice = z.object({ ...componentPriceShape, rates: z.array(DatedRateInput).min(1).meta({ label: "Rate" }) })
+  .superRefine((price, ctx) => checkDatedRatesAt(price.rates, ["rates"], ctx));
 
 /**
  * Schema for a `component_of` back-reference. `inclusion_type` is optional here
@@ -682,7 +707,9 @@ export const ComponentSchema: z.ZodType<ProductComponent> = ComponentObject
  */
 const ComponentInputSchema: z.ZodType<ProductComponent> = extendChecked(ComponentObject, {
   // `price` has no `.meta()` of its own, so the re-declaration drops nothing.
-  price: ComponentObject.shape.price.strip(),
+  // Its dated rates take the stripping input twin too (`DatedRateInput`), so an
+  // echoed row's extra keys strip at every depth.
+  price: ComponentInputPrice,
 }).strip()
   .superRefine(checkItemContract)
   .superRefine(checkZeroPricedAmount);
@@ -838,7 +865,8 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
   eligible_shipping_ground: z.boolean().meta({ column: true, label: "Ground Eligible" }),
   eligible_shipping_air: z.boolean().meta({ column: true, label: "Air Eligible" }),
   price: z.strictObject({
-    base_cents: z.int().meta({ column: true, label: "Price" }),
+    uid_price_formula: FirestoreId.nullable(),
+    rates: z.array(DatedRateSchema).meta({ label: "Price" }),
     // 🔴 **No `.meta({ column: true })`, deliberately** — and this is the one
     // field here where the reflex to add it is wrong. Every sibling in this
     // object is a column, so annotating looks like consistency. But a display
@@ -852,14 +880,13 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
     base_percent: z.number().nullable().optional(),
     replacement_cents: z.int().nullable().optional().meta({ column: true, label: "Replacement Price" }),
     coa_revenue: COARevenueEnum,
-    formula: PriceFormulaEnum.meta({ column: true, label: "Price Formula" }),
     // `.meta({ initial })` rather than `.default(true)`, for the reason stated on
     // `active` above — and here the annotation is load-bearing rather than
     // tidy: the type-derived zero for a boolean is `false`, so dropping the
     // default without it would seed every new-product form NON-discountable
     // with nothing failing (core#95 batch 9).
     discountable: z.boolean().meta({ initial: true, column: true, label: "Discountable" }),
-  }).superRefine(checkPriceBaseUnit),
+  }).superRefine(checkCatalogPrice),
   // The four dimensions are NULLABLE because `0` means two different things —
   // "weighs nothing" and "nobody has weighed it" — and the corpus is entirely
   // the second: 0 of 549 prod products carried a value > 0 when this was
@@ -1015,11 +1042,14 @@ export interface CreateProductInputType {
   eligible_shipping_ground: boolean;
   eligible_shipping_air: boolean;
   price: {
-    base_cents: number;
+    /** See {@link ProductPrice.uid_price_formula}. */
+    uid_price_formula: string | null;
+    /** See {@link ProductPrice.rates}. */
+    rates: DatedRate[];
+    base_percent?: number | null;
     replacement_cents?: number | null;
     /** Required — see {@link ProductPrice.coa_revenue}. */
     coa_revenue: COARevenueType;
-    formula: PriceFormulaType;
     discountable: boolean;
   };
   shipping?: {
@@ -1095,14 +1125,14 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
   eligible_shipping_ground: z.boolean(),
   eligible_shipping_air: z.boolean(),
   price: z.object({
-    base_cents: z.int(),
+    uid_price_formula: FirestoreId.nullable(),
+    rates: z.array(DatedRateInput),
     // See `ProductSchema.price` for why this carries no `.meta()`.
     base_percent: z.number().nullable().optional(),
     replacement_cents: z.int().nullable().optional(),
     coa_revenue: COARevenueEnum,
-    formula: PriceFormulaEnum,
     discountable: z.boolean(),
-  }).superRefine(checkPriceBaseUnit),
+  }).superRefine(checkCatalogPrice),
   // Nullable to match storage — see `ProductSchema`. A client that has not
   // measured a dimension sends `null`, which is what makes "unmeasured"
   // enterable rather than collapsing to `0` (core#51).
@@ -1168,7 +1198,14 @@ export interface UpdateProductInputType {
   eligible_shipping_ground?: boolean;
   eligible_shipping_air?: boolean;
   price?: {
-    base_cents: number;
+    /** See {@link ProductPrice.uid_price_formula}. */
+    uid_price_formula: string | null;
+    /**
+     * See {@link ProductPrice.rates}. Required — `price` is a WHOLE-OBJECT
+     * replacement, so an omitted key would erase the stored rates.
+     */
+    rates: DatedRate[];
+    base_percent?: number | null;
     replacement_cents?: number | null;
     /**
      * Required — `price` here is a WHOLE-OBJECT replacement, so an update
@@ -1176,7 +1213,6 @@ export interface UpdateProductInputType {
      * {@link ProductPrice.coa_revenue}.
      */
     coa_revenue: COARevenueType;
-    formula: PriceFormulaType;
     discountable: boolean;
   };
   shipping?: {
@@ -1236,16 +1272,16 @@ export const UpdateProductInput: z.ZodType<UpdateProductInputType> = z.object({
   eligible_shipping_ground: z.boolean().optional(),
   eligible_shipping_air: z.boolean().optional(),
   price: z.object({
-    base_cents: z.int(),
+    uid_price_formula: FirestoreId.nullable(),
+    rates: z.array(DatedRateInput),
     // See `ProductSchema.price` for why this carries no `.meta()`.
     base_percent: z.number().nullable().optional(),
     replacement_cents: z.int().nullable().optional(),
     coa_revenue: COARevenueEnum,
     // No `taxes`: product-level tax refs were retired (api-cloudrun#993); the
     // class catalog (`uid_tax_class`) decides a line's tax.
-    formula: PriceFormulaEnum,
     discountable: z.boolean(),
-  }).superRefine(checkPriceBaseUnit).optional(),
+  }).superRefine(checkCatalogPrice).optional(),
   shipping: z.object({
     weight: z.number().nullable(),
     height: z.number().nullable(),

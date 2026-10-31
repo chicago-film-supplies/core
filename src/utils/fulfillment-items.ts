@@ -41,7 +41,7 @@ import { computeItemPaths } from "./orders.ts";
 import { collectSubstitutionAnchors, isStrictlyBelow, isSubstitutionRow } from "./substitutions.ts";
 import { isFulfillmentLineItem } from "../schemas/fulfillment.ts";
 import { isFulfillableItemType } from "../schemas/common.ts";
-import { deriveLineCatalogFacts, quantityPerParentForSlot, zeroPricedForSlot } from "./order-lines.ts";
+import { deriveLineCatalogShape, quantityPerParentForSlot, zeroPricedForSlot } from "./order-lines.ts";
 import type {
   FulfillmentItemType,
   FulfillmentLineItemType,
@@ -413,7 +413,7 @@ export function substitutionRootQuantityPerParent(
  * The {@link FulfillmentLineSource} of a CATALOG component row — a row inside a
  * substituted subtree, or a component sent with an exchange's replacement.
  *
- * Every descriptive fact comes from `deriveLineCatalogFacts`, the one author an
+ * Every descriptive fact comes from `deriveLineCatalogShape`, the one author an
  * order line's facts come from too, so a component reads the same on an order
  * and on a fulfillment. Resolve the row BY PATH (`catalogComponentAt`), never
  * by first uid.
@@ -429,7 +429,7 @@ export function fulfillmentSourceOfComponent(
     readonly quantity?: number;
   },
 ): FulfillmentLineSource {
-  const facts = deriveLineCatalogFacts(row, zeroPricedForSlot(row));
+  const facts = deriveLineCatalogShape(row, zeroPricedForSlot(row));
   return {
     uid: row.uid,
     type: facts.type as FulfillmentLineItemType["type"],

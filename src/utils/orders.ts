@@ -26,7 +26,7 @@ import type {
   ConsolidatedItemType,
   GroupPathType,
   ItemTypeType,
-  PriceFormulaType,
+  PriceFormulaRef,
   PreTaxItemType,
   FromTotalItemType,
   RateType,
@@ -47,7 +47,8 @@ import {
 } from "../schemas/mod.ts";
 import { componentSignatureHash } from "./booking-id.ts";
 import { closestAncestor } from "./item-pairing.ts";
-import { applyDateEdit, canonicalChargeWindows, type ChargeDates, chargedDays, chargeWindowsOf, toChicagoYmd } from "./dates.ts";
+import { applyDateEdit, type ChargeDates, chargeWindowBusinessDays, chargeWindowsOf, toChicagoYmd } from "./dates.ts";
+import { priceFromFormula, type RateSnapshot, type TierCount } from "./price-formulas.ts";
 import {
   fromCents,
   roundDivHalfAwayFromZero,
@@ -182,7 +183,7 @@ export interface PreTaxLineItem extends LineItem {
  * A transaction fee line item.
  *
  * Carries the same `PriceObject` every other line carries — a fee is an
- * ordinary line whose `price.formula` is `percent_of_total`, not a second price
+ * ordinary line whose `price.base_percent` makes it percent-of-total, not a second price
  * shape. It differs from a `PreTaxLineItem` only in that it is priced FROM the
  * document total rather than into it, which is why it has its own predicate and
  * its own stage in `priceDocument`.
@@ -213,12 +214,18 @@ export type PriceableLineItem = PreTaxLineItem | TransactionFeeLineItem;
  * which is what `api-cloudrun`'s `buildLineItem` did, twice, on the money path.
  */
 export interface PricingPrice {
-  /** Integer cents. Meaningless (and asserted 0) on a `percent_of_total` line. */
-  base_cents?: number;
-  /** The `percent_of_total` percentage at 4dp — see {@link checkPriceBaseUnit}. */
+  /** The formula snapshot; `null` exactly on a percent-of-total fee line. */
+  price_formula?: { uid: string; basis?: string } | null;
+  /** The rates the line prices with, integer cents per counted period. */
+  rates?: readonly RateSnapshot[];
+  /**
+   * The line's exact tier counts (ruling 8) — metered by `priceDocument` from
+   * the line's windows through its formula, or stated. A line priced on its own
+   * must already carry them.
+   */
+  counts?: readonly TierCount[];
+  /** The percent-of-total percentage at 4dp — see {@link checkLinePrice}. */
   base_percent?: number | null;
-  formula?: PriceFormulaType;
-  chargeable_days?: number | null;
   /** `rate` is 4dp DOLLARS on the `flat` arm and a percentage on `percent`. */
   discount?: { rate: number; type: RateType } | null;
   taxes?: readonly { uid: string }[];
@@ -482,20 +489,19 @@ export function getDestinationsLegend(
 }
 
 /**
- * The days a pair's charge windows charge, counted against `holidays`: Σ each
- * window's business days. Returns `null` when the dates are incomplete or a
- * window cannot be counted.
- *
- * For a stored pair, read the stored counts with `chargedDays` instead.
+ * The business days a pair's charge windows span, counted against `holidays`:
+ * Σ each window's business days — a formula-free DISPLAY count. What a line
+ * bills is its own `price.counts`, metered through its formula. Returns `null`
+ * when the dates are incomplete or a window cannot be counted.
  */
 export function getDefaultChargeDays(
   dates: ChargeDates,
   holidays: string[],
 ): number | null {
   if (!dates?.delivery_start || !dates?.collection_start) return null;
+  const windows = chargeWindowsOf(dates) ?? [{ start: dates.delivery_start, end: dates.collection_start }];
   try {
-    const windows = canonicalChargeWindows(dates, holidays).charge_windows as unknown as { days: number }[] | undefined;
-    return windows ? chargedDays({ charge_windows: windows }) : null;
+    return chargeWindowBusinessDays(windows, holidays).reduce((sum, d) => sum + d, 0);
   } catch {
     return null;
   }
@@ -565,7 +571,7 @@ function pickEnvelopeBound(
  * boundaries take the latest; `days_active` takes the largest non-null value.
  *
  * There is no charge half (charge-windows step 5): a pair's charge is its
- * windows, read with `chargeEnvelope` / `chargedDays` from `utils/dates`.
+ * windows, read with `chargeEnvelope` from `utils/dates`.
  */
 export function deriveOrderDateEnvelope(
   destinations: ReadonlyArray<Pick<DocDestinationType, "dates">>,
@@ -854,137 +860,71 @@ const RATE_SCALE = 1_000_000n;
 // ── Item-level calculations ──────────────────────────────────────
 
 /**
- * Calculate the pre-discount and post-discount subtotals for a single line item.
- *
- * `subtotal = base × quantity × max(chargeable_days / 5, 1)` for `five_day_week`,
- * or `base × quantity` for `fixed`. The one-week floor means the day factor only
- * applies above 5 chargeable days.
+ * Calculate the pre-discount and post-discount subtotals for a single line item:
+ * `priceFromFormula(rates, counts, quantity, discount)` — Σ tier
+ * `rate × quantity × num ÷ den`, each tier rounded once, then the discount
+ * (purchases-as-documents Phase 2 ruling 8). Five-day week's one-week minimum
+ * and an extension's skipped minimum are already in the counts.
  */
 export function calculateItemSubtotal(
   item: PricingItem,
-  opts: LinePricingOptions = {},
 ): { subtotal_cents: number; subtotal_discounted_cents: number } {
   if (!isPreTaxPricingItem(item)) {
     throw new Error(
       "Item is not priceable: missing price object or is a destination/group/transaction_fee",
     );
   }
-  return perUnitSubtotal(item.price, item.quantity, opts);
+  return perUnitSubtotal(item.price, item.quantity);
 }
 
 /**
  * Pricing inputs that come from the DOCUMENT rather than the line.
  *
- * Only `priceDocument` (`@cfs/core/utils/price-document`) derives these. A
- * writer that prices a line on its own never passes them, which is the point:
- * the document decides, so no per-line caller can forget to (D1 of the
- * priceDocument campaign, api-cloudrun#997).
+ * Only `priceDocument` (`@cfs/core/utils/price-document`) and its credit and
+ * remainder siblings derive these.
  */
 export interface LinePricingOptions {
   /**
-   * The line sits in a date-EXTENSION section (#680): it bills the days an
-   * order's window grew past what an earlier invoice billed. The value is
-   * `max(order charge days, 5) − max(billed charge days, 5)`, and it may be
-   * zero or negative (a shortened window is a credit).
-   *
-   * Priced as `× days ÷ 5` with the one-week minimum SKIPPED — the minimum was
-   * already charged on the invoice being extended — so 2→4 days is 0, 3→7 is 2
-   * and 7→4 is −2. Only a `five_day_week` line can be extended.
+   * The line sits in a date-EXTENSION section (#680): its `counts` are the
+   * days an order's window grew past what an earlier invoice billed, stated
+   * with the minimum skipped, and may be zero or negative. Only a flat TAX
+   * reads this — a per-unit levy would be charged a second time — and is
+   * refused.
    */
-  extensionDays?: number;
+  extension?: boolean;
 }
 
 /**
  * The per-unit half of `calculateItemSubtotal`, split out so the fee path can
  * reach it without spoofing a discriminator. Takes the price and quantity
  * directly, because "which item type is this" is the caller's question.
+ *
+ * ⚠️ `Discount.rate` stays 4dp DOLLARS on the `flat` arm (dollars per unit per
+ * counted period) — Xero's `DiscountRate` holds 4dp and is a line's only
+ * discount channel, and quantizing it to the cent is the beta.117 regression.
+ * `priceFromFormula` converts it once, inside.
+ *
+ * @throws on a percent-of-total price (it prices from the DOCUMENT total), on a
+ *   line with no formula, rates or counts, and on a count whose rate key the
+ *   rates lack.
  */
 function perUnitSubtotal(
   price: PricingPrice,
   itemQuantity: number,
-  opts?: LinePricingOptions,
 ): { subtotal_cents: number; subtotal_discounted_cents: number } {
-  const { base_cents = 0, formula, chargeable_days = null, discount } = price;
-  if (formula === "percent_of_total") {
-    // Not a per-unit price: the rate lives in `base_percent` and is a
-    // percentage of the DOCUMENT's subtotal_discounted, which this function
-    // cannot see. Only a `transaction_fee` may be priced this way, and it is
-    // costed by `calculateTransactionFeeAmount` in the totals pass instead.
+  if (price.base_percent != null) {
+    // Not a per-unit price: the rate is a percentage of the DOCUMENT's
+    // subtotal_discounted, which this function cannot see. Only a
+    // `transaction_fee` may be priced this way, and it is costed by
+    // `calculateTransactionFeeAmountCents` in the totals pass instead.
     throw new Error(
-      "percent_of_total prices from the document total, not the line: use calculateTransactionFeeAmount",
+      "A percent-of-total price prices from the document total, not the line: use calculateTransactionFeeAmountCents",
     );
   }
-  if (formula !== "five_day_week" && formula !== "fixed") {
-    throw new Error("Unknown formula: " + formula);
+  if (price.price_formula == null || price.rates == null || price.counts == null) {
+    throw new Error("A line priced from itself carries price_formula, rates and counts");
   }
-
-  const quantity = BigInt(Math.round(itemQuantity * Number(QTY_SCALE)));
-  const extension = opts?.extensionDays;
-  if (extension !== undefined && formula !== "five_day_week") {
-    // A fixed-price line has no day count to extend, so an extension section
-    // holding one is a defect in the section, not a price to invent.
-    throw new Error(`An extension section can only price five_day_week lines, got formula "${formula}"`);
-  }
-  // `pricingFactor = Math.max(chargeable_days / 5, 1)` — so the day factor bites
-  // only above the one-week floor. At exactly 5 days it is 1, as is `fixed`.
-  // An extension skips that floor: its day count is signed and always applies.
-  const days = Math.round(extension ?? chargeable_days ?? 0);
-  const useDays = extension !== undefined || (formula === "five_day_week" && days > 5);
-
-  // `base_cents` is ALREADY an integer count of cents, so this is a widening
-  // and not a conversion — the `toCentsBig(base)` this replaced was the one
-  // dollars→cents step in the line path, and it is now the storage form.
-  let num = BigInt(base_cents) * quantity;
-  let den = QTY_SCALE;
-  if (useDays) {
-    num *= BigInt(days);
-    den *= 5n;
-  }
-  // `base_cents` is unconstrained in sign (a "Rounding Adjustment" or a found-item
-  // credit line is negative), so this must round symmetrically. `roundDivHalfUp`
-  // truncated a negative numerator toward zero and lost a cent even on an exact
-  // multiple (core#88).
-  const subtotalCents = roundDivHalfAwayFromZero(num, den);
-
-  if (!discount) {
-    return { subtotal_cents: Number(subtotalCents), subtotal_discounted_cents: Number(subtotalCents) };
-  }
-
-  let discountedCents: bigint;
-  if (discount.type === "percent") {
-    // subtotal × (100 − rate)/100, as subtotalCents × (100·RATE_SCALE − rate·RATE_SCALE) / (100·RATE_SCALE)
-    const rate = BigInt(Math.round(discount.rate * Number(RATE_SCALE)));
-    const scale = 100n * RATE_SCALE;
-    // `subtotalCents` carries the base's sign, so this numerator can be negative too.
-    discountedCents = roundDivHalfAwayFromZero(subtotalCents * (scale - rate), scale);
-  } else {
-    // `flat`: rate is DOLLARS per unit, per pricing factor — not a line total,
-    // and NOT cents.
-    //
-    // ⚠️ `toCentsBig` survives here on purpose, and it is the only surviving
-    // dollars→cents conversion in this function. `Discount.rate` keeps its
-    // dollar denomination through the cents migration because Xero's
-    // `DiscountRate` holds 4dp and is a line's only discount channel; storing
-    // it as an integer count of cents would quantize it, which is the
-    // beta.117 regression. So the money beside it is cents and this is
-    // dollars, deliberately — deleting this call to "finish the migration"
-    // divides every flat discount by 100.
-    let dNum = toCentsBig(discount.rate) * quantity;
-    let dDen = QTY_SCALE;
-    if (useDays) {
-      dNum *= BigInt(days);
-      dDen *= 5n;
-    }
-    // Subtraction is exact; a flat discount larger than the line goes negative,
-    // which is the caller's problem to surface, not ours to clamp. The rate is
-    // never negative, but a negative extension day count makes `dNum` so.
-    discountedCents = subtotalCents - roundDivHalfAwayFromZero(dNum, dDen);
-  }
-
-  return {
-    subtotal_cents: Number(subtotalCents),
-    subtotal_discounted_cents: Number(discountedCents),
-  };
+  return priceFromFormula(price.rates, price.counts, itemQuantity, price.discount ?? null);
 }
 
 /**
@@ -995,9 +935,9 @@ function perUnitSubtotal(
  * `subtotal_discounted` (pre-tax, post-discount — the same base the fee has
  * always been computed against).
  *
- * - `percent_of_total` → `basisCents × base_percent / 100`.
- * - anything else → the ordinary per-unit subtotal, `base_cents × quantity`, so
- *   a flat processing charge stays expressible without a second formula.
+ * - percent-of-total (`base_percent`) → `basisCents × base_percent / 100`.
+ * - anything else → the ordinary per-unit subtotal from the line's formula, so
+ *   a flat processing charge stays expressible on the Fixed formula.
  *
  * Exact: the percentage is applied as `× rate ÷ 100` over integer cents rather
  * than as a pre-divided float factor, and rounds half-up exactly once.
@@ -1017,10 +957,10 @@ export function calculateTransactionFeeAmountCents(item: PricingItem, basisCents
   if (!isTransactionFeePricingItem(item)) {
     throw new Error("Item is not a transaction fee: missing price object or wrong type");
   }
-  if (item.price.formula !== "percent_of_total") {
+  if (item.price.base_percent == null) {
     return perUnitSubtotal(item.price, item.quantity).subtotal_discounted_cents;
   }
-  // The percentage now lives in its own named field. Reading `base_cents` here
+  // The percentage lives in its own named field. Reading a rate here
   // is exactly the 100× D1 exists to prevent, and it no longer type-checks as
   // the same thing.
   //
@@ -1213,7 +1153,7 @@ export function calculateItemTax(
     );
   }
 
-  const { subtotal_discounted_cents } = calculateItemSubtotal(item, opts);
+  const { subtotal_discounted_cents } = calculateItemSubtotal(item);
   const quantity = item.quantity;
 
   return (item.price.taxes ?? []).map((itemTax) => {
@@ -1221,7 +1161,7 @@ export function calculateItemTax(
     if (!taxDoc) {
       throw new Error("Unknown tax uid: " + itemTax.uid);
     }
-    if (opts.extensionDays !== undefined && taxDoc.type === "flat") {
+    if (opts.extension && taxDoc.type === "flat") {
       // A flat tax is per UNIT, not per day, so an extension would charge it a
       // second time for units already levied. No catalog rental carries one;
       // refuse rather than pick an answer.
@@ -1259,7 +1199,7 @@ export function calculateItemPrice(
     );
   }
 
-  const { subtotal_cents, subtotal_discounted_cents } = calculateItemSubtotal(item, opts);
+  const { subtotal_cents, subtotal_discounted_cents } = calculateItemSubtotal(item);
   const itemTaxes = calculateItemTax(item, taxes, opts);
 
   // Integer addition over exact cent counts — currency.js has nothing left to
@@ -1298,8 +1238,8 @@ export function calculateItemPrice(
 //
 // The price object decomposes into THREE halves, not two:
 //
-//   declared   `base_cents`, `base_percent`, `chargeable_days`, `formula`,
-//              `replacement_cents` — the caller's input, a CRMS payload, Xero
+//   declared   `price_formula`, `rates`, `counts`, `base_percent`,
+//              `replacement_cents` — the caller's input and the metered counts
 //   computed   the five keys of {@link LinePriceMoney} — the pricer
 //   projected  `taxes_base` — the WRITER, from a source only it knows: the
 //              line's charged taxes for the two order writers, the PRODUCT's
@@ -1351,12 +1291,12 @@ export function isFromTotalItemType(type: string): boolean {
 /**
  * Price one `transaction_fee` line for storage.
  *
- * ## The stored amount is `base_cents × quantity`, and the basis is not read
+ * ## A flat fee is priced from its own formula, and the basis is not read
  *
- * A **flat** fee (`formula: "fixed"`) is priced entirely from its own fields, so
+ * A **flat** fee (on the Fixed formula) is priced entirely from its own fields, so
  * the document basis is irrelevant and is passed as `0`.
  * {@link calculateTransactionFeeAmountCents} falls through to the ordinary
- * per-unit subtotal for any formula that is not `percent_of_total`, honouring
+ * per-unit subtotal for any fee that is not percent-of-total, honouring
  * the discount — a flat fee is legitimate and `checkItemPriceFormula`
  * (`@cfs/core/schemas/common.ts`) deliberately does not assert the converse.
  *
@@ -1441,7 +1381,7 @@ export function priceTransactionFeeLine(item: PricingItem): LinePriceMoney {
   // applies. Storing `null` makes the line agree with the only function that
   // prices it; carrying it would make the document assert a charge it did not
   // make.
-  if (item.price.formula === "percent_of_total") {
+  if (item.price.base_percent != null) {
     return {
       subtotal_cents: 0,
       subtotal_discounted_cents: 0,
@@ -1542,11 +1482,6 @@ export function computeLineMoney(
  *   surely as a real amount. A stored `sale` line legitimately carries `0`, and
  *   the product cascade RE-TYPES such a line in place.
  * - `taxes: []` — the structural exemption above.
- * - `chargeable_days: null` — ⚠️ **this one is NOT derivable from
- *   `ITEM_CONTRACTS`**, unlike the other three. There is no such axis on
- *   `ItemContract`. It is asserted here as a new fact, on arithmetic
- *   inertness: a fee's `formula` is `fixed`, where `getDaysFactor` returns 1
- *   regardless, so a stored day count would be a number that explains nothing.
  * - `taxes_base: []` — only when the caller authors the key at all; see below.
  *
  * ## `taxesBase` is the PROJECTED half
@@ -1603,7 +1538,6 @@ export function assembleLinePrice<P extends object>(
 
   if (isFee) {
     out.taxes = [];
-    if ("chargeable_days" in out) out.chargeable_days = null;
     if ("replacement_cents" in out) out.replacement_cents = null;
   }
   if (opts?.taxesBase !== undefined) {
@@ -1627,8 +1561,8 @@ export type DeclaredPriceKey<T> = Exclude<keyof T, keyof LinePriceMoney | "taxes
  *
  * 🔴 **A hand-written declared literal drops every key it does not name, and
  * that is not hypothetical.** `buildLineItem` (api-cloudrun) named four keys and
- * not `base_percent`, so every `percent_of_total` fee line lost its rate after
- * the catalog had filled it and `checkPriceBaseUnit` refused the write
+ * not `base_percent`, so every percent-of-total fee line lost its rate after
+ * the catalog had filled it and the price-shape check refused the write
  * (api-cloudrun#984) — at least the fourth drop of that shape.
  *
  * The `Record` annotation makes this exhaustive in BOTH directions: a key added to the
@@ -1637,37 +1571,38 @@ export type DeclaredPriceKey<T> = Exclude<keyof T, keyof LinePriceMoney | "taxes
  * which the type cannot see.
  */
 export const ORDER_DECLARED_PRICE_KEYS: Record<DeclaredPriceKey<OrderDocItemPriceType>, true> = {
-  base_cents: true,
+  price_formula: true,
+  rates: true,
+  counts: true,
   base_percent: true,
   replacement_cents: true,
-  chargeable_days: true,
-  formula: true,
 };
 
 /** The declared half of a stored INVOICE line price — see {@link ORDER_DECLARED_PRICE_KEYS}. */
 export const INVOICE_DECLARED_PRICE_KEYS: Record<DeclaredPriceKey<InvoiceDocItemPriceType>, true> = {
-  base_cents: true,
+  price_formula: true,
+  rates: true,
+  counts: true,
   base_percent: true,
-  chargeable_days: true,
-  formula: true,
 };
 
 /** What a writer must have resolved before it can declare a price. */
 interface DeclaredPriceInput {
-  base_cents: number;
-  formula: PriceFormulaType;
+  price_formula: PriceFormulaRef | null;
+  rates: RateSnapshot[];
+  /** Absent on a line `priceDocument` has not metered yet: declared as `[]`. */
+  counts?: TierCount[];
   base_percent?: number | null;
   replacement_cents?: number | null;
-  chargeable_days?: number | null;
 }
 
 /** An order line's declared price half, every nullable key present. */
 export interface OrderDeclaredPrice {
-  base_cents: number;
+  price_formula: PriceFormulaRef | null;
+  rates: RateSnapshot[];
+  counts: TierCount[];
   base_percent: number | null;
   replacement_cents: number | null;
-  chargeable_days: number | null;
-  formula: PriceFormulaType;
 }
 
 /** An invoice line's declared price half, every nullable key present. */
@@ -1676,10 +1611,9 @@ export type InvoiceDeclaredPrice = Omit<OrderDeclaredPrice, "replacement_cents">
 function pickDeclared(keys: Record<string, true>, price: DeclaredPriceInput): Record<string, unknown> {
   const src = price as unknown as Record<string, unknown>;
   const out: Record<string, unknown> = {};
-  // `?? null` on every key: absent and `null` mean the same thing for each
-  // nullable declared key, and `base_cents` / `formula` are required by the
-  // input type, so it never fires on them.
-  for (const k of Object.keys(keys)) out[k] = src[k] ?? null;
+  // `?? null` on every nullable key: absent and `null` mean the same thing for
+  // each. `counts` is an array, so an unmetered line declares `[]`.
+  for (const k of Object.keys(keys)) out[k] = src[k] ?? (k === "counts" ? [] : null);
   return out;
 }
 
@@ -1689,7 +1623,7 @@ function pickDeclared(keys: Record<string, true>, price: DeclaredPriceInput): Re
  * `taxes`) are ignored — they are the pricer's, not the caller's.
  *
  * ⚠️ **Every order line therefore carries `base_percent`** — `null` on all but a
- * `percent_of_total` line. That matches what `buildOrderLineFromProduct` already
+ * percent-of-total fee line. That matches what `buildOrderLineFromProduct` already
  * stages, and `invoicePriceDifferences` drops null keys before comparing.
  */
 export function declaredOrderPrice(price: DeclaredPriceInput): OrderDeclaredPrice {
@@ -1820,7 +1754,7 @@ export function getTransactionFeeTotals(items: LineItem[]): PriceModifier[] {
     if (amountCents === 0) continue;
 
     if (!totals[item.name]) {
-      const isPercent = item.price.formula === "percent_of_total";
+      const isPercent = item.price.base_percent != null;
       totals[item.name] = {
         uid: item.uid,
         // `PriceModifier.rate` is DOLLARS on the flat arm and a PERCENTAGE on
@@ -1828,7 +1762,8 @@ export function getTransactionFeeTotals(items: LineItem[]): PriceModifier[] {
         // — so the two arms read different source fields. This single line is
         // what `price.base`'s two units used to hide: it read one field and
         // relabelled it `rate` regardless of which unit was in it.
-        rate: isPercent ? (item.price.base_percent ?? 0) : fromCents(item.price.base_cents),
+        // A flat fee is on the Fixed formula: its one rate is the flat amount.
+        rate: isPercent ? (item.price.base_percent ?? 0) : fromCents(item.price.rates[0]?.amount_cents ?? 0),
         type: isPercent ? "percent" : "flat",
         amount_cents: 0,
       };

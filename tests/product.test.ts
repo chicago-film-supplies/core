@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import { datedPrice, FIVE_DAY_WEEK, FIXED } from "./helpers/formulas.ts";
 import { AuthoredComponentSchema, ComponentSchema, CreateProductInput, deriveProductImageUuids, ProductSchema, roundComponentQuantity, UpdateProductInput } from "../src/schemas/product.ts";
 import { getInitialValues } from "../src/schemas/initial.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
@@ -15,7 +16,7 @@ const validProduct = {
   name: "Canon C300",
   active: true,
   crms_id: 100,
-  price: { ...base.price, base_cents: 50000, replacement_cents: 500000, discountable: true },
+  price: { ...base.price, ...datedPrice(FIVE_DAY_WEEK, 50000), replacement_cents: 500000, discountable: true },
   tags: [{ uid: "testt100000000000000", name: "Camera" }],
   webshop: { available: true },
   created_by: actor,
@@ -91,9 +92,8 @@ Deno.test("ProductSchema validates with components", () => {
         crms_id: 200,
         quantity: 2,
         price: {
-          base_cents: 0,
+          ...datedPrice(FIXED, 0),
           replacement_cents: 10000,
-          formula: "fixed",
           discountable: false,
         },
       },
@@ -126,7 +126,7 @@ const validReplacement = {
   ...validProduct,
   type: "replacement",
   stock_method: "none",
-  price: { ...(validProduct.price as Record<string, unknown>), formula: "fixed", replacement_cents: null },
+  price: { ...(validProduct.price as Record<string, unknown>), ...datedPrice(FIXED, 0), replacement_cents: null },
   webshop: { available: false },
 };
 
@@ -163,7 +163,7 @@ Deno.test("ProductSchema rejects rental component without price.replacement_cent
         stock_method: "bulk",
         crms_id: 200,
         quantity: 2,
-        price: { base_cents: 0, formula: "fixed", discountable: false },
+        price: { ...datedPrice(FIXED, 0), discountable: false },
       },
     ],
   };
@@ -185,7 +185,7 @@ Deno.test("ProductSchema accepts rental component with stock_method none and no 
         stock_method: "none",
         crms_id: 200,
         quantity: 1,
-        price: { base_cents: 0, formula: "fixed", discountable: false },
+        price: { ...datedPrice(FIXED, 0), discountable: false },
       },
     ],
   };
@@ -246,13 +246,12 @@ const validCreateInput = {
   eligible_shipping_ground: false,
   eligible_shipping_air: false,
   price: {
-    base_cents: 50000,
+    ...datedPrice(FIVE_DAY_WEEK, 50000),
     replacement_cents: 500000,
     // Required on the create input as of Wave 5b — `4000` is what rentals
     // actually carry in prod. Stated in the shared fixture so the negative
     // cases below still fail for the reason each one names.
     coa_revenue: 4000 as const,
-    formula: "five_day_week" as const,
     discountable: true,
   },
   webshop: { available: false },
@@ -267,7 +266,7 @@ Deno.test("CreateProductInput requires price.replacement_cents for rental produc
 });
 
 Deno.test("CreateProductInput refuses a counted replacement (manager#685)", () => {
-  const input = { ...validCreateInput, type: "replacement", price: { ...validCreateInput.price, formula: "fixed", replacement_cents: null } };
+  const input = { ...validCreateInput, type: "replacement", price: { ...validCreateInput.price, ...datedPrice(FIXED, 0), replacement_cents: null } };
   assertEquals(CreateProductInput.safeParse({ ...input, stock_method: "none" }).success, true);
   for (const stock_method of ["bulk", "serialized"] as const) {
     const result = CreateProductInput.safeParse({ ...input, stock_method });
@@ -327,8 +326,7 @@ Deno.test("CreateProductInput requires price.replacement_cents for rental compon
     crms_id: 200,
     quantity: 2,
     price: {
-      base_cents: 0,
-      formula: "fixed" as const,
+      ...datedPrice(FIXED, 0),
       discountable: false,
     },
   };
@@ -525,7 +523,7 @@ Deno.test("price.coa_revenue is REQUIRED on the document and on BOTH inputs", ()
     stock_method: "bulk",
     crms_id: 200,
     quantity: 2,
-    price: { base_cents: 0, replacement_cents: 10000, formula: "fixed", discountable: false },
+    price: { ...datedPrice(FIXED, 0), replacement_cents: 10000, discountable: false },
   };
   assertEquals(ComponentSchema.safeParse(component).success, true);
 });
@@ -561,7 +559,7 @@ Deno.test("components require inclusion_type, price_overridden and zero_priced; 
     stock_method: "bulk",
     crms_id: 200,
     quantity: 2,
-    price: { base_cents: 0, replacement_cents: 10000, formula: "fixed", discountable: false },
+    price: { ...datedPrice(FIXED, 0), replacement_cents: 10000, discountable: false },
   };
 
   assertEquals(ComponentSchema.safeParse(backRef).success, true);
@@ -616,7 +614,7 @@ const componentBaseForEcho = {
   stock_method: "bulk",
   crms_id: 300,
   quantity: 1,
-  price: { base_cents: 2500, replacement_cents: 10000, formula: "fixed", discountable: false },
+  price: { ...datedPrice(FIXED, 2500), replacement_cents: 10000, discountable: false },
 };
 
 const storedComponent = {
@@ -629,8 +627,8 @@ const storedComponent = {
   quantity: 2,
   inclusion_type: "default",
   zero_priced: false,
-  price_overridden: ["base_cents"],
-  price: { base_cents: 1500, replacement_cents: 10000, formula: "fixed", discountable: false },
+  price_overridden: ["rates"],
+  price: { ...datedPrice(FIXED, 1500), replacement_cents: 10000, discountable: false },
 };
 
 Deno.test("an echoed stored product's components parse through both inputs, price_overridden stripped (api-cloudrun#879)", () => {
@@ -652,7 +650,7 @@ Deno.test("an echoed stored product's components parse through both inputs, pric
   // Everything the client DID author survives the strip.
   assertEquals(entry.inclusion_type, "default");
   assertEquals(entry.zero_priced, false);
-  assertEquals((entry.price as Record<string, unknown>).base_cents, 1500);
+  assertEquals((entry.price as { rates: { amount_cents: number }[] }).rates[0].amount_cents, 1500);
 
   const create = CreateProductInput.safeParse({ ...validCreateInput, components: [storedComponent] });
   assertEquals(create.success, true, JSON.stringify(create.error?.issues));
@@ -679,7 +677,7 @@ Deno.test("the stripping input component node keeps both object-level refinement
   // checkZeroPricedAmount: a zero-priced entry carrying a price still fails.
   const zeroPriced = parse({ ...storedComponent, zero_priced: true });
   assertEquals(zeroPriced.success, false);
-  assertEquals(parse({ ...storedComponent, zero_priced: true, price: { ...storedComponent.price, base_cents: 0 } }).success, true);
+  assertEquals(parse({ ...storedComponent, zero_priced: true, price: { ...storedComponent.price, rates: storedComponent.price.rates.map((r) => ({ ...r, amount_cents: 0 })) } }).success, true);
 
   // checkItemContract: a rental with no replacement price still fails.
   const { replacement_cents: _r, ...noReplacement } = storedComponent.price;
@@ -713,7 +711,7 @@ Deno.test("an authored component quantity is ≥ 0 with at most 4 decimals; the 
     inclusion_type: "default",
     zero_priced: false,
     price_overridden: [],
-    price: { base_cents: 0, replacement_cents: 10000, formula: "fixed", discountable: false },
+    price: { ...datedPrice(FIXED, 0), replacement_cents: 10000, discountable: false },
   };
   const parses = (quantity: number) => AuthoredComponentSchema.safeParse({ ...authored, quantity }).success;
 
@@ -759,25 +757,27 @@ const componentBase = {
   stock_method: "bulk",
   crms_id: 200,
   quantity: 2,
-  price: { base_cents: 0, replacement_cents: 10000, formula: "fixed", discountable: false },
+  price: { ...datedPrice(FIXED, 0), replacement_cents: 10000, discountable: false },
 };
 
-Deno.test("a component may be priced five_day_week or fixed", () => {
-  for (const formula of ["five_day_week", "fixed"]) {
-    const component = { ...componentBase, price: { ...componentBase.price, formula } };
-    assertEquals(ComponentSchema.safeParse(component).success, true, formula);
+Deno.test("a component may be priced on any formula, with at least one rate", () => {
+  for (const formula of [FIVE_DAY_WEEK, FIXED]) {
+    const component = { ...componentBase, price: { ...componentBase.price, ...datedPrice(formula, 2500) } };
+    assertEquals(ComponentSchema.safeParse(component).success, true, formula.name);
     assertEquals(
       AuthoredComponentSchema.safeParse({ ...component, inclusion_type: "default", price_overridden: [], zero_priced: false }).success,
       true,
-      formula,
+      formula.name,
     );
   }
+  // A component is never a percent fee, so it always carries a rate.
+  assertEquals(ComponentSchema.safeParse({ ...componentBase, price: { ...componentBase.price, rates: [] } }).success, false);
 });
 
 Deno.test("a component may NOT be priced percent_of_total — on either side", () => {
   // Both sides, because `AuthoredComponentSchema` extends `ComponentSchema` and
   // an extension is exactly where a narrowing can be widened back by accident.
-  const component = { ...componentBase, price: { ...componentBase.price, formula: "percent_of_total" } };
+  const component = { ...componentBase, price: { ...componentBase.price, uid_price_formula: null, rates: [] } };
   assertEquals(ComponentSchema.safeParse(component).success, false);
   assertEquals(
     AuthoredComponentSchema.safeParse({ ...component, inclusion_type: "default", price_overridden: [], zero_priced: false }).success,
@@ -794,7 +794,7 @@ Deno.test("a component priced percent_of_total is rejected even WITH a base_perc
   // because `ComponentTypeEnum` excludes `transaction_fee`.
   const component = {
     ...componentBase,
-    price: { ...componentBase.price, formula: "percent_of_total", base_percent: 4 },
+    price: { ...componentBase.price, uid_price_formula: null, rates: [], base_percent: 4 },
   };
   assertEquals(ComponentSchema.safeParse(component).success, false);
 });
@@ -806,7 +806,7 @@ Deno.test("the PRODUCT price keeps all three formulas — the narrowing is not o
   const feeProduct = {
     ...validProduct,
     type: "transaction_fee",
-    price: { ...validProduct.price, base_cents: 0, base_percent: 4, formula: "percent_of_total" },
+    price: { ...validProduct.price, uid_price_formula: null, rates: [], base_percent: 4 },
   };
   assertEquals(ProductSchema.safeParse(feeProduct).success, true);
 });
@@ -826,7 +826,7 @@ Deno.test("a component may NOT carry a base_percent beside a two-member formula"
   // hole. This one pins the hole.
   const component = {
     ...componentBase,
-    price: { ...componentBase.price, base_cents: 5000, formula: "fixed", base_percent: 4 },
+    price: { ...componentBase.price, ...datedPrice(FIXED, 5000), base_percent: 4 },
   };
   assertEquals(ComponentSchema.safeParse(component).success, false);
   assertEquals(
@@ -844,7 +844,7 @@ Deno.test("a component with a NULL base_percent still parses — the copy path",
   // product create. Measured: all `base_percent` in both environments are null.
   const component = {
     ...componentBase,
-    price: { ...componentBase.price, base_cents: 5000, formula: "fixed", base_percent: null },
+    price: { ...componentBase.price, ...datedPrice(FIXED, 5000), base_percent: null },
   };
   assertEquals(ComponentSchema.safeParse(component).success, true);
 });
@@ -941,12 +941,12 @@ Deno.test("core#78: a component price cannot declare percent_of_total, nor a bas
     stock_method: "bulk",
     crms_id: 200,
     quantity: 2,
-    price: { base_cents: 0, replacement_cents: 10000, formula: "fixed", discountable: false },
+    price: { ...datedPrice(FIXED, 0), replacement_cents: 10000, discountable: false },
   };
   // The control: the same component parses, so each refusal below is the price's alone.
   assertEquals(ComponentSchema.safeParse(component).success, true);
   // The half that matters — a percent with no rate — is unrepresentable.
-  const percent = { ...component, price: { ...component.price, formula: "percent_of_total", base_percent: null } };
+  const percent = { ...component, price: { ...component.price, uid_price_formula: null, rates: [], base_percent: null } };
   assertEquals(ComponentSchema.safeParse(percent).success, false);
   // And the mirror half: a rate beside a formula that never reads one.
   const stray = { ...component, price: { ...component.price, base_percent: 3 } };

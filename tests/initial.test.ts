@@ -196,8 +196,9 @@ Deno.test("getInitialValues — product price has correct structure", () => {
   // No cast: the return is typed now, so `price` is `ProductPrice | undefined`
   // and `?.` is the honest read — the partial genuinely may not carry it.
   const price = getInitialValues(ProductSchema).price;
-  assertEquals(price?.base_cents, 0);
-  assertEquals(price?.formula, "five_day_week");
+  // A formula is a document now: the seed names none and states no rates (D4).
+  assertEquals(price?.uid_price_formula, null);
+  assertEquals(price?.rates, []);
   assertEquals("taxes" in (price ?? {}), false);
   assertEquals(price?.discountable, true);
   // COA revenue codes are numeric — JS sorts object keys numerically, so first is 2210

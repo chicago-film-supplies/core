@@ -115,3 +115,51 @@ export function formulaMoneyMismatch(
   }
   return expected === amountCents ? null : expected;
 }
+
+/** The line surface {@link checkFormulaLineMoney} reads. */
+export interface FormulaPricedLineLike {
+  quantity?: number;
+  price?: {
+    price_formula?: unknown;
+    rates?: readonly RateSnapshot[];
+    counts?: readonly TierCountLike[];
+    discount?: FormulaDiscount | null;
+    subtotal_cents?: number;
+    subtotal_discounted_cents?: number;
+  } | null;
+}
+
+/**
+ * **A formula-priced line's money is what its own snapshot reproduces** — the
+ * single-document refine ruling 8 puts on every customer line (order, invoice,
+ * credit note). `rates`, `counts`, `quantity` and `discount` → both subtotals,
+ * to the cent. A percent-of-total fee (no `price_formula`) is priced from the
+ * document and is not checked here.
+ *
+ * Structural rather than a schema refine body so each grain attaches it to its
+ * own line arm.
+ */
+export function checkFormulaLineMoney(
+  item: FormulaPricedLineLike,
+  ctx: { addIssue: (issue: { code: "custom"; path: (string | number)[]; message: string }) => void },
+): void {
+  const price = item.price;
+  if (price == null || price.price_formula == null || price.rates == null || price.counts == null) return;
+  if (typeof item.quantity !== "number") return;
+  let expected: { subtotal_cents: number; subtotal_discounted_cents: number };
+  try {
+    expected = priceFromFormula(price.rates, price.counts, item.quantity, price.discount ?? null);
+  } catch (e) {
+    ctx.addIssue({ code: "custom", path: ["price", "counts"], message: (e as Error).message });
+    return;
+  }
+  for (const key of ["subtotal_cents", "subtotal_discounted_cents"] as const) {
+    if (price[key] !== undefined && price[key] !== expected[key]) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["price", key],
+        message: `price.${key} ${price[key]} must equal what the line's rates × counts reproduce: ${expected[key]}`,
+      });
+    }
+  }
+}

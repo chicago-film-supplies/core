@@ -3,9 +3,8 @@
  */
 import { z } from "zod";
 import { FirestoreId } from "./_uid.ts";
+import { checkDatedRates, type DatedRate, DatedRateSchema } from "./price-formula.ts";
 import {
-  ComponentPriceFormulaEnum,
-  type ComponentPriceFormulaType,
   ComponentTypeEnum,
   type ComponentTypeType,
   type FirestoreTimestampType,
@@ -33,13 +32,28 @@ export interface WebshopProductComponent {
   zero_priced?: boolean;
   /** @see `ProductComponent.uid_tax_class` — mirrored from the component product. */
   uid_tax_class?: string;
-  price: {
-    base_cents: number;
-    replacement_cents?: number | null;
-    formula: ComponentPriceFormulaType;
-    discountable: boolean;
-  };
+  price: WebshopPrice;
 }
+
+/**
+ * A webshop price: the product's formula and its dated rates (purchases-as-documents
+ * D4), mirrored. A webshop document mirrors a product whose type is confined to
+ * `WEBSHOP_PRODUCT_TYPES`, which excludes `transaction_fee`, so it never carries a
+ * percent-of-total price: it always names a formula and at least one rate.
+ */
+export interface WebshopPrice {
+  uid_price_formula: string;
+  rates: DatedRate[];
+  replacement_cents?: number | null;
+  discountable: boolean;
+}
+
+const WebshopPriceSchema: z.ZodType<WebshopPrice> = z.strictObject({
+  uid_price_formula: FirestoreId,
+  rates: z.array(DatedRateSchema).min(1).superRefine(checkDatedRates),
+  replacement_cents: z.int().nullable().optional(),
+  discountable: z.boolean(),
+});
 
 /** Shipping dimensions and hazard classification for a webshop product. */
 export interface WebshopProductShipping {
@@ -113,12 +127,7 @@ export interface WebshopProduct {
   eligible_in_store_pickup: boolean;
   eligible_shipping_ground: boolean;
   eligible_shipping_air: boolean;
-  price: {
-    base_cents: number;
-    replacement_cents?: number | null;
-    formula: ComponentPriceFormulaType;
-    discountable: boolean;
-  };
+  price: WebshopPrice;
   shipping?: WebshopProductShipping;
   alternates: UidNameRefType[];
   components: WebshopProductComponent[];
@@ -152,30 +161,7 @@ const WebshopComponentSchema: z.ZodType<WebshopProductComponent> = z.strictObjec
   quantity: z.number(),
   zero_priced: z.boolean().optional(),
   uid_tax_class: FirestoreId.optional(),
-  /**
-   * ⚠️ **Narrower than `Product.price` — `ComponentPriceFormulaType`, not
-   * `PriceFormulaType`** (core#89). Two independent reasons, and the second is
-   * the stronger one:
-   *
-   * 1. A webshop document mirrors a product whose type is confined to
-   *    `WEBSHOP_PRODUCT_TYPES`, which excludes `transaction_fee` — the only
-   *    type that legitimately prices from a document total.
-   * 2. 🔴 **Neither webshop price arm declares `base_percent` at all**, so
-   *    `percent_of_total` here would name a formula whose rate the document is
-   *    structurally incapable of carrying. The member is not merely
-   *    unreachable, it is uninhabitable.
-   *
-   * ⭐ Narrowing rather than adding `checkPriceBaseUnit`: on a price object with
-   * no `base_percent` key that refinement could only ever fire its
-   * *"percent_of_total requires base_percent"* arm — a formula ban wearing a
-   * refinement's clothes. The type says it once, where a consumer can read it.
-   */
-  price: z.strictObject({
-    base_cents: z.int(),
-    replacement_cents: z.int().nullable().optional(),
-    formula: ComponentPriceFormulaEnum,
-    discountable: z.boolean(),
-  }),
+  price: WebshopPriceSchema,
 });
 
 /** Zod schema for a WebshopProduct document. */
@@ -192,30 +178,7 @@ export const WebshopProductSchema: z.ZodType<WebshopProduct> = z.strictObject({
   eligible_in_store_pickup: z.boolean(),
   eligible_shipping_ground: z.boolean(),
   eligible_shipping_air: z.boolean(),
-  /**
-   * ⚠️ **Narrower than `Product.price` — `ComponentPriceFormulaType`, not
-   * `PriceFormulaType`** (core#89). Two independent reasons, and the second is
-   * the stronger one:
-   *
-   * 1. A webshop document mirrors a product whose type is confined to
-   *    `WEBSHOP_PRODUCT_TYPES`, which excludes `transaction_fee` — the only
-   *    type that legitimately prices from a document total.
-   * 2. 🔴 **Neither webshop price arm declares `base_percent` at all**, so
-   *    `percent_of_total` here would name a formula whose rate the document is
-   *    structurally incapable of carrying. The member is not merely
-   *    unreachable, it is uninhabitable.
-   *
-   * ⭐ Narrowing rather than adding `checkPriceBaseUnit`: on a price object with
-   * no `base_percent` key that refinement could only ever fire its
-   * *"percent_of_total requires base_percent"* arm — a formula ban wearing a
-   * refinement's clothes. The type says it once, where a consumer can read it.
-   */
-  price: z.strictObject({
-    base_cents: z.int(),
-    replacement_cents: z.int().nullable().optional(),
-    formula: ComponentPriceFormulaEnum,
-    discountable: z.boolean(),
-  }),
+  price: WebshopPriceSchema,
   shipping: z.strictObject({
     weight: z.number().nullable().optional(),
     height: z.number().nullable().optional(),

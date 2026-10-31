@@ -13,6 +13,10 @@ import {
 } from "../src/utils/order-lines.ts";
 import { OrderDocLineItem } from "../src/schemas/mod.ts";
 import type { ProductDocument, ProductDocumentComponent } from "../src/schemas/typesense/mod.ts";
+import { catalogPrice, FDW_REF, FIVE_DAY_WEEK, FIXED, FIXED_REF, FORMULAS } from "./helpers/formulas.ts";
+
+/** A line's (or fact's) first rate — what `base_cents` was. */
+const base = (price: { rates: readonly { amount_cents: number }[] }): number => price.rates[0]?.amount_cents ?? 0;
 
 // ── fixtures ────────────────────────────────────────────────────────
 //
@@ -34,7 +38,7 @@ function comp(
     stock_method: "bulk",
     inclusion_type: "default",
     zero_priced: false,
-    price: { base_cents: 1000, formula: "five_day_week" },
+    price: { ...catalogPrice(FIVE_DAY_WEEK, 1000) },
     ...over,
   };
 }
@@ -49,7 +53,7 @@ function product(over: Partial<ProductDocument> = {}): ProductDocument {
     active: true,
     component_only: false,
     updated_at: 0,
-    price: { base_cents: 10000, replacement_cents: 50000, formula: "five_day_week" },
+    price: { ...catalogPrice(FIVE_DAY_WEEK, 10000), replacement_cents: 50000 },
     ...over,
   };
 }
@@ -58,7 +62,7 @@ function product(over: Partial<ProductDocument> = {}): ProductDocument {
 // schema passes `FirestoreId`. Keyed by type so a test can see which it took.
 const DEFAULT_CLASS = "TaxC1assDefau1tAAAAA";
 const taxClassForType = (type: string) => (type === "sale" ? "TaxC1assSa1eAAAAAAAA" : DEFAULT_CLASS);
-const OPTS = { quantity: 1, chargeDays: 5, taxClassForType };
+const OPTS = { quantity: 1, formulas: FORMULAS, asOf: null, taxClassForType };
 
 /** The pre-refactor path expression: the catalog chain, concatenated verbatim. */
 function catalogConcatPath(
@@ -78,7 +82,7 @@ const REAL_ORDER_UID = "Ord3rAAAAAAAAAAAAAAA";
 
 Deno.test("buildOrderLineFromProduct emits a schema-valid line, ancestry-only path", () => {
   const line = buildOrderLineFromProduct(
-    product({ uid: REAL_PRODUCT_UID, price: { base_cents: 10000, replacement_cents: 50000, formula: "five_day_week" } }),
+    product({ uid: REAL_PRODUCT_UID, price: { ...catalogPrice(FIVE_DAY_WEEK, 10000), replacement_cents: 50000 } }),
     { ...OPTS, quantity: 3, uidOrder: REAL_ORDER_UID },
   );
 
@@ -93,9 +97,11 @@ Deno.test("buildOrderLineFromProduct emits a schema-valid line, ancestry-only pa
   assertEquals(line.path, []);
   assertEquals(line.inclusion_type, null);
   assertEquals(line.zero_priced, null);
-  assertEquals(line.price.base_cents, 10000);
+  assertEquals(base(line.price), 10000);
   assertEquals(line.price.replacement_cents, 50000);
-  assertEquals(line.price.chargeable_days, 5);
+  assertEquals(line.price.price_formula, FDW_REF);
+  // No counts until the document is priced: `priceDocument` meters them (ruling 8).
+  assertEquals(line.price.counts, []);
   // Money fields are zero and taxes empty until the document is priced — the
   // documented contract of this module (api-cloudrun#993).
   assertEquals(line.price.subtotal_cents, 0);
@@ -122,11 +128,11 @@ Deno.test("buildOrderLineFromProduct carries inheritedAncestry and reads its own
   assertEquals(line.path, ["parentKit"]);
   assertEquals(line.type, "sale");
   assertEquals(line.stock_method, "none");
-  // A sale line takes no chargeable_days — only a rental does.
-  assertEquals(line.price.chargeable_days, null);
+  // The line takes the catalog's formula and rates; counts are the pricer's.
+  assertEquals(line.price.counts, []);
 });
 
-Deno.test("buildOrderLineFromProduct carries a percent_of_total product's rate and zeroes base_cents", () => {
+Deno.test("buildOrderLineFromProduct carries a percent-of-total product's rate and no formula or rates", () => {
   // The prod Card Fee shape. Before `base_percent` was copied, this line staged
   // as a percent fee with no rate and priced at $0.
   const line = buildOrderLineFromProduct(
@@ -134,28 +140,29 @@ Deno.test("buildOrderLineFromProduct carries a percent_of_total product's rate a
       uid: REAL_PRODUCT_UID,
       type: "transaction_fee",
       stock_method: "none",
-      price: { base_cents: 0, base_percent: 4, formula: "percent_of_total" },
+      price: { uid_price_formula: null, rates: [], base_percent: 4 },
     }),
     { ...OPTS, uidOrder: REAL_ORDER_UID },
   );
-  assertEquals(line.price.formula, "percent_of_total");
+  assertEquals(line.price.price_formula, null);
   assertEquals(line.price.base_percent, 4);
-  assertEquals(line.price.base_cents, 0);
-  assertEquals(line.price.chargeable_days, null);
+  assertEquals(line.price.rates, []);
+  assertEquals(line.price.counts, []);
 
-  // A stray base_cents on the catalog doc cannot break the biconditional.
+  // Stray rates beside a null formula cannot break the biconditional.
   const stray = buildOrderLineFromProduct(
-    product({ type: "transaction_fee", price: { base_cents: 500, base_percent: 4, formula: "percent_of_total" } }),
+    product({ type: "transaction_fee", price: { uid_price_formula: null, rates: [{ rate_key: "flat", amount_cents: 500 }], base_percent: 4 } }),
     OPTS,
   );
-  assertEquals(stray.price.base_cents, 0);
+  assertEquals(stray.price.rates, []);
+  assertEquals(stray.price.price_formula, null);
   assertEquals(stray.price.base_percent, 4);
 });
 
 Deno.test("buildOrderLineFromProduct states base_percent: null on a non-percent price", () => {
   const line = buildOrderLineFromProduct(product(), OPTS);
   assertEquals(line.price.base_percent, null);
-  assertEquals(line.price.base_cents, 10000);
+  assertEquals(base(line.price), 10000);
 });
 
 // ── buildOrderComponentLines: the path seam ─────────────────────────
@@ -297,7 +304,7 @@ Deno.test("a freshly expanded line reads as NOT hand-edited: componentQuantityAt
 
 Deno.test("a top-level and a custom line state quantity_per_parent: null — they fill no slot", () => {
   assertEquals(buildOrderLineFromProduct(product(), OPTS).quantity_per_parent, null);
-  const custom = buildCustomOrderLine({ type: "sale", chargeDays: null, taxes: [], uid_tax_class: "AbCdEfGhIjKlMnOpQrSt" });
+  const custom = buildCustomOrderLine({ type: "sale", formula: FIXED, taxes: [], uid_tax_class: "AbCdEfGhIjKlMnOpQrSt" });
   assertEquals(custom.quantity_per_parent, null);
   assert(OrderDocLineItem.safeParse(custom).success);
 });
@@ -362,9 +369,9 @@ Deno.test("zero-priced components precede priced ones within a parent block", ()
 
 Deno.test("a zero-priced component prices at 0 regardless of its catalog base", () => {
   const doc = product({
-    components: [comp("F", ["A"], { zero_priced: true, price: { base_cents: 9900 } })],
+    components: [comp("F", ["A"], { zero_priced: true, price: { ...catalogPrice(FIVE_DAY_WEEK, 9900) } })],
   });
-  assertEquals(buildOrderComponentLines(doc, OPTS)[0].price.base_cents, 0);
+  assertEquals(base(buildOrderComponentLines(doc, OPTS)[0].price), 0);
 });
 
 // ── uid_tax_class: the class travels with the hit (api-cloudrun#993) ──
@@ -430,9 +437,9 @@ Deno.test("emitted items share no mutable references", () => {
   // guarantee.
   const doc = product({ components: [comp("B", ["A"]), comp("C", ["A"])] });
   const [first, second] = buildOrderComponentLines(doc, OPTS);
-  first.price.base_cents = 12345;
+  first.price.rates[0].amount_cents = 12345;
   first.path.push("mutated");
-  assert(second.price.base_cents !== 12345);
+  assert(base(second.price) !== 12345);
   assert(!second.path.includes("mutated"));
 });
 
@@ -478,49 +485,64 @@ Deno.test("a component whose catalog row states no zero_priced builds as false, 
   const { zero_priced: _omit, ...unstated } = comp("U", ["A"]);
   const [line] = buildOrderComponentLines(product({ components: [unstated] }), OPTS);
   assertEquals(line.zero_priced, false);
-  assertEquals(line.price.base_cents, 1000);
+  assertEquals(base(line.price), 1000);
 });
 
 Deno.test("deriveLineCatalogFacts: the price follows the flag it is given", () => {
-  const p = { type: "rental", stock_method: "bulk", price: { base_cents: 2500, replacement_cents: 9000, formula: "five_day_week" } };
-  assertEquals(deriveLineCatalogFacts(p, true).price.base_cents, 0);
-  assertEquals(deriveLineCatalogFacts(p, false).price.base_cents, 2500);
-  assertEquals(deriveLineCatalogFacts(p, null).price.base_cents, 2500);
-  assertEquals(deriveLineCatalogFacts(p, true).zero_priced, true);
-  assertEquals(deriveLineCatalogFacts(p, true).price.replacement_cents, 9000);
+  const p = { type: "rental", stock_method: "bulk", price: { ...catalogPrice(FIVE_DAY_WEEK, 2500), replacement_cents: 9000 } };
+  assertEquals(base(deriveLineCatalogFacts(p, true, OPTS).price), 0);
+  assertEquals(base(deriveLineCatalogFacts(p, false, OPTS).price), 2500);
+  assertEquals(base(deriveLineCatalogFacts(p, null, OPTS).price), 2500);
+  assertEquals(deriveLineCatalogFacts(p, true, OPTS).zero_priced, true);
+  assertEquals(deriveLineCatalogFacts(p, true, OPTS).price.replacement_cents, 9000);
 });
 
-Deno.test("deriveLineCatalogFacts: the CATALOG formula wins over the type default", () => {
-  // Prod's two Combo Hangers rentals are deliberately `fixed`; a type-derived
+Deno.test("deriveLineCatalogFacts: the CATALOG formula is the line's, never the type's", () => {
+  // Prod's two Combo Hangers rentals are deliberately on Fixed; a type-derived
   // formula bills them per day (api-cloudrun#1286).
-  const hangers = { type: "rental", stock_method: "bulk", price: { base_cents: 3000, formula: "fixed" } };
-  assertEquals(deriveLineCatalogFacts(hangers, null).price.formula, "fixed");
-  // Only a catalog that states nothing takes the type's default.
-  assertEquals(deriveLineCatalogFacts({ type: "rental", price: {} }, null).price.formula, "five_day_week");
-  assertEquals(deriveLineCatalogFacts({ type: "sale", price: {} }, null).price.formula, "fixed");
-  assertEquals(deriveLineCatalogFacts({ type: "sale" }, null).price.formula, "fixed");
+  const hangers = { type: "rental", stock_method: "bulk", price: { ...catalogPrice(FIXED, 3000) } };
+  assertEquals(deriveLineCatalogFacts(hangers, null, OPTS).price.price_formula, FIXED_REF);
+  // There is no type default to fall back on: a catalog naming no formula, or
+  // one the context has not loaded, is refused.
+  assertThrows(() => deriveLineCatalogFacts({ type: "rental", price: {} }, null, OPTS), Error, "names no formula");
+  assertThrows(
+    () => deriveLineCatalogFacts({ type: "rental", price: { uid_price_formula: "NotLoadedFormu1aAAAA" } }, null, OPTS),
+    Error,
+    "not loaded",
+  );
 });
 
-Deno.test("deriveLineCatalogFacts: percent_of_total states base 0 and the rate; others state base_percent null", () => {
-  const fee = { type: "transaction_fee", stock_method: "none", price: { base_cents: 999, base_percent: 3, formula: "percent_of_total" } };
-  assertEquals(deriveLineCatalogFacts(fee, null).price, { base_cents: 0, base_percent: 3, replacement_cents: null, formula: "percent_of_total" });
-  const sale = { type: "sale", stock_method: "bulk", price: { base_cents: 500, base_percent: 7, formula: "fixed" } };
-  assertEquals(deriveLineCatalogFacts(sale, null).price.base_percent, null);
+Deno.test("deriveLineCatalogFacts: the rates in force at asOf, else the open row", () => {
+  const rates = [
+    { uid: "a", rate_key: "week", amount_cents: 1000, applied_from: "2026-01-01T00:00:00.000-06:00", applied_to: "2026-06-01T00:00:00.000-05:00" },
+    { uid: "b", rate_key: "week", amount_cents: 1200, applied_from: "2026-06-01T00:00:00.000-05:00", applied_to: null },
+  ];
+  const p = { type: "rental", stock_method: "bulk", price: { uid_price_formula: FIVE_DAY_WEEK.uid, rates } };
+  assertEquals(base(deriveLineCatalogFacts(p, null, { formulas: FORMULAS, asOf: "2026-03-01T09:00:00.000-06:00" }).price), 1000);
+  assertEquals(base(deriveLineCatalogFacts(p, null, { formulas: FORMULAS, asOf: "2026-07-01T09:00:00.000-05:00" }).price), 1200);
+  assertEquals(base(deriveLineCatalogFacts(p, null, OPTS).price), 1200);
+});
+
+Deno.test("deriveLineCatalogFacts: a percent-of-total fee states the rate and no formula; others state base_percent null", () => {
+  const fee = { type: "transaction_fee", stock_method: "none", price: { uid_price_formula: null, rates: [], base_percent: 3 } };
+  assertEquals(deriveLineCatalogFacts(fee, null, OPTS).price, { price_formula: null, rates: [], base_percent: 3, replacement_cents: null });
+  const sale = { type: "sale", stock_method: "bulk", price: { ...catalogPrice(FIXED, 500), base_percent: 7 } };
+  assertEquals(deriveLineCatalogFacts(sale, null, OPTS).price.base_percent, null);
 });
 
 Deno.test("both builders agree with deriveLineCatalogFacts field for field", () => {
-  const top = buildOrderLineFromProduct(product({ price: { base_cents: 4200, replacement_cents: 7, formula: "fixed" } }), OPTS);
-  const topFacts = deriveLineCatalogFacts(product({ price: { base_cents: 4200, replacement_cents: 7, formula: "fixed" } }), null);
+  const top = buildOrderLineFromProduct(product({ price: { ...catalogPrice(FIXED, 4200), replacement_cents: 7 } }), OPTS);
+  const topFacts = deriveLineCatalogFacts(product({ price: { ...catalogPrice(FIXED, 4200), replacement_cents: 7 } }), null, OPTS);
   assertEquals(
-    { type: top.type, stock_method: top.stock_method, zero_priced: top.zero_priced, base_cents: top.price.base_cents, base_percent: top.price.base_percent, replacement_cents: top.price.replacement_cents, formula: top.price.formula },
+    { type: top.type, stock_method: top.stock_method, zero_priced: top.zero_priced, price_formula: top.price.price_formula, rates: top.price.rates, base_percent: top.price.base_percent, replacement_cents: top.price.replacement_cents },
     { type: topFacts.type, stock_method: topFacts.stock_method, zero_priced: topFacts.zero_priced, ...topFacts.price },
   );
-  const c = comp("F", ["A"], { zero_priced: true, price: { base_cents: 9900, replacement_cents: 1, formula: "fixed" } });
+  const c = comp("F", ["A"], { zero_priced: true, price: { ...catalogPrice(FIXED, 9900), replacement_cents: 1 } });
   const [line] = buildOrderComponentLines(product({ components: [c] }), OPTS);
-  const facts = deriveLineCatalogFacts(c, zeroPricedForSlot(c));
+  const facts = deriveLineCatalogFacts(c, zeroPricedForSlot(c), OPTS);
   assertEquals(
-    { type: line.type, stock_method: line.stock_method, zero_priced: line.zero_priced, base_cents: line.price.base_cents, replacement_cents: line.price.replacement_cents, formula: line.price.formula },
-    { type: facts.type, stock_method: facts.stock_method, zero_priced: facts.zero_priced, base_cents: facts.price.base_cents, replacement_cents: facts.price.replacement_cents, formula: facts.price.formula },
+    { type: line.type, stock_method: line.stock_method, zero_priced: line.zero_priced, rates: line.price.rates, replacement_cents: line.price.replacement_cents, price_formula: line.price.price_formula },
+    { type: facts.type, stock_method: facts.stock_method, zero_priced: facts.zero_priced, rates: facts.price.rates, replacement_cents: facts.price.replacement_cents, price_formula: facts.price.price_formula },
   );
   // A component line keeps its key set: no `base_percent` key.
   assert(!("base_percent" in line.price));
@@ -544,7 +566,7 @@ const CUSTOM_TAXES = [{ uid: "tax1", name: "IL", rate: 10, type: "percent" as co
 Deno.test("buildCustomOrderLine stamps the custom- uid prefix", () => {
   const line = buildCustomOrderLine({
     type: "rental",
-    chargeDays: 5,
+    formula: FIVE_DAY_WEEK,
     taxes: CUSTOM_TAXES,
     uid_tax_class: DEFAULT_CLASS,
     uidOrder: "order1",
@@ -557,31 +579,39 @@ Deno.test("buildCustomOrderLine stamps the custom- uid prefix", () => {
   assertEquals(line.stock_method, "none");
   assertEquals(line.crms_id, null);
   assertEquals(line.uid_order, "order1");
-  assertEquals(line.price.formula, "five_day_week");
+  assertEquals(line.price.price_formula, FDW_REF);
+  assertEquals(line.price.rates, [{ rate_key: "week", amount_cents: 0 }]);
   assertEquals(line.price.replacement_cents, 0);
-  assertEquals(line.price.chargeable_days, 5);
+  assertEquals(line.price.counts, []);
   // Fully-formed modifiers — the caller resolved them.
   assertEquals(line.price.taxes, [{ uid: "tax1", name: "IL", rate: 10, type: "percent", amount_cents: 0 }]);
 });
 
-Deno.test("buildCustomOrderLine defaults formula and replacement by type", () => {
-  const sale = buildCustomOrderLine({ type: "sale", chargeDays: 5, taxes: [], uid_tax_class: DEFAULT_CLASS });
-  assertEquals(sale.price.formula, "fixed");
+Deno.test("buildCustomOrderLine takes the caller's formula and defaults replacement by type", () => {
+  const sale = buildCustomOrderLine({ type: "sale", formula: FIXED, taxes: [], uid_tax_class: DEFAULT_CLASS });
+  assertEquals(sale.price.price_formula, FIXED_REF);
   assertEquals(sale.price.replacement_cents, null);
-  assertEquals(sale.price.chargeable_days, null);
+  assertEquals(sale.price.counts, []);
 
-  const explicit = buildCustomOrderLine({ type: "sale", chargeDays: null, taxes: [], uid_tax_class: DEFAULT_CLASS, formula: "five_day_week" });
-  assertEquals(explicit.price.formula, "five_day_week");
+  const explicit = buildCustomOrderLine({
+    type: "sale",
+    formula: FIVE_DAY_WEEK,
+    rates: [{ rate_key: "week", amount_cents: 700 }],
+    taxes: [],
+    uid_tax_class: DEFAULT_CLASS,
+  });
+  assertEquals(explicit.price.price_formula, FDW_REF);
+  assertEquals(explicit.price.rates, [{ rate_key: "week", amount_cents: 700 }]);
 });
 
 Deno.test("buildCustomOrderLine mints a distinct uid per call", () => {
-  const a = buildCustomOrderLine({ type: "rental", chargeDays: null, taxes: [], uid_tax_class: DEFAULT_CLASS });
-  const b = buildCustomOrderLine({ type: "rental", chargeDays: null, taxes: [], uid_tax_class: DEFAULT_CLASS });
+  const a = buildCustomOrderLine({ type: "rental", formula: FIXED, taxes: [], uid_tax_class: DEFAULT_CLASS });
+  const b = buildCustomOrderLine({ type: "rental", formula: FIXED, taxes: [], uid_tax_class: DEFAULT_CLASS });
   assert(a.uid !== b.uid);
 });
 
 Deno.test("buildCustomInvoiceLine emits no order-only field", () => {
-  const line = buildCustomInvoiceLine({ type: "rental", chargeDays: 5, taxes: CUSTOM_TAXES, uid_tax_class: DEFAULT_CLASS });
+  const line = buildCustomInvoiceLine({ type: "rental", formula: FIVE_DAY_WEEK, taxes: CUSTOM_TAXES, uid_tax_class: DEFAULT_CLASS });
 
   // The old docblock claimed it "strips order-only fields" while the `initial`
   // spread put `stock_method: "bulk"`, `order_number: 0` and `uid_order: ""`
@@ -594,8 +624,8 @@ Deno.test("buildCustomInvoiceLine emits no order-only field", () => {
   assertEquals(line.zero_priced, null);
   // An invoice does not track replacement value.
   assert(!("replacement" in line.price));
-  assertEquals(line.price.chargeable_days, 5);
-  assertEquals(line.price.formula, "five_day_week");
+  assertEquals(line.price.counts, []);
+  assertEquals(line.price.price_formula, FDW_REF);
   assert(line.uid.startsWith("custom-"));
 });
 
@@ -716,9 +746,9 @@ Deno.test("posting: each line starts at its OWN catalog source's account and cat
   const CAT_B = "TrackCatBBBBBBBBBBBB";
   const doc = product({
     uid_tracking_category: CAT_KIT,
-    price: { base_cents: 10000, replacement_cents: 50000, formula: "five_day_week", coa_revenue: 4000 },
+    price: { ...catalogPrice(FIVE_DAY_WEEK, 10000), replacement_cents: 50000, coa_revenue: 4000 },
     components: [
-      comp("B", ["A"], { uid_tracking_category: CAT_B, price: { base_cents: 1000, formula: "five_day_week", coa_revenue: 4100 } }),
+      comp("B", ["A"], { uid_tracking_category: CAT_B, price: { ...catalogPrice(FIVE_DAY_WEEK, 1000), coa_revenue: 4100 } }),
       // An entry stamped before the mirror existed carries no category.
       comp("C", ["A"]),
     ],
@@ -729,6 +759,6 @@ Deno.test("posting: each line starts at its OWN catalog source's account and cat
   // A component takes ITS product's posting (the mirror), never the kit's.
   assertEquals([b.coa_revenue, b.uid_tracking_category], [4100, CAT_B]);
   assertEquals([c.coa_revenue, c.uid_tracking_category], [null, null]);
-  const custom = buildCustomOrderLine({ type: "sale", chargeDays: null, taxes: [], uid_tax_class: DEFAULT_CLASS });
+  const custom = buildCustomOrderLine({ type: "sale", formula: FIXED, taxes: [], uid_tax_class: DEFAULT_CLASS });
   assertEquals([custom.coa_revenue, custom.uid_tracking_category], [null, null]);
 });

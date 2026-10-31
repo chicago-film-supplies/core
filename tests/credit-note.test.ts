@@ -10,6 +10,7 @@
  * `status === "issued"` into `issued OR part_applied`.
  */
 import { assertEquals } from "@std/assert";
+import { fixedPrice } from "./helpers/formulas.ts";
 import {
   COA_BAD_DEBT,
   CREDIT_NOTE_REASONS,
@@ -49,9 +50,7 @@ function makeCreditNote(overrides: Record<string, unknown> = {}) {
       description: "",
       quantity: 1,
       price: {
-        base_cents: 219600,
-        chargeable_days: null,
-        formula: "fixed",
+        ...fixedPrice(219600),
         subtotal_cents: 219600,
         subtotal_discounted_cents: 219600,
         discount: null,

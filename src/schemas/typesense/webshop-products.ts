@@ -3,11 +3,11 @@ import type { TypesenseCollectionConfig } from "./types.ts";
 /** Typesense collection config for webshop products. */
 export const webshopProducts: TypesenseCollectionConfig = {
   alias: "webshop-products",
-  version: 6,
+  version: 7,
   firestoreCollection: "webshop-products",
-  collectionName: "webshop-products_v6",
+  collectionName: "webshop-products_v7",
   schema: {
-    name: "webshop-products_v6",
+    name: "webshop-products_v7",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -22,9 +22,13 @@ export const webshopProducts: TypesenseCollectionConfig = {
       { name: "eligible_shipping_ground", type: "bool", sort: true, facet: true },
       { name: "eligible_shipping_air", type: "bool", sort: true, facet: true },
       { name: "price", type: "object" },
-      { name: "price.base_cents", type: "int64", optional: true, money: true },
+      { name: "price.uid_price_formula", type: "string", facet: true, optional: true },
+      // The OPEN row per rate key only (the api translator filters): a closed
+      // or future row would make a search answer a price nobody pays today.
+      { name: "price.rates", type: "object[]", optional: true },
+      { name: "price.rates.rate_key", type: "string[]", facet: true, optional: true },
+      { name: "price.rates.amount_cents", type: "int64[]", optional: true, money: true },
       { name: "price.replacement_cents", type: "int64", optional: true, money: true },
-      { name: "price.formula", type: "string", facet: true, optional: true },
       { name: "price.discountable", type: "bool", facet: true, optional: true },
       { name: "webshop", type: "object" },
       { name: "webshop.available", type: "bool", facet: true },
@@ -52,9 +56,13 @@ export const webshopProducts: TypesenseCollectionConfig = {
       { name: "components.type", type: "string[]", facet: true, optional: true },
       { name: "components.zero_priced", type: "bool[]", facet: true, optional: true },
       { name: "components.price", type: "object[]", optional: true },
-      { name: "components.price.base_cents", type: "int64[]", optional: true, money: true },
+      { name: "components.price.uid_price_formula", type: "string[]", facet: true, optional: true },
+      // The OPEN row per rate key only (the api translator filters): a closed
+      // or future row would make a search answer a price nobody pays today.
+      { name: "components.price.rates", type: "object[]", optional: true },
+      { name: "components.price.rates.rate_key", type: "string[]", facet: true, optional: true },
+      { name: "components.price.rates.amount_cents", type: "int64[]", optional: true, money: true },
       { name: "components.price.replacement_cents", type: "int64[]", optional: true, money: true },
-      { name: "components.price.formula", type: "string[]", facet: true, optional: true },
       { name: "components.price.discountable", type: "bool[]", facet: true, optional: true },
       { name: "component_of", type: "object[]", optional: true },
       { name: "component_of.uid", type: "string[]", optional: true },
@@ -66,9 +74,13 @@ export const webshopProducts: TypesenseCollectionConfig = {
       { name: "component_of.type", type: "string[]", facet: true, optional: true },
       { name: "component_of.zero_priced", type: "bool[]", facet: true, optional: true },
       { name: "component_of.price", type: "object[]", optional: true },
-      { name: "component_of.price.base_cents", type: "int64[]", optional: true, money: true },
+      { name: "component_of.price.uid_price_formula", type: "string[]", facet: true, optional: true },
+      // The OPEN row per rate key only (the api translator filters): a closed
+      // or future row would make a search answer a price nobody pays today.
+      { name: "component_of.price.rates", type: "object[]", optional: true },
+      { name: "component_of.price.rates.rate_key", type: "string[]", facet: true, optional: true },
+      { name: "component_of.price.rates.amount_cents", type: "int64[]", optional: true, money: true },
       { name: "component_of.price.replacement_cents", type: "int64[]", optional: true, money: true },
-      { name: "component_of.price.formula", type: "string[]", facet: true, optional: true },
       { name: "component_of.price.discountable", type: "bool[]", facet: true, optional: true },
       { name: "updated_at", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "created_at", type: "int64", sort: true, index: true, facet: false, optional: true },

@@ -1,4 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
+import { fdwPrice, fixedPrice } from "./helpers/formulas.ts";
 import { getInitialValues } from "../src/schemas/initial.ts";
 import { ACCEPTS_PAYMENT_STATUSES, canOperatorTransition, CreateInvoiceInput, INVOICE_STATUS_CONTRACTS, InvoiceDocLineItem, InvoiceDocOrderItem, InvoiceItemInputLine, InvoiceSchema, type InvoiceStatusType, LIVE_IN_XERO_STATUSES, REACHED_XERO_STATUSES, SETTLED_STATUSES, UpdateInvoiceInput } from "../src/schemas/invoice.ts";
 import { deriveInvoiceStatus } from "../src/utils/invoices.ts";
@@ -21,8 +22,10 @@ const derive = (status: InvoiceStatusType, paid: number, due: number, credited =
 // `""`, which it rejects. Supply a real id, as every prod doc carries one.
 const invoiceBase = { ...getInitialValues(InvoiceSchema), uid_thread: "testthread0000000001" } as Record<string, unknown>;
 const totalsBase = invoiceBase.totals as Record<string, unknown>;
-const lineItemBase = { ...getInitialValues(InvoiceDocLineItem), uid_tax_class: "TaxC1assDefau1tAAAAA" } as Record<string, unknown>;
-const priceBase = (lineItemBase as { price: Record<string, unknown> }).price;
+const lineSeed = getInitialValues(InvoiceDocLineItem);
+// The form seed names no formula (ruling 8): price lines on the Five-day week fixture.
+const priceBase = { ...lineSeed.price, ...fdwPrice(0, 5) };
+const lineItemBase = { ...lineSeed, uid_tax_class: "TaxC1assDefau1tAAAAA", price: priceBase };
 
 const validDocDates = {
   delivery_start: "2026-03-01T00:00:00.000-06:00",
@@ -34,7 +37,7 @@ const validDocDates = {
   collection_end: "2026-03-10T00:00:00.000-06:00",
   collection_end_fs: mockTimestamp,
   days_active: null,
-  charge_windows: [{ start: "2026-03-01T00:00:00.000-06:00", end: "2026-03-10T00:00:00.000-06:00", days: 7 }],
+  charge_windows: [{ start: "2026-03-01T00:00:00.000-06:00", end: "2026-03-10T00:00:00.000-06:00" }],
 };
 
 /**
@@ -96,8 +99,7 @@ const validLine = {
   quantity: 1,
   price: {
     ...priceBase,
-    base_cents: 50000,
-    chargeable_days: 5,
+    ...fdwPrice(50000, 5),
     subtotal_cents: 50000,
     subtotal_discounted_cents: 50000,
     total_cents: 50000,
@@ -614,8 +616,7 @@ Deno.test("InvoiceSchema accepts full multi-order hierarchy", () => {
         quantity: 2,
         price: {
           ...priceBase,
-          base_cents: 20000,
-          formula: "fixed",
+          ...fixedPrice(20000),
           subtotal_cents: 40000,
           subtotal_discounted_cents: 40000,
           total_cents: 40000,
@@ -677,7 +678,7 @@ Deno.test("CreateInvoiceInput: a divider cannot carry a price or a quantity", ()
     uid: "newinv10000000000000",
     query_by_orders: ["order100000000000000"],
     organization: { uid: "org10000000000000000" },
-    items: [{ uid: "order100000000000000", type: "order", name: "Order #1", path: ["order100000000000000"], quantity: 2, price: { base_cents: 1000 } }],
+    items: [{ uid: "order100000000000000", type: "order", name: "Order #1", path: ["order100000000000000"], quantity: 2, price: { ...fdwPrice(1000, 5) } }],
   });
   assertEquals(bad.success, false);
   assertEquals(bad.error?.issues[0].code, "unrecognized_keys");
@@ -694,7 +695,7 @@ Deno.test("UpdateInvoiceInput: a line ships back with its stored extras", () => 
       name: "Spot Light",
       quantity: 1,
       path: ["order100000000000000"],
-      price: { base_cents: 10000, subtotal_cents: 10000, total_cents: 10900 },
+      price: { ...fdwPrice(10000, 5), subtotal_cents: 10000, total_cents: 10900 },
       xero_id: "550e8400-e29b-41d4-a716-446655440099",
       crms_id: 4021,
     }],
@@ -710,10 +711,10 @@ Deno.test("UpdateInvoiceInput: a line ships back with its stored extras", () => 
 Deno.test("UpdateInvoiceInput: percent_of_total is inexpressible on an input line", () => {
   const bad = UpdateInvoiceInput.safeParse({
     version: 1,
-    items: [{ uid: "item1000000000000000", type: "rental", path: ["item1000000000000000"], price: { base_percent: 3, formula: "percent_of_total" } }],
+    items: [{ uid: "item1000000000000000", type: "rental", path: ["item1000000000000000"], price: { base_percent: 3 } }],
   });
   assertEquals(bad.success, false);
-  assertEquals(bad.error?.issues[0].path, ["items", 0, "price", "formula"]);
+  assertEquals(bad.error?.issues[0].path, ["items", 0, "price", "base_percent"]);
 });
 
 Deno.test("CreateInvoiceInput: an invoice may still start with a line item", () => {

@@ -31,9 +31,9 @@ const order = {
 
 const products = new Map<string, ReplacementSourceProduct>([
   ["vest", { uid: "vest", name: "Safety Vest", uid_linked_replacement: "vest-r" }],
-  ["vest-r", { uid: "vest-r", name: "Replacement: Safety Vest", price: { base_cents: 3000 } }],
+  ["vest-r", { uid: "vest-r", name: "Replacement: Safety Vest", price: { rates: [{ rate_key: "flat", amount_cents: 3000 }] } }],
   ["cone", { uid: "cone", name: "Traffic Cone", uid_linked_replacement: "cone-r" }],
-  ["cone-r", { uid: "cone-r", name: "Replacement: Traffic Cone", price: { base_cents: 4500 } }],
+  ["cone-r", { uid: "cone-r", name: "Replacement: Traffic Cone", price: { rates: [{ rate_key: "flat", amount_cents: 4500 }] } }],
   ["legacy", { uid: "legacy", name: "Old Stand" }],
 ]);
 
@@ -139,7 +139,7 @@ Deno.test("seed: with no serial to name, the description is the ranges; with not
 Deno.test("seed: the description opens with the replacement twin's description, never the rental's", () => {
   const described = new Map(products);
   described.set("vest", { uid: "vest", name: "Safety Vest", uid_linked_replacement: "vest-r", description: "Rental vest — not this" });
-  described.set("vest-r", { uid: "vest-r", name: "Replacement: Safety Vest", price: { base_cents: 3000 }, description: "Otto Two Wire Surveillance Kit - V1-10176" });
+  described.set("vest-r", { uid: "vest-r", name: "Replacement: Safety Vest", price: { rates: [{ rate_key: "flat", amount_cents: 3000 }] }, description: "Otto Two Wire Surveillance Kit - V1-10176" });
 
   // No units (invoice 2462's shape): the twin's description alone, no "Lost".
   const [bulk] = seedReplacementLines(order, [vests], [], described, noUnits);

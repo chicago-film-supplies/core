@@ -312,7 +312,11 @@ Deno.test("plant: the products input regressed to the storage node is caught, na
     UpdateProductInput: z.object({ uid: z.string(), components: z.array(mod.ComponentSchema).optional() }),
   };
   const { added } = diff(inputStrictPaths(regressed).paths);
-  assertEquals(added, ["UpdateProductInput components[]", "UpdateProductInput components[].price"]);
+  assertEquals(added, [
+    "UpdateProductInput components[]",
+    "UpdateProductInput components[].price",
+    "UpdateProductInput components[].price.rates[]",
+  ]);
 });
 
 Deno.test("plant: a new input with a strict node is caught, through every wrapper the walker claims", () => {

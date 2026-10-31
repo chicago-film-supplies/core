@@ -1512,7 +1512,7 @@ npm `.d.ts` emit TRUNCATED a spread inside an `as const`, and no core gate
 could see it.
 
 ```ts
-const COMPONENT_PRICE_KEYS: "base_cents" | "base_percent" | "replacement_cents" | "coa_revenue" | "formula" | "discountable"[];
+const COMPONENT_PRICE_KEYS: "uid_price_formula" | "rates" | "replacement_cents" | "coa_revenue" | "discountable"[];
 ```
 
 ### `COMPONENT_QUANTITY_DECIMALS`
@@ -2195,10 +2195,8 @@ const ChargeWindowInput: z.ZodType<ChargeWindowInputType>;
 
 ### `ChargeWindowInputType`
 
-One charge window as a client states it: a start and an end instant.
-
-The day count is not an input. The server counts it once, when the window is
-written (`canonicalChargeWindows` in `@cfs/core/utils/dates`).
+One charge window as a client states it: a start and an end instant — the
+same shape as the stored {@link ChargeWindow}.
 
 ```ts
 interface ChargeWindowInputType {
@@ -2209,18 +2207,18 @@ interface ChargeWindowInputType {
 
 ### `ChargeWindowType`
 
-One stored charge window: a start, an end, and the business days it charges.
+One stored charge window: a start and an end instant, and nothing else.
 
 A pair holds one or more of these (`OrderDocDates.charge_windows`). A hotspot
 out for three months and switched on three times is one pair with three
 windows: splitting it into three pairs would invent deliveries and free up the
 stock between windows.
 
-- **`days` is counted once, when the window is written**, and stored. The
-  holiday list has no versions, so recounting on read would move the days on a
-  document already sent out.
-- **`days` may be 0.** A window over a weekend charges nothing of its own; the
-  one-week minimum still applies to it when priced (`billableDays`).
+- 🔴 **No day count** (purchases-as-documents Phase 2 ruling 8). A window
+  used to store the business days it charged, but a pair's lines may be on
+  different price formulas, so no one count per window is every line's. Each
+  priced line freezes its OWN tier counts (`price.counts`), metered from these
+  windows by its formula when the line is priced.
 - **No `_fs` twins and no `uid`.** The array is one value to the shared-field
   merge (`shared: "value"` on the field).
 
@@ -2228,7 +2226,6 @@ stock between windows.
 interface ChargeWindowType {
   start: string;
   end: string;
-  days: number;
 }
 ```
 
@@ -2762,22 +2759,6 @@ Zod schema for CommitMeta. `author` reuses the pii-annotated ActorRef.
 
 ```ts
 const CommitMetaSchema: z.ZodType<CommitMeta>;
-```
-
-### `ComponentPriceFormulaEnum`
-
-Zod schema for ComponentPriceFormulaType.
-
-```ts
-const ComponentPriceFormulaEnum: z.ZodType<ComponentPriceFormulaType>;
-```
-
-### `ComponentPriceFormulaType`
-
-Allowed pricing formulas for a component — see {@link COMPONENT_PRICE_FORMULAS}.
-
-```ts
-type ComponentPriceFormulaType = indexedAccess;
 ```
 
 ### `ComponentPriceKeyEnum`
@@ -3785,10 +3766,10 @@ Pricing breakdown for a single credit-note line.
 
 ```ts
 interface CreditNoteDocItemPrice {
-  base_cents: number;
+  price_formula: PriceFormulaRef | null;
+  rates: RateSnapshotType[];
+  counts: TierCountType[];
   base_percent?: number | null;
-  chargeable_days: number | null;
-  formula: PriceFormulaType;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
@@ -5196,7 +5177,7 @@ type ForwardMovementTypeType = Exclude<MovementTypeType, UndoMovementTypeType>;
 ### `FromTotalItemType`
 
 The `pricing: "from_total"` members — priced FROM the document total rather
-than into it, which is what makes a `percent_of_total` formula legal on them.
+than into it, which is what makes a percent-of-total price (`base_percent`) legal on them.
 
 ```ts
 type FromTotalItemType = indexedAccess;
@@ -5958,7 +5939,7 @@ Owner decisions, 2026-09-13:
   lines there.
 - **The no-minimum rule is DERIVED from the section, never stored on the
   line.** `priceDocument` prices every line under an extension section at the
-  line's own `chargeable_days` — the ADDED days — with the one-week floor
+  line's own stated `counts` — the ADDED time — with the formula's minimum
   skipped (`invoiceExtensionSections`, `@cfs/core/utils/price-document`).
 
 ⚠️ Absent on every divider stored before 2026-09-15, and on every full-window
@@ -6033,10 +6014,10 @@ Pricing breakdown for a single invoice line item.
 
 ```ts
 interface InvoiceDocItemPriceType {
-  base_cents: number;
+  price_formula: PriceFormulaRef | null;
+  rates: RateSnapshotType[];
+  counts: TierCountType[];
   base_percent?: number | null;
-  chargeable_days: number | null;
-  formula: PriceFormulaType;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
@@ -6375,10 +6356,10 @@ draft proposed are absent because the corpus refutes them:
   property of WHERE the goods went as much as of the line, so it is not a
   type invariant. (This bullet named `tax_class` and `tax_profile` until
   2026-08-22; neither is a field any more.)
-- **no per-type `formula` whitelist.** Order `sale`/`service`/`surcharge` rows
-  are `fixed` while their invoice projections are `five_day_week` (617 sale,
-  643 service, 137 surcharge). A whitelist keyed on type would reject the
-  invoice side of the same line.
+- **no per-type formula whitelist.** A line's formula is the catalog's (or the
+  operator's) and the formulas are a collection, not a closed vocabulary; the
+  pre-ruling-8 corpus already disagreed by type (617 sale, 643 service, 137
+  surcharge rows `fixed` on the order and `five_day_week` on the invoice).
 - **`replacement` is `optional`, not `forbidden`, off the rental arm.** All
   1,480 non-rental order line items carry a `price.replacement`; the builder
   writes it for every type.
@@ -6408,10 +6389,10 @@ Price breakdown for an order item (input — client sends partial data, server c
 
 ```ts
 interface ItemPriceType {
-  base_cents?: number;
+  uid_price_formula?: string;
+  rates?: RateSnapshotType[];
   base_percent?: number | null;
   replacement_cents?: number | null;
-  formula?: PriceFormulaType;
   subtotal_cents?: number;
   discount?: DiscountInputType | null;
   taxes?: Array<typeLiteral>;
@@ -8408,7 +8389,7 @@ twice — once by `DOC_LINE_ITEM_TYPES` here and once by a separate
 `OrderDocTransactionFeeItem` arm carrying a `PriceModifier` instead of an
 `OrderDocItemPrice` — and Zod answers a duplicate discriminator with a bare
 `Error`, not a `ZodError`, so `safeParse` could not trap it. A fee is now an
-ordinary line item whose `price.formula` says `percent_of_total`; the
+ordinary line item whose `price.base_percent` makes it percent-of-total; the
 per-document rollup (`totals.transaction_fees`) keeps the `PriceModifier`
 shape, because that IS a rate-and-amount summary rather than a line.
 
@@ -8425,17 +8406,23 @@ const OrderDocItemPrice: z.ZodType<OrderDocItemPriceType>;
 ### `OrderDocItemPriceType`
 
 Line item price in the full order document (all fields required after server compute).
-subtotal = pre-discount (base × qty × days_factor).
-subtotal_discounted = post-discount.
-total = subtotal_discounted + sum(taxes[].amount).
+
+- subtotal = `priceFromFormula(rates, counts, quantity)` — Σ tier
+  `rate × quantity × num ÷ den`, each tier rounded once (purchases-as-documents
+  Phase 2 ruling 8).
+- subtotal_discounted = post-discount.
+- total = subtotal_discounted + sum(taxes[].amount).
+
+A percent-of-total fee line states `base_percent` instead of a formula
+({@link checkLinePrice}).
 
 ```ts
 interface OrderDocItemPriceType {
-  base_cents: number;
+  price_formula: PriceFormulaRef | null;
+  rates: RateSnapshotType[];
+  counts: TierCountType[];
   base_percent?: number | null;
   replacement_cents?: number | null;
-  chargeable_days: number | null;
-  formula: PriceFormulaType;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
@@ -9738,14 +9725,6 @@ Zod schema for {@link PriceFormulaBasis}.
 const PriceFormulaBasisEnum: z.ZodType<PriceFormulaBasis>;
 ```
 
-### `PriceFormulaEnum`
-
-Zod schema for PriceFormulaType.
-
-```ts
-const PriceFormulaEnum: z.ZodType<PriceFormulaType>;
-```
-
 ### `PriceFormulaGapAllowance`
 
 Free suspension time per line, over a ROLLING window: a gap day is free while
@@ -9996,14 +9975,6 @@ Zod schema for {@link PriceFormulaSegmentUnit}.
 const PriceFormulaSegmentUnitEnum: z.ZodType<PriceFormulaSegmentUnit>;
 ```
 
-### `PriceFormulaType`
-
-Allowed values for pricing formula.
-
-```ts
-type PriceFormulaType = indexedAccess;
-```
-
 ### `PriceModifier`
 
 Zod schema for a rate-based price modifier (tax or transaction fee).
@@ -10171,11 +10142,11 @@ Pricing details for a product.
 
 ```ts
 interface ProductPrice {
-  base_cents: number;
+  uid_price_formula: string | null;
+  rates: DatedRate[];
   base_percent?: number | null;
   replacement_cents?: number | null;
   coa_revenue: COARevenueType;
-  formula: PriceFormulaType;
   discountable: boolean;
 }
 ```
@@ -16008,6 +15979,22 @@ Zod schema for WebhookEvent.
 const WebhookEventSchema: z.ZodType<WebhookEvent>;
 ```
 
+### `WebshopPrice`
+
+A webshop price: the product's formula and its dated rates (purchases-as-documents
+D4), mirrored. A webshop document mirrors a product whose type is confined to
+`WEBSHOP_PRODUCT_TYPES`, which excludes `transaction_fee`, so it never carries a
+percent-of-total price: it always names a formula and at least one rate.
+
+```ts
+interface WebshopPrice {
+  uid_price_formula: string;
+  rates: DatedRate[];
+  replacement_cents?: number | null;
+  discountable: boolean;
+}
+```
+
 ### `WebshopProduct`
 
 A webshop product document in the webshop-products Firestore collection.
@@ -16025,7 +16012,7 @@ interface WebshopProduct {
   eligible_in_store_pickup: boolean;
   eligible_shipping_ground: boolean;
   eligible_shipping_air: boolean;
-  price: typeLiteral;
+  price: WebshopPrice;
   shipping?: WebshopProductShipping;
   alternates: UidNameRefType[];
   components: WebshopProductComponent[];
@@ -16060,7 +16047,7 @@ interface WebshopProductComponent {
   quantity: number;
   zero_priced?: boolean;
   uid_tax_class?: string;
-  price: typeLiteral;
+  price: WebshopPrice;
 }
 ```
 
@@ -16301,6 +16288,14 @@ Read this rather than the column, so the manager cannot offer a button the
 server will 400 — and so a status outside the vocabulary answers `false`
 instead of throwing on an undefined lookup.
 
+### `checkCatalogPrice(price: typeLiteral, ctx: z.RefinementCtx): void`
+
+**A catalog price is a formula with dated rates, or a percentage of the
+document — exactly one** (D4; the catalog twin of {@link checkLinePrice}).
+The rates' own ordering rules run here too ({@link checkDatedRates}). That
+every key the formula names has a row in force is the WRITER's check: the
+formula is another document.
+
 ### `checkCollectionLegs(doc: typeLiteral, ctx: z.RefinementCtx): void`
 
 The ORDER's collection legs agree with themselves and with its items — the
@@ -16385,19 +16380,18 @@ vacuous bound fails rather than passes.
 
 ### `checkItemPriceFormula(item: typeLiteral, ctx: z.RefinementCtx): void`
 
-The `pricing` half of {@link ITEM_CONTRACTS}: a `percent_of_total` price is
-legal only where the contract says the line is priced FROM the document total.
+The `pricing` half of {@link ITEM_CONTRACTS}: a percent-of-total price — a
+`base_percent` — is legal only where the contract says the line is priced
+FROM the document total.
 
 Applies to every price shape in the package, so it is the check the invoice
 arm attaches on its own — an invoice line has no `stock_method` and its price
 has no `replacement` key, which leaves this as the only axis it can express.
 
-`percent_of_total` prices a line from the DOCUMENT total, which only
-`calculateTransactionFeeAmount` knows how to do — `calculateItemSubtotal`
-throws on it. Before this axis the combination was merely thrown on at
-runtime, deep in `perUnitSubtotal`; here it is unwritable. The converse is
-deliberately NOT asserted: a flat-amount fee is legitimate, and
-`calculateTransactionFeeAmount` prices one.
+Since purchases-as-documents ruling 8 a percent-of-total line is no formula at
+all: it states `base_percent` and `price_formula: null` ({@link checkLinePrice}).
+The converse is deliberately NOT asserted: a flat-amount fee is legitimate and
+prices on a formula like any other line.
 
 ### `checkLeadingDivider(grain: LeadingDividerGrain): fnOrConstructor`
 
@@ -16409,6 +16403,32 @@ invoice's `linked` is `query_by_orders.length > 0`.
 the moment a consumer pins it.** The corpus read 0 in both projects before it
 shipped (2026-09-28: every order and fulfillment leads with a `destination`,
 every one of 1,035 order-linked invoices with an `order`).
+
+### `checkLinePrice(price: typeLiteral | null | undefined, ctx: z.RefinementCtx, _: unknown): void`
+
+**The shape of a line's price: a formula, or a percentage of the document —
+exactly one** (purchases-as-documents Phase 2 ruling 8).
+
+A formula-priced line snapshots `price_formula` (`{ uid, name, basis }`), the
+`rates` it priced with and the frozen tier `counts`; its money is
+`priceFromFormula(rates, counts, quantity, discount)`. A percent-of-total line
+— only a `transaction_fee` ({@link checkItemPriceFormula}) — states
+`base_percent` instead, a percentage of the document's discounted subtotal at
+4dp, and carries no formula, rates or counts: it is priced from the document,
+not from itself.
+
+**Why `base_percent` stays a separate field.** `price.base` once carried two
+units — dollars per unit, or a percentage of the document — discriminated only
+by a sibling `formula`, so a reader that skipped the sibling billed a 2.9% card
+fee as $2.90. The unit lives in the NAME, and a percentage is never a rate row.
+
+`requireFormula` is the stored half: a stored line states `price_formula`
+(non-null exactly when `base_percent` is null). An input price may omit it —
+the writer resolves it from the product.
+
+### `checkLinePriceInput(price: indexedAccess, ctx: z.RefinementCtx): void`
+
+{@link checkLinePrice} on an INPUT price, where the writer resolves the formula.
 
 ### `checkMixedBookingGrains(items: ReadonlyArray<unknown>, ctx: z.RefinementCtx): void`
 
@@ -18242,22 +18262,6 @@ A collection name valid in a {@link DocSourceType}.
 type CfsSourceCollectionType = indexedAccess;
 ```
 
-### `ComponentPriceFormulaEnum`
-
-Zod schema for ComponentPriceFormulaType.
-
-```ts
-const ComponentPriceFormulaEnum: z.ZodType<ComponentPriceFormulaType>;
-```
-
-### `ComponentPriceFormulaType`
-
-Allowed pricing formulas for a component — see {@link COMPONENT_PRICE_FORMULAS}.
-
-```ts
-type ComponentPriceFormulaType = indexedAccess;
-```
-
 ### `ComponentTypeEnum`
 
 Zod schema for ComponentTypeType.
@@ -18631,7 +18635,7 @@ interface FirestoreTimestampValue {
 ### `FromTotalItemType`
 
 The `pricing: "from_total"` members — priced FROM the document total rather
-than into it, which is what makes a `percent_of_total` formula legal on them.
+than into it, which is what makes a percent-of-total price (`base_percent`) legal on them.
 
 ```ts
 type FromTotalItemType = indexedAccess;
@@ -18713,10 +18717,10 @@ draft proposed are absent because the corpus refutes them:
   property of WHERE the goods went as much as of the line, so it is not a
   type invariant. (This bullet named `tax_class` and `tax_profile` until
   2026-08-22; neither is a field any more.)
-- **no per-type `formula` whitelist.** Order `sale`/`service`/`surcharge` rows
-  are `fixed` while their invoice projections are `five_day_week` (617 sale,
-  643 service, 137 surcharge). A whitelist keyed on type would reject the
-  invoice side of the same line.
+- **no per-type formula whitelist.** A line's formula is the catalog's (or the
+  operator's) and the formulas are a collection, not a closed vocabulary; the
+  pre-ruling-8 corpus already disagreed by type (617 sale, 643 service, 137
+  surcharge rows `fixed` on the order and `five_day_week` on the invoice).
 - **`replacement` is `optional`, not `forbidden`, off the rental arm.** All
   1,480 non-rental order line items carry a `price.replacement`; the builder
   writes it for every type.
@@ -19325,22 +19329,6 @@ Zod schema for PreTaxItemType. @see {@link PRE_TAX_ITEM_TYPES}
 const PreTaxItemTypeEnum: z.ZodType<PreTaxItemType>;
 ```
 
-### `PriceFormulaEnum`
-
-Zod schema for PriceFormulaType.
-
-```ts
-const PriceFormulaEnum: z.ZodType<PriceFormulaType>;
-```
-
-### `PriceFormulaType`
-
-Allowed values for pricing formula.
-
-```ts
-type PriceFormulaType = indexedAccess;
-```
-
 ### `ProductTypeEnum`
 
 Zod schema for ProductTypeType.
@@ -19889,21 +19877,44 @@ vacuous bound fails rather than passes.
 
 ### `checkItemPriceFormula(item: typeLiteral, ctx: z.RefinementCtx): void`
 
-The `pricing` half of {@link ITEM_CONTRACTS}: a `percent_of_total` price is
-legal only where the contract says the line is priced FROM the document total.
+The `pricing` half of {@link ITEM_CONTRACTS}: a percent-of-total price — a
+`base_percent` — is legal only where the contract says the line is priced
+FROM the document total.
 
 Applies to every price shape in the package, so it is the check the invoice
 arm attaches on its own — an invoice line has no `stock_method` and its price
 has no `replacement` key, which leaves this as the only axis it can express.
 
-`percent_of_total` prices a line from the DOCUMENT total, which only
-`calculateTransactionFeeAmount` knows how to do — `calculateItemSubtotal`
-throws on it. Before this axis the combination was merely thrown on at
-runtime, deep in `perUnitSubtotal`; here it is unwritable. The converse is
-deliberately NOT asserted: a flat-amount fee is legitimate, and
-`calculateTransactionFeeAmount` prices one.
+Since purchases-as-documents ruling 8 a percent-of-total line is no formula at
+all: it states `base_percent` and `price_formula: null` ({@link checkLinePrice}).
+The converse is deliberately NOT asserted: a flat-amount fee is legitimate and
+prices on a formula like any other line.
 
-### `checkPriceBaseUnit(price: typeLiteral | null | undefined, ctx: z.RefinementCtx): void`
+### `checkLinePrice(price: typeLiteral | null | undefined, ctx: z.RefinementCtx, _: unknown): void`
+
+**The shape of a line's price: a formula, or a percentage of the document —
+exactly one** (purchases-as-documents Phase 2 ruling 8).
+
+A formula-priced line snapshots `price_formula` (`{ uid, name, basis }`), the
+`rates` it priced with and the frozen tier `counts`; its money is
+`priceFromFormula(rates, counts, quantity, discount)`. A percent-of-total line
+— only a `transaction_fee` ({@link checkItemPriceFormula}) — states
+`base_percent` instead, a percentage of the document's discounted subtotal at
+4dp, and carries no formula, rates or counts: it is priced from the document,
+not from itself.
+
+**Why `base_percent` stays a separate field.** `price.base` once carried two
+units — dollars per unit, or a percentage of the document — discriminated only
+by a sibling `formula`, so a reader that skipped the sibling billed a 2.9% card
+fee as $2.90. The unit lives in the NAME, and a percentage is never a rate row.
+
+`requireFormula` is the stored half: a stored line states `price_formula`
+(non-null exactly when `base_percent` is null). An input price may omit it —
+the writer resolves it from the product.
+
+### `checkLinePriceInput(price: indexedAccess, ctx: z.RefinementCtx): void`
+
+{@link checkLinePrice} on an INPUT price, where the writer resolves the formula.
 
 ### `checkZeroPricedAmount(item: typeLiteral, ctx: z.RefinementCtx): void`
 
@@ -19914,9 +19925,9 @@ at EVERY grain, with no exceptions.
 
 🔴 **Nothing used to tie the flag to the amount, and that is precisely how the
 corpus drifted.** `zero_priced` is applied to a price in exactly one place —
-`core/src/utils/order-lines.ts`, `base_cents: comp.zero_priced ? 0 : (…)` —
+`core/src/utils/order-lines.ts`, which zeroed the line's base for a flagged component —
 which runs client-side, ONCE, at line construction, and the resulting `0` is
-then stored. Every pricer downstream reads the stored `base_cents` and never
+then stored. Every pricer downstream reads the stored rates and never
 consults the flag, so once a non-zero amount arrives by any route nothing
 re-zeroes it. Measured before this refinement existed: **53 order lines across
 35 documents** and **65 catalog component entries across 37 products**, both
@@ -22443,7 +22454,7 @@ Owner decisions, 2026-09-13:
   lines there.
 - **The no-minimum rule is DERIVED from the section, never stored on the
   line.** `priceDocument` prices every line under an extension section at the
-  line's own `chargeable_days` — the ADDED days — with the one-week floor
+  line's own stated `counts` — the ADDED time — with the formula's minimum
   skipped (`invoiceExtensionSections`, `@cfs/core/utils/price-document`).
 
 ⚠️ Absent on every divider stored before 2026-09-15, and on every full-window
@@ -22518,10 +22529,10 @@ Pricing breakdown for a single invoice line item.
 
 ```ts
 interface InvoiceDocItemPriceType {
-  base_cents: number;
+  price_formula: PriceFormulaRef | null;
+  rates: RateSnapshotType[];
+  counts: TierCountType[];
   base_percent?: number | null;
-  chargeable_days: number | null;
-  formula: PriceFormulaType;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
@@ -22760,9 +22771,9 @@ Item price input — partial, server computes the rest.
 
 ```ts
 interface InvoiceItemInputPriceType {
-  base_cents?: number;
+  uid_price_formula?: string;
+  rates?: RateSnapshotType[];
   base_percent?: number | null;
-  formula?: PriceFormulaType;
   discount?: DiscountInputType | null;
   taxes?: Array<typeLiteral>;
 }
@@ -23277,10 +23288,8 @@ const ChargeWindowInput: z.ZodType<ChargeWindowInputType>;
 
 ### `ChargeWindowInputType`
 
-One charge window as a client states it: a start and an end instant.
-
-The day count is not an input. The server counts it once, when the window is
-written (`canonicalChargeWindows` in `@cfs/core/utils/dates`).
+One charge window as a client states it: a start and an end instant — the
+same shape as the stored {@link ChargeWindow}.
 
 ```ts
 interface ChargeWindowInputType {
@@ -23291,18 +23300,18 @@ interface ChargeWindowInputType {
 
 ### `ChargeWindowType`
 
-One stored charge window: a start, an end, and the business days it charges.
+One stored charge window: a start and an end instant, and nothing else.
 
 A pair holds one or more of these (`OrderDocDates.charge_windows`). A hotspot
 out for three months and switched on three times is one pair with three
 windows: splitting it into three pairs would invent deliveries and free up the
 stock between windows.
 
-- **`days` is counted once, when the window is written**, and stored. The
-  holiday list has no versions, so recounting on read would move the days on a
-  document already sent out.
-- **`days` may be 0.** A window over a weekend charges nothing of its own; the
-  one-week minimum still applies to it when priced (`billableDays`).
+- 🔴 **No day count** (purchases-as-documents Phase 2 ruling 8). A window
+  used to store the business days it charged, but a pair's lines may be on
+  different price formulas, so no one count per window is every line's. Each
+  priced line freezes its OWN tier counts (`price.counts`), metered from these
+  windows by its formula when the line is priced.
 - **No `_fs` twins and no `uid`.** The array is one value to the shared-field
   merge (`shared: "value"` on the field).
 
@@ -23310,7 +23319,6 @@ stock between windows.
 interface ChargeWindowType {
   start: string;
   end: string;
-  days: number;
 }
 ```
 
@@ -23783,10 +23791,10 @@ Price breakdown for an order item (input — client sends partial data, server c
 
 ```ts
 interface ItemPriceType {
-  base_cents?: number;
+  uid_price_formula?: string;
+  rates?: RateSnapshotType[];
   base_percent?: number | null;
   replacement_cents?: number | null;
-  formula?: PriceFormulaType;
   subtotal_cents?: number;
   discount?: DiscountInputType | null;
   taxes?: Array<typeLiteral>;
@@ -24073,7 +24081,7 @@ twice — once by `DOC_LINE_ITEM_TYPES` here and once by a separate
 `OrderDocTransactionFeeItem` arm carrying a `PriceModifier` instead of an
 `OrderDocItemPrice` — and Zod answers a duplicate discriminator with a bare
 `Error`, not a `ZodError`, so `safeParse` could not trap it. A fee is now an
-ordinary line item whose `price.formula` says `percent_of_total`; the
+ordinary line item whose `price.base_percent` makes it percent-of-total; the
 per-document rollup (`totals.transaction_fees`) keeps the `PriceModifier`
 shape, because that IS a rate-and-amount summary rather than a line.
 
@@ -24090,17 +24098,23 @@ const OrderDocItemPrice: z.ZodType<OrderDocItemPriceType>;
 ### `OrderDocItemPriceType`
 
 Line item price in the full order document (all fields required after server compute).
-subtotal = pre-discount (base × qty × days_factor).
-subtotal_discounted = post-discount.
-total = subtotal_discounted + sum(taxes[].amount).
+
+- subtotal = `priceFromFormula(rates, counts, quantity)` — Σ tier
+  `rate × quantity × num ÷ den`, each tier rounded once (purchases-as-documents
+  Phase 2 ruling 8).
+- subtotal_discounted = post-discount.
+- total = subtotal_discounted + sum(taxes[].amount).
+
+A percent-of-total fee line states `base_percent` instead of a formula
+({@link checkLinePrice}).
 
 ```ts
 interface OrderDocItemPriceType {
-  base_cents: number;
+  price_formula: PriceFormulaRef | null;
+  rates: RateSnapshotType[];
+  counts: TierCountType[];
   base_percent?: number | null;
   replacement_cents?: number | null;
-  chargeable_days: number | null;
-  formula: PriceFormulaType;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
@@ -26288,7 +26302,7 @@ npm `.d.ts` emit TRUNCATED a spread inside an `as const`, and no core gate
 could see it.
 
 ```ts
-const COMPONENT_PRICE_KEYS: "base_cents" | "base_percent" | "replacement_cents" | "coa_revenue" | "formula" | "discountable"[];
+const COMPONENT_PRICE_KEYS: "uid_price_formula" | "rates" | "replacement_cents" | "coa_revenue" | "discountable"[];
 ```
 
 ### `COMPONENT_QUANTITY_DECIMALS`
@@ -26597,11 +26611,11 @@ Pricing details for a product.
 
 ```ts
 interface ProductPrice {
-  base_cents: number;
+  uid_price_formula: string | null;
+  rates: DatedRate[];
   base_percent?: number | null;
   replacement_cents?: number | null;
   coa_revenue: COARevenueType;
-  formula: PriceFormulaType;
   discountable: boolean;
 }
 ```
@@ -26683,6 +26697,14 @@ interface UpdateProductInputType {
   version: number;
 }
 ```
+
+### `checkCatalogPrice(price: typeLiteral, ctx: z.RefinementCtx): void`
+
+**A catalog price is a formula with dated rates, or a percentage of the
+document — exactly one** (D4; the catalog twin of {@link checkLinePrice}).
+The rates' own ordering rules run here too ({@link checkDatedRates}). That
+every key the formula names has a row in force is the WRITER's check: the
+formula is another document.
 
 ### `deriveProductImageUuids(images: readonly typeLiteral[] | undefined): string[]`
 
@@ -28537,10 +28559,10 @@ Pricing breakdown for a single credit-note line.
 
 ```ts
 interface CreditNoteDocItemPrice {
-  base_cents: number;
+  price_formula: PriceFormulaRef | null;
+  rates: RateSnapshotType[];
+  counts: TierCountType[];
   base_percent?: number | null;
-  chargeable_days: number | null;
-  formula: PriceFormulaType;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
@@ -30851,6 +30873,22 @@ const UserSchema: z.ZodType<User>;
 
 ## `@cfs/core/schemas/webshop-product`
 
+### `WebshopPrice`
+
+A webshop price: the product's formula and its dated rates (purchases-as-documents
+D4), mirrored. A webshop document mirrors a product whose type is confined to
+`WEBSHOP_PRODUCT_TYPES`, which excludes `transaction_fee`, so it never carries a
+percent-of-total price: it always names a formula and at least one rate.
+
+```ts
+interface WebshopPrice {
+  uid_price_formula: string;
+  rates: DatedRate[];
+  replacement_cents?: number | null;
+  discountable: boolean;
+}
+```
+
 ### `WebshopProduct`
 
 A webshop product document in the webshop-products Firestore collection.
@@ -30868,7 +30906,7 @@ interface WebshopProduct {
   eligible_in_store_pickup: boolean;
   eligible_shipping_ground: boolean;
   eligible_shipping_air: boolean;
-  price: typeLiteral;
+  price: WebshopPrice;
   shipping?: WebshopProductShipping;
   alternates: UidNameRefType[];
   components: WebshopProductComponent[];
@@ -30903,7 +30941,7 @@ interface WebshopProductComponent {
   quantity: number;
   zero_priced?: boolean;
   uid_tax_class?: string;
-  price: typeLiteral;
+  price: WebshopPrice;
 }
 ```
 
@@ -37260,17 +37298,7 @@ What {@link canonicalChargeWindows} guarantees about the dates it returns.
 
 ```ts
 interface CanonicalChargeDates {
-  charge_windows?: CountedChargeWindow[];
-}
-```
-
-### `CanonicalChargeWindowsOptions`
-
-Options for {@link canonicalChargeWindows}.
-
-```ts
-interface CanonicalChargeWindowsOptions {
-  extension?: boolean;
+  charge_windows?: ChargeWindowLike[];
 }
 ```
 
@@ -37303,25 +37331,12 @@ type ChargeDaysLabel = "day" | "days" | "week" | "weeks";
 
 ### `ChargeWindowLike`
 
-A window as the helpers read it. `days` is present once the window is stored.
+A window as the helpers read and store it.
 
 ```ts
 interface ChargeWindowLike {
   start: string;
   end: string;
-  days?: number;
-}
-```
-
-### `CountedChargeWindow`
-
-A stored window: its day count has been written.
-
-```ts
-interface CountedChargeWindow {
-  start: string;
-  end: string;
-  days: number;
 }
 ```
 
@@ -37377,7 +37392,7 @@ interface DurationDates {
 The possession duration returned by {@link getDuration}.
 
 There is no charge half: a pair's charged days are its stored window counts
-(`chargedDays`), counted once by `canonicalChargeWindows`.
+(`price.counts`, metered by `priceDocument` through each line's formula).
 
 ```ts
 interface DurationResult {
@@ -37433,7 +37448,7 @@ addChicagoDays("2026-06-16T00:00:00.000-05:00", -15); // "2026-06-01T00:00:00.00
 
 ### `applyDateEdit(dates: D, edit: DateEdit, ctx: DateEditContext): DateEditResult<D>`
 
-**Apply one date edit to a pair and recount it.** The one home of the date
+**Apply one date edit to a pair and canonicalize it.** The one home of the date
 rules, shared by the manager's date editor and the API.
 
 Instants are parsed in Chicago and returned in Chicago offset form, and every
@@ -37464,29 +37479,15 @@ The edits:
 
 Never throws for a bad edit: it returns `{ error }`.
 
-### `billableDays(days: readonly number[]): number`
+### `canonicalChargeWindows(dates: D, holidays: readonly string[]): D & CanonicalChargeDates`
 
-**The days a set of windows bills: Σ `max(days, 5)`.** Every window carries
-the one-week minimum, a 0-day window included (charge-windows decision 2).
+**Canonicalize a pair's dates**: every window's instants to Chicago offset
+form, and the pair's `days_active` — the business days of POSSESSION,
+delivery start to collection start, which reads no window and no formula —
+recounted against `holidays`.
 
-For a single window this is today's `max(days, 5)`, so a one-window pair
-prices exactly as before.
-
-```ts
-billableDays([3, 4, 2]); // 15 → 3.0 × base
-billableDays([3, 0, 4]); // 15
-billableDays([8, 7, 6]); // 21 → 4.2 × base
-```
-
-### `canonicalChargeWindows(dates: D, holidays: readonly string[], _: unknown): D & CanonicalChargeDates`
-
-**The one writer of stored day counts.** Recounts every window's `days` and
-the pair's `days_active` against `holidays`.
-
-- **Windows.** Instants are canonicalized to Chicago offset form. A pair with
-  no windows is left without them.
-- **Extension pairs keep their days** (`opts.extension`): the count is the
-  days added past what was billed, not a count of the window.
+A window carries no day count (Phase 2 ruling 8); a line meters the windows
+through its own formula when it is priced.
 
 Pure: returns a copy.
 
@@ -37497,19 +37498,16 @@ window's end. `null` when the pair has no windows.
 
 It is not a window: the gaps between windows charge nothing.
 
+### `chargeWindowBusinessDays(windows: readonly typeLiteral[], holidays: readonly string[]): number[]`
+
+**Each window's business days**, counted in Chicago against `holidays` — a
+formula-free DISPLAY count (the Five-day week meter counts the same days, but
+a line's bill is its own `price.counts`, never this).
+
 ### `chargeWindowsOf(dates: ChargeDates): ChargeWindowLike[] | null`
 
 A copy of a pair's windows, or `null` when it states none (a draft whose dates
 have not been authored yet). Every stored pair has at least one window.
-
-### `chargedDays(dates: typeLiteral): number`
-
-**The days a pair charges: Σ `window.days`.** Reads stored counts only.
-
-```ts
-chargedDays({ charge_windows: [{ start, end, days: 3 }, { start, end, days: 4 }] }); // 7
-chargedDays({ charge_windows: null }); // 0 — the pair bills no days
-```
 
 ### `chicagoDayAtTimeOf(instant: string, days: number, timeOf: string): string`
 
@@ -37874,6 +37872,8 @@ What the order ↔ invoice explanation arms need, per order.
 interface DocumentDiffContext {
   taxNameByUid: ReadonlyMap<string, string>;
   isOrderFrozen: fnOrConstructor;
+  formulas: PricingFormulas;
+  holidays: readonly string[];
 }
 ```
 
@@ -38184,17 +38184,18 @@ each X. So:
 
 An order whose dates were extended after it was billed has no quantity left to
 bill and still has money left to bill. That remainder is each billed row priced
-as a D7 EXTENSION (api-cloudrun#997): for
-`billableDays(order windows) − billableDays(billed windows)` days with the
-one-week minimum skipped, through `priceDocument`'s line pricer — so it is
-exactly what an extension section on an invoice bills (#997 D11).
+as a D7 EXTENSION (api-cloudrun#997): at the counts
+`meter(order windows) − meter(billed windows)`, both metered through the
+billed row's formula (each side carries its own minimum, so the difference
+skips it), through `priceDocument`'s line pricer — so it is exactly what an
+extension section on an invoice bills (#997 D11, Phase 2 ruling 8).
 
 🔴 **An extension is a change of WINDOW SET, and its days are the PAIRS' days.**
 A billed row is extended, or shortened, only when the order pair's windows
 cover DIFFERENT Chicago calendar dates than the windows that billed it; the
-amount is then `billableDays(order windows) − billed days`, sign and all, from
-the two pairs' stored window days — never a line's `chargeable_days`. A
-{@link BilledWindow} carries that pair's last window end, its window days, and
+amount is then `meter(order windows) − billed counts`, sign and all, from the
+two pairs' windows metered through the row's formula — never a line's own
+stored counts. A {@link BilledWindow} carries that pair's last window end and
 each window's bounds.
 
 ⚠️ **This widened on 2026-09-17 (api-cloudrun#1028 phase 1a), and the widening
@@ -38204,7 +38205,7 @@ all. The two questions — *did the window move?* and *by how much, which way?* 
 are now asked separately in {@link extensionGroups}; the first is answered by
 dates ({@link sameWindowDates}) and the second by day counts.
 
-Both cuts reverse the first one, which read line `chargeable_days` on both sides.
+Both cuts reverse the first one, which read the line's stored days on both sides.
 The 2026-09-16 census (prod and dev agree) found ONE genuine extension in the
 corpus (#898) against 34 orders reading a positive extension on an UNMOVED
 window — $59.6k — and 60 remainder sections charging from the day after their
@@ -38220,7 +38221,7 @@ operator held by hand is extended by the pairs' difference on top of whatever
 it billed. A row billed on no pair — no `destinations` entry, or no end —
 extends by nothing: an unknown window is not a later one.
 
-🔴 **Never price "the extra days" as an ordinary line.** `five_day_week` floors
+🔴 **Never price "the extra days" as an ordinary line.** Five-day week floors
 at one week, so `price(3 days)` charges a week the billed row already paid.
 The D7 day count floors each SIDE at the week instead, and skips the floor on
 the difference. A `fixed` row never read its days and extends by nothing.
@@ -38231,8 +38232,8 @@ an `extension` row at the path it extends: it adds no units, and
 {@link accountLine} subtracts its money, priced at its own added days, from
 what the order's days add to the unit rows.
 
-⚠️ **A line's `chargeable_days` is read for its RATE terms only**, never for
-the extension's days — see above.
+⚠️ **A billed line is read for its RATE terms and formula only**, never for
+the extension's counts — see above.
 
 ## Money is PRE-TAX, in integer cents
 
@@ -38305,14 +38306,25 @@ interface AccountedInvoice {
 }
 ```
 
+### `AccountingContext`
+
+What metering a window set needs (ruling 8): every formula the order's and
+invoices' lines name, and the holiday list.
+
+```ts
+interface AccountingContext {
+  formulas: PricingFormulas;
+  holidays: readonly string[];
+}
+```
+
 ### `BilledWindow`
 
-A pair's charge windows, as an extension compares them: where the last one ends, each one's days, and each one's bounds.
+A pair's charge windows, as an extension compares them: where the last one ends, and each one's bounds.
 
 ```ts
 interface BilledWindow {
   end: string;
-  days: readonly number[];
   windows: readonly WindowBounds[];
 }
 ```
@@ -38335,10 +38347,11 @@ interface ExtensionGroup {
   item: LineItem;
   via: "direct" | "substitute";
   quantity: number;
-  billed_days: number;
+  billed_counts: readonly TierCount[];
   billed_end: string;
   billed_set: readonly WindowBounds[];
-  extension_days: number;
+  extension_counts: readonly TierCount[];
+  extension_direction: -1 | 1;
   section: [string, string];
   last_billed: typeLiteral;
 }
@@ -38431,7 +38444,7 @@ interface OverbillingCreditLine {
   uid_invoice_item: string;
   order_path: string[];
   quantity: number;
-  credited_days?: number;
+  credited_counts?: TierCount[];
   preview_cents: number;
 }
 ```
@@ -38530,7 +38543,7 @@ interface WindowBounds {
 }
 ```
 
-### `accountLine(orderLine: LineItem, billed: InvoicedAtPath | undefined, orderWindow: BilledWindow | null, fulfilled?: number): LineAccount`
+### `accountLine(orderLine: LineItem, billed: InvoicedAtPath | undefined, orderWindow: BilledWindow | null, ctx: AccountingContext, fulfilled?: number): LineAccount`
 
 Account for one order line against what the invoices bill at its path.
 
@@ -38539,6 +38552,7 @@ Account for one order line against what the invoices bill at its path.
 - `orderLine` — The order line, at its current quantity
 - `billed` — {@link invoicedByPath}'s entry for the line's path, if any
 - `orderWindow` — {@link orderLineWindow} for the line; `null` extends nothing
+- `ctx` — the formulas and holidays the extension meters with
 - `fulfilled` — the FULFILLMENT row's quantity at this line's path, if one exists
 
 ### `billingReversals(creditNotes: readonly AccountedCreditNote[]): BillingReversals`
@@ -38561,7 +38575,7 @@ A line counts only when all four hold, and each one is load-bearing:
 
 Anything else is reported in `unkeyed` rather than guessed at.
 
-### `buildOverbillingCredits(order: RemainingOrderSource, invoices: readonly AccountedInvoice[], _: unknown): OverbillingCredits`
+### `buildOverbillingCredits(order: RemainingOrderSource, invoices: readonly AccountedInvoice[], ctx: AccountingContext, _: unknown): OverbillingCredits`
 
 **Build the credit notes that give back what an order's invoices over-billed
 it** (api-cloudrun#1028). The ONE author of the offer: the server rebuilds it
@@ -38606,7 +38620,7 @@ live CRMS-authored invoice — **plus**, per path:
 terms, while `priceCreditNote` prices the stored INVOICE line — and where the
 two disagree, the second is what the operator will be asked to approve.
 
-### `buildRemainingInvoice(order: RemainingOrderSource, invoices: readonly RemainingInvoiceSource[], creditNotes: readonly AccountedCreditNote[], _: unknown): RemainingInvoice`
+### `buildRemainingInvoice(order: RemainingOrderSource, invoices: readonly RemainingInvoiceSource[], creditNotes: readonly AccountedCreditNote[], ctx: AccountingContext, _: unknown): RemainingInvoice`
 
 Build the invoice that bills what is left on an order: new lines whole,
 quantity increases at their own path, and each extension of dates as a
@@ -38649,16 +38663,26 @@ as {@link remainingForOrder}.
 
 - `creditNotes` — EVERY credit note against the invoices — all of them, never a page
 
+### `countsDirection(item: LineItem, counts: readonly TierCount[]): -1 | 0 | 1`
+
+The DIRECTION of a count delta: the sign of the money it prices to at the
+line's own rates, or — on a $0 line — the sign of its summed periods. `+1`
+is an extension still owed, `−1` a shortening, `0` nothing.
+
+### `countsMagnitude(item: LineItem, counts: readonly TierCount[]): TierCount[]`
+
+The magnitude of a count delta — every tier's sign flipped when the direction is negative.
+
 ### `crmsAuthoredInvoices(invoices: readonly AccountedInvoice[]): string[]`
 
 The uids of the LIVE invoices CRMS authored — a remainder refuses when any exist.
 
-### `extensionGroups(orderLine: LineItem, billed: InvoicedAtPath | undefined, orderWindow: BilledWindow | null): ExtensionGroup[]`
+### `extensionGroups(orderLine: LineItem, billed: InvoicedAtPath | undefined, orderWindow: BilledWindow | null, ctx: AccountingContext): ExtensionGroup[]`
 
 The extension still owed on an order line, as groups of billed units that
 share their terms and their cumulative billed days (api-cloudrun#680 R1).
 
-The walk: every `five_day_week` unit row on a known {@link BilledWindow}
+The walk: every time-formula unit row on a known {@link BilledWindow}
 starts a group at its pair's billable days and end. Each extension row then moves its
 quantity from the groups whose window ENDS earliest (then fewest days), in
 invoice order, to `billed days + the extension pair's days`, ending where the
@@ -38677,17 +38701,17 @@ shortening reported nothing at all. They are now asked separately:
 
 1. **Did the window move?** {@link sameWindowDates} compares the order pair's
    windows against the group's {@link ExtensionGroup.billed_set}, window for
-   window, as Chicago calendar dates. Identical ⇒ `extension_days = 0`,
+   window, as Chicago calendar dates. Identical ⇒ no extension,
    whatever the day counts say. 🔴 This is the holiday-recount guard, and it is
    why the comparison is of DATES and not of `days`: a stored `days` is frozen
    at write while the order's is recounted, so a delta under an identical date
    set is always an artefact of the recount.
-2. **How much, and which way?** `billableDays(order pair windows) − billed_days`,
+2. **How much, and which way?** `meter(order pair windows) − billed_counts`,
    sign and all. Negative is a shortening — over-billing, for the credit-note
    flow — and positive is an extension still owed.
 
 ⚠️ **There is deliberately no sub-cover test.** A window set that shrinks by
-date while `billableDays` RISES (one window split into several, each floored to
+date while the metered count RISES (one window split into several, each floored to
 a week) is a genuine extension, and by owner ruling an invoice stating its own
 windows is never over-billing — so a bill inside a narrower or split cover
 credits nothing.
@@ -38767,9 +38791,9 @@ order's own ratio to X's components. Netting the total afterwards would leave
 every descendant crediting units their parent no longer bills.
 
 ⚠️ **Units only. Days are NOT netted here** — a credited shortening is reported
-as a suppressed offer instead. `billed_days` is derived inside
+as a suppressed offer instead. `billed_counts` is derived inside
 {@link extensionGroups}, where extension rows split and merge groups, so a
-`(path, quantity, days)` triple cannot say which group loses the days.
+`(path, quantity, counts)` triple cannot say which group loses the time.
 
 **Parameters**
 
@@ -38786,7 +38810,7 @@ The window of the order pair an order line hangs under (`path[0]`), or `null`.
 
 A pair's {@link BilledWindow}, or `null` when it has no windows.
 
-### `remainingForOrder(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[], orderDestinations: readonly DocDestinationType[], _: unknown): RemainingForOrder`
+### `remainingForOrder(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[], orderDestinations: readonly DocDestinationType[], ctx: AccountingContext, _: unknown): RemainingForOrder`
 
 What is left to bill on an order: new lines in full, quantity deltas at
 existing paths, and date-extension money on rows already billed (D4).
@@ -39051,6 +39075,8 @@ interface InvoiceSyncContext {
   taxNameByUid: ReadonlyMap<string, string>;
   orderFrozen: boolean;
   invoiceChargeWindows: readonly PairChargeWindows[];
+  formulas: PricingFormulas;
+  holidays: readonly string[];
 }
 ```
 
@@ -39312,10 +39338,10 @@ which is what `api-cloudrun`'s `buildLineItem` did, twice, on the money path.
 
 ```ts
 interface PricingPrice {
-  base_cents?: number;
+  price_formula?: typeLiteral | null;
+  rates?: readonly RateSnapshot[];
+  counts?: readonly TierCount[];
   base_percent?: number | null;
-  formula?: PriceFormulaType;
-  chargeable_days?: number | null;
   discount?: typeLiteral | null;
   taxes?: readonly typeLiteral[];
 }
@@ -39376,7 +39402,7 @@ interface Tax {
 A transaction fee line item.
 
 Carries the same `PriceObject` every other line carries — a fee is an
-ordinary line whose `price.formula` is `percent_of_total`, not a second price
+ordinary line whose `price.base_percent` makes it percent-of-total, not a second price
 shape. It differs from a `PreTaxLineItem` only in that it is priced FROM the
 document total rather than into it, which is why it has its own predicate and
 its own stage in `priceDocument`.
@@ -39570,13 +39596,13 @@ is nothing for currency.js to be careful about.
 Calculate the complete price for a single line item.
 Runs the full pipeline: subtotal → discount → taxes → total.
 
-### `calculateItemSubtotal(item: PricingItem, _: unknown): typeLiteral`
+### `calculateItemSubtotal(item: PricingItem): typeLiteral`
 
-Calculate the pre-discount and post-discount subtotals for a single line item.
-
-`subtotal = base × quantity × max(chargeable_days / 5, 1)` for `five_day_week`,
-or `base × quantity` for `fixed`. The one-week floor means the day factor only
-applies above 5 chargeable days.
+Calculate the pre-discount and post-discount subtotals for a single line item:
+`priceFromFormula(rates, counts, quantity, discount)` — Σ tier
+`rate × quantity × num ÷ den`, each tier rounded once, then the discount
+(purchases-as-documents Phase 2 ruling 8). Five-day week's one-week minimum
+and an extension's skipped minimum are already in the counts.
 
 ### `calculateItemTax(item: PricingItem, taxes: Tax[], _: unknown): PriceModifier[]`
 
@@ -40077,7 +40103,7 @@ every invoice caller.
 ### `getXeroUnitAmountFromCents(subtotalCents: number, quantity: number): number`
 
 Compute the Xero unit amount from subtotal and quantity.
-Bakes duration (chargeable_days × formula) into per-unit price,
+Bakes duration (the line's formula counts) into per-unit price,
 since Xero has no concept of rental duration.
 
 ## The round trip does not close, and that is a property, not a bug
@@ -40121,7 +40147,7 @@ half-done.
 **Parameters**
 
 - `subtotalCents` — Pre-discount subtotal in integer cents
-(base_cents × days × formula × quantity)
+(Σ rate × quantity × count, the line's formula money)
 - `quantity` — Item quantity. May be fractional; scaled rather than
 narrowed, so a non-integer cannot throw on the Xero push path.
 
@@ -40223,7 +40249,7 @@ the operator's to change at all?* Both exist, and neither subsumes the other.
 {@link invoiceItemsMatch}, and the reason there is only one comparator.
 
 Returns sorted, qualified field names (`name`, `price.taxes`,
-`price.chargeable_days`); `[]` means the rows agree. Invoice-only fields
+`price.counts`); `[]` means the rows agree. Invoice-only fields
 ({@link INVOICE_ONLY_ITEM_FIELDS}) are filtered out of both sides first, so an
 override is never a difference.
 
@@ -41270,8 +41296,8 @@ interface CreditableLine {
   path: string[];
   uid: string;
   billed: number;
-  billed_days: number;
-  unit_days: number;
+  billed_time: TimeAmount;
+  unit_time: TimeAmount;
   units: number;
 }
 ```
@@ -41385,8 +41411,20 @@ What {@link orderInvoiceActionsFor} needs that the order alone does not carry.
 interface OrderInvoiceOfferContext {
   invoices?: readonly AccountedInvoice[];
   creditNotes?: readonly AccountedCreditNote[];
+  accounting?: AccountingContext;
   replacement_units?: number;
   on_request_units?: number;
+}
+```
+
+### `TimeAmount`
+
+An exact, non-negative-denominator rational — a quantity of a formula's periods.
+
+```ts
+interface TimeAmount {
+  num: number;
+  den: number;
 }
 ```
 
@@ -41402,6 +41440,11 @@ offer's limits. Operator routes only — see the module doc.
 ### `assertOrderInvoiceAction(order: OfferOrder, ctx: OrderInvoiceOfferContext, request: OrderInvoiceActionRequest): void`
 
 Refuse an order-invoicing action the ruleset does not offer. Operator routes only.
+
+### `countsTime(counts: readonly typeLiteral[] | null | undefined): TimeAmount`
+
+**One unit's billed time**: Σ a line's `counts`, exact. A line with no counts
+(none stored) counts as one period, so the budget is exactly its unit count.
 
 ### `creditNoteActionsFor(note: OfferCreditNote, ctx: CreditNoteOfferContext): InvoiceActionOffer[]`
 
@@ -41431,11 +41474,12 @@ Credit left on every billed line, net of `priorNotes` (D3). **Arm B of the
 api's credit-note cap, lifted here** (`api-cloudrun/src/lib/creditNoteCap.ts`)
 so the manager offers exactly what the server will accept.
 
-ONE budget, in unit-days. A null `chargeable_days` on a prior note line means
-"whole units at the row's own terms", NOT one day — every note stored before
-api-cloudrun#1028 has it null, and reading those as one day would leave room
-to credit units the note already gave back. A line with no `chargeable_days`
-of its own counts as 1 day, which makes the budget exactly the unit count.
+ONE budget, in unit-TIME: quantity × Σ `counts`, exact (ruling 8 — the days
+a line bills are its frozen counts, in its formula's own periods). A prior
+note line credited its own counts: the invoice line's for whole units, the
+credited days stated through the formula for a days credit
+(`priceCreditNote`). A line with no counts counts as one period, which makes
+the budget exactly the unit count.
 
 ### `invoiceActionSubject(action: InvoiceActionId): InvoiceActionSubject`
 
@@ -42249,7 +42293,7 @@ server's signature.
 The {@link FulfillmentLineSource} of a CATALOG component row — a row inside a
 substituted subtree, or a component sent with an exchange's replacement.
 
-Every descriptive fact comes from `deriveLineCatalogFacts`, the one author an
+Every descriptive fact comes from `deriveLineCatalogShape`, the one author an
 order line's facts come from too, so a component reads the same on an order
 and on a fulfillment. Resolve the row BY PATH (`catalogComponentAt`), never
 by first uid.
@@ -45501,9 +45545,8 @@ interface CustomLineBuildOptions {
   type: DocLineItemTypeType;
   name?: string;
   quantity?: number;
-  base_cents?: number;
-  formula?: PriceFormulaType;
-  chargeDays: number | null;
+  formula: PricingFormula;
+  rates?: readonly RateSnapshot[];
   taxes: ReadonlyArray<typeLiteral>;
   uid_tax_class: string;
   uidOrder?: string;
@@ -45542,6 +45585,20 @@ interface LineCatalogFacts {
 }
 ```
 
+### `LinePriceSnapshotContext`
+
+What a builder needs to snapshot a line's price (D4, Q13): every formula its
+products name, and the line's pricing date — order → earliest delivery
+start, invoice → `invoice.date`. `asOf: null` takes the catalog's open rows
+({@link catalogRateSnapshot}).
+
+```ts
+interface LinePriceSnapshotContext {
+  formulas: PricingFormulas;
+  asOf: string | null;
+}
+```
+
 ### `OrderLineBuildOptions`
 
 Shared options for building order line items from a Typesense
@@ -45558,7 +45615,6 @@ can allocate. Each builder now writes every field it emits.
 ```ts
 interface OrderLineBuildOptions {
   quantity: number;
-  chargeDays: number | null;
   inheritedAncestry?: string[];
   uidOrder?: string;
   taxClassForType: fnOrConstructor;
@@ -45696,7 +45752,7 @@ once to 4 dp (where it is stored), and nothing after that rounds until the
 single ceil — the closure rule `cfs-money` states for money, applied to a
 count.
 
-### `deriveLineCatalogFacts(product: CatalogLineSource, zeroPriced: boolean | null): LineCatalogFacts`
+### `deriveLineCatalogFacts(product: CatalogLineSource, zeroPriced: boolean | null, ctx: LinePriceSnapshotContext): LineCatalogFacts`
 
 The ONE author of a product line's catalog facts — type, stock method,
 `zero_priced` and the catalog half of the price — decided together, so no
@@ -45709,13 +45765,20 @@ subset could write a flag/price pair nothing else would.
   writer: a builder takes {@link zeroPricedForSlot} of the catalog row, while
   api-cloudrun's order writer carries the STORED flag by row and derives only
   for a new row — a SNAPSHOT (owner, 2026-10-12). Whatever it is, the price
-  follows it here: flagged → `base_cents: 0`.
-- **`formula` is the catalog's**, falling back to the type default only when
-  the catalog states none. Two prod rentals are deliberately `fixed` (Combo
-  Hangers); a type-derived formula would bill them per day.
-- **`percent_of_total`** carries its unit in `base_percent` and must state
-  `base_cents: 0` (`checkPriceBaseUnit`); every other formula states
+  follows it here: flagged → every rate `0`.
+- **The formula is the catalog's** (`uid_price_formula`), never the type's.
+  Two prod rentals are deliberately on Fixed (Combo Hangers); a type-derived
+  formula would bill them per day.
+- **The rates are the catalog's in force at `ctx.asOf`** ({@link catalogRateSnapshot}).
+- **A percent-of-total fee** carries its unit in `base_percent` and no formula
+  or rates ({@link checkLinePrice}); every other product states
   `base_percent: null`.
+
+### `deriveLineCatalogShape(product: CatalogLineSource, zeroPriced: boolean | null): Omit<LineCatalogFacts, "price">`
+
+The catalog facts of a line that carries NO price — type, stock method,
+`zero_priced` and the revenue account. A fulfillment row reads these and
+needs no formula.
 
 ### `isDirectComponent(comp: typeLiteral): boolean`
 
@@ -45788,21 +45851,21 @@ component line written before the stamp, and there is no catalog fallback
 change under a catalog edit made after the line was written, and there is
 nothing to await.
 
-### `retypedLinePrice(price: P, type: DocLineItemTypeType, chargeDays: number | null): P`
+### `retypedLinePrice(price: P, type: DocLineItemTypeType, formula: PricingFormula): P`
 
 A custom line's price after its TYPE changes — the one rule both manager
 stores' `setItemType` apply (api-cloudrun#1286). They used to disagree:
 retyping rental → sale, the order store nulled `replacement_cents` and the
 invoice store kept it.
 
-The formula and `chargeable_days` follow the new type, exactly as
-{@link buildCustomOrderLine} defaults them. `replacement_cents` is restated
-ONLY where the key is present (an invoice line has none; a writer's key set
-is a claim about its stored lines): `0` for a rental, `null` otherwise.
-`taxes` is cleared — the reprice re-derives them from the line's class.
-
-`chargeDays` is the caller's: an order passes its destination's charged days,
-an invoice `null` (its operator fills the Duration cell).
+The formula follows the new type — `formula` is the caller's default for it
+(Five-day week for a rental, Fixed otherwise), exactly as
+{@link buildCustomOrderLine} is defaulted. The rates move onto the new
+formula's keys: a key both formulas name keeps its amount, a new key takes
+the line's first amount, so a one-key line keeps its price. `counts` are
+cleared for the pricer to re-meter. `replacement_cents` is restated ONLY where
+the key is present (an invoice line has none): `0` for a rental, `null`
+otherwise. `taxes` is cleared — the reprice re-derives them from the class.
 
 ### `zeroPricedForSlot(slot: CatalogSlot | null): boolean | null`
 
@@ -46242,14 +46305,12 @@ interface LinePriceMoney {
 
 Pricing inputs that come from the DOCUMENT rather than the line.
 
-Only `priceDocument` (`@cfs/core/utils/price-document`) derives these. A
-writer that prices a line on its own never passes them, which is the point:
-the document decides, so no per-line caller can forget to (D1 of the
-priceDocument campaign, api-cloudrun#997).
+Only `priceDocument` (`@cfs/core/utils/price-document`) and its credit and
+remainder siblings derive these.
 
 ```ts
 interface LinePricingOptions {
-  extensionDays?: number;
+  extension?: boolean;
 }
 ```
 
@@ -46260,8 +46321,8 @@ The declared half of a stored ORDER line price, derived from
 
 🔴 **A hand-written declared literal drops every key it does not name, and
 that is not hypothetical.** `buildLineItem` (api-cloudrun) named four keys and
-not `base_percent`, so every `percent_of_total` fee line lost its rate after
-the catalog had filled it and `checkPriceBaseUnit` refused the write
+not `base_percent`, so every percent-of-total fee line lost its rate after
+the catalog had filled it and the price-shape check refused the write
 (api-cloudrun#984) — at least the fourth drop of that shape.
 
 The `Record` annotation makes this exhaustive in BOTH directions: a key added to the
@@ -46317,11 +46378,11 @@ An order line's declared price half, every nullable key present.
 
 ```ts
 interface OrderDeclaredPrice {
-  base_cents: number;
+  price_formula: PriceFormulaRef | null;
+  rates: RateSnapshot[];
+  counts: TierCount[];
   base_percent: number | null;
   replacement_cents: number | null;
-  chargeable_days: number | null;
-  formula: PriceFormulaType;
 }
 ```
 
@@ -46425,10 +46486,10 @@ which is what `api-cloudrun`'s `buildLineItem` did, twice, on the money path.
 
 ```ts
 interface PricingPrice {
-  base_cents?: number;
+  price_formula?: typeLiteral | null;
+  rates?: readonly RateSnapshot[];
+  counts?: readonly TierCount[];
   base_percent?: number | null;
-  formula?: PriceFormulaType;
-  chargeable_days?: number | null;
   discount?: typeLiteral | null;
   taxes?: readonly typeLiteral[];
 }
@@ -46570,7 +46631,7 @@ interface Tax {
 A transaction fee line item.
 
 Carries the same `PriceObject` every other line carries — a fee is an
-ordinary line whose `price.formula` is `percent_of_total`, not a second price
+ordinary line whose `price.base_percent` makes it percent-of-total, not a second price
 shape. It differs from a `PreTaxLineItem` only in that it is priced FROM the
 document total rather than into it, which is why it has its own predicate and
 its own stage in `priceDocument`.
@@ -46626,11 +46687,6 @@ gains a `replacement_cents` it does not declare:
   surely as a real amount. A stored `sale` line legitimately carries `0`, and
   the product cascade RE-TYPES such a line in place.
 - `taxes: []` — the structural exemption above.
-- `chargeable_days: null` — ⚠️ **this one is NOT derivable from
-  `ITEM_CONTRACTS`**, unlike the other three. There is no such axis on
-  `ItemContract`. It is asserted here as a new fact, on arithmetic
-  inertness: a fee's `formula` is `fixed`, where `getDaysFactor` returns 1
-  regardless, so a stored day count would be a number that explains nothing.
 - `taxes_base: []` — only when the caller authors the key at all; see below.
 
 ## `taxesBase` is the PROJECTED half
@@ -46871,13 +46927,13 @@ is nothing for currency.js to be careful about.
 Calculate the complete price for a single line item.
 Runs the full pipeline: subtotal → discount → taxes → total.
 
-### `calculateItemSubtotal(item: PricingItem, _: unknown): typeLiteral`
+### `calculateItemSubtotal(item: PricingItem): typeLiteral`
 
-Calculate the pre-discount and post-discount subtotals for a single line item.
-
-`subtotal = base × quantity × max(chargeable_days / 5, 1)` for `five_day_week`,
-or `base × quantity` for `fixed`. The one-week floor means the day factor only
-applies above 5 chargeable days.
+Calculate the pre-discount and post-discount subtotals for a single line item:
+`priceFromFormula(rates, counts, quantity, discount)` — Σ tier
+`rate × quantity × num ÷ den`, each tier rounded once, then the discount
+(purchases-as-documents Phase 2 ruling 8). Five-day week's one-week minimum
+and an extension's skipped minimum are already in the counts.
 
 ### `calculateItemTax(item: PricingItem, taxes: Tax[], _: unknown): PriceModifier[]`
 
@@ -46920,9 +46976,9 @@ A fee is priced from the document, not from itself, so it needs the one input
 `subtotal_discounted` (pre-tax, post-discount — the same base the fee has
 always been computed against).
 
-- `percent_of_total` → `basisCents × base_percent / 100`.
-- anything else → the ordinary per-unit subtotal, `base_cents × quantity`, so
-  a flat processing charge stays expressible without a second formula.
+- percent-of-total (`base_percent`) → `basisCents × base_percent / 100`.
+- anything else → the ordinary per-unit subtotal from the line's formula, so
+  a flat processing charge stays expressible on the Fixed formula.
 
 Exact: the percentage is applied as `× rate ÷ 100` over integer cents rather
 than as a pre-divided float factor, and rounds half-up exactly once.
@@ -47116,7 +47172,7 @@ an absent nullable key to `null`. Extra keys (computed money, `discount`,
 `taxes`) are ignored — they are the pricer's, not the caller's.
 
 ⚠️ **Every order line therefore carries `base_percent`** — `null` on all but a
-`percent_of_total` line. That matches what `buildOrderLineFromProduct` already
+percent-of-total fee line. That matches what `buildOrderLineFromProduct` already
 stages, and `invoicePriceDifferences` drops null keys before comparing.
 
 ### `deriveNextEventDate(order: typeLiteral): typeLiteral`
@@ -47155,7 +47211,7 @@ and the quote / Xero / Calendar / Trello exporters.
 boundaries take the latest; `days_active` takes the largest non-null value.
 
 There is no charge half (charge-windows step 5): a pair's charge is its
-windows, read with `chargeEnvelope` / `chargedDays` from `utils/dates`.
+windows, read with `chargeEnvelope` from `utils/dates`.
 
 ### `documentRenderRows(items: readonly T[], levels: readonly string[], _: unknown): DocumentRenderRows<T>`
 
@@ -47186,11 +47242,10 @@ Keyed by PATH, never by uid: `item.uid` repeats within one document.
 
 ### `getDefaultChargeDays(dates: ChargeDates, holidays: string[]): number | null`
 
-The days a pair's charge windows charge, counted against `holidays`: Σ each
-window's business days. Returns `null` when the dates are incomplete or a
-window cannot be counted.
-
-For a stored pair, read the stored counts with `chargedDays` instead.
+The business days a pair's charge windows span, counted against `holidays`:
+Σ each window's business days — a formula-free DISPLAY count. What a line
+bills is its own `price.counts`, metered through its formula. Returns `null`
+when the dates are incomplete or a window cannot be counted.
 
 ### `getDestinationPairItemName(destination: Pick<DestinationType, "delivery" | "collection">, index: number): string`
 
@@ -47579,12 +47634,12 @@ Check whether any pre-tax line item has taxes applied.
 
 Price one `transaction_fee` line for storage.
 
-## The stored amount is `base_cents × quantity`, and the basis is not read
+## A flat fee is priced from its own formula, and the basis is not read
 
-A **flat** fee (`formula: "fixed"`) is priced entirely from its own fields, so
+A **flat** fee (on the Fixed formula) is priced entirely from its own fields, so
 the document basis is irrelevant and is passed as `0`.
 {@link calculateTransactionFeeAmountCents} falls through to the ordinary
-per-unit subtotal for any formula that is not `percent_of_total`, honouring
+per-unit subtotal for any fee that is not percent-of-total, honouring
 the discount — a flat fee is legitimate and `checkItemPriceFormula`
 (`@cfs/core/schemas/common.ts`) deliberately does not assert the converse.
 
@@ -47823,18 +47878,17 @@ interface ChargeWindowPair {
 
 One line that breaks the charge-window pair invariant (core#113).
 
-`stored` is what the document carries; `expected` is what the pair's windows
-bill. Both are stated so a report can show the difference without re-deriving
-either.
+`stored` is what the line carries; `expected` is what its formula meters from
+the pair's windows. Both are stated so a report can show the difference
+without re-deriving either.
 
 ```ts
 interface ChargeWindowPairViolation {
   item_uid: string;
   path: readonly string[];
   divider_path: readonly string[];
-  window_days: readonly number[];
-  stored: number | null;
-  expected: number;
+  stored: readonly TierCount[];
+  expected: readonly TierCount[];
 }
 ```
 
@@ -47844,9 +47898,9 @@ The stored price of one credit-note line: the invoice line's declared half plus 
 
 ```ts
 interface CreditLinePrice {
-  base_cents: number;
-  chargeable_days: number | null;
-  formula: indexedAccess;
+  price_formula: PriceFormulaRef | null;
+  rates: RateSnapshot[];
+  counts: TierCount[];
 }
 ```
 
@@ -47858,7 +47912,7 @@ One invoice line to credit, and how many of it.
 interface CreditSelectionLine {
   line: L;
   quantity: number;
-  credited_days?: number;
+  credited_counts?: readonly TierCount[];
 }
 ```
 
@@ -47876,26 +47930,14 @@ interface CreditSourceLine {
 }
 ```
 
-### `LineExtension`
-
-The two day counts a D7 extension is priced from.
-
-```ts
-interface LineExtension {
-  order_charge_days: number;
-  billed_charge_days: number;
-}
-```
-
 ### `PairChargeWindows`
 
-The charge windows of one destination pair, as the pricer reads them: stored
-day counts only, so pricing never needs the holiday list.
+The charge windows of one destination pair, as the pricer reads them.
 
 ```ts
 interface PairChargeWindows {
   divider_path: readonly string[];
-  days: readonly number[];
+  windows: readonly typeLiteral[];
 }
 ```
 
@@ -47909,10 +47951,21 @@ interface PriceDocumentContext {
   tax: DocumentTaxContext;
   extensions?: readonly PriceDocumentExtension[];
   charge_windows: readonly PairChargeWindows[];
+  formulas: PricingFormulas;
+  holidays: readonly string[];
 }
 ```
 
 ### `PriceDocumentExtension`
+
+A date-extension section (#680, D7): every line whose `path` starts with
+`divider_path` bills the days the order's window grew past what was billed.
+
+The count is the LINE's own `counts` — the ADDED days, stated once by the
+writer that builds the section (owner, 2026-09-15) with the minimum skipped.
+The section supplies only the rule, never a count, so a re-price reads
+nothing beyond the document. Derive the sections with
+{@link invoiceExtensionSections}.
 
 ```ts
 interface PriceDocumentExtension {
@@ -47941,7 +47994,7 @@ line added to a finished order priced on whatever days the client sent), and
 "no line is carried" re-derives every frozen line's money.
 
 🔴 **A carried line's days are read off its STORED row, never off the row
-being priced.** The order input schema strips `chargeable_days`, so on a PUT
+being priced.** The order input schema strips `counts`, so on a PUT
 every incoming row arrives with none. Reading the incoming row is how an
 operator's quantity nudge on complete order 1013 nulled 25 lines' days and
 repriced it from $4,952.91 to $2,667.17 at the one-week floor (2026-10-08).
@@ -47978,9 +48031,28 @@ interface PricedDocument {
 }
 ```
 
+### `PricingFormula`
+
+A price formula as a pricer or a line builder reads it: the rule, plus the
+identity a line snapshots (`price.price_formula = { uid, name, basis }`).
+
+```ts
+type PricingFormula = PriceFormulaRule & typeLiteral;
+```
+
+### `PricingFormulas`
+
+**Every formula a set of lines names, keyed by uid** — build it with
+{@link formulaUidsOf} and a point read per uid. Retired (`active: false`)
+formulas included: a carried or frozen line keeps the formula it priced by.
+
+```ts
+type PricingFormulas = ReadonlyMap<string, PricingFormula>;
+```
+
 ### `StoredDaysRow`
 
-A stored order row as {@link carriedLines} reads it: its identity, and the days it carries.
+A stored order row as {@link carriedLines} reads it: its identity, and the counts it carries.
 
 ```ts
 interface StoredDaysRow {
@@ -47988,67 +48060,56 @@ interface StoredDaysRow {
 }
 ```
 
-### `carriedLines(items: readonly T[], document: PriceDocumentKind): ReadonlyMap<T, number | null>`
+### `carriedLines(items: readonly T[], document: PriceDocumentKind): ReadonlyMap<T, readonly TierCount[]>`
 
-**The lines that keep the day counts they carry, and those days**: on a
+**The lines that keep the counts they carry, and those counts**: on a
 `complete` or `canceled` order (charge-windows census decision, 2026-09-16),
 every line that pairs with a row of `stored_items`, mapped to THAT STORED
-ROW's `chargeable_days` — never its own, which an API write has stripped (see
-{@link PriceDocumentKind}). Empty on any other document. A void,
-paid or settled invoice never reaches here: it is refused outright.
+ROW's `counts` — never its own, which an API write has stripped (see
+{@link PriceDocumentKind}). Empty on any other document. A void, paid or
+settled invoice never reaches here: it is refused outright.
 
-The census decision protects days the order ALREADY carried. A line the edit
-adds has none to protect, so it derives its days from its pair's windows like
-any live line (api-cloudrun#1341) — a `custom-` line books nothing, so adding
-one does not reopen the order.
+The census decision protects counts the order ALREADY carried. A line the
+edit adds has none to protect, so it meters its windows like any live line
+(api-cloudrun#1341).
 
 ⚠️ **Paired with `pairItemsAcrossRebuild`, never by exact `path` and never by
 `uid` alone.** A path changes when a line moves under another group or a
-divider is re-minted, and re-deriving a moved line would change a finished
-job's money — including one-window lines whose legacy days the census left
-alone on purpose. A uid repeats, so a uid set would let a second row of a
-product the order already carries keep the client's days. The pairing's
-`(uid, k-th occurrence)` fallback gives both: a moved row stays carried, an
-extra occurrence does not.
+divider is re-minted; a uid repeats. The pairing's `(uid, k-th occurrence)`
+fallback gives both: a moved row stays carried, an extra occurrence does not.
 
 ### `chargeWindowContext(destinations: readonly ChargeWindowPair[]): PairChargeWindows[]`
 
 **Build {@link PriceDocumentContext.charge_windows}** from a document's stored
-`destinations`. Reads stored window days only.
+`destinations`.
 
 A pair whose windows are `null` bills no days (a document with no rental —
-api-cloudrun#1154) and is simply absent from the context; a rental line under
-it is refused where it is priced ({@link lineChargeableDays}), which names the
+api-cloudrun#1154) and is simply absent from the context; a time-formula line
+under it is refused where it is priced ({@link lineCounts}), which names the
 line rather than the pair.
 
-### `chargeWindowPairViolations(items: readonly LineItem[], ctx: Pick<PriceDocumentContext, "document" | "charge_windows" | "extensions">): ChargeWindowPairViolation[]`
+### `chargeWindowPairViolations(items: readonly LineItem[], ctx: Pick<PriceDocumentContext, "document" | "charge_windows" | "extensions" | "formulas" | "holidays">): ChargeWindowPairViolation[]`
 
 **The charge-window pair invariant, checked (core#113):** in a pair holding
-two or more charge windows, every `rental` + `five_day_week` line outside an
-extension section states `chargeable_days === billableDays(window days)`.
+two or more charge windows, every time-formula line outside an extension
+section stores the counts its formula meters from those windows.
 
-Because it holds, a reader never has to ask whether a line follows its pair —
-which is what lets `perUnitSubtotal` price a multi-window line from its stored
-days alone, with no window input (charge-windows plan §4).
+It holds **by construction**: {@link lineCounts} is the one author of a
+line's counts and every order/invoice writer prices through
+{@link priceDocument}. This exists for the writers that do not — a `scripts/`
+repair, a direct Firestore write — and is called from api-cloudrun's
+`assertValidForWrite`, so a divergent document is refused at the write.
 
-It holds **by construction** today: {@link lineChargeableDays} is the one
-author of a line's days and every order/invoice writer prices through
-{@link priceDocument}. This function exists for the writers that do not — a
-`scripts/` repair, a direct Firestore write, a future service — and is called
-from api-cloudrun's `assertValidForWrite`, so a divergent document is refused
-at the write rather than found later by an audit.
+⚠️ **Returns violations rather than throwing** — the write path turns one into
+a 400, the audit script reports every row.
 
-⚠️ **Returns violations rather than throwing**, because the two callers need
-different outcomes from the same answer: the write path turns one into an
-operator-facing 400 (core throws plain `Error`, which api's middleware maps to
-a 500 — see `api-cloudrun/src/lib/linePrice.ts`, the same reasoning), while
-the audit script reports every row across both projects and exits non-zero.
+⚠️ **Single-window pairs are NOT checked**: a one-window line whose counts
+differ from its window is legacy CRMS divergence the 2026-09-16 census left
+alone on purpose, carried into `counts` by the ruling-8 backfill.
 
-⚠️ **Single-window pairs are NOT checked, and that is the invariant's scope
-rather than an omission.** A one-window line whose stored days differ from its
-window is legacy CRMS divergence, which the 2026-09-16 census measured and the
-backfill resolved per owner decision; re-asserting it here would refuse
-documents the campaign deliberately left alone.
+### `formulaUidsOf(items: readonly typeLiteral[]): string[]`
+
+The formula uids a set of lines name — what a caller must load into {@link PricingFormulas}.
 
 ### `invoiceExtensionSections(items: readonly typeLiteral[]): PriceDocumentExtension[]`
 
@@ -48057,7 +48118,7 @@ divider carrying `path_extension_for`.
 
 The one derivation of {@link PriceDocumentContext.extensions}, shared by every
 invoice writer and the manager's optimistic recompute — a caller that forgets
-to pass it re-prices extension lines at the one-week floor.
+to pass it re-meters extension lines from their window, minimum included.
 
 ### `invoiceRepriceRefusal(document: PriceDocumentKind): string | null`
 
@@ -48066,28 +48127,33 @@ invoice is retracted, and a paid or settled one is agreed. The rule
 `priceDocument` refuses on, exported so the manager reads it instead of
 restating it (`invoiceIsRepriceable`). An order always reprices.
 
-### `lineChargeableDays(item: LineItem, ctx: Pick<PriceDocumentContext, "document" | "charge_windows" | "extensions">, carried: ReadonlyMap<LineItem, number | null>): typeLiteral`
+### `lineCounts(item: LineItem, ctx: Pick<PriceDocumentContext, "charge_windows" | "extensions" | "formulas" | "holidays">, carried: ReadonlyMap<LineItem, readonly TierCount[]>): TierCount[]`
 
-**A line's `chargeable_days`, the one derivation of it** (charge-windows
-decision 3), and the window days that price it.
+**A line's `counts`, the one derivation of them** (ruling 8).
 
-| line | `chargeable_days` |
+| line | `counts` |
 |---|---|
-| in an extension section | Σ its pair's window days (the days added) |
-| in `carried` (a line a `complete`/`canceled` order already had) | its STORED row's days |
-| `rental` + `five_day_week` on a one-window pair | that window's days |
-| `rental` + `five_day_week` on a 2+ window pair | `billableDays(windows)` |
-| `rental` + `five_day_week` on no pair | refused |
-| anything else | `null` |
+| percent-of-total fee (no formula) | `[]` |
+| in an extension section | its OWN stated counts — the days the section adds |
+| in `carried` (a line a `complete`/`canceled` order already had) | its STORED row's counts |
+| on a flat formula | `[{ flat, 1, 1 }]` |
+| on a time formula under a pair with windows | what the formula meters from them |
+| on a time formula under no such pair | refused |
 
-A 2+ window pair stores its BILLABLE days, Σ `max(days, 5)`, so the line's
-own numbers multiply out to its subtotal: `quantity × base × days ÷ 5` (owner,
-2026-09-17, core#114). A one window pair keeps its raw count; the pricer's
-`max(days, 5)` floor is the same thing for one window.
+Five-day week's per-window minimum is the formula's own (`minimum.scope:
+"window"`), so a 2+ window line stores Σ `max(days, 5)` business days ÷ 5 and
+its own numbers multiply out to its subtotal.
 
-`carried` is {@link carriedLines} over the whole document, which needs every
-row at once, so a single-line call cannot work it out. Pass an empty map for
-a document that keeps no stored days.
+### `meteredLineCounts(item: LineItem, ctx: Pick<PriceDocumentContext, "charge_windows" | "formulas" | "holidays">): TierCount[] | null`
+
+**What a line's formula meters from its pair's windows** — `null` when the
+line hangs under no pair with windows. A flat formula meters no time and
+answers `[{ flat, 1, 1 }]` wherever the line sits.
+
+⚠️ **It knows nothing about extension sections or carried lines**, which keep
+counts they STATE. {@link lineCounts} owns that; this is the window half,
+split out so the invoice sync comparator can ask the same question
+(core#112).
 
 ### `priceCreditNote(selection: readonly CreditSelectionLine[], taxes: Tax[], extensions: readonly PriceDocumentExtension[]): PricedCreditNote`
 
@@ -48095,71 +48161,52 @@ a document that keeps no stored days.
 The server stores this result, and the manager renders it as a preview.
 
 - **Stages 2 + 3 only.** Each line goes through {@link priceLine} and
-  {@link assembleLinePrice} at the credited quantity. Nothing scales money by
-  `credited ÷ billed`: that would be a float factor on cents.
+  {@link assembleLinePrice} at the credited quantity, on the invoice line's own
+  rates and counts. Nothing scales money by `credited ÷ billed`: that would be
+  a float factor on cents.
 - **Stage 1 is deliberately skipped.** The line keeps the tax refs STORED on
-  the invoice line, so a credit is taxed at the rate that was charged. It never
-  re-resolves jurisdiction, exemption or version. An exempt line carries
-  `taxes: []` and credits untaxed. `taxes` must therefore be the WHOLE rate
-  catalog, superseded versions included.
+  the invoice line, so a credit is taxed at the rate that was charged.
 - **No D3 refusal.** Credit is raised on settled invoices as a matter of
   course; crediting prices a NEW document and moves no invoice money.
 - **Totals are stage 5's sum** ({@link sumPricedLines}).
-- **A line may credit DAYS instead of whole units** —
-  {@link CreditSelectionLine.credited_days}, for a charge window the order
-  shortened after it was billed (api-cloudrun#1028). It takes the same day arm
-  the extension branch uses, so the one-week minimum is skipped, and it is
-  refused on a line whose formula never read its days.
+- **A line may credit TIME instead of whole units** —
+  {@link CreditSelectionLine.credited_counts}: the line is priced at those
+  counts, minimum already out of them.
 
 ⚠️ **The credit composes to within a rounding of re-charging the difference,
-and that is the SHIPPED property rather than a defect.** It mirrors the
-extension — priced at the credited days directly — so
-`charged(billed) − credit(credited)` sits a cent or so from
-`charged(billed − credited)`; both round once, they just round different
-products. Measured worst 1¢ over the sweep in
+and that is the SHIPPED property rather than a defect.** Both round once,
+they just round different products. Measured worst 1¢ over the sweep in
 `tests/price-document.test.ts`. 🔴 **Do not "fix" it by pricing the credit as a
-difference of two charges**: a credit line stores its own declared half beside
-its money, and {@link assembleLinePrice} is the one door.
+difference of two charges.**
 
 ### `priceDocument(items: readonly T[], ctx: PriceDocumentContext): PricedDocument<T>`
 
 Price a document: taxes, line money, fee amounts and totals, in one pass.
 
-### `priceLine(item: LineItem, taxes: Tax[], extensionDays?: number): LinePriceMoney`
+### `priceFormulaRefOf(formula: PricingFormula): PriceFormulaRef`
+
+The snapshot a line stores for `formula` — `{ uid, name, basis }`.
+
+### `priceLine(item: LineItem, taxes: Tax[], _: unknown): LinePriceMoney`
 
 **Stage 2 for one line: the line pricer.** `priceDocument` prices every line
 through it, and so does the one reader that must price a line outside a
 document — `accountLine` (`./quantityAccounting.ts`), which prices a
 remainder and a billed row's extension (#997 D11).
 
-`extensionDays` is D7: the line is priced for that many days with the
-one-week minimum skipped, which is what an extension section on an invoice
-bills. A document line passes its own `chargeable_days`; `accountLine` passes
-the days an extension group adds for a billed row.
+The line must already carry its `counts` ({@link lineCounts}). `extension`
+marks a line whose counts are the days an extension section ADDS, stated with
+the minimum skipped — only a flat tax reads it, and is refused.
 
-### `seedChargeableDays(items: readonly StructuralItem[], destinations: readonly ChargeWindowPair[], dividerUid: string): number | null`
+### `seedLineCounts(items: readonly StructuralItem[], destinations: readonly ChargeWindowPair[], dividerUid: string, formula: PricingFormula, holidays: readonly string[]): TierCount[] | null`
 
-**The `chargeable_days` to SEED on a rental line about to land under one
-destination divider** (core#130 row 5) — the same rule
-{@link windowChargeableDays} prices with, for a client building a line before
-the pricer has run.
+**The counts to SEED on a line about to land under one destination divider**
+(core#130 row 5) — the same rule {@link meteredLineCounts} prices with, for a
+client building a line before the pricer has run. Joins the pair by the
+divider's own `path`, exactly as the pricer does.
 
-The manager seeded `chargedDays` (a plain Σ) and found the pair by its
-POSITION in `destinations[]`, so on a 2+ window pair `[8, 3]` it showed 11
-where the pricer bills 13, and on a reordered pair list it read the wrong
-pair. This joins by the divider's own `path` — `[pair.uid]` on an order,
-`[uid_order, pair.uid]` on an invoice — exactly as the pricer does.
-
-The seed is display-only for a live document (the server reprices); it
-matters because it is what the operator sees until then.
-
-**Parameters**
-
-- `items` — The document's items, to read the divider's `path`
-- `destinations` — The document's stored pairs
-- `dividerUid` — The destination divider the line lands under
-
-**Returns** — `null` when that pair states no windows, or the divider is unknown
+**Returns** — `null` when that pair states no windows or the divider is unknown
+(a flat formula still answers).
 
 ### `statedChargeWindows(destinations: readonly ChargeWindowPair[]): PairChargeWindows[]`
 
@@ -48167,20 +48214,10 @@ matters because it is what the operator sees until then.
 {@link chargeWindowContext} with the pricer's refusal left off, for a READER
 rather than a writer (core#112).
 
-The two differ on one input and it is not a style choice. A pair with no
-windows is unpriceable — its rental lines have no days to bill — so
-{@link chargeWindowContext} refuses it. A pair with no windows is perfectly
-*readable*: the answer is simply that this pair states none, and a comparator's
-correct response is to explain nothing about the lines under it.
-
 🔴 **Use this one wherever a throw would be the wrong outcome**, which is every
-comparator: `computeDocumentDiffs` documents itself as pure and never-throwing
-(*"a source the caller did not pass yields no entries — never an 'in sync'
-answer"*), and raising a `PriceRefusalError` out of a diff view because one pair
-predates the windows campaign would take the whole page down to say nothing.
-The stored schema requires `.min(1)`, so in practice this only diverges on a
-partial or hand-built document — which is exactly the population a comparator
-has to survive and a pricer does not.
+comparator: `computeDocumentDiffs` documents itself as pure and never-throwing,
+and raising a `PriceRefusalError` out of a diff view because one pair is
+partial would take the whole page down to say nothing.
 
 ### `sumPricedLines(items: readonly LineItem[]): DocumentTotalsCore`
 
@@ -48201,24 +48238,6 @@ loaded, where the contract is "fold the stored lines, never re-price".
 ⚠️ A percent fee line stored before D6 carries `total_cents: 0`, so a document
 not yet re-priced by `priceDocument` folds with no fee. Re-pricing it stores
 the amount (api-cloudrun#997 step 7 re-prices the two live ones).
-
-### `windowChargeableDays(item: LineItem, pairs: readonly PairChargeWindows[]): number | null`
-
-**What a line's pair's windows bill it for** — the window half of
-{@link lineChargeableDays}, split out so the invoice sync comparator can ask
-the same question without re-deriving the rule (core#112).
-
-`null` means *this line does not take its days from windows at all*: it is not
-a `rental` priced `five_day_week`, or it hangs under no pair. The two cases are
-deliberately not distinguished here — {@link lineChargeableDays} owns the
-refusal, because a pairless rental is a document defect and reporting it twice
-would be two findings for one fault (the same split {@link chargeWindowPairViolations}
-makes).
-
-⚠️ **It knows nothing about extension sections**, which bill the days their
-section ADDS rather than their pair's total. A caller holding items that may
-sit in one must exclude them first, as {@link lineChargeableDays} does through
-{@link extensionFor}.
 
 ## `@cfs/core/utils/price-formulas`
 
@@ -48254,6 +48273,19 @@ nothing below adds milliseconds (`cfs-datetime`; `addChicagoDays`'s DST note).
 A month anchored on day 29–31 lands on the month's last day where the month is
 shorter, computed from the ANCHOR each time, never chained (Jan 31 → Feb 28 →
 Mar 31).
+
+### `CatalogRateLike`
+
+A catalog rate row as a line builder reads it — a stored `DatedRate`, or a search hit's open row (no dates).
+
+```ts
+interface CatalogRateLike {
+  rate_key: string;
+  amount_cents: number;
+  applied_from?: string | null;
+  applied_to?: string | null;
+}
+```
 
 ### `DatedRateLike`
 
@@ -48313,6 +48345,25 @@ interface MeteredUnits {
 }
 ```
 
+### `PricingFormula`
+
+A price formula as a pricer or a line builder reads it: the rule, plus the
+identity a line snapshots (`price.price_formula = { uid, name, basis }`).
+
+```ts
+type PricingFormula = PriceFormulaRule & typeLiteral;
+```
+
+### `PricingFormulas`
+
+**Every formula a set of lines names, keyed by uid** — build it with
+{@link formulaUidsOf} and a point read per uid. Retired (`active: false`)
+formulas included: a carried or frozen line keeps the formula it priced by.
+
+```ts
+type PricingFormulas = ReadonlyMap<string, PricingFormula>;
+```
+
 ### `RateSnapshot`
 
 A rate the line priced with — the snapshot a line owns (`price.rates`).
@@ -48338,6 +48389,21 @@ interface TierCount {
 }
 ```
 
+### `catalogRateSnapshot(rates: readonly CatalogRateLike[], asOf: string | null): RateSnapshot[]`
+
+**The rates a new line snapshots off its catalog source** (D4, Q13): per
+`rate_key`, the row in force at `asOf` — the line's pricing date — when the
+source carries dates and `asOf` is known; otherwise the key's OPEN row (a
+Typesense hit indexes only open rows), else its last row.
+
+⚠️ A server writer passes the real pricing date; a client building an
+optimistic line from a search hit gets the open rows, and the server
+resolves the in-force rows when it builds the line.
+
+### `formulaUidsOf(items: readonly typeLiteral[]): string[]`
+
+The formula uids a set of lines name — what a caller must load into {@link PricingFormulas}.
+
 ### `meterUnits(formula: PriceFormulaRule, input: MeterInput): MeteredUnits`
 
 **Metered time → per-tier counts.** Pure; throws on a malformed rule.
@@ -48350,6 +48416,10 @@ interface TierCount {
 
 A `line`-scoped minimum tops up the line's total on its last window. A line
 with no windows meters nothing — no minimum invents a window.
+
+### `priceFormulaRefOf(formula: PricingFormula): PriceFormulaRef`
+
+The snapshot a line stores for `formula` — `{ uid, name, basis }`.
 
 ### `priceFromFormula(rates: readonly RateSnapshot[], tiers: readonly TierCountLike[], quantity: number, discount: FormulaDiscount | null): typeLiteral`
 
@@ -49994,7 +50064,7 @@ Pure: returns `merged` unchanged when there is nothing to settle.
 
 The fields of one row (or of the document itself), relative to it.
 
-`fieldsUnder(c, "items[]")` gives `name`, `price.base_cents`, … — the unit
+`fieldsUnder(c, "items[]")` gives `name`, `price.rates`, … — the unit
 {@link mergeSharedFields} merges one matched row with. `fieldsUnder(c, "")`
 gives the document-level fields and excludes everything inside a row, because
 rows are matched by identity before their fields are merged.
@@ -51140,7 +51210,7 @@ computes no subtotal.
 This is the half a `charge_total`-authoritative caller needs on its own: a
 writer that supplies its own subtotals must call THIS and never
 `priceDocument`, because a reprice would recompute its
-subtotals from `base_cents × quantity × days_factor` and under-bill by a
+subtotals from the line's rates × quantity × counts and under-bill by a
 measured 28.6% on a real line (api-cloudrun#236).
 
 ## `taxes` and `taxes_base` have ONE author

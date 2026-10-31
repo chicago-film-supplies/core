@@ -84,7 +84,7 @@ export interface SharedField {
    * Set on a field declared `.meta({ shared: "value" })`: an array or object
    * merged as ONE value. Lists the keys inside it that a derivation writes
    * (`.meta({ derived: true })` one level down), which the merge ignores when it
-   * compares. `charge_windows[].days` is the one case.
+   * compares. A shared value whose element declares a `derived` key is the case.
    */
   derived_keys?: readonly string[];
   /**
@@ -357,7 +357,7 @@ export function classifySharedFields(
 /**
  * The fields of one row (or of the document itself), relative to it.
  *
- * `fieldsUnder(c, "items[]")` gives `name`, `price.base_cents`, … — the unit
+ * `fieldsUnder(c, "items[]")` gives `name`, `price.rates`, … — the unit
  * {@link mergeSharedFields} merges one matched row with. `fieldsUnder(c, "")`
  * gives the document-level fields and excludes everything inside a row, because
  * rows are matched by identity before their fields are merged.

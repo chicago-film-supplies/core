@@ -16,7 +16,8 @@ import {
   ActorRef,
   type ActorRefType,
   checkItemPriceFormula,
-  checkPriceBaseUnit,
+  checkLinePrice,
+  checkLinePriceInput,
   checkZeroPricedAmount,
   checkZeroPricedComponents,
   COARevenueEnum,
@@ -30,12 +31,20 @@ import {
   InvoiceStatusEnum,
   type InvoiceStatusType,
   isLineItemType,
-  PriceFormulaEnum,
-  type PriceFormulaType,
   SubstitutedForList,
   type SubstitutedForEntryType,
   TimestampFields,
 } from "./common.ts";
+import {
+  type PriceFormulaRef,
+  PriceFormulaRefSchema,
+  RateKey,
+  RateSnapshotSchema,
+  type RateSnapshotType,
+  TierCountSchema,
+  type TierCountType,
+} from "./price-formula.ts";
+import { checkFormulaLineMoney } from "./_line-money.ts";
 import {
   checkLeadingDivider,
   checkStoredEndpoints,
@@ -389,11 +398,14 @@ export const INVOICE_FIELD_FREEZE: Readonly<
 
 /** Pricing breakdown for a single invoice line item. */
 export interface InvoiceDocItemPriceType {
-  base_cents: number;
+  /** See {@link OrderDocItemPriceType.price_formula}. */
+  price_formula: PriceFormulaRef | null;
+  /** See {@link OrderDocItemPriceType.rates} — the snapshot the line owns. */
+  rates: RateSnapshotType[];
+  /** See {@link OrderDocItemPriceType.counts} — frozen when the line is priced. */
+  counts: TierCountType[];
   /** See {@link OrderDocItemPriceType.base_percent} — same biconditional. */
   base_percent?: number | null;
-  chargeable_days: number | null;
-  formula: PriceFormulaType;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
@@ -420,24 +432,11 @@ export interface InvoiceDocItemPriceType {
 }
 
 const InvoiceDocItemPrice: z.ZodType<InvoiceDocItemPriceType> = z.strictObject({
-  base_cents: z.int().meta({ column: true, label: "Base Price" }),
+  price_formula: PriceFormulaRefSchema.nullable(),
+  rates: z.array(RateSnapshotSchema).meta({ shared: "value", label: "Rate" }),
+  // Metered from the invoice pair's charge windows, as on an order line.
+  counts: z.array(TierCountSchema).meta({ derived: true }),
   base_percent: z.number().nullable().optional(),
-  // 🔴 `.int()`, matching `OrderDocItemPrice.chargeable_days`. A count of days
-  // has no fractional value that means anything, which is `CLAUDE.md` § *Stored
-  // money is integer cents* — "an INTEGRAL quantity is `z.int()` … a count of
-  // things — units, documents, attempts, days". This grain admitted 2.5. 0 of
-  // 1,040 stored invoices carry a fractional value in either project, and 0
-  // across the 23 committed `invoice`+`quote` fixtures in `templates`.
-  // Derived from the invoice pair's charge windows, as on an order line.
-  chargeable_days: z.int().nullable().meta({
-    column: true,
-    label: "Chargeable Days",
-    derived: true,
-  }),
-  formula: PriceFormulaEnum.meta({
-    column: true,
-    label: "Formula",
-  }),
   subtotal_cents: z.int().meta({ column: true, label: "Subtotal" }),
   subtotal_discounted_cents: z.int().meta({
     column: true,
@@ -450,7 +449,7 @@ const InvoiceDocItemPrice: z.ZodType<InvoiceDocItemPriceType> = z.strictObject({
   // to name them, or the pre-override snapshot collides with the live `taxes`.
   taxes_base: z.array(TaxRef).optional().meta({ label: "Base Tax" }),
   total_cents: z.int().meta({ column: true, label: "Total" }),
-}).superRefine(checkPriceBaseUnit);
+}).superRefine((price, ctx) => checkLinePrice(price, ctx));
 
 // ── Line items ───────────────────────────────────────────────────
 
@@ -672,7 +671,7 @@ const InvoiceDocLineItemInner = z.strictObject({
   // `seed: false`: `[]` fails `.min(1)`, so the form seed must omit the key.
   path_order_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
 }).superRefine(checkItemPriceFormula).superRefine(checkZeroPricedAmount)
-  .superRefine(checkOutOfServiceLineType);
+  .superRefine(checkOutOfServiceLineType).superRefine(checkFormulaLineMoney);
 
 // 🔴 `checkZeroPricedAmount` moved onto the **Inner** const on 2026-09-09, and
 // until then it never ran when an invoice document parsed. It was attached here,
@@ -684,7 +683,7 @@ const InvoiceDocLineItemInner = z.strictObject({
 // a fulfillment line has no `price`, so the check returns early.
 //
 // Cleared to land by the census: 0 invoice lines in either project carry
-// `zero_priced === true` with a non-zero `base_cents`, and 0 across the fixture
+// `zero_priced === true` with a non-zero base price, and 0 across the fixture
 // corpus. This is a tightening of what PARSES, not a new field — it belongs in
 // the census-gated set even though nothing about it looks like a migration.
 export const InvoiceDocLineItem: z.ZodType<InvoiceDocLineItemType> =
@@ -747,7 +746,7 @@ export const InvoiceDocOrderItem: z.ZodType<InvoiceDocOrderItemType> =
  *   lines there.
  * - **The no-minimum rule is DERIVED from the section, never stored on the
  *   line.** `priceDocument` prices every line under an extension section at the
- *   line's own `chargeable_days` — the ADDED days — with the one-week floor
+ *   line's own stated `counts` — the ADDED time — with the formula's minimum
  *   skipped (`invoiceExtensionSections`, `@cfs/core/utils/price-document`).
  *
  * ⚠️ Absent on every divider stored before 2026-09-15, and on every full-window
@@ -1388,22 +1387,24 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
 
 /** Item price input — partial, server computes the rest. */
 export interface InvoiceItemInputPriceType {
-  base_cents?: number;
+  /** See {@link ItemPriceType.uid_price_formula}. */
+  uid_price_formula?: string;
+  /** See {@link ItemPriceType.rates}. */
+  rates?: RateSnapshotType[];
   base_percent?: number | null;
-  formula?: PriceFormulaType;
   discount?: DiscountInputType | null;
   taxes?: Array<{ uid: string }>;
 }
 
 const InvoiceItemInputPrice: z.ZodType<InvoiceItemInputPriceType> = z.object({
-  base_cents: z.int().optional(),
+  uid_price_formula: FirestoreId.optional(),
+  rates: z.array(z.object({ rate_key: RateKey, amount_cents: z.int() })).optional(),
   base_percent: z.number().nullable().optional(),
-  // No `chargeable_days`: derived from the pair's charge windows by
-  // `priceDocument` (charge-windows decision 3), and stripped if sent.
-  formula: PriceFormulaEnum.optional(),
+  // No `counts`: metered from the pair's charge windows by `priceDocument`
+  // (Phase 2 ruling 8), and stripped if sent.
   discount: DiscountInput.nullable().optional(),
   taxes: z.array(z.object({ uid: FirestoreId })).optional(),
-}).superRefine(checkPriceBaseUnit);
+}).superRefine(checkLinePriceInput);
 
 /**
  * A billable invoice line as a client sends it — the input mirror of
@@ -1446,7 +1447,7 @@ export interface InvoiceItemInputLineType {
    * strip the backfilled value off every line of that invoice, silently.
    *
    * ⚠️ The API does not trust it blindly either — `checkZeroPricedAmount` ties
-   * `true` to `base_cents === 0`, so a client cannot flag a line it also
+   * `true` to every rate being `0`, so a client cannot flag a line it also
    * charges for.
    */
   zero_priced?: boolean | null;

@@ -1,4 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
+import { fdwPrice, fixedPrice, FORMULAS, legacyPrice } from "./helpers/formulas.ts";
 import { getInitialValues, InvoiceDocLineItem, SETTLED_STATUSES, InvoiceDocOrderItem, isInvoiceLineItem, OrderDocDestinationItem, OrderDocGroupItem } from "../src/schemas/mod.ts";
 import { computeItemPaths, rederiveDocumentTotalsForAudit, validateItemPaths } from "../src/utils/orders.ts";
 import type { OrderInvoiceFieldSync } from "../src/utils/invoices.ts";
@@ -82,7 +83,7 @@ const NO_DOC_DATES: OrderDocDatesType = {
   collection_start: null, collection_start_fs: TS0,
   collection_end: null, collection_end_fs: TS0,
   days_active: null,
-  charge_windows: [{ start: "2026-01-05T09:00:00.000-06:00", end: "2026-01-05T09:00:00.000-06:00", days: 0 }],
+  charge_windows: [{ start: "2026-01-05T09:00:00.000-06:00", end: "2026-01-05T09:00:00.000-06:00" }],
 };
 
 // ── Schema bases ────────────────────────────────────────────────
@@ -121,7 +122,7 @@ function makeItem(
     ...overrides,
     price: {
       ...priceBase,
-      ...priceOverrides,
+      ...legacyPrice({ base_cents: 0, chargeable_days: 5, ...priceOverrides }),
     },
   } as unknown as InvoiceItem;
 }
@@ -182,8 +183,7 @@ const lineItem1: InvoiceDocItemType = {
   quantity: 2,
   price: {
     ...priceBase,
-    base_cents: 10000,
-    chargeable_days: 5,
+    ...fdwPrice(10000, 5),
     subtotal_cents: 20000,
     subtotal_discounted_cents: 20000,
     total_cents: 20000,
@@ -201,8 +201,7 @@ const lineItem2: InvoiceDocItemType = {
   quantity: 1,
   price: {
     ...priceBase,
-    base_cents: 30000,
-    formula: "fixed",
+    ...fixedPrice(30000),
     subtotal_cents: 30000,
     subtotal_discounted_cents: 30000,
     total_cents: 30000,
@@ -226,8 +225,7 @@ const lineItem3: InvoiceDocItemType = {
   quantity: 1,
   price: {
     ...priceBase,
-    base_cents: 50000,
-    chargeable_days: 5,
+    ...fdwPrice(50000, 5),
     subtotal_cents: 50000,
     subtotal_discounted_cents: 50000,
     total_cents: 50000,
@@ -327,9 +325,7 @@ Deno.test("buildOrderScopedItems projects order-only fields off line items", () 
       // @ts-expect-error — inclusion_type not on LineItem type, but exists at runtime on OrderDocLineItem
       inclusion_type: "mandatory",
       price: {
-        base_cents: 10000,
-        chargeable_days: 5,
-        formula: "five_day_week",
+        ...fdwPrice(10000, 5),
         subtotal_cents: 20000,
         subtotal_discounted_cents: 20000,
         discount: null,
@@ -589,8 +585,12 @@ Deno.test("syncOrderItems projects order-only fields off new items (strict schem
       // @ts-expect-error — inclusion_type not on LineItem type
       inclusion_type: "mandatory",
       price: {
-        base_cents: 10000, chargeable_days: 5, formula: "five_day_week",
-        subtotal_cents: 10000, subtotal_discounted_cents: 10000, discount: null, taxes: [], total_cents: 10000,
+        ...fdwPrice(10000, 5),
+        subtotal_cents: 10000,
+        subtotal_discounted_cents: 10000,
+        discount: null,
+        taxes: [],
+        total_cents: 10000,
         replacement_cents: 500000,
       },
     },
@@ -630,8 +630,12 @@ Deno.test("syncOrderToInvoiceSelective projects new items to invoice-line-item s
       uid_order: ORDER_ID_1,
       zero_priced: false,
       price: {
-        base_cents: 10000, chargeable_days: 5, formula: "five_day_week",
-        subtotal_cents: 10000, subtotal_discounted_cents: 10000, discount: null, taxes: [], total_cents: 10000,
+        ...fdwPrice(10000, 5),
+        subtotal_cents: 10000,
+        subtotal_discounted_cents: 10000,
+        discount: null,
+        taxes: [],
+        total_cents: 10000,
         replacement_cents: 500000,
       },
     },
@@ -661,9 +665,14 @@ function orderShapedLine(overrides: Partial<LineItem> = {}): LineItem {
     zero_priced: false,
     ...overrides,
     price: {
-      base_cents: 10000, replacement_cents: 50000, base_percent: null, chargeable_days: 5,
-      formula: "five_day_week", subtotal_cents: 10000, subtotal_discounted_cents: 10000,
-      discount: null, taxes: [], total_cents: 10000,
+      ...fdwPrice(10000, 5),
+      replacement_cents: 50000,
+      base_percent: null,
+      subtotal_cents: 10000,
+      subtotal_discounted_cents: 10000,
+      discount: null,
+      taxes: [],
+      total_cents: 10000,
       ...((overrides.price ?? {}) as Record<string, unknown>),
     } as unknown as LineItem["price"],
   };
@@ -696,9 +705,13 @@ Deno.test("syncOrderToInvoiceSelective projects synced items and carries forward
   // Carried forward from the overridden invoice item
   assertEquals((out as InvoiceItem).coa_revenue, 4100);
   assertEquals((out as InvoiceItem).xero_id, "00000000-0000-4000-8000-000000000001");
-  // Projected — strict schema passes
+  // Projected — strict on every key. The one thing it may NOT yet satisfy is the
+  // money refine (ruling 8): line money is `derived`, so the merge keeps the
+  // stored invoice's and `priceDocument` re-derives it at the new quantity before
+  // any write. Nothing else may fail.
   const parsed = InvoiceDocLineItem.safeParse(out);
-  assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues, null, 2));
+  const issues = parsed.success ? [] : parsed.error.issues.map((i) => i.path.join("."));
+  assertEquals(issues.filter((p) => p !== "price.subtotal_cents" && p !== "price.subtotal_discounted_cents"), []);
 });
 
 // ── What the order→invoice projection carries ──────────────────
@@ -958,7 +971,7 @@ Deno.test("substitution: the sync badge reads the pair as tracked, not as drift"
     [substitutedLine() as InvoiceItem],
     [orderShapedLine()],
     ORDER_DIV_1,
-    { taxNameByUid: new Map(), orderFrozen: false, invoiceChargeWindows: [] },
+    { taxNameByUid: new Map(), orderFrozen: false, invoiceChargeWindows: [], formulas: FORMULAS, holidays: [] },
   );
 
   assertEquals([...status.values()], ["in_sync"]);
@@ -1879,7 +1892,7 @@ Deno.test("buildInvoiceDestinationDivider accepts an explicit path and matches t
  * cannot fire — so none of the tax-arm tests below is quietly rebased. The arm's
  * own population is built explicitly in `tests/charge-windows.test.ts`.
  */
-const NO_EXPLANATIONS = { taxNameByUid: new Map<string, string>(), orderFrozen: false, invoiceChargeWindows: [] };
+const NO_EXPLANATIONS = { taxNameByUid: new Map<string, string>(), orderFrozen: false, invoiceChargeWindows: [], formulas: FORMULAS, holidays: [] };
 
 // ── resyncInvoiceLines + computeInvoiceSyncStatus ───────────────
 
@@ -1893,16 +1906,26 @@ const RESYNC_LINE_A: LineItem = {
   uid: ITEM_1, type: "rental", uid_tax_class: TAX_CLASS, name: "Spot Light", quantity: 2, path: [DEST_1, ITEM_1],
   stock_method: "reserve", order_number: 1001, uid_order: ORDER_ID_1, zero_priced: false,
   price: {
-    base_cents: 10000, chargeable_days: 5, formula: "five_day_week",
-    subtotal_cents: 20000, subtotal_discounted_cents: 20000, discount: null, taxes: [], total_cents: 20000, replacement_cents: 500000,
+    ...fdwPrice(10000, 5),
+    subtotal_cents: 20000,
+    subtotal_discounted_cents: 20000,
+    discount: null,
+    taxes: [],
+    total_cents: 20000,
+    replacement_cents: 500000,
   },
 } as unknown as LineItem;
 const RESYNC_LINE_B: LineItem = {
   uid: ITEM_2, type: "sale", uid_tax_class: TAX_CLASS, name: "Tripod", quantity: 1, path: [DEST_1, ITEM_2],
   stock_method: "reserve", order_number: 1001, uid_order: ORDER_ID_1, zero_priced: false,
   price: {
-    base_cents: 30000, chargeable_days: null, formula: "fixed",
-    subtotal_cents: 30000, subtotal_discounted_cents: 30000, discount: null, taxes: [], total_cents: 30000, replacement_cents: 0,
+    ...fixedPrice(30000),
+    subtotal_cents: 30000,
+    subtotal_discounted_cents: 30000,
+    discount: null,
+    taxes: [],
+    total_cents: 30000,
+    replacement_cents: 0,
   },
 } as unknown as LineItem;
 const RESYNC_ORDER_ITEMS: LineItem[] = [RESYNC_DEST, RESYNC_LINE_A, RESYNC_LINE_B];
@@ -2015,8 +2038,13 @@ const RESYNC_LINE_C: LineItem = {
   uid: ITEM_C, type: "replacement", uid_tax_class: TAX_CLASS, name: "Replacement: Spot Light", quantity: 1, path: [DEST_1, ITEM_C],
   stock_method: "reserve", order_number: 1001, uid_order: ORDER_ID_1, zero_priced: false,
   price: {
-    base_cents: 50000, chargeable_days: null, formula: "fixed",
-    subtotal_cents: 50000, subtotal_discounted_cents: 50000, discount: null, taxes: [], total_cents: 50000, replacement_cents: 0,
+    ...fixedPrice(50000),
+    subtotal_cents: 50000,
+    subtotal_discounted_cents: 50000,
+    discount: null,
+    taxes: [],
+    total_cents: 50000,
+    replacement_cents: 0,
   },
 } as unknown as LineItem;
 
@@ -2987,8 +3015,8 @@ const TAX_NAMES = new Map([
   [TAX_CHI_V2, "Chicago Rental Tax"],
   [TAX_OTHER, "Chicago Sales Tax"],
 ]);
-const FROZEN = { taxNameByUid: TAX_NAMES, orderFrozen: true, invoiceChargeWindows: [] };
-const LIVE = { taxNameByUid: TAX_NAMES, orderFrozen: false, invoiceChargeWindows: [] };
+const FROZEN = { taxNameByUid: TAX_NAMES, orderFrozen: true, invoiceChargeWindows: [], formulas: FORMULAS, holidays: [] };
+const LIVE = { taxNameByUid: TAX_NAMES, orderFrozen: false, invoiceChargeWindows: [], formulas: FORMULAS, holidays: [] };
 
 /** A line taxed by `uid` at `rate`, collecting `amount` cents, totalling accordingly. */
 function taxedLine(uid: string, rate: number, amount: number): InvoiceItem {
@@ -3337,7 +3365,7 @@ Deno.test("syncOrderDestinationsSelective never emits an UNDEFINED field", () =>
 // `taxed_as` and `price.taxes_base` above.
 Deno.test("manager#421 stage one: the invoice line SCHEMA accepts zero_priced", () => {
   const line = { ...(buildOrderScopedItems([orderShapedLine()], ORDER_DIV_1)[0] as InvoiceItem) };
-  // ⚠️ The flag comes with `base_cents: 0`, and that is invariant (1) rather than
+  // ⚠️ The flag comes with every rate at 0, and that is invariant (1) rather than
   // fixture housekeeping. This arm originally set the flag ALONE on a priced
   // line — legal when it was written, because nothing tied the flag to the
   // amount, and that missing tie is exactly what let 53 order lines and 65
@@ -3346,7 +3374,13 @@ Deno.test("manager#421 stage one: the invoice line SCHEMA accepts zero_priced", 
   const withFlag = {
     ...line,
     zero_priced: true,
-    price: { ...(line as unknown as { price: Record<string, unknown> }).price, base_cents: 0 },
+    price: {
+      ...(line as unknown as { price: Record<string, unknown> }).price,
+      rates: [{ rate_key: "week", amount_cents: 0 }],
+      subtotal_cents: 0,
+      subtotal_discounted_cents: 0,
+      total_cents: 0,
+    },
   } as unknown as Record<string, unknown>;
   assertEquals(InvoiceDocLineItem.safeParse(withFlag).success, true);
   // Nullable, matching the order's own shape rather than tightening past it.
@@ -3365,14 +3399,14 @@ Deno.test("invariant (1): a flagged invoice line may not carry a charge", () => 
   const charged = {
     ...line,
     zero_priced: true,
-    price: { ...(line as unknown as { price: Record<string, unknown> }).price, base_cents: 6000 },
+    price: { ...(line as unknown as { price: Record<string, unknown> }).price, rates: [{ rate_key: "week", amount_cents: 6000 }] },
   } as unknown as Record<string, unknown>;
   const parsed = InvoiceDocLineItem.safeParse(charged);
   assertEquals(parsed.success, false);
   // Assert WHERE it failed, not merely that it did — a line that fails for an
   // unrelated reason would satisfy a bare `success === false`.
   assertEquals(
-    parsed.success === false && parsed.error.issues.some((i) => i.path.join(".") === "price.base_cents"),
+    parsed.success === false && parsed.error.issues.some((i) => i.path.join(".") === "price.rates.0.amount_cents"),
     true,
   );
 });
@@ -3566,7 +3600,7 @@ function extensionSection(): InvoiceDocItemType[] {
   return [
     { uid: EXT_DIV, type: "destination", name: "Venue", description: "", path: [ORDER_DIV_1, EXT_DIV], path_extension_for: [DEST_1] },
     {
-      ...buildOrderScopedItems([orderShapedLine({ price: { chargeable_days: 2 } as unknown as LineItem["price"] })], ORDER_DIV_1)[0],
+      ...buildOrderScopedItems([orderShapedLine({ price: { ...fdwPrice(0, 2) } as unknown as LineItem["price"] })], ORDER_DIV_1)[0],
       path: [ORDER_DIV_1, EXT_DIV, ITEM_1],
     },
   ] as InvoiceDocItemType[];
@@ -3601,7 +3635,7 @@ Deno.test("syncOrderToInvoiceSelective: an invoice line whose order line MOVED f
 });
 
 Deno.test("syncOrderToInvoiceSelective: an extension section passes through untouched, at the tail", () => {
-  const light = orderShapedLine({ price: { chargeable_days: 7 } as unknown as LineItem["price"] });
+  const light = orderShapedLine({ price: { ...fdwPrice(0, 7) } as unknown as LineItem["price"] });
   const order = [destDivider(), light];
   const invoice = [...buildOrderScopedItems(order, ORDER_DIV_1), ...extensionSection()];
   const result = syncOrderToInvoiceSelective(order, order, invoice, ORDER_DIV_1);

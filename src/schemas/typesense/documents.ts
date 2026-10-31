@@ -414,15 +414,14 @@ export interface OrderDocument {
     order_number?: number;
     path?: string[];
     price?: {
-      base_cents?: number;
+      price_formula?: { name?: string };
+      rates?: Array<{ rate_key?: string; amount_cents?: number }>;
       replacement_cents?: number;
       subtotal_cents?: number;
       subtotal_discounted_cents?: number;
       total_cents?: number;
       discount?: { rate?: number; type?: string; amount_cents?: number };
       taxes?: Array<{ uid?: string; name?: string; rate?: number; type?: string; amount_cents?: number }>;
-      chargeable_days?: number;
-      formula?: string;
     };
   }>;
   created_at?: number;
@@ -680,10 +679,12 @@ export interface ProductDocumentComponent {
   /** @see `ProductComponent.uid_tracking_category`. */
   uid_tracking_category?: string;
   price?: {
-    base_cents?: number;
+    /** The formula — `null`/absent on a percent-of-total fee product. */
+    uid_price_formula?: string | null;
+    /** The OPEN row per rate key — the api translator indexes no closed or future row. */
+    rates?: Array<{ rate_key: string; amount_cents: number }>;
     replacement_cents?: number;
     coa_revenue?: number;
-    formula?: string;
     discountable?: boolean;
   };
 }
@@ -706,12 +707,14 @@ export interface ProductDocument {
   /** @see `Product.uid_tax_class`. */
   uid_tax_class?: string | null;
   price?: {
-    base_cents?: number;
-    /** The `percent_of_total` percentage at 4dp — a rate, not cents. */
+    /** The formula — `null`/absent on a percent-of-total fee product. */
+    uid_price_formula?: string | null;
+    /** The OPEN row per rate key — the api translator indexes no closed or future row. */
+    rates?: Array<{ rate_key: string; amount_cents: number }>;
+    /** The percent-of-total percentage at 4dp — a rate, not cents. */
     base_percent?: number | null;
     replacement_cents?: number;
     coa_revenue?: number;
-    formula?: string;
     discountable?: boolean;
   };
   webshop?: {
@@ -896,9 +899,11 @@ export interface WebshopProductDocumentComponent {
   inclusion_type?: string;
   zero_priced?: boolean;
   price?: {
-    base_cents?: number;
+    /** The formula — `null`/absent on a percent-of-total fee product. */
+    uid_price_formula?: string | null;
+    /** The OPEN row per rate key — the api translator indexes no closed or future row. */
+    rates?: Array<{ rate_key: string; amount_cents: number }>;
     replacement_cents?: number;
-    formula?: string;
     discountable?: boolean;
   };
 }
@@ -918,9 +923,11 @@ export interface WebshopProductDocument {
   eligible_shipping_ground?: boolean;
   eligible_shipping_air?: boolean;
   price: {
-    base_cents?: number;
+    /** The formula — `null`/absent on a percent-of-total fee product. */
+    uid_price_formula?: string | null;
+    /** The OPEN row per rate key — the api translator indexes no closed or future row. */
+    rates?: Array<{ rate_key: string; amount_cents: number }>;
     replacement_cents?: number;
-    formula?: string;
     discountable?: boolean;
   };
   webshop: {

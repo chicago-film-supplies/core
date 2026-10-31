@@ -5,6 +5,7 @@ import currency from "currency.js";
 // The two fail-closed companions model DOLLAR-denominated predecessors, so they
 // need the cents->dollars direction. Via the core export, never a bare / 100.
 import { fromCents } from "../src/utils/money.ts";
+import { fdwPrice, fixedPrice, legacyPrice, tier } from "./helpers/formulas.ts";
 import {
   DOC_LINE_ITEM_TYPES,
   FULFILLMENT_LINE_ITEM_TYPES,
@@ -117,11 +118,9 @@ function makeItem(
     ...overrides,
     price: {
       ...priceBase,
-      base_cents: 10000,
-      chargeable_days: 5,
-      ...priceOverrides,
+      ...legacyPrice({ base_cents: 10000, chargeable_days: 5, ...priceOverrides }),
     },
-  } as LineItem;
+  } as unknown as LineItem;
 }
 
 // The re-derivation these tests pin lives on only as the audit oracle
@@ -146,11 +145,9 @@ function makeFeeItem(
     ...overrides,
     price: {
       ...priceBase,
-      formula: "percent_of_total",
-      base_percent: 3,
-      ...feeOverrides,
+      ...legacyPrice({ formula: "percent_of_total", base_percent: 3, ...feeOverrides }),
     },
-  } as LineItem;
+  } as unknown as LineItem;
 }
 
 // ── isPriceableItem ──────────────────────────────────────────────
@@ -227,7 +224,7 @@ Deno.test("isTransactionFeePricingItem accepts an item with no uid, name or path
   const midConstruction = {
     type: "transaction_fee",
     quantity: 1,
-    price: { base_percent: 3, formula: "percent_of_total" },
+    price: { price_formula: null, rates: [], counts: [], base_percent: 3 },
   };
   assertEquals(isTransactionFeePricingItem(midConstruction as unknown as PricingItem), true);
 });
@@ -261,7 +258,7 @@ Deno.test("calculateTransactionFeeAmountCents prices a PricingItem — no uid, n
   const midConstruction = {
     type: "transaction_fee",
     quantity: 1,
-    price: { base_percent: 3, formula: "percent_of_total" },
+    price: { price_formula: null, rates: [], counts: [], base_percent: 3 },
   };
   // 3% of $1,000.00 = $30.00.
   assertEquals(
@@ -632,11 +629,9 @@ Deno.test("calculateItemSubtotal: negating the base negates both subtotals (core
   assertEquals(checked > 500, true);
 });
 
-Deno.test("calculateItemSubtotal: rejects an unknown formula", () => {
-  const item = makeItem({}, { formula: "nonsense" });
-  let threw = false;
-  try { calculateItemSubtotal(item); } catch { threw = true; }
-  assertEquals(threw, true);
+Deno.test("calculateItemSubtotal: rejects a count whose rate key the rates lack", () => {
+  const item = makeItem({}, { counts: [tier("month", 1, 1)] });
+  assertThrows(() => calculateItemSubtotal(item), Error, 'No rate for key "month"');
 });
 
 Deno.test("calculateItemSubtotal five_day_week 1 week", () => {
@@ -715,11 +710,11 @@ Deno.test("calculateItemSubtotal throws for non-priceable", () => {
   );
 });
 
-Deno.test("calculateItemSubtotal throws for unknown formula", () => {
+Deno.test("calculateItemSubtotal throws for a line with no formula snapshot", () => {
   assertThrows(
-    () => calculateItemSubtotal(makeItem({}, { formula: "unknown" })),
+    () => calculateItemSubtotal(makeItem({}, { price_formula: null })),
     Error,
-    "Unknown formula",
+    "carries price_formula, rates and counts",
   );
 });
 
@@ -2771,8 +2766,8 @@ Deno.test("deriveOrderDateEnvelope: single destination returns its own dates", (
     collection_end: "2026-03-10T17:00:00.000-06:00", collection_end_fs: fsTs(104),
     days_active: 8,
     charge_windows: [
-      { start: "2026-03-01T09:00:00.000-06:00", end: "2026-03-03T17:00:00.000-06:00", days: 3 },
-      { start: "2026-03-06T09:00:00.000-06:00", end: "2026-03-10T17:00:00.000-06:00", days: 3 },
+      { start: "2026-03-01T09:00:00.000-06:00", end: "2026-03-03T17:00:00.000-06:00" },
+      { start: "2026-03-06T09:00:00.000-06:00", end: "2026-03-10T17:00:00.000-06:00" },
     ],
   });
   const env = deriveOrderDateEnvelope([{ dates }]);
@@ -2790,15 +2785,15 @@ Deno.test("deriveOrderDateEnvelope: starts take min, ends take max across destin
     delivery_start: "2026-03-05T09:00:00.000-06:00", delivery_start_fs: fsTs(1),
     collection_end: "2026-03-12T17:00:00.000-06:00", collection_end_fs: fsTs(2),
     days_active: 5,
-    charge_windows: [{ start: "2026-03-05T09:00:00.000-06:00", end: "2026-03-12T09:00:00.000-06:00", days: 5 }],
+    charge_windows: [{ start: "2026-03-05T09:00:00.000-06:00", end: "2026-03-12T09:00:00.000-06:00" }],
   });
   const b = docDates({
     delivery_start: "2026-03-02T09:00:00.000-06:00", delivery_start_fs: fsTs(3),
     collection_end: "2026-03-20T17:00:00.000-06:00", collection_end_fs: fsTs(4),
     days_active: 9,
     charge_windows: [
-      { start: "2026-03-02T09:00:00.000-06:00", end: "2026-03-04T09:00:00.000-06:00", days: 2 },
-      { start: "2026-03-09T09:00:00.000-06:00", end: "2026-03-20T09:00:00.000-06:00", days: 5 },
+      { start: "2026-03-02T09:00:00.000-06:00", end: "2026-03-04T09:00:00.000-06:00" },
+      { start: "2026-03-09T09:00:00.000-06:00", end: "2026-03-20T09:00:00.000-06:00" },
     ],
   });
   const env = deriveOrderDateEnvelope([{ dates: a }, { dates: b }]);
@@ -2969,7 +2964,7 @@ Deno.test("calculateItemSubtotal refuses percent_of_total — it cannot see the 
   assertThrows(
     () => calculateItemSubtotal(makeItem({ type: "sale" }, { formula: "percent_of_total", base_percent: 3 })),
     Error,
-    "percent_of_total",
+    "percent-of-total",
   );
 });
 
@@ -3065,7 +3060,7 @@ Deno.test("…and the divide-first fee form DOES disagree — the fee sweep can 
 Deno.test("getTransactionFeeTotals derives rate/type from the price, identity from the item", () => {
   const totals = getTransactionFeeTotals([
     makeFeeItem({ uid: "cc-fee-product", name: "Card Fee" }, { base_cents: 300, total_cents: 3000 }),
-    makeFeeItem({ uid: "flat-fee-product", name: "Handling" }, { base_cents: 500, formula: "fixed", total_cents: 500 }),
+    makeFeeItem({ uid: "flat-fee-product", name: "Handling" }, { base_cents: 500, base_percent: null, formula: "fixed", total_cents: 500 }),
   ]);
   assertEquals(totals.length, 2);
   const card = totals.find((t) => t.name === "Card Fee");
@@ -3176,7 +3171,7 @@ Deno.test("the pricing entry points take an order-INPUT price, not only a stored
   const input: PricingItem = {
     type: "rental",
     quantity: 2,
-    price: { base_cents: 10000, formula: "fixed", chargeable_days: null, discount: null, taxes: [{ uid: "t1" }] },
+    price: { ...fixedPrice(10000), discount: null, taxes: [{ uid: "t1" }] },
   };
 
   const computed = calculateItemPrice(input, taxes);
@@ -3195,9 +3190,7 @@ Deno.test("the pricing entry points take an order-INPUT price, not only a stored
     path: ["u"],
     quantity: 2,
     price: {
-      base_cents: 10000,
-      formula: "fixed",
-      chargeable_days: null,
+      ...fixedPrice(10000),
       discount: null,
       taxes: [{ uid: "t1", name: "Chicago Rental", rate: 9, type: "percent", amount_cents: 1800 }],
       subtotal_cents: 20000,
@@ -3224,7 +3217,7 @@ Deno.test("PreTaxItemType and FromTotalItemType are the contract's pricing axis,
 });
 
 Deno.test("the three pricing predicates read the contract, not their own type lists", () => {
-  const price = { base_cents: 1000, formula: "fixed", chargeable_days: null, subtotal_cents: 1000, subtotal_discounted_cents: 1000, discount: null, taxes: [], total_cents: 1000 } as unknown as PriceObject;
+  const price = { ...fixedPrice(1000), subtotal_cents: 1000, subtotal_discounted_cents: 1000, discount: null, taxes: [], total_cents: 1000 } as unknown as PriceObject;
   const at = (type: ItemTypeType): LineItem => ({ uid: "u", name: "n", type, path: ["u"], quantity: 1, price });
 
   for (const type of ["rental", "replacement", "sale", "service", "surcharge"] as const) {
@@ -3936,7 +3929,7 @@ const flatFee = (
 ): PricingItem => ({
   type: "transaction_fee",
   quantity,
-  price: { base_cents, formula: "fixed", chargeable_days: null, discount, taxes: [] },
+  price: { ...fixedPrice(base_cents), discount, taxes: [] },
 });
 
 Deno.test("priceTransactionFeeLine — a flat fee is base_cents x quantity, exactly", () => {
@@ -4002,7 +3995,7 @@ Deno.test("priceTransactionFeeLine — a percent_of_total fee stores the RATE an
     priceTransactionFeeLine({
       type: "transaction_fee",
       quantity: 1,
-      price: { base_cents: 0, base_percent: 4, formula: "percent_of_total", discount: null, taxes: [] },
+      price: { price_formula: null, rates: [], counts: [], base_percent: 4, discount: null, taxes: [] },
     }),
     { subtotal_cents: 0, subtotal_discounted_cents: 0, discount: null, taxes: [], total_cents: 0 },
   );
@@ -4020,11 +4013,9 @@ Deno.test("priceTransactionFeeLine — a percent fee's stored ZERO does not reac
     type: "transaction_fee",
     quantity: 1,
     price: {
-      base_cents: 0,
+      price_formula: null, rates: [], counts: [],
       base_percent: 4,
       replacement_cents: null,
-      formula: "percent_of_total",
-      chargeable_days: null,
       discount: null,
       subtotal_cents: 0,
       subtotal_discounted_cents: 0,
@@ -4053,9 +4044,8 @@ Deno.test("priceTransactionFeeLine — a discount on a percent fee is DROPPED, n
     type: "transaction_fee",
     quantity: 1,
     price: {
-      base_cents: 0,
+      price_formula: null, rates: [], counts: [],
       base_percent: 4,
-      formula: "percent_of_total",
       discount: { rate: 10, type: "percent" },
       taxes: [],
     },
@@ -4067,7 +4057,7 @@ Deno.test("priceTransactionFeeLine — a discount on a percent fee is DROPPED, n
 
 Deno.test("priceTransactionFeeLine — refuses a line that is not a fee", () => {
   assertThrows(
-    () => priceTransactionFeeLine({ type: "sale", quantity: 1, price: { base_cents: 100, formula: "fixed" } }),
+    () => priceTransactionFeeLine({ type: "sale", quantity: 1, price: { ...fixedPrice(100) } }),
     Error,
     "not a transaction fee",
   );
@@ -4083,7 +4073,7 @@ Deno.test("isFromTotalItemType and isTransactionFeePricingItem read one fact and
 
   assertEquals(isTransactionFeePricingItem(flatFee(100, 1)), true);
   assertEquals(
-    isTransactionFeePricingItem({ type: "sale", quantity: 1, price: { base_cents: 100 } }),
+    isTransactionFeePricingItem({ type: "sale", quantity: 1, price: { ...fdwPrice(100, 5) } }),
     false,
   );
   // ⚠️ NOT the negation of `isPreTaxPricingItem`: a divider is neither, which is
@@ -4131,16 +4121,16 @@ Deno.test("ORDER_DECLARED_PRICE_KEYS — equals the runtime schema's keys minus 
 });
 
 Deno.test("declaredOrderPrice — a percent fee keeps base_percent, every other line gets it as null", () => {
-  const fee = declaredOrderPrice({ base_cents: 0, base_percent: 4, formula: "percent_of_total" });
-  assertEquals(fee, { base_cents: 0, base_percent: 4, replacement_cents: null, chargeable_days: null, formula: "percent_of_total" });
+  const fee = declaredOrderPrice({ price_formula: null, rates: [], base_percent: 4 });
+  assertEquals(fee, { price_formula: null, rates: [], counts: [], base_percent: 4, replacement_cents: null });
 
   // Extra input keys (money, discount, taxes) are the pricer's and are not copied.
-  const sale = declaredOrderPrice({ base_cents: 1_000, formula: "fixed", replacement_cents: 5_000, ...{ subtotal_cents: 9 } });
-  assertEquals(sale, { base_cents: 1_000, base_percent: null, replacement_cents: 5_000, chargeable_days: null, formula: "fixed" });
+  const sale = declaredOrderPrice({ ...fixedPrice(1_000), replacement_cents: 5_000, ...{ subtotal_cents: 9 } });
+  assertEquals(sale, { ...fixedPrice(1_000), base_percent: null, replacement_cents: 5_000 });
 
   assertEquals(
-    declaredInvoicePrice({ base_cents: 1_000, formula: "fixed", replacement_cents: 5_000 }),
-    { base_cents: 1_000, base_percent: null, chargeable_days: null, formula: "fixed" },
+    declaredInvoicePrice({ ...fixedPrice(1_000), replacement_cents: 5_000 }),
+    { ...fixedPrice(1_000), base_percent: null },
   );
 });
 
@@ -4152,9 +4142,9 @@ Deno.test("declaredOrderPrice — assembled fee and sale lines both parse as Ord
     taxes: [],
     total_cents: 400,
   };
-  const feeItem: PricingItem = { type: "transaction_fee", quantity: 1, price: { base_cents: 0, base_percent: 4, formula: "percent_of_total" } };
+  const feeItem: PricingItem = { type: "transaction_fee", quantity: 1, price: { price_formula: null, rates: [], counts: [], base_percent: 4 } };
   const fee = assembleLinePrice(
-    declaredOrderPrice({ base_cents: 0, base_percent: 4, formula: "percent_of_total" }),
+    declaredOrderPrice({ price_formula: null, rates: [], base_percent: 4 }),
     feeMoney,
     feeItem,
     { taxesBase: [] },
@@ -4163,9 +4153,9 @@ Deno.test("declaredOrderPrice — assembled fee and sale lines both parse as Ord
   assertEquals(feeParse.success, true, JSON.stringify(feeParse.error?.issues));
   assertEquals(fee.base_percent, 4);
 
-  const saleItem: PricingItem = { type: "sale", quantity: 1, price: { base_cents: 1_000, formula: "fixed" } };
+  const saleItem: PricingItem = { type: "sale", quantity: 1, price: { ...fixedPrice(1_000) } };
   const sale = assembleLinePrice(
-    declaredOrderPrice({ base_cents: 1_000, formula: "fixed" }),
+    declaredOrderPrice(fixedPrice(1_000)),
     { ...feeMoney, subtotal_cents: 1_000, subtotal_discounted_cents: 1_000, total_cents: 1_000 },
     saleItem,
     { taxesBase: [] },
@@ -4183,10 +4173,10 @@ Deno.test("assembleLinePrice — an ORDER shape keeps replacement_cents, an INVO
     taxes: [],
     total_cents: 10_000,
   };
-  const item: PricingItem = { type: "sale", quantity: 1, price: { base_cents: 10_000, formula: "fixed" } };
+  const item: PricingItem = { type: "sale", quantity: 1, price: { ...fixedPrice(10_000) } };
 
   const orderPrice = assembleLinePrice(
-    { base_cents: 10_000, base_percent: null, chargeable_days: null, formula: "fixed", replacement_cents: 25_000 },
+    { ...fixedPrice(10_000), base_percent: null, replacement_cents: 25_000 },
     money,
     item,
   );
@@ -4195,7 +4185,7 @@ Deno.test("assembleLinePrice — an ORDER shape keeps replacement_cents, an INVO
   // The invoice shape declares no `replacement_cents` at all. The generic spread
   // carries the caller's shape, so there is nothing to add one.
   const invoicePrice = assembleLinePrice(
-    { base_cents: 10_000, base_percent: null, chargeable_days: null, formula: "fixed" },
+    { ...fixedPrice(10_000), base_percent: null },
     money,
     item,
   );
@@ -4206,27 +4196,24 @@ Deno.test("assembleLinePrice — the fee normalization fires ONLY where the key 
   const fee = flatFee(4_360, 1);
   const money = priceTransactionFeeLine(fee);
 
-  // An ORDER-shaped fee line: both keys present, both forced to null. A stored
+  // An ORDER-shaped fee line: the key is present and forced to null. A stored
   // `sale` line legitimately carries `replacement_cents: 0`, and
   // `ITEM_CONTRACTS.transaction_fee.replacement` is `forbidden`, which
   // `checkItemContract` reads as `!= null` — so `0` fails as surely as a real
   // amount. This is the product cascade's re-type case.
   const orderFee = assembleLinePrice(
-    { base_cents: 4_360, base_percent: null, chargeable_days: 5, formula: "fixed" as const, replacement_cents: 0 },
+    { ...fixedPrice(4_360), base_percent: null, replacement_cents: 0 },
     money,
     fee,
   );
-  assertEquals(orderFee.chargeable_days, null);
   assertEquals(orderFee.replacement_cents, null);
 
-  // An INVOICE-shaped fee line: `chargeable_days` is forced, and no
-  // `replacement_cents` key appears out of nowhere.
+  // An INVOICE-shaped fee line: no `replacement_cents` key appears out of nowhere.
   const invoiceFee = assembleLinePrice(
-    { base_cents: 4_360, base_percent: null, chargeable_days: 5, formula: "fixed" as const },
+    { ...fixedPrice(4_360), base_percent: null },
     money,
     fee,
   );
-  assertEquals(invoiceFee.chargeable_days, null);
   assertEquals("replacement_cents" in invoiceFee, false);
 });
 
@@ -4235,7 +4222,7 @@ Deno.test("assembleLinePrice — a fee's taxes are forced to [], and a non-fee's
   // A given-money caller (the Xero restate script) that resolved tax refs for a
   // line it had not yet recognised as a fee. The structural exemption wins.
   const withTax = assembleLinePrice(
-    { base_cents: 1_000, chargeable_days: null, formula: "fixed" as const },
+    fixedPrice(1_000),
     {
       subtotal_cents: 1_000,
       subtotal_discounted_cents: 1_000,
@@ -4247,9 +4234,9 @@ Deno.test("assembleLinePrice — a fee's taxes are forced to [], and a non-fee's
   );
   assertEquals(withTax.taxes, []);
 
-  const sale: PricingItem = { type: "sale", quantity: 1, price: { base_cents: 1_000, formula: "fixed" } };
+  const sale: PricingItem = { type: "sale", quantity: 1, price: { ...fixedPrice(1_000) } };
   const taxed = assembleLinePrice(
-    { base_cents: 1_000, chargeable_days: null, formula: "fixed" as const },
+    fixedPrice(1_000),
     {
       subtotal_cents: 1_000,
       subtotal_discounted_cents: 1_000,
@@ -4271,8 +4258,8 @@ Deno.test("assembleLinePrice — taxesBase OMITTED authors no key; supplied on a
     taxes: [],
     total_cents: 1_000,
   };
-  const sale: PricingItem = { type: "sale", quantity: 1, price: { base_cents: 1_000, formula: "fixed" } };
-  const declared = { base_cents: 1_000, chargeable_days: null, formula: "fixed" as const };
+  const sale: PricingItem = { type: "sale", quantity: 1, price: { ...fixedPrice(1_000) } };
+  const declared = fixedPrice(1_000);
 
   // The CRMS invoice writer authors an 8-key literal and no `taxes_base`.
   // Widening it would read as a replacement on ~9k stored lines, bump `version`
@@ -4298,9 +4285,9 @@ Deno.test("assembleLinePrice — money wins over a stale declared half", () => {
   // The product-write cascade spreads the STORED price as its declared half, so
   // it arrives carrying yesterday's money keys. Spread order is the only thing
   // that makes that safe.
-  const sale: PricingItem = { type: "sale", quantity: 1, price: { base_cents: 1_000, formula: "fixed" } };
+  const sale: PricingItem = { type: "sale", quantity: 1, price: { ...fixedPrice(1_000) } };
   const out = assembleLinePrice(
-    { base_cents: 1_000, formula: "fixed" as const, subtotal_cents: 999_999, total_cents: 999_999 },
+    { ...fixedPrice(1_000), subtotal_cents: 999_999, total_cents: 999_999 },
     {
       subtotal_cents: 1_000,
       subtotal_discounted_cents: 1_000,
@@ -4319,8 +4306,8 @@ Deno.test("assembleLinePrice — it ASSERTS the money it is handed (Seam F)", ()
   // invoice ingest and the Xero restate script — and between them they account
   // for the whole stored invoice corpus. `calculateItemPrice` guarantees these
   // identities by construction; a hand-built `LinePriceMoney` does not.
-  const sale: PricingItem = { type: "sale", quantity: 1, price: { base_cents: 1_000, formula: "fixed" } };
-  const declared = { base_cents: 1_000, chargeable_days: null, formula: "fixed" as const };
+  const sale: PricingItem = { type: "sale", quantity: 1, price: { ...fixedPrice(1_000) } };
+  const declared = fixedPrice(1_000);
 
   assertThrows(
     () =>
@@ -4383,11 +4370,9 @@ Deno.test("priceTransactionFeeLine and the totals rollup deliberately DISAGREE a
     type: "transaction_fee",
     quantity: 1,
     price: {
-      base_cents: 10_000,
+      ...fixedPrice(10_000),
       base_percent: null,
       replacement_cents: null,
-      formula: "fixed",
-      chargeable_days: null,
       discount: { rate: 10, type: "percent", amount_cents: 1_000 },
       subtotal_cents: 10_000,
       subtotal_discounted_cents: 9_000,
@@ -4420,11 +4405,9 @@ Deno.test("THE MIGRATION INVARIANT — retyping sale -> transaction_fee does not
       quantity: 2,
       path: ["dest-1", "grp-1", "prod-rental"],
       price: {
-        base_cents: 50_000,
+        ...fdwPrice(50_000, 5),
         base_percent: null,
         replacement_cents: 250_000,
-        formula: "five_day_week",
-        chargeable_days: 5,
         discount: null,
         subtotal_cents: 100_000,
         subtotal_discounted_cents: 100_000,
@@ -4445,14 +4428,12 @@ Deno.test("THE MIGRATION INVARIANT — retyping sale -> transaction_fee does not
       price: {
         // 4.00% of (100,000 subtotal + 9,000 tax) = 4,360 — the rate prod's four
         // most recent Card Fee orders carry, against the tax-INCLUSIVE total.
-        base_cents: 4_360,
+        ...fixedPrice(4_360),
         base_percent: null,
         // The contract change, stated in the fixture: prod's `sale` fee line
         // carries `replacement_cents: 0`, and `transaction_fee`'s contract is
         // `forbidden`, which `checkItemContract` reads as `!= null`.
         replacement_cents: feeType === "sale" ? 0 : null,
-        formula: "fixed",
-        chargeable_days: null,
         discount: null,
         subtotal_cents: 4_360,
         subtotal_discounted_cents: 4_360,

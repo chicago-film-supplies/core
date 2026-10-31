@@ -15,6 +15,7 @@
  * **Do not read a green here as self-evidently meaningful.**
  */
 import { assert, assertEquals, assertNotEquals } from "@std/assert";
+import { fdwCounts, fdwPrice } from "./helpers/formulas.ts";
 import {
   buildOrderScopedItems,
   type InvoiceDestinationPair,
@@ -57,7 +58,7 @@ function dates(from: string, to: string, tag: number) {
     collection_start: to, collection_start_fs: fs(to),
     collection_end: to, collection_end_fs: fs(to),
     days_active: activeFor(from, to),
-    charge_windows: [{ start: from, end: to, days: daysFor(from, to) }],
+    charge_windows: [{ start: from, end: to }],
   };
 }
 
@@ -93,9 +94,8 @@ function line(uid: string, dest: string, over: { quantity?: number; name?: strin
     uid_order: "Order000000000000001",
     zero_priced: false,
     price: {
-      base_cents: over.base ?? 1000, replacement_cents: 5000, base_percent: null,
-      chargeable_days: over.days === undefined ? 5 : over.days,
-      formula: "five_day_week", subtotal_cents: 0, subtotal_discounted_cents: 0,
+      ...fdwPrice(over.base ?? 1000, over.days === undefined ? 5 : over.days), replacement_cents: 5000, base_percent: null,
+      subtotal_cents: 0, subtotal_discounted_cents: 0,
       discount: null, taxes: [], total_cents: 0,
     },
   } as unknown as LineItem;
@@ -142,12 +142,12 @@ Deno.test("per field: the folding chair — an invoice at 2 follows 2 → 3; an 
   const unedited = invoiceOf(prev);
   const followed = lineAt(sync(prev, next, unedited, FIELD).scopedItems, CHAIR);
   assertEquals(followed.length, 1);
-  assertEquals([followed[0].quantity, followed[0].price?.base_cents], [3, 1500]);
+  assertEquals([followed[0].quantity, (followed[0].price as { rates: { amount_cents: number }[] }).rates[0].amount_cents], [3, 1500]);
 
   const edited = invoiceOf(prev);
   (rows(edited.items).find((r) => r.uid === CHAIR)!).quantity = 4;
   const kept = lineAt(sync(prev, next, edited, FIELD).scopedItems, CHAIR);
-  assertEquals([kept[0].quantity, kept[0].price?.base_cents], [4, 1500], "quantity kept, price followed (G1)");
+  assertEquals([kept[0].quantity, (kept[0].price as { rates: { amount_cents: number }[] }).rates[0].amount_cents], [4, 1500], "quantity kept, price followed (G1)");
 });
 
 Deno.test("per field: a line that differs only in DERIVED money still follows the order (G2)", () => {
@@ -220,7 +220,7 @@ Deno.test("per field: a pair keeps its jurisdiction override while its delivery 
   assertEquals([out.jurisdiction, out.delivery.instructions], ["frankfort", "new"]);
 });
 
-Deno.test("per field: pair dates merge per leaf — a mixed window takes each _fs from its side and recomputes the days (G6)", () => {
+Deno.test("per field: pair dates merge per leaf — a mixed window takes each _fs from its side (G6)", () => {
   const prev = { items: [divider(DEST_A)], destinations: [pair(DEST_A, dates(iso(5), iso(9), 1))] };
   const next = { items: [divider(DEST_A)], destinations: [pair(DEST_A, dates(iso(5), iso(16), 2))] };
   const inv = invoiceOf(prev);
@@ -231,7 +231,8 @@ Deno.test("per field: pair dates merge per leaf — a mixed window takes each _f
   assertEquals([out.delivery_start, out.collection_start], [iso(6), iso(16)]);
   assertEquals((out.delivery_start_fs as { nanoseconds: number }).nanoseconds, 3, "delivery kept → the invoice's own _fs");
   assertEquals((out.collection_start_fs as { nanoseconds: number }).nanoseconds, 2, "collection followed → the order's _fs");
-  assertEquals((out.charge_windows as unknown as { days: number }[])[0].days, daysFor(iso(6), iso(16)));
+  // One window over the merged possession; its lines meter it when priced (ruling 8).
+  assertEquals(out.charge_windows as unknown, [{ start: iso(6), end: iso(16) }]);
   assertNotEquals(daysFor(iso(6), iso(16)), daysFor(iso(5), iso(16)), "anti-vacuity: the two windows bill differently");
 });
 
@@ -265,11 +266,11 @@ Deno.test("per field: a pair the order deleted is kept when its dates were overr
 
 // ── Charge days are derived (charge-windows decision 3) ──────────────────────
 //
-// A line's `chargeable_days` is stamped by `priceDocument` from its OWN pair's
+// A line's `counts` are metered by `priceDocument` from its OWN pair's
 // windows, so the sync neither propagates it from the order nor settles it
 // against the invoice pair. It leaves the stored value for the pricer.
 
-Deno.test("per field: the sync leaves a line's chargeable_days as stored — priceDocument derives it", () => {
+Deno.test("per field: the sync leaves a line's counts as stored — priceDocument meters them", () => {
   const [from, to, later] = [iso(5), iso(9), iso(14)];
   const before = daysFor(from, to);
   const after = daysFor(from, later);
@@ -279,7 +280,7 @@ Deno.test("per field: the sync leaves a line's chargeable_days as stored — pri
   const next = { items: [divider(DEST_A), line(CHAIR, DEST_A, { days: after })], destinations: [pair(DEST_A, dates(from, later, 0))] };
 
   const out = sync(prev, next, invoiceOf(prev), FIELD);
-  assertEquals(lineAt(out.scopedItems, CHAIR)[0].price?.chargeable_days, before, "not propagated from the order line");
+  assertEquals(lineAt(out.scopedItems, CHAIR)[0].price?.counts, fdwCounts(before), "not propagated from the order line");
   // The pair itself did follow the order, so the pricer will stamp `after`.
   assertEquals((out.destinations[0].dates as { collection_start: string }).collection_start, later);
 });

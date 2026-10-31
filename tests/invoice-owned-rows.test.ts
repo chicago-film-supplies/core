@@ -10,6 +10,7 @@
  * Every expectation is written out by hand.
  */
 import { assert, assertEquals } from "@std/assert";
+import { FORMULAS, fdwPrice } from "./helpers/formulas.ts";
 import type { DocDestinationType, Invoice, InvoiceDocItemType, Order } from "../src/schemas/mod.ts";
 import {
   buildOrderScopedItems,
@@ -45,9 +46,13 @@ function line(uid: string, path: string[], quantity = 1, baseCents = 1000): Line
     uid, type: "rental", name: uid, description: "", quantity, path,
     stock_method: "reserve", zero_priced: false, uid_tax_class: "TaxC1assDefau1tAAAAA",
     price: {
-      base_cents: baseCents, chargeable_days: 5, formula: "five_day_week",
-      subtotal_cents: baseCents * quantity, subtotal_discounted_cents: baseCents * quantity,
-      discount: null, taxes: [], total_cents: baseCents * quantity, replacement_cents: 1000,
+      ...fdwPrice(baseCents, 5),
+      subtotal_cents: baseCents * quantity,
+      subtotal_discounted_cents: baseCents * quantity,
+      discount: null,
+      taxes: [],
+      total_cents: baseCents * quantity,
+      replacement_cents: 1000,
     },
   } as unknown as LineItem;
 }
@@ -61,7 +66,7 @@ const END = "2026-09-11T00:00:00.000-05:00";
 function pair(uid: string, extra: Record<string, unknown> = {}): DocDestinationType {
   return {
     uid,
-    dates: { charge_windows: [{ start: START, end: END, days: 5 }] },
+    dates: { charge_windows: [{ start: START, end: END }] },
     delivery: { uid: `dlv-${uid}`, address: null, instructions: null, contact: null },
     collection: { uid: `col-${uid}`, address: null, instructions: null, contact: null },
     customer_collecting: false,
@@ -248,7 +253,7 @@ Deno.test("🔴 accounting: an authored subtree credits NOTHING, and the remaind
   assertEquals([billed.compared, billed.unaligned], [["a"], []]);
   assertEquals([...billed.byPath.keys()].sort(), [`${D}/${G}/${LIGHT}`, `${D}/${TRIPOD}`]);
 
-  const remaining = remainingForOrder(O, order, [accounted("a", scope)], [pair(D)]);
+  const remaining = remainingForOrder(O, order, [accounted("a", scope)], [pair(D)], { formulas: FORMULAS, holidays: [] });
   assertEquals(remaining.unaligned, []);
   assertEquals(remaining.lines.map((l) => [l.path.join("/"), l.quantity]), [[`${D}/${G}/${LIGHT}`, 1]]);
 
@@ -282,7 +287,7 @@ Deno.test("🔴 diff: an authored LEG reports once as a pair, its rows suppresse
     destinations: [scoped(pair(D)), leg.pair],
   } as unknown as Invoice;
   const sources = { orders: [ord], invoices: [inv] };
-  const ctx = { taxNameByUid: new Map<string, string>(), isOrderFrozen: () => false };
+  const ctx = { taxNameByUid: new Map<string, string>(), isOrderFrozen: () => false, formulas: FORMULAS, holidays: [] };
 
   const onInvoice = computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-1" }, ctx);
   assertEquals(onInvoice.unaligned, []);
@@ -429,7 +434,7 @@ Deno.test("🔴 1b accounting: a declined leg's lines read UNBILLED and the rema
     items: [divider, ...(buildOrderScopedItems(orderItems(), O) as unknown as InvoiceItem[])],
     destinations: [scoped(pair(D))] as never,
   };
-  const { lines, unaligned } = remainingForOrder(O, order, [billed], [pair(D), pair(D2)]);
+  const { lines, unaligned } = remainingForOrder(O, order, [billed], [pair(D), pair(D2)], { formulas: FORMULAS, holidays: [] });
   assertEquals(unaligned, []);
   assertEquals(lines.map((l) => [l.path.join("/"), l.quantity]), [[`${D2}/${G2}/${TRIPOD}`, 1]]);
 });

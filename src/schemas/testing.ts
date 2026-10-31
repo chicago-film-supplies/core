@@ -506,6 +506,100 @@ function enumArmSearch<S extends z.ZodType>(
   return null;
 }
 
+// ── Nullable fill ────────────────────────────────────────────────────
+
+/** The schema node at `path` under `schema`, unwrapping wrappers; `null` when the walk cannot follow it. */
+function nodeAt(schema: z.ZodType, path: readonly PropertyKey[]): z.ZodType | null {
+  let node: z.ZodType | undefined = schema;
+  for (const seg of path) {
+    let d = def(node!);
+    while (d.innerType && d.type !== "nullable" && !d.shape && !d.element) {
+      node = d.innerType;
+      d = def(node);
+    }
+    if (d.type === "nullable" && d.innerType) {
+      node = d.innerType;
+      d = def(node);
+      while (d.innerType && !d.shape && !d.element) {
+        node = d.innerType;
+        d = def(node);
+      }
+    }
+    if (typeof seg === "number") node = d.element;
+    else node = d.shape?.[seg as string];
+    if (!node) return null;
+  }
+  return node ?? null;
+}
+
+/**
+ * On a parse failure, populate each NULL value, ABSENT key or EMPTY array an
+ * issue names — built minimally, one element for an array — and parse again.
+ *
+ * Still purely structural, the twin of {@link enumArmSearch}: it reaches a
+ * cross-field rule that refuses the cheapest value of a nullable key (a stored
+ * line price must name its `price_formula` unless it is a percent fee,
+ * purchases-as-documents ruling 8). Never touches a key the caller overrode.
+ */
+function nullableFill<S extends z.ZodType>(
+  schema: S,
+  input: Record<string, unknown>,
+  error: z.ZodError,
+  overridden: ReadonlySet<string>,
+  ctx: Ctx,
+  allowAbsent: boolean,
+): { input: Record<string, unknown>; result: z.ZodSafeParseResult<z.output<S>> } | null {
+  const out = structuredCloneKeepingClasses(input);
+  let changed = false;
+  for (const issue of error.issues) {
+    const path = issue.path;
+    if (path.length === 0 || overridden.has(String(path[0]))) continue;
+    let parent: Record<string | number, unknown> | null = out as Record<string, unknown>;
+    for (const seg of path.slice(0, -1)) {
+      const next: unknown = parent?.[seg as string];
+      parent = next !== null && typeof next === "object" ? next as Record<string, unknown> : null;
+    }
+    const last = path[path.length - 1] as string | number;
+    // A NULL value, an ABSENT key (an `.optional()` the required-only walk
+    // omitted) or an EMPTY array, that a cross-field rule wants stated.
+    const current = parent?.[last];
+    const empty = Array.isArray(current) && current.length === 0;
+    if (!parent || (current !== null && !(allowAbsent && current === undefined) && !empty)) continue;
+    const node = nodeAt(schema, path);
+    if (!node) continue;
+    // Unwrap the key's own optional/nullable/default, then build the value
+    // MINIMALLY: nested nullables stay null, so the fill states only what the
+    // rule asked for (a full build would also invent, say, an `applied_to`).
+    let inner: z.ZodType = node;
+    let nd = def(inner);
+    while (nd.innerType && (nd.type === "optional" || nd.type === "nullable" || nd.type === "default" || nd.type === "prefault")) {
+      inner = nd.innerType;
+      nd = def(inner);
+    }
+    let built = build(inner, ctx, 0);
+    if (Array.isArray(built) && built.length === 0 && nd.element) {
+      // A refine wanting at least one element on an array with no `.min()`.
+      const el = build(nd.element, ctx, 0);
+      if (el !== OMIT) built = [el];
+    }
+    if (built === OMIT || built === null || (Array.isArray(built) && built.length === 0)) continue;
+    parent[last] = built;
+    changed = true;
+  }
+  return changed ? { input: out, result: schema.safeParse(out) } : null;
+}
+
+/** A deep copy of plain objects and arrays; class instances (timestamps) are shared. */
+function structuredCloneKeepingClasses<T>(v: T): T {
+  if (Array.isArray(v)) return v.map((x) => structuredCloneKeepingClasses(x)) as T;
+  if (isPlainObject(v)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v)) out[k] = structuredCloneKeepingClasses(x);
+    return out as T;
+  }
+  return v;
+}
+
 // ── Errors ───────────────────────────────────────────────────────────
 
 function formatFailure(error: z.ZodError, wantedNow: boolean, gaveNow: boolean): string {
@@ -541,6 +635,18 @@ function construct<S extends z.ZodType>(
   const overridden = new Set(isPlainObject(overrides) ? Object.keys(overrides) : []);
   const rechosen = enumArmSearch(schema, merged as Record<string, unknown>, overridden);
   if (rechosen?.success) return rechosen.data;
+
+  // Fill NULL and EMPTY values a rule wants stated, then re-choose an enum arm
+  // over the filled document; only then fill ABSENT optional keys too — so the
+  // documented default arm (a SALE product) survives a fill.
+  const filled = nullableFill(schema, merged as Record<string, unknown>, result.error, overridden, ctx, false);
+  if (filled?.result.success) return filled.result.data;
+  if (filled) {
+    const rearmed = enumArmSearch(schema, filled.input, overridden);
+    if (rearmed?.success) return rearmed.data;
+  }
+  const filledAll = nullableFill(schema, merged as Record<string, unknown>, result.error, overridden, ctx, true);
+  if (filledAll?.result.success) return filledAll.result.data;
 
   throw new Error(formatFailure(result.error, ctx.wantedNow, options?.now !== undefined));
 }

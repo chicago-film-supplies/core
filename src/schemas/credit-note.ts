@@ -39,7 +39,7 @@ import {
   DocumentOrganizationSnapshot,
   type DocumentOrganizationSnapshotType,
   checkItemPriceFormula,
-  checkPriceBaseUnit,
+  checkLinePrice,
   COARevenueEnum,
   type COARevenueType,
   DOC_LINE_ITEM_TYPES,
@@ -48,12 +48,19 @@ import {
   type DocSourceType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
-  PriceFormulaEnum,
-  type PriceFormulaType,
   SETTLEMENT_CONTRACTS,
   type SettlementReasonType,
   TimestampFields,
 } from "./common.ts";
+import {
+  type PriceFormulaRef,
+  PriceFormulaRefSchema,
+  RateSnapshotSchema,
+  type RateSnapshotType,
+  TierCountSchema,
+  type TierCountType,
+} from "./price-formula.ts";
+import { checkFormulaLineMoney } from "./_line-money.ts";
 import {
   Discount,
   type DiscountType,
@@ -196,11 +203,14 @@ export const CREDIT_NOTE_REASONS: readonly SettlementReasonType[] =
 
 /** Pricing breakdown for a single credit-note line. */
 export interface CreditNoteDocItemPrice {
-  base_cents: number;
+  /** See {@link OrderDocItemPriceType.price_formula}. */
+  price_formula: PriceFormulaRef | null;
+  /** See {@link OrderDocItemPriceType.rates} — the snapshot the line owns. */
+  rates: RateSnapshotType[];
+  /** See {@link OrderDocItemPriceType.counts} — frozen when the line is priced. */
+  counts: TierCountType[];
   /** See {@link OrderDocItemPriceType.base_percent} — same biconditional. */
   base_percent?: number | null;
-  chargeable_days: number | null;
-  formula: PriceFormulaType;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
@@ -209,16 +219,16 @@ export interface CreditNoteDocItemPrice {
 }
 
 const CreditNoteDocItemPriceSchema: z.ZodType<CreditNoteDocItemPrice> = z.strictObject({
-  base_cents: z.int().meta({ column: true, label: "Base Price" }),
+  price_formula: PriceFormulaRefSchema.nullable(),
+  rates: z.array(RateSnapshotSchema).meta({ label: "Rate" }),
+  counts: z.array(TierCountSchema),
   base_percent: z.number().nullable().optional(),
-  chargeable_days: z.int().nullable(),
-  formula: PriceFormulaEnum.meta({ column: true, label: "Formula" }),
   subtotal_cents: z.int().meta({ column: true, label: "Subtotal" }),
   subtotal_discounted_cents: z.int().meta({ column: true, label: "Discounted Subtotal" }),
   discount: Discount.nullable().meta({ label: "Discount" }),
   taxes: z.array(PriceModifier).meta({ label: "Tax" }),
   total_cents: z.int().meta({ column: true, label: "Total" }),
-}).superRefine(checkPriceBaseUnit);
+}).superRefine((price, ctx) => checkLinePrice(price, ctx));
 
 // ── Line items ───────────────────────────────────────────────────
 
@@ -368,7 +378,7 @@ const CreditNoteDocLineItemInner = z.strictObject({
   // `seed: false`: `[]` fails `.min(1)`, so the form seed must omit the key (core#125).
   path_invoice_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
   reverses_billing: z.boolean(),
-}).superRefine(checkItemPriceFormula);
+}).superRefine(checkItemPriceFormula).superRefine(checkFormulaLineMoney);
 
 /** Zod schema for a credit-note line item. */
 export const CreditNoteDocLineItem: z.ZodType<CreditNoteDocLineItem> = CreditNoteDocLineItemInner;

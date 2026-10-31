@@ -1,19 +1,21 @@
 /**
- * Charge windows: the stored schema, the day-count writer, `applyDateEdit`, the
- * shared-field rule, and the pricer's derived `chargeable_days` and multi-window
+ * Charge windows: the stored schema, the canonicalizer, `applyDateEdit`, the
+ * shared-field rule, and the pricer's metered line `counts` and multi-window
  * factor.
  *
- * ⚠️ This named `.claude/plans/charge-windows.md`, which was DELETED when the
- * campaign's last step (the multi-window UI) landed on 2026-09-17 — a promoted
- * plan is retired with its final piece, because a stale plan reads as current
- * intent. The decisions it held are now where they are enforced: the one-week
- * floor per window in {@link billableDays}, the single author of a line's days in
- * `lineChargeableDays`, and the pair invariant in `chargeWindowPairViolations`.
+ * Since purchases-as-documents Phase 2 ruling 8 a window is a start and an end
+ * and nothing else: each priced line meters its pair's windows through its own
+ * formula and freezes the result (`price.counts`). The decisions the retired
+ * charge-windows plan held are where they are enforced: the one-week floor per
+ * window in Five-day week's `minimum.scope: "window"`, the single author of a
+ * line's counts in `lineCounts`, and the pair invariant in
+ * `chargeWindowPairViolations`.
  *
  * Dates are October 2026 in Chicago: Monday the 5th, Friday the 9th. DST ends on
  * Sunday 1 November.
  */
 import { assert, assertEquals, assertThrows } from "@std/assert";
+import { businessDayWindow, businessDayWindows, fdwCounts, fdwPrice, fixedPrice, FORMULAS, legacyPrice, tier } from "./helpers/formulas.ts";
 import {
   ChargeWindow,
   getInitialValues,
@@ -25,12 +27,11 @@ import {
 } from "../src/schemas/mod.ts";
 import {
   applyDateEdit,
-  billableDays,
   canonicalChargeWindows,
   type CanonicalChargeDates,
   type ChargeDates,
-  chargedDays,
   chargeEnvelope,
+  chargeWindowBusinessDays,
   type DateEditResult,
 } from "../src/utils/dates.ts";
 import type { LineItem } from "../src/utils/orders.ts";
@@ -39,7 +40,7 @@ import {
   chargeWindowPairViolations,
   type CreditSourceLine,
   carriedLines,
-  lineChargeableDays,
+  lineCounts,
   PriceRefusalError,
   type PriceDocumentContext,
   priceCreditNote,
@@ -75,58 +76,72 @@ Deno.test("OrderDocDates: windows must be in order and not overlap, by calendar 
     delivery_start: at(5, "09:00:00"),
     collection_start: at(16, "15:00:00"),
   };
-  const w = (s: number, e: number, days: number) => ({ start: at(s, "09:00:00"), end: at(e, "15:00:00"), days });
-  assertEquals(OrderDocDates.safeParse({ ...dates, charge_windows: [w(5, 7, 3), w(12, 13, 2)] }).success, true);
-  const sameDay = OrderDocDates.safeParse({ ...dates, charge_windows: [w(5, 7, 3), w(7, 9, 3)] });
+  const w = (s: number, e: number) => ({ start: at(s, "09:00:00"), end: at(e, "15:00:00") });
+  assertEquals(OrderDocDates.safeParse({ ...dates, charge_windows: [w(5, 7), w(12, 13)] }).success, true);
+  const sameDay = OrderDocDates.safeParse({ ...dates, charge_windows: [w(5, 7), w(7, 9)] });
   assertEquals(sameDay.success, false, "a window starting on the day the previous one ends overlaps");
-  assertEquals(OrderDocDates.safeParse({ ...dates, charge_windows: [w(12, 13, 2), w(5, 7, 3)] }).success, false, "out of order");
+  assertEquals(OrderDocDates.safeParse({ ...dates, charge_windows: [w(12, 13), w(5, 7)] }).success, false, "out of order");
   assertEquals(OrderDocDates.safeParse({ ...dates, charge_windows: [] }).success, false, "never empty");
   // Required since the backfill (beta B): a pair with no windows is refused.
   const { charge_windows: _omit, ...windowless } = { ...dates, charge_windows: undefined };
   assertEquals(OrderDocDates.safeParse(windowless).success, false);
 });
 
-Deno.test("ChargeWindow: days is a non-negative integer and a window is strict", () => {
-  const ok = { start: at(5, "09:00:00"), end: at(9, "15:00:00"), days: 0 };
-  assertEquals(ChargeWindow.safeParse(ok).success, true, "a 0-day window is valid");
-  assertEquals(ChargeWindow.safeParse({ ...ok, days: -1 }).success, false);
-  assertEquals(ChargeWindow.safeParse({ ...ok, days: 2.5 }).success, false);
+Deno.test("ChargeWindow: a start and an end, and nothing else (ruling 8)", () => {
+  const ok = { start: at(5, "09:00:00"), end: at(9, "15:00:00") };
+  assertEquals(ChargeWindow.safeParse(ok).success, true);
+  // A day count is no longer a window's: each line meters its own.
+  assertEquals(ChargeWindow.safeParse({ ...ok, days: 5 }).success, false);
   assertEquals(ChargeWindow.safeParse({ ...ok, uid: "x" }).success, false);
 });
 
 // ── The pure readers ─────────────────────────────────────────────────────────
 
-Deno.test("billableDays: every window carries the one-week minimum", () => {
-  assertEquals(billableDays([3, 4, 2]), 15);
-  assertEquals(billableDays([3, 0, 4]), 15);
-  assertEquals(billableDays([8, 7, 6]), 21);
-  for (let d = 0; d <= 30; d++) assertEquals(billableDays([d]), Math.max(d, 5), "one window is today's floor");
+Deno.test("chargeWindowBusinessDays and chargeEnvelope are formula-free readers", () => {
+  const charge_windows = [
+    { start: at(5, "09:00:00"), end: at(7, "15:00:00") },
+    { start: at(10, "09:00:00"), end: at(11, "15:00:00") },
+  ];
+  // Mon–Wed is 3; Sat–Sun is 0. A display count — a line bills its own counts.
+  assertEquals(chargeWindowBusinessDays(charge_windows, []), [3, 0]);
+  assertEquals(chargeWindowBusinessDays(charge_windows, ["2026-10-06"]), [2, 0], "a holiday inside a window is not a business day");
+  assertEquals(chargeEnvelope({ charge_windows }), { start: at(5, "09:00:00"), end: at(11, "15:00:00") });
+  assertEquals(chargeEnvelope({ charge_windows: [] }), null);
 });
 
-Deno.test("chargedDays and chargeEnvelope read stored windows only", () => {
-  const charge_windows = [
-    { start: at(5, "09:00:00"), end: at(7, "15:00:00"), days: 3 },
-    { start: at(12, "09:00:00"), end: at(13, "15:00:00"), days: 0 },
-  ];
-  assertEquals(chargedDays({ charge_windows }), 3, "the stored count, even when a recount would differ");
-  assertEquals(chargeEnvelope({ charge_windows }), { start: at(5, "09:00:00"), end: at(13, "15:00:00") });
-  assertEquals(chargeEnvelope({ charge_windows: [] }), null);
+Deno.test("Five-day week meters every window to its own one-week minimum", () => {
+  // The rule `billableDays` used to state, now the formula's `minimum.scope: "window"`.
+  const meter = (windows: { start: string; end: string }[]) =>
+    lineCounts(line(["D", "r"], { counts: [] }), { charge_windows: [{ divider_path: ["D"], windows }], formulas: FORMULAS, holidays: [] }, new Map());
+  const w = (s: number, e: number) => ({ start: at(s, "09:00:00"), end: at(e, "15:00:00") });
+  // 3 + 4 + 2 business days → 5 + 5 + 5 = 15 → 3 weeks.
+  assertEquals(meter([w(5, 7), w(12, 15), w(19, 20)]), [tier("week", 15, 5)]);
+  // 8 + 7 + 6 → 21 business days.
+  assertEquals(meter([w(5, 14), w(19, 27), w(29, 30)]).map((t) => t.num * 5 / t.den), [8 + 7 + 5]);
+  for (let d = 1; d <= 20; d++) {
+    assertEquals(meter([businessDayWindow(d)]), fdwCounts(d), `one window of ${d} days is today's floor`);
+  }
 });
 
 // ── canonicalChargeWindows ───────────────────────────────────────────────────
 
 
-Deno.test("canonicalChargeWindows: recounts each window and DELETES the legacy fields (charge-windows step 5)", () => {
+Deno.test("canonicalChargeWindows: windows to instants only, days_active counted, legacy fields DELETED", () => {
   const out = canonicalChargeWindows({
     delivery_start: at(5, "09:00:00"),
     collection_start: at(16, "15:00:00"),
     days_active: null,
     charge_windows: [
-      { start: at(5, "09:00:00"), end: at(7, "15:00:00"), days: 99 },
+      { start: at(5, "14:00:00", 10, "Z"), end: at(7, "15:00:00") },
       { start: at(12, "09:00:00"), end: at(13, "15:00:00") },
     ],
   } as ChargeDates & Record<string, unknown>, ["2026-10-06"]) as ChargeDates & Record<string, unknown>;
-  assertEquals(out.charge_windows?.map((w) => w.days), [2, 2], "the stored 99 is recounted, the holiday on the 6th excluded");
+  // A stray `days` (a pre-ruling-8 window) is dropped, and every instant lands in Chicago form.
+  assertEquals(out.charge_windows, [
+    { start: at(5, "09:00:00"), end: at(7, "15:00:00") },
+    { start: at(12, "09:00:00"), end: at(13, "15:00:00") },
+  ]);
+  // Possession, not a window: Mon 5 → Fri 16 is 10 business days less the holiday on the 6th.
   assertEquals(out.days_active, 9);
   for (const key of ["charge_start", "charge_start_fs", "charge_end", "charge_end_fs", "days_charged"]) {
     assertEquals(key in out, false, `${key} is deleted, not nulled — a purged pair must stay purged on rewrite`);
@@ -140,13 +155,6 @@ Deno.test("canonicalChargeWindows: the legacy charge bounds never imply a window
   } as ChargeDates & Record<string, unknown>, []) as ChargeDates & Record<string, unknown>;
   assertEquals(out.charge_windows, undefined);
   assertEquals(["charge_start" in out, "charge_end" in out], [false, false]);
-});
-
-Deno.test("canonicalChargeWindows: an extension pair keeps its stated days, and must state them", () => {
-  const dates = { delivery_start: at(5, "09:00:00"), collection_start: at(16, "15:00:00") };
-  const kept = canonicalChargeWindows({ ...dates, charge_windows: [{ start: at(12, "00:00:00"), end: at(16, "15:00:00"), days: 2 }] }, [], { extension: true });
-  assertEquals(kept.charge_windows?.[0].days, 2);
-  assertThrows(() => canonicalChargeWindows({ ...dates, charge_windows: [{ start: at(12, "00:00:00"), end: at(16, "15:00:00") }] }, [], { extension: true }));
 });
 
 Deno.test("canonicalChargeWindows: a window ending two days before it starts is refused", () => {
@@ -168,7 +176,7 @@ Deno.test("applyDateEdit default_dates: 09:00 next business day, collection 5 bu
     delivery_end: at(5, "09:00:00"),
     collection_start: at(9, "15:00:00"),
     collection_end: at(9, "15:00:00"),
-    charge_windows: [{ start: at(5, "09:00:00"), end: at(9, "15:00:00"), days: 5 }],
+    charge_windows: [{ start: at(5, "09:00:00"), end: at(9, "15:00:00") }],
     days_active: 5,
   });
   const late = defaults(at(5, "10:00:00"));
@@ -179,14 +187,14 @@ Deno.test("applyDateEdit default_dates: 09:00 next business day, collection 5 bu
 
 Deno.test("applyDateEdit set_possession: one window over possession FOLLOWS it, and so do the ends", () => {
   const moved = ok(applyDateEdit(defaults(), { type: "set_possession", collection_start: at(16, "15:00:00") }, H));
-  assertEquals(moved.charge_windows, [{ start: at(5, "09:00:00"), end: at(16, "15:00:00"), days: 10 }]);
+  assertEquals(moved.charge_windows, [{ start: at(5, "09:00:00"), end: at(16, "15:00:00") }]);
   assertEquals(moved.collection_end, at(16, "15:00:00"), "an end equal to its start follows it");
 });
 
 Deno.test("applyDateEdit set_possession: an EDITED window does not follow", () => {
   const edited = ok(applyDateEdit(defaults(), { type: "set_window", index: 0, end: at(7, "15:00:00") }, H));
   const moved = ok(applyDateEdit(edited, { type: "set_possession", collection_start: at(16, "15:00:00") }, H));
-  assertEquals(moved.charge_windows, [{ start: at(5, "09:00:00"), end: at(7, "15:00:00"), days: 3 }]);
+  assertEquals(moved.charge_windows, [{ start: at(5, "09:00:00"), end: at(7, "15:00:00") }]);
 });
 
 Deno.test("applyDateEdit set_possession: an end that differs from its start stays where it is", () => {
@@ -204,17 +212,17 @@ Deno.test("applyDateEdit follows by INSTANT, so an API payload in another offset
     charge_windows: [{ start: "2026-10-05T14:00:00.000Z", end: "2026-10-09T20:00:00.000Z" }],
   };
   const out = ok(applyDateEdit(input, { type: "set_possession", collection_start: at(16, "15:00:00") }, { holidays: [], prev: stored }));
-  assertEquals(out.charge_windows, [{ start: at(5, "09:00:00"), end: at(16, "15:00:00"), days: 10 }]);
+  assertEquals(out.charge_windows, [{ start: at(5, "09:00:00"), end: at(16, "15:00:00") }]);
 });
 
 Deno.test("applyDateEdit set_possession_days / set_window_days keep the end's own time of day", () => {
   const long = ok(applyDateEdit(defaults(), { type: "set_possession_days", days: 7 }, H));
   assertEquals(long.collection_start, at(13, "15:00:00"));
-  assertEquals(long.charge_windows?.[0], { start: at(5, "09:00:00"), end: at(13, "15:00:00"), days: 7 });
+  assertEquals(long.charge_windows?.[0], { start: at(5, "09:00:00"), end: at(13, "15:00:00") });
 
   const odd = ok(applyDateEdit(defaults(), { type: "set_window", index: 0, end: at(9, "11:30:00") }, H));
   const shorter = ok(applyDateEdit(odd, { type: "set_window_days", index: 0, days: 2 }, H));
-  assertEquals(shorter.charge_windows?.[0], { start: at(5, "09:00:00"), end: at(6, "11:30:00"), days: 2 });
+  assertEquals(shorter.charge_windows?.[0], { start: at(5, "09:00:00"), end: at(6, "11:30:00") });
 });
 
 Deno.test("applyDateEdit across the DST change: wall time kept, offset moves", () => {
@@ -225,13 +233,13 @@ Deno.test("applyDateEdit across the DST change: wall time kept, offset moves", (
     H,
   ));
   assertEquals(out.collection_start, at(3, "15:00:00", 11, "-06:00"), "Fri 30 Oct, Mon 2, Tue 3 Nov — still 15:00, now CST");
-  assertEquals(out.charge_windows?.[0].days, 3);
+  assertEquals(chargeWindowBusinessDays(out.charge_windows!, []), [3]);
 });
 
 Deno.test("applyDateEdit counts holidays inside a window", () => {
   const out = ok(applyDateEdit(defaults(), { type: "set_possession_days", days: 5 }, { holidays: ["2026-10-07"] }));
   assertEquals(out.collection_start, at(12, "15:00:00"), "the 7th is skipped");
-  assertEquals(out.charge_windows?.[0].days, 5);
+  assertEquals(chargeWindowBusinessDays(out.charge_windows!, ["2026-10-07"]), [5]);
 });
 
 Deno.test("applyDateEdit refuses when holidays have not loaded", () => {
@@ -242,7 +250,7 @@ Deno.test("applyDateEdit add/remove/reset windows, and the refusals", () => {
   const base = ok(applyDateEdit(defaults(), { type: "set_possession", collection_start: at(23, "15:00:00") }, H));
   const first = ok(applyDateEdit(base, { type: "set_window", index: 0, end: at(7, "15:00:00") }, H));
   const two = ok(applyDateEdit(first, { type: "add_window", start: at(19, "09:00:00"), end: at(20, "15:00:00") }, H));
-  assertEquals(two.charge_windows?.map((w) => w.days), [3, 2]);
+  assertEquals(chargeWindowBusinessDays(two.charge_windows!, []), [3, 2]);
 
   const three = ok(applyDateEdit(two, { type: "add_window", start: at(12, "09:00:00"), end: at(12, "15:00:00") }, H));
   assertEquals(three.charge_windows?.map((w) => w.start), [at(5, "09:00:00"), at(12, "09:00:00"), at(19, "09:00:00")], "inserted in order");
@@ -257,7 +265,7 @@ Deno.test("applyDateEdit add/remove/reset windows, and the refusals", () => {
   assertEquals(applyDateEdit(one, { type: "set_window_days", index: 3, days: 2 }, H), { error: "no_such_window" });
 
   const reset = ok(applyDateEdit(two, { type: "reset_windows" }, H));
-  assertEquals(reset.charge_windows, [{ start: at(5, "09:00:00"), end: at(23, "15:00:00"), days: 15 }]);
+  assertEquals(reset.charge_windows, [{ start: at(5, "09:00:00"), end: at(23, "15:00:00") }]);
 });
 
 Deno.test("applyDateEdit refuses window edits on an extension pair, and a 0-day set_*_days", () => {
@@ -273,10 +281,11 @@ Deno.test("applyDateEdit refuses window edits on an extension pair, and a 0-day 
   assertEquals(applyDateEdit(defaults(), { type: "set_possession_days", days: 0 }, H), { error: "invalid_days" });
 });
 
-Deno.test("applyDateEdit copy_from: a new pair takes another pair's dates and recounts them", () => {
+Deno.test("applyDateEdit copy_from: a new pair takes another pair's dates", () => {
   const source = ok(applyDateEdit(defaults(), { type: "add_window", start: at(19, "09:00:00"), end: at(20, "15:00:00") }, H));
   const copy = ok(applyDateEdit<ChargeDates>({}, { type: "copy_from", dates: source }, { holidays: ["2026-10-19"] }));
-  assertEquals(copy.charge_windows?.map((w) => w.days), [5, 1], "recounted against this edit's holidays");
+  assertEquals(copy.charge_windows, source.charge_windows, "the windows themselves; a line meters them against its own holidays");
+  assertEquals(chargeWindowBusinessDays(copy.charge_windows!, ["2026-10-19"]), [5, 1]);
   assertEquals(copy.delivery_start, source.delivery_start);
 });
 
@@ -284,25 +293,25 @@ Deno.test("applyDateEdit copy_from: a new pair takes another pair's dates and re
 
 const PAIR_FIELDS = fieldsUnder(classifySharedFields(OrderSchema, InvoiceSchema), "destinations[]");
 
-Deno.test("classifySharedFields: charge_windows is one propagated value whose `days` is derived", () => {
+Deno.test("classifySharedFields: charge_windows is one propagated value, with no derived key (ruling 8)", () => {
   const field = PAIR_FIELDS.find((f) => f.path === "dates.charge_windows");
-  assertEquals(field, { path: "dates.charge_windows", kind: "propagated", derived_keys: ["days"] });
+  assertEquals(field?.kind, "propagated");
+  assertEquals(field?.derived_keys ?? [], [], "a window carries no counted day any more");
 });
 
-Deno.test("mergeSharedFields: windows differing only in their counted days are not an override", () => {
-  const w = (end: number, days: number) => [{ start: at(5, "09:00:00"), end: at(end, "15:00:00"), days }];
+Deno.test("mergeSharedFields: windows the invoice did not touch follow the order; edited ones stay", () => {
+  const w = (end: number) => [{ start: at(5, "09:00:00"), end: at(end, "15:00:00") }];
   const pair = (windows: ReturnType<typeof w>) => ({ dates: { charge_windows: windows } });
-  // The invoice recounted against a holiday the order did not have.
-  const { merged, overridden } = mergeSharedFields(PAIR_FIELDS, pair(w(9, 5)), pair(w(16, 10)), pair(w(9, 4)));
+  const { merged, overridden } = mergeSharedFields(PAIR_FIELDS, pair(w(9)), pair(w(16)), pair(w(9)));
   assertEquals(overridden, []);
-  assertEquals(merged.dates.charge_windows, w(16, 10), "follows the order; the caller recounts");
+  assertEquals(merged.dates.charge_windows, w(16), "follows the order");
 
-  const edited = mergeSharedFields(PAIR_FIELDS, pair(w(9, 5)), pair(w(16, 10)), pair(w(7, 3)));
+  const edited = mergeSharedFields(PAIR_FIELDS, pair(w(9)), pair(w(16)), pair(w(7)));
   assertEquals(edited.overridden, ["dates.charge_windows"]);
-  assertEquals(edited.merged.dates.charge_windows, w(7, 3));
+  assertEquals(edited.merged.dates.charge_windows, w(7));
 });
 
-Deno.test("resolveMergedPairDates: a mix recounts the windows and carries each _fs from the side that holds its instant", () => {
+Deno.test("resolveMergedPairDates: a mix canonicalizes the windows and carries each _fs from the side that holds its instant", () => {
   const dates = (collection: number, windowEnd: number, tag: number) => ({
     delivery_start: at(5, "09:00:00"),
     delivery_start_fs: { seconds: 1, nanoseconds: tag },
@@ -313,7 +322,7 @@ Deno.test("resolveMergedPairDates: a mix recounts the windows and carries each _
     collection_end: at(collection, "15:00:00"),
     collection_end_fs: { seconds: 2, nanoseconds: tag },
     days_active: 0,
-    charge_windows: [{ start: at(5, "09:00:00"), end: at(windowEnd, "15:00:00"), days: 0 }],
+    charge_windows: [{ start: at(5, "09:00:00"), end: at(windowEnd, "15:00:00") }],
   });
   // The downstream's window is NOT its possession, so it does not follow.
   const downstream = dates(9, 7, 1);
@@ -321,12 +330,12 @@ Deno.test("resolveMergedPairDates: a mix recounts the windows and carries each _
   // Collection from the source, the window kept from the downstream.
   const merged = { ...downstream, collection_start: source.collection_start, collection_end: source.collection_end };
   const out = resolveMergedPairDates(merged, source, downstream, [], canonicalChargeWindows)!;
-  assertEquals(out.charge_windows, [{ start: at(5, "09:00:00"), end: at(7, "15:00:00"), days: 3 }]);
+  assertEquals(out.charge_windows, [{ start: at(5, "09:00:00"), end: at(7, "15:00:00") }]);
   assertEquals(out.days_active, 10);
   assertEquals(out.collection_start_fs, source.collection_start_fs);
   assertEquals(merged.collection_start_fs, downstream.collection_start_fs, "the caller's merged object is not mutated");
 
-  const invalid = { ...merged, charge_windows: [{ start: at(9, "09:00:00"), end: at(5, "15:00:00"), days: 0 }] };
+  const invalid = { ...merged, charge_windows: [{ start: at(9, "09:00:00"), end: at(5, "15:00:00") }] };
   assertEquals(resolveMergedPairDates(invalid, source, downstream, [], canonicalChargeWindows), null);
 });
 
@@ -337,25 +346,25 @@ Deno.test("resolveMergedPairDates: a kept window equal to the downstream's posse
     collection_start: at(collection, "15:00:00"),
     collection_end: at(collection, "15:00:00"),
     days_active: 0,
-    charge_windows: [{ start: at(5, "09:00:00"), end: at(windowEnd, "15:00:00"), days: 0 }],
+    charge_windows: [{ start: at(5, "09:00:00"), end: at(windowEnd, "15:00:00") }],
   });
   // The invoice's window is its possession; the order's is not, and did not follow.
   const downstream = dates(9, 9);
   const source = dates(16, 12);
   const merged = { ...downstream, collection_start: source.collection_start, collection_end: source.collection_end };
   const out = resolveMergedPairDates(merged, source, downstream, [], canonicalChargeWindows)!;
-  assertEquals(out.charge_windows, [{ start: at(5, "09:00:00"), end: at(16, "15:00:00"), days: 10 }]);
-  assertEquals(["charge_end", "days_charged"].filter((k) => k in out), [], "a recount drops the legacy fields");
+  assertEquals(out.charge_windows, [{ start: at(5, "09:00:00"), end: at(16, "15:00:00") }]);
+  assertEquals(["charge_end", "days_charged"].filter((k) => k in out), [], "canonicalizing drops the legacy fields");
 
   // Compared as instants: the same moment in another offset still follows.
-  const utc = { ...downstream, charge_windows: [{ start: "2026-10-05T14:00:00.000Z", end: "2026-10-09T20:00:00.000Z", days: 5 }] };
+  const utc = { ...downstream, charge_windows: [{ start: "2026-10-05T14:00:00.000Z", end: "2026-10-09T20:00:00.000Z" }] };
   const utcOut = resolveMergedPairDates({ ...utc, collection_start: source.collection_start }, source, utc, [], canonicalChargeWindows)!;
   assertEquals(utcOut.charge_windows?.[0].end, at(16, "15:00:00"));
 
   // Two windows never follow.
-  const two = { ...downstream, charge_windows: [{ start: at(5, "09:00:00"), end: at(6, "15:00:00"), days: 2 }, { start: at(8, "09:00:00"), end: at(9, "15:00:00"), days: 2 }] };
+  const two = { ...downstream, charge_windows: [{ start: at(5, "09:00:00"), end: at(6, "15:00:00") }, { start: at(8, "09:00:00"), end: at(9, "15:00:00") }] };
   const twoOut = resolveMergedPairDates({ ...two, collection_start: source.collection_start }, source, two, [], canonicalChargeWindows)!;
-  assertEquals(twoOut.charge_windows?.map((w) => w.days), [2, 2]);
+  assertEquals(twoOut.charge_windows, two.charge_windows);
 });
 
 // ── The pricer ───────────────────────────────────────────────────────────────
@@ -372,7 +381,7 @@ function line(path: string[], price: Record<string, unknown> = {}, over: Record<
     quantity: 1,
     path: [...path, uid],
     ...over,
-    price: { ...(lineBase.price as object), base_cents: 10000, chargeable_days: 5, formula: "five_day_week", taxes: [], discount: null, ...price },
+    price: { ...(lineBase.price as object), taxes: [], discount: null, ...legacyPrice({ base_cents: 10000, chargeable_days: 5, ...price }) },
   } as unknown as LineItem;
 }
 
@@ -383,14 +392,17 @@ const TAX: PriceDocumentContext["tax"] = {
   catalog: { codes: [], rates: [], classes: [] },
   asOf: "2026-10-05T00:00:00.000-05:00",
 };
-const priceCtx = (charge_windows: PriceDocumentContext["charge_windows"], document: PriceDocumentContext["document"] = { kind: "order", status: "active", stored_items: [] }): PriceDocumentContext => ({ document, tax: TAX, charge_windows });
-const pairWith = (days: number[]) => chargeWindowContext([{
-  uid: "D",
-  dates: { charge_windows: days.map((d) => ({ days: d })) },
-}]);
+const priceCtx = (charge_windows: PriceDocumentContext["charge_windows"], document: PriceDocumentContext["document"] = { kind: "order", status: "active", stored_items: [] }): PriceDocumentContext => ({ document, tax: TAX, charge_windows, formulas: FORMULAS, holidays: [] });
+/** Pair `D`, its windows holding `days[i]` business days each. */
+const pairWith = (days: number[]) => chargeWindowContext([{ uid: "D", dates: { charge_windows: businessDayWindows(days) } }]);
+/** A Five-day week line's billable days, off its counts; `null` when it has none or is flat. */
+const daysOf = (price: { price_formula?: { basis?: string } | null; counts?: { num: number; den: number }[] }): number | null =>
+  price.price_formula?.basis === "time" && price.counts?.length ? (price.counts[0].num * 5) / price.counts[0].den : null;
 const priced = (it: LineItem, ctx: PriceDocumentContext) => {
-  const out = priceDocument([it], ctx).items[0].price as unknown as { chargeable_days: number | null; subtotal_cents: number; subtotal_discounted_cents: number };
-  return out;
+  const price = priceDocument([it], ctx).items[0].price as unknown as {
+    price_formula: { basis: string } | null; counts: { num: number; den: number }[]; subtotal_cents: number; subtotal_discounted_cents: number;
+  };
+  return { ...price, days: daysOf(price) };
 };
 
 Deno.test("priceDocument: the worked multi-window cases", () => {
@@ -401,7 +413,7 @@ Deno.test("priceDocument: the worked multi-window cases", () => {
   ];
   for (const [windows, days, cents] of cases) {
     const out = priced(line(["D"]), priceCtx(pairWith(windows)));
-    assertEquals([out.chargeable_days, out.subtotal_cents], [days, cents], JSON.stringify(windows));
+    assertEquals([out.days, out.subtotal_cents], [days, cents], JSON.stringify(windows));
   }
 });
 
@@ -409,8 +421,8 @@ Deno.test("priceDocument: a multi-window line's own numbers multiply out to its 
   for (const windows of [[3, 4, 2], [3, 0, 4], [8, 7, 6], [0, 0], [12, 1]]) {
     for (const quantity of [1, 3, 7]) {
       const out = priced(line(["D"], {}, { quantity }), priceCtx(pairWith(windows)));
-      assertEquals(out.chargeable_days, billableDays(windows), JSON.stringify(windows));
-      assertEquals(out.subtotal_cents, quantity * 10000 * out.chargeable_days! / 5, `${JSON.stringify(windows)} × ${quantity}`);
+      assertEquals(out.days, windows.reduce((sum, d) => sum + Math.max(d, 5), 0), JSON.stringify(windows));
+      assertEquals(out.subtotal_cents, quantity * 10000 * out.days! / 5, `${JSON.stringify(windows)} × ${quantity}`);
     }
   }
 });
@@ -450,17 +462,22 @@ Deno.test("priceDocument: property — a single-window pair prices exactly as a 
   assert(factorBit > 1000, "anti-vacuity: the day factor was exercised");
 });
 
-Deno.test("priceDocument: only a rental five_day_week line takes days from its pair", () => {
+Deno.test("priceDocument: the line's FORMULA, not its type, decides whether it meters its pair (ruling 8)", () => {
   const ctx = priceCtx(pairWith([12]));
-  const sale = priced(line(["D"], { chargeable_days: 12 }, { type: "sale" }), ctx);
-  assertEquals([sale.chargeable_days, sale.subtotal_cents], [null, 10000], "a sale stored as five_day_week prices at factor 1");
+  // A flat formula meters no time: one count, at factor 1, whatever the windows say.
   const fixed = priced(line(["D"], { formula: "fixed", chargeable_days: 12 }), ctx);
-  assertEquals([fixed.chargeable_days, fixed.subtotal_cents], [null, 10000]);
+  assertEquals([fixed.counts, fixed.subtotal_cents], [[tier("flat", 1, 1)], 10000]);
+  const fixedSale = priced(line(["D"], { formula: "fixed" }, { type: "sale" }), ctx);
+  assertEquals(fixedSale.subtotal_cents, 10000);
+  // A time formula meters, on a sale as on a rental: the backfill moves factor-1
+  // lines to Fixed rather than relying on the type.
   const rental = priced(line(["D"], { chargeable_days: 5 }), ctx);
-  assertEquals([rental.chargeable_days, rental.subtotal_cents], [12, 24000]);
+  assertEquals([rental.days, rental.subtotal_cents], [12, 24000]);
+  const sale = priced(line(["D"], { chargeable_days: 5 }, { type: "sale" }), ctx);
+  assertEquals([sale.days, sale.subtotal_cents], [12, 24000]);
 });
 
-Deno.test("priceDocument: a rental five_day_week line under no pair is refused", () => {
+Deno.test("priceDocument: a time-formula line under no pair is refused", () => {
   assertThrows(() => priceDocument([line(["order-divider"])], priceCtx(pairWith([5]))), PriceRefusalError, "under no destination pair with charge windows");
 });
 
@@ -468,10 +485,10 @@ Deno.test("priceDocument: a complete or canceled order keeps the stored days of 
   for (const status of ["complete", "canceled"] as const) {
     const carried = line(["D"], { chargeable_days: 5 });
     const out = priced(carried, priceCtx(pairWith([7]), { kind: "order", status, stored_items: [carried] }));
-    assertEquals([out.chargeable_days, out.subtotal_cents], [5, 10000], status);
+    assertEquals([out.days, out.subtotal_cents], [5, 10000], status);
   }
   const live = priced(line(["D"], { chargeable_days: 5 }), priceCtx(pairWith([7]), { kind: "invoice", status: "issued", has_settlement: false }));
-  assertEquals(live.chargeable_days, 7, "an issued, unpaid invoice is re-derived");
+  assertEquals(live.days, 7, "an issued, unpaid invoice is re-derived");
 });
 
 // ── A line ADDED to a frozen order (api-cloudrun#1341) ────────────────────────
@@ -481,35 +498,38 @@ Deno.test("priceDocument: a complete or canceled order keeps the stored days of 
 
 const frozen = (stored_items: LineItem[]): PriceDocumentContext["document"] => ({ kind: "order", status: "complete", stored_items });
 const pricedAll = (items: LineItem[], ctx: PriceDocumentContext) =>
-  priceDocument(items, ctx).items.map((it) => it.price as unknown as { chargeable_days: number | null; subtotal_cents: number });
+  priceDocument(items, ctx).items.map((it) => {
+    const price = it.price as unknown as { price_formula: { basis: string }; counts: { num: number; den: number }[]; subtotal_cents: number };
+    return { ...price, days: daysOf(price) };
+  });
 
-Deno.test("api-cloudrun#1341: a rental added to a complete 2-window order bills billableDays, not the client's seed", () => {
-  const carried = line(["D"], { chargeable_days: 4 }); // a legacy count the windows disagree with
+Deno.test("api-cloudrun#1341: a rental added to a complete 2-window order bills its metered count, not the client's seed", () => {
+  const carried = line(["D"], { chargeable_days: 4 }); // a legacy count the windows disagree with (stored floored: 5)
   const added = line(["D"], { chargeable_days: 11 }, { uid: "custom-x", path: ["D", "custom-x"] }); // 8 + 3 raw
   const [keep, add] = pricedAll([carried, added], priceCtx(pairWith([8, 3]), frozen([carried])));
-  assertEquals([add.chargeable_days, add.subtotal_cents], [13, 26000], "Σ max(d,5) = 8 + 5");
-  assertEquals([keep.chargeable_days, keep.subtotal_cents], [4, 10000], "the carried line keeps its own days");
+  assertEquals([add.days, add.subtotal_cents], [13, 26000], "Σ max(d,5) = 8 + 5");
+  assertEquals([keep.days, keep.subtotal_cents], [5, 10000], "the carried line keeps its own counts");
 });
 
 Deno.test("a carried line keeps its STORED row's days when the incoming row has none (order 1013)", () => {
-  // The order input schema strips `chargeable_days`, so a PUT's every row arrives
+  // The order input schema strips `counts`, so a PUT's every row arrives
   // without them. Reading the incoming row nulled 25 lines of complete order
   // 1013 and repriced it at the one-week floor, $4,952.91 → $2,667.17.
   const stored = line(["D"], { chargeable_days: 19 });
-  const incoming = { ...stored, price: { ...stored.price, chargeable_days: null } } as LineItem;
+  const incoming = { ...stored, price: { ...stored.price, counts: [] } } as LineItem;
   const out = priced(incoming, priceCtx(pairWith([7]), frozen([stored])));
-  assertEquals([out.chargeable_days, out.subtotal_cents], [19, 38000]);
+  assertEquals([out.days, out.subtotal_cents], [19, 38000]);
 });
 
 Deno.test("api-cloudrun#1341: a rental added to a complete one-window order bills that window", () => {
   const added = line(["D"], { chargeable_days: 2 });
-  assertEquals(priced(added, priceCtx(pairWith([9]), frozen([]))).chargeable_days, 9);
+  assertEquals(priced(added, priceCtx(pairWith([9]), frozen([]))).days, 9);
 });
 
 Deno.test("api-cloudrun#1341: an added rental seeded null derives its days instead of billing the one-week floor", () => {
   const added = line(["D"], { chargeable_days: null });
   const out = priced(added, priceCtx(pairWith([8, 3]), frozen([])));
-  assertEquals([out.chargeable_days, out.subtotal_cents], [13, 26000]);
+  assertEquals([out.days, out.subtotal_cents], [13, 26000]);
 });
 
 Deno.test("api-cloudrun#1341: an added rental under no pair is refused, not priced at one week", () => {
@@ -524,16 +544,16 @@ Deno.test("api-cloudrun#1341: a carried line MOVED to another group still keeps 
   // A path changes on a move; re-deriving would change a finished job's money.
   const stored = line(["D", "G1"], { chargeable_days: 4 });
   // Stripped, as every row of an API write is: the days come off the stored row.
-  const moved = { ...stored, path: ["D", "G2", stored.uid], price: { ...stored.price, chargeable_days: null } } as LineItem;
-  assertEquals(priced(moved, priceCtx(pairWith([8, 3]), frozen([stored]))).chargeable_days, 4);
+  const moved = { ...stored, path: ["D", "G2", stored.uid], price: { ...stored.price, counts: [] } } as LineItem;
+  assertEquals(priced(moved, priceCtx(pairWith([8, 3]), frozen([stored]))).days, 5);
 });
 
 Deno.test("api-cloudrun#1341: a second row of a uid the order already carries is NOT carried", () => {
   // A uid repeats, so a uid set would let the extra row keep the client's seed.
   const stored = line(["D", "G1"], { chargeable_days: 4 });
-  const extra = { ...stored, path: ["D", "G2", stored.uid], price: { ...stored.price, chargeable_days: 11 } } as LineItem;
+  const extra = { ...stored, path: ["D", "G2", stored.uid], price: { ...stored.price, counts: fdwCounts(11) } } as LineItem;
   const [keep, add] = pricedAll([stored, extra], priceCtx(pairWith([8, 3]), frozen([stored])));
-  assertEquals([keep.chargeable_days, add.chargeable_days], [4, 13]);
+  assertEquals([keep.days, add.days], [5, 13]);
 });
 
 Deno.test("carriedLines: empty on every document that is not a frozen order", () => {
@@ -558,61 +578,65 @@ Deno.test("chargeWindowContext: a pair whose windows are null bills no days and 
   // throw: its lines never read days, and a rental under such a pair is refused
   // where it is priced, naming the line.
   assertEquals(chargeWindowContext([{ uid: "D", dates: { charge_windows: null } }]), []);
-  const sale = { ...line(["D"]), type: "sale" as const, price: { ...line(["D"]).price, formula: "fixed" as const } };
-  assertEquals(lineChargeableDays(sale as never, priceCtx([]), new Map()), { chargeable_days: null });
-  assertThrows(() => lineChargeableDays(line(["D"]), priceCtx([]), new Map()), PriceRefusalError, "under no destination pair with charge windows");
+  const sale = { ...line(["D"]), type: "sale" as const, price: { ...line(["D"]).price, ...fixedPrice(0) } };
+  assertEquals(lineCounts(sale as never, priceCtx([]), new Map()), [tier("flat", 1, 1)]);
+  assertThrows(() => lineCounts(line(["D"]), priceCtx([]), new Map()), PriceRefusalError, "under no destination pair with charge windows");
 });
 
 Deno.test("chargeWindowContext: an invoice pair's divider path is [uid_order, uid]", () => {
-  const ctx = chargeWindowContext([{ uid: "D", uid_order: "O", dates: { charge_windows: [{ days: 3 }, { days: 4 }] } }]);
-  assertEquals(ctx, [{ divider_path: ["O", "D"], days: [3, 4] }]);
+  const windows = businessDayWindows([3, 4]);
+  const ctx = chargeWindowContext([{ uid: "D", uid_order: "O", dates: { charge_windows: windows } }]);
+  assertEquals(ctx, [{ divider_path: ["O", "D"], windows }]);
   const onInvoice = line(["O", "D"]);
-  assertEquals(lineChargeableDays(onInvoice, priceCtx(ctx), new Map()), { chargeable_days: 10 });
+  assertEquals(lineCounts(onInvoice, priceCtx(ctx), new Map()), [tier("week", 10, 5)]);
 });
 
-Deno.test("priceDocument: an extension line bills its pair's added days, unfloored", () => {
-  const priceExt = (stored: number | null, dates: { charge_windows: { days: number }[] }) => {
-    const ext = line(["O", "E"], { chargeable_days: stored });
+Deno.test("priceDocument: an extension line bills its OWN stated counts, unfloored, never its window", () => {
+  const priceExt = (counts: ReturnType<typeof fdwCounts>) => {
+    const ext = line(["O", "E"], { counts });
     return priceDocument([ext], {
-      ...priceCtx(chargeWindowContext([{ uid: "E", uid_order: "O", dates }]), { kind: "invoice", status: "draft", has_settlement: false }),
+      ...priceCtx(chargeWindowContext([{ uid: "E", uid_order: "O", dates: { charge_windows: businessDayWindows([4]) } }]), { kind: "invoice", status: "draft", has_settlement: false }),
       extensions: [{ divider_path: ["O", "E"] }],
-    }).items[0].price as unknown as { chargeable_days: number; subtotal_cents: number };
+    }).items[0].price as unknown as { counts: { num: number; den: number }[]; subtotal_cents: number };
   };
-  // The window carries the added days; a line arriving with none (an API build nulls input days) takes them.
-  const fromWindow = priceExt(null, { charge_windows: [{ days: 2 }] });
-  assertEquals([fromWindow.chargeable_days, fromWindow.subtotal_cents], [2, 4000]);
-  assertEquals(priceExt(7, { charge_windows: [{ days: 2 }] }).chargeable_days, 2, "the window wins over a stale line count");
+  // The section's writer states the added days (ruling 8); the window's 4 business days are not consulted.
+  const stated = priceExt(fdwCounts(2, { stated: true }));
+  assertEquals([stated.counts, stated.subtotal_cents], [[tier("week", 2, 5)], 4000]);
+  // A line arriving with none has nothing to extend by.
+  assertThrows(() => priceExt([]), PriceRefusalError, "states no counts");
 });
 
-Deno.test("priceCreditNote: a line billed on a multi-window pair is credited at its stored billable days", () => {
-  const src = (chargeable_days: number): CreditSourceLine => ({
+Deno.test("priceCreditNote: a line billed on a multi-window pair is credited at its stored counts", () => {
+  const src = (counts: { rate_key: string; num: number; den: number }[]): CreditSourceLine => ({
     uid: "r1",
     path: ["O", "D", "r1"],
     type: "rental",
     quantity: 1,
-    price: { base_cents: 10000, chargeable_days, formula: "five_day_week", discount: null, taxes: [] },
+    price: { ...fdwPrice(10000), counts, discount: null, taxes: [] },
   });
   const billed = priced(line(["D"]), priceCtx(pairWith([3, 4, 2])));
-  assertEquals(priceCreditNote([{ line: src(billed.chargeable_days!), quantity: 1 }], [], []).prices[0].subtotal_cents, billed.subtotal_cents);
-  assertEquals(priceCreditNote([{ line: src(9), quantity: 1 }], [], []).prices[0].subtotal_cents, 18000, "one window: its own days");
+  assertEquals(priceCreditNote([{ line: src(billed.counts as never), quantity: 1 }], [], []).prices[0].subtotal_cents, billed.subtotal_cents);
+  assertEquals(priceCreditNote([{ line: src(fdwCounts(9)), quantity: 1 }], [], []).prices[0].subtotal_cents, 18000, "one window: its own days");
 });
 
 // ── The pair invariant, checked on write (core#113) ──────────────────────────
 
 /**
- * A line stating `days`, under pair `D`, so a test can put a WRONG count on a
- * multi-window pair — which the pricer itself cannot produce.
+ * A line stating `days` as its counts (unfloored), under pair `D`, so a test can
+ * put a WRONG count on a multi-window pair — which the pricer cannot produce.
  */
-const storedLine = (days: number | null, path = ["D"]) => line(path, { chargeable_days: days });
+const storedLine = (days: number | null, path = ["D"]) => line(path, { counts: days === null ? [] : fdwCounts(days, { stated: true }) });
+const PAIR_CTX = { formulas: FORMULAS, holidays: [] as string[] };
 
-Deno.test("chargeWindowPairViolations: a 2+ window pair requires billableDays, and reports the difference", () => {
+Deno.test("chargeWindowPairViolations: a 2+ window pair requires the metered counts, and reports the difference", () => {
   const ctx = (document: PriceDocumentContext["document"] = { kind: "order", status: "active", stored_items: [] }) => ({
     document,
     charge_windows: pairWith([3, 4, 2]),
+    ...PAIR_CTX,
   });
   // [3,4,2] → Σ max(d,5) = 15. The pricer's own output is the clean case.
   const clean = priced(line(["D"]), priceCtx(pairWith([3, 4, 2])));
-  assertEquals(clean.chargeable_days, 15);
+  assertEquals(clean.days, 15);
   assertEquals(chargeWindowPairViolations([storedLine(15)], ctx()), []);
 
   // …and the guard BITES on a line that skipped the pricer. Without this arm
@@ -620,8 +644,7 @@ Deno.test("chargeWindowPairViolations: a 2+ window pair requires billableDays, a
   const offender = storedLine(9);
   const bad = chargeWindowPairViolations([offender], ctx());
   assertEquals(bad.length, 1);
-  assertEquals([bad[0].stored, bad[0].expected], [9, 15], "it states both counts, so a report need not re-derive either");
-  assertEquals(bad[0].window_days, [3, 4, 2]);
+  assertEquals([bad[0].stored, bad[0].expected], [[tier("week", 9, 5)], [tier("week", 15, 5)]], "it states both, so a report need not re-derive either");
   assertEquals(bad[0].divider_path, ["D"]);
   // `path` is the LINE's own path — the row identity within this document.
   // `item_uid` is not one: it repeats within an array on 18% of prod orders.
@@ -635,17 +658,17 @@ Deno.test("chargeWindowPairViolations: a 2+ window pair requires billableDays, a
 Deno.test("chargeWindowPairViolations: a SINGLE-window pair is out of scope", () => {
   // Legacy CRMS divergence the 2026-09-16 census measured and the backfill
   // settled. Re-asserting it here would refuse documents the campaign left alone.
-  const ctx = { document: { kind: "order", status: "active", stored_items: [] } as const, charge_windows: pairWith([9]) };
+  const ctx = { document: { kind: "order", status: "active", stored_items: [] } as const, charge_windows: pairWith([9]), ...PAIR_CTX };
   assertEquals(chargeWindowPairViolations([storedLine(4)], ctx), []);
   assertEquals(chargeWindowPairViolations([storedLine(9)], ctx), []);
 });
 
-Deno.test("chargeWindowPairViolations: only a rental five_day_week line is checked", () => {
-  const ctx = { document: { kind: "order", status: "active", stored_items: [] } as const, charge_windows: pairWith([3, 4, 2]) };
-  // A sale/service/surcharge is stored as five_day_week with null days and prices at factor 1.
-  assertEquals(chargeWindowPairViolations([line(["D"], { chargeable_days: null }, { type: "sale" })], ctx), []);
-  assertEquals(chargeWindowPairViolations([line(["D"], { chargeable_days: null, formula: "fixed" })], ctx), []);
-  // A rental with NO pair is lineChargeableDays' refusal to make, not this one's.
+Deno.test("chargeWindowPairViolations: only a time-formula line is checked", () => {
+  const ctx = { document: { kind: "order", status: "active", stored_items: [] } as const, charge_windows: pairWith([3, 4, 2]), ...PAIR_CTX };
+  // A flat-formula line meters no time, whatever its type.
+  assertEquals(chargeWindowPairViolations([line(["D"], { formula: "fixed" }, { type: "sale" })], ctx), []);
+  assertEquals(chargeWindowPairViolations([line(["D"], { formula: "fixed" })], ctx), []);
+  // A time line with NO pair is lineCounts' refusal to make, not this one's.
   assertEquals(chargeWindowPairViolations([storedLine(9, [])], ctx), []);
 });
 
@@ -661,7 +684,7 @@ Deno.test("chargeWindowPairViolations: a document that keeps its stored days is 
   ];
   for (const document of exempt) {
     const label = `${document.kind}/${document.status}${"has_settlement" in document && document.has_settlement ? "+settled" : ""}`;
-    assertEquals(chargeWindowPairViolations(items, { document, charge_windows: windows }), [], label);
+    assertEquals(chargeWindowPairViolations(items, { document, charge_windows: windows, ...PAIR_CTX }), [], label);
   }
   // …and the live ones are NOT exempt, so the arm above cannot pass vacuously.
   const live: PriceDocumentContext["document"][] = [
@@ -670,19 +693,19 @@ Deno.test("chargeWindowPairViolations: a document that keeps its stored days is 
     { kind: "invoice", status: "issued", has_settlement: false },
   ];
   for (const document of live) {
-    assertEquals(chargeWindowPairViolations(items, { document, charge_windows: windows }).length, 1, `${document.kind}/${document.status}`);
+    assertEquals(chargeWindowPairViolations(items, { document, charge_windows: windows, ...PAIR_CTX }).length, 1, `${document.kind}/${document.status}`);
   }
 });
 
 Deno.test("chargeWindowPairViolations: an extension line bills the days it ADDS, not its pair's total", () => {
-  const ext = line(["O", "E"], { chargeable_days: 2 });
-  const windows = chargeWindowContext([{ uid: "E", uid_order: "O", dates: { charge_windows: [{ days: 3 }, { days: 4 }] } }]);
+  const ext = line(["O", "E"], { counts: fdwCounts(2, { stated: true }) });
+  const windows = chargeWindowContext([{ uid: "E", uid_order: "O", dates: { charge_windows: businessDayWindows([3, 4]) } }]);
   const document = { kind: "invoice", status: "draft", has_settlement: false } as const;
-  // Under the section: exempt — 2 is the added days, while billableDays is 10.
-  assertEquals(chargeWindowPairViolations([ext], { document, charge_windows: windows, extensions: [{ divider_path: ["O", "E"] }] }), []);
+  // Under the section: exempt — 2 is the added days, while the windows meter 10.
+  assertEquals(chargeWindowPairViolations([ext], { document, charge_windows: windows, extensions: [{ divider_path: ["O", "E"] }], ...PAIR_CTX }), []);
   // The SAME line with no extension section declared is checked, so the
   // exemption is the section's doing rather than the line's shape.
-  assertEquals(chargeWindowPairViolations([ext], { document, charge_windows: windows }).length, 1);
+  assertEquals(chargeWindowPairViolations([ext], { document, charge_windows: windows, ...PAIR_CTX }).length, 1);
 });
 
 // ── The sync comparator's `invoice_windows` arm (core#112) ────────────────────
@@ -702,15 +725,17 @@ const PAIR_UID = "pair-1";
 
 /** The pair as the ORDER states it — divider path `[pair.uid]`. */
 const orderWindows = (days: number[]) =>
-  chargeWindowContext([{ uid: PAIR_UID, dates: { charge_windows: days.map((d) => ({ days: d })) } }]);
+  chargeWindowContext([{ uid: PAIR_UID, dates: { charge_windows: businessDayWindows(days) } }]);
 /** The same pair as the INVOICE states it — divider path `[uid_order, pair.uid]`. */
 const invoiceWindows = (days: number[]) =>
-  chargeWindowContext([{ uid: PAIR_UID, uid_order: ORDER_UID, dates: { charge_windows: days.map((d) => ({ days: d })) } }]);
+  chargeWindowContext([{ uid: PAIR_UID, uid_order: ORDER_UID, dates: { charge_windows: businessDayWindows(days) } }]);
 
 const syncCtx = (invoiceChargeWindows: ReturnType<typeof invoiceWindows>, over: Partial<InvoiceSyncContext> = {}): InvoiceSyncContext => ({
   taxNameByUid: new Map<string, string>(),
   orderFrozen: false,
   invoiceChargeWindows,
+  formulas: FORMULAS,
+  holidays: [],
   ...over,
 });
 
@@ -735,7 +760,7 @@ const explainBilled = (expected: InvoiceItem, current: InvoiceItem, context: Inv
 Deno.test("invoice_windows: a partial bill is explained, and the arm says so", () => {
   // The order's pair bills 20 days; the invoice bills 15 of them.
   const { expected, current } = billedPair([20], [15]);
-  assert(invoiceItemDifferences(expected, current).includes("price.chargeable_days"), "the naive comparison must still see the difference");
+  assert(invoiceItemDifferences(expected, current).includes("price.counts"), "the naive comparison must still see the difference");
 
   const verdict = explainBilled(expected, current, syncCtx(invoiceWindows([15])));
   assertEquals(verdict.unexplained, []);
@@ -754,7 +779,7 @@ Deno.test("invoice_windows: a MULTI-window invoice pair is explained at its bill
   const { expected, current } = billedPair([20], [3, 4, 2]);
   const verdict = explainBilled(expected, current, syncCtx(invoiceWindows([3, 4, 2])));
   assertEquals(verdict.unexplained, []);
-  assertEquals((current.price as { chargeable_days: number }).chargeable_days, billableDays([3, 4, 2]));
+  assertEquals((current.price as { counts: unknown }).counts, [tier("week", 15, 5)], "Σ max(d, 5) = 15");
 });
 
 Deno.test("invoice_windows: the arm does NOT fire when the two documents state the same windows", () => {
@@ -772,16 +797,16 @@ Deno.test("🔴 invoice_windows: passing the ORDER's windows explains NOTHING �
   const { expected, current } = billedPair([20], [15]);
   const wrong = explainBilled(expected, current, syncCtx(orderWindows([20]) as ReturnType<typeof invoiceWindows>));
   assertEquals(wrong.arms, []);
-  assert(wrong.unexplained.includes("price.chargeable_days"));
+  assert(wrong.unexplained.includes("price.counts"));
 });
 
 Deno.test("invoice_windows: a REAL drift under a partial bill still reports", () => {
   // Same partial bill, but the invoice's base price was also changed. The day
   // difference is explained; the price change and the money it moves are not.
-  const { expected, current } = billedPair([20], [15], { base_cents: 12000 });
+  const { expected, current } = billedPair([20], [15], { rates: [{ rate_key: "week", amount_cents: 12000 }] });
   const verdict = explainBilled(expected, current, syncCtx(invoiceWindows([15])));
   assertEquals(verdict.arms, ["invoice_windows"]);
-  assertEquals(verdict.unexplained, ["price.base_cents", "price.subtotal_cents", "price.subtotal_discounted_cents", "price.total_cents"]);
+  assertEquals(verdict.unexplained, ["price.rates", "price.subtotal_cents", "price.subtotal_discounted_cents", "price.total_cents"]);
 });
 
 Deno.test("invoice_windows: a line whose stored days disagree with its OWN windows stays red", () => {
@@ -795,7 +820,7 @@ Deno.test("invoice_windows: a line whose stored days disagree with its OWN windo
   const { current: billedAtNine } = billedPair([20], [9]);
   const verdict = explainBilled(expected, billedAtNine, syncCtx(invoiceWindows([15])));
   assertEquals(verdict.arms, []);
-  assert(verdict.unexplained.includes("price.chargeable_days"));
+  assert(verdict.unexplained.includes("price.counts"));
 });
 
 Deno.test("invoice_windows: a line stating the wrong DAYS beside the right money is red on the days alone", () => {
@@ -805,10 +830,10 @@ Deno.test("invoice_windows: a line stating the wrong DAYS beside the right money
   // badging the count is more useful than either extreme — an operator is shown
   // the one field that is actually wrong.
   const { expected, current } = billedPair([20], [15]);
-  const inconsistent = { ...current, price: { ...(current.price as object), chargeable_days: 9 } } as unknown as InvoiceItem;
+  const inconsistent = { ...current, price: { ...(current.price as object), counts: fdwCounts(9) } } as unknown as InvoiceItem;
   const verdict = explainBilled(expected, inconsistent, syncCtx(invoiceWindows([15])));
   assertEquals(verdict.arms, ["invoice_windows"]);
-  assertEquals(verdict.unexplained, ["price.chargeable_days"]);
+  assertEquals(verdict.unexplained, ["price.counts"]);
 });
 
 Deno.test("🔴 invoice_windows REBASES the tax arms, and `totalFollowsTax` proves it", () => {
@@ -828,8 +853,11 @@ Deno.test("🔴 invoice_windows REBASES the tax arms, and `totalFollowsTax` prov
     uid: "L", type: "rental", name: "Hotspot", description: "", quantity: 1,
     path: [ORDER_UID, PAIR_UID, "L"], uid_tax_class: "class-1", zero_priced: null,
     price: {
-      base_cents: 10000, base_percent: null, chargeable_days: days, formula: "five_day_week",
-      subtotal_cents: subtotal, subtotal_discounted_cents: subtotal, discount: null,
+      ...fdwPrice(10000, days),
+      base_percent: null,
+      subtotal_cents: subtotal,
+      subtotal_discounted_cents: subtotal,
+      discount: null,
       taxes: [{ uid: tax.uid, name: "Chicago", rate: tax.rate, type: "percent", amount_cents: tax.amount_cents }],
       total_cents: total,
     },
@@ -860,7 +888,7 @@ Deno.test("invoice_windows: computeInvoiceSyncStatus reads a partial bill as in_
 
   assertEquals(computeInvoiceSyncStatus(invoiceItems, orderItems, ORDER_UID, syncCtx(invoiceWindows([15]))).get(key), "in_sync");
 
-  const drifted = billedPair([20], [15], { base_cents: 12000 });
+  const drifted = billedPair([20], [15], { rates: [{ rate_key: "week", amount_cents: 12000 }] });
   const withDrift = [...invoiceItems.slice(0, 2), drifted.current];
   assertEquals(computeInvoiceSyncStatus(withDrift, orderItems, ORDER_UID, syncCtx(invoiceWindows([15]))).get(key), "out_of_sync");
 });

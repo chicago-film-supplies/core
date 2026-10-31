@@ -613,7 +613,7 @@ export interface DurationDates {
  * The possession duration returned by {@link getDuration}.
  *
  * There is no charge half: a pair's charged days are its stored window counts
- * (`chargedDays`), counted once by `canonicalChargeWindows`.
+ * (`price.counts`, metered by `priceDocument` through each line's formula).
  */
 export interface DurationResult {
   activeDays: number;
@@ -667,22 +667,16 @@ export function getDuration(
 // ── Charge windows ──────────────────────────────────────────────────
 //
 // A destination pair charges for one or more windows (`charge_windows` on
-// `OrderDocDates`). Each window stores the business days it charges, counted
-// once when it is written. Every total is a sum of those stored counts, so
-// nothing below the write path needs the holiday list.
+// `OrderDocDates`). A window is a start and an end instant and nothing else
+// (purchases-as-documents Phase 2 ruling 8): a pair's lines may be on different
+// price formulas, so no one count per window is every line's. Each priced line
+// meters these windows through its own formula and freezes the result on itself
+// (`price.counts`, `@cfs/core/utils/price-document`).
 
-/** A window as the helpers read it. `days` is present once the window is stored. */
+/** A window as the helpers read and store it. */
 export interface ChargeWindowLike {
   start: string;
   end: string;
-  days?: number;
-}
-
-/** A stored window: its day count has been written. */
-export interface CountedChargeWindow {
-  start: string;
-  end: string;
-  days: number;
 }
 
 /**
@@ -699,40 +693,6 @@ export interface ChargeDates {
   collection_end?: string | null;
   charge_windows?: readonly ChargeWindowLike[] | null;
   days_active?: number | null;
-}
-
-/**
- * **The days a pair charges: Σ `window.days`.** Reads stored counts only.
- *
- * ```ts
- * chargedDays({ charge_windows: [{ start, end, days: 3 }, { start, end, days: 4 }] }); // 7
- * chargedDays({ charge_windows: null }); // 0 — the pair bills no days
- * ```
- */
-export function chargedDays(dates: { charge_windows: readonly { days: number }[] | null }): number {
-  // `null` = a pair that bills no days (a document with no rental, api-cloudrun#1154).
-  let sum = 0;
-  for (const w of dates.charge_windows ?? []) sum += w.days;
-  return sum;
-}
-
-/**
- * **The days a set of windows bills: Σ `max(days, 5)`.** Every window carries
- * the one-week minimum, a 0-day window included (charge-windows decision 2).
- *
- * For a single window this is today's `max(days, 5)`, so a one-window pair
- * prices exactly as before.
- *
- * ```ts
- * billableDays([3, 4, 2]); // 15 → 3.0 × base
- * billableDays([3, 0, 4]); // 15
- * billableDays([8, 7, 6]); // 21 → 4.2 × base
- * ```
- */
-export function billableDays(days: readonly number[]): number {
-  let sum = 0;
-  for (const d of days) sum += Math.max(d, 5);
-  return sum;
 }
 
 /**
@@ -755,7 +715,7 @@ export function chargeEnvelope(
  */
 export function chargeWindowsOf(dates: ChargeDates): ChargeWindowLike[] | null {
   if (!dates.charge_windows || dates.charge_windows.length === 0) return null;
-  return dates.charge_windows.map((w) => ({ ...w }));
+  return dates.charge_windows.map((w) => ({ start: w.start, end: w.end }));
 }
 
 /** Business days in one window, counted in Chicago. */
@@ -767,40 +727,48 @@ function countWindowDays(start: string, end: string, holidays: readonly string[]
   ).days;
 }
 
-/** What {@link canonicalChargeWindows} guarantees about the dates it returns. */
-export interface CanonicalChargeDates {
-  /** Counted, in Chicago offset form. Absent only when the pair has no charge bounds at all. */
-  charge_windows?: CountedChargeWindow[];
+/**
+ * **Each window's business days**, counted in Chicago against `holidays` — a
+ * formula-free DISPLAY count (the Five-day week meter counts the same days, but
+ * a line's bill is its own `price.counts`, never this).
+ *
+ * @throws when a window cannot be counted ({@link isNonTerminatingWindow}).
+ */
+export function chargeWindowBusinessDays(
+  windows: readonly { start: string; end: string }[],
+  holidays: readonly string[],
+): number[] {
+  return windows.map((w, i) => {
+    if (isNonTerminatingWindow(w.start, w.end)) {
+      throw new Error(`Charge window ${i + 1} ends more than one day before it starts`);
+    }
+    return countWindowDays(w.start, w.end, holidays);
+  });
 }
 
-/** Options for {@link canonicalChargeWindows}. */
-export interface CanonicalChargeWindowsOptions {
-  /**
-   * The pair opens a date-extension section. Its windows keep their stored
-   * `days` — the added days its writer computed — and are never recounted.
-   */
-  extension?: boolean;
+/** What {@link canonicalChargeWindows} guarantees about the dates it returns. */
+export interface CanonicalChargeDates {
+  /** In Chicago offset form. Absent only when the pair has no charge bounds at all. */
+  charge_windows?: ChargeWindowLike[];
 }
 
 /**
- * **The one writer of stored day counts.** Recounts every window's `days` and
- * the pair's `days_active` against `holidays`.
+ * **Canonicalize a pair's dates**: every window's instants to Chicago offset
+ * form, and the pair's `days_active` — the business days of POSSESSION,
+ * delivery start to collection start, which reads no window and no formula —
+ * recounted against `holidays`.
  *
- * - **Windows.** Instants are canonicalized to Chicago offset form. A pair with
- *   no windows is left without them.
- * - **Extension pairs keep their days** (`opts.extension`): the count is the
- *   days added past what was billed, not a count of the window.
+ * A window carries no day count (Phase 2 ruling 8); a line meters the windows
+ * through its own formula when it is priced.
  *
  * Pure: returns a copy.
  *
  * @throws Error when a window or the possession span cannot be counted
- *   ({@link isNonTerminatingWindow}), when an extension window states no days,
- *   or when `holidays` is not an array.
+ *   ({@link isNonTerminatingWindow}), or when `holidays` is not an array.
  */
 export function canonicalChargeWindows<D extends ChargeDates>(
   dates: D,
   holidays: readonly string[],
-  opts: CanonicalChargeWindowsOptions = {},
 ): D & CanonicalChargeDates {
   if (!Array.isArray(holidays)) {
     throw new Error("holidays must be an array");
@@ -809,21 +777,14 @@ export function canonicalChargeWindows<D extends ChargeDates>(
 
   const windows = chargeWindowsOf(dates);
   if (windows !== null) {
-    const counted: CountedChargeWindow[] = windows.map((w, i) => {
+    out.charge_windows = windows.map((w, i) => {
       const start = toChicagoInstant(w.start);
       const end = toChicagoInstant(w.end);
-      if (opts.extension) {
-        if (typeof w.days !== "number") {
-          throw new Error(`Extension charge window ${i + 1} states no days`);
-        }
-        return { start, end, days: w.days };
-      }
       if (isNonTerminatingWindow(start, end)) {
         throw new Error(`Charge window ${i + 1} ends more than one day before it starts`);
       }
-      return { start, end, days: countWindowDays(start, end, holidays) };
+      return { start, end };
     });
-    out.charge_windows = counted;
   }
 
   if (dates.delivery_start && dates.collection_start) {
@@ -933,7 +894,7 @@ function checkWindows(
 }
 
 /**
- * **Apply one date edit to a pair and recount it.** The one home of the date
+ * **Apply one date edit to a pair and canonicalize it.** The one home of the date
  * rules, shared by the manager's date editor and the API.
  *
  * Instants are parsed in Chicago and returned in Chicago offset form, and every
@@ -1090,7 +1051,7 @@ export function applyDateEdit<D extends ChargeDates>(
       if (problem) return { error: problem };
       next.charge_windows = windows;
     }
-    return { dates: canonicalChargeWindows(next as D, holidays, { extension: ctx.extension }) };
+    return { dates: canonicalChargeWindows(next as D, holidays) };
   } catch {
     // Every refusable edit is checked above, so a throw here is an instant
     // that does not parse.

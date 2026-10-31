@@ -41,6 +41,7 @@
  */
 import { componentSignatureHash, parseBookingId } from "./booking-id.ts";
 import { formatUnitRanges, serialAt } from "./units.ts";
+import { type CatalogRateLike, catalogRateSnapshot } from "./price-formulas.ts";
 import type { OOSReasonType } from "../schemas/common.ts";
 import { CUSTODY_RULES, OOS_BREAKDOWN_KEYS, oosBucketUnits, OUT_OF_SERVICE_KEYS, type OOSUnitsType, type UnitType } from "../schemas/mod.ts";
 
@@ -141,7 +142,8 @@ export interface ReplacementSourceProduct {
   uid: string;
   name: string;
   uid_linked_replacement?: string;
-  price?: { base_cents?: number | null } | null;
+  /** A replacement twin is on a flat formula: its one open rate is its unit price. */
+  price?: { rates?: readonly CatalogRateLike[] } | null;
   /** The twin's description opens its line's — never the rental's. */
   description?: string | null;
 }
@@ -163,9 +165,9 @@ export interface ReplacementLineSeed {
   /** Units still to bill: the record's quantity less what non-void invoices bill. */
   quantity: number;
   /**
-   * Per-unit value in integer cents: the order line's quoted
-   * `price.replacement_cents` (what the customer was told), falling back to the
-   * twin's `price.base_cents`, else `0`.
+   * Per-unit value in integer cents — the line's flat rate: the order line's
+   * quoted `price.replacement_cents` (what the customer was told), falling back
+   * to the twin's open rate, else `0`.
    */
   base_cents: number;
   /**
@@ -371,7 +373,7 @@ export function seedReplacementLines(
     const rental = products.get(record.uid_product);
     const twinUid = rental?.uid_linked_replacement ?? null;
     const twin = twinUid ? products.get(twinUid) : undefined;
-    const twinCents = twin?.price?.base_cents;
+    const twinCents = catalogRateSnapshot(twin?.price?.rates ?? [], null)[0]?.amount_cents;
     const base_cents = quoted ?? (typeof twinCents === "number" ? twinCents : 0);
     const rentalName = rental?.name ?? record.uid_product;
     const numbers = recordUnits(record.units);

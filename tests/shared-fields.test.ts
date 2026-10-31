@@ -1,4 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
+import { businessDayWindows, fdwPrice, FORMULAS, legacyPrice } from "./helpers/formulas.ts";
 import { z } from "zod";
 import {
   FulfillmentSchema,
@@ -28,7 +29,7 @@ import { mockTimestamp } from "./helpers/timestamp.ts";
 const render = (c: SharedFieldClassification) => c.fields.map((f) => `${f.kind} ${f.path}`);
 
 /** An order line built from the schema seed, with explicit overrides. */
-function line(over: Partial<LineItem>, price: Partial<NonNullable<LineItem["price"]>>): LineItem {
+function line(over: Partial<LineItem>, price: Record<string, unknown>): LineItem {
   const seed = getInitialValues(OrderDocLineItem) as LineItem;
   return {
     ...seed,
@@ -39,7 +40,7 @@ function line(over: Partial<LineItem>, price: Partial<NonNullable<LineItem["pric
     path: ["line-1"],
     uid_tax_class: "class-rental",
     ...over,
-    price: { ...seed.price, base_cents: 10000, base_percent: null, chargeable_days: 5, formula: "five_day_week", taxes: [], ...price },
+    price: { ...seed.price, base_percent: null, taxes: [], ...legacyPrice({ base_cents: 10000, chargeable_days: 5, ...price }) },
   } as LineItem;
 }
 
@@ -97,10 +98,10 @@ Deno.test("classifySharedFields: order → invoice, every shared key and its kin
     "propagated items[].quantity",
     "propagated items[].zero_priced",
     "propagated items[].quantity_per_parent",
-    "propagated items[].price.base_cents",
+    "atom items[].price.price_formula",
+    "propagated items[].price.rates",
+    "derived items[].price.counts",
     "propagated items[].price.base_percent",
-    "derived items[].price.chargeable_days",
-    "propagated items[].price.formula",
     "derived items[].price.subtotal_cents",
     "derived items[].price.subtotal_discounted_cents",
     "propagated items[].price.discount.rate",
@@ -325,7 +326,7 @@ function windowOver(over: Record<string, unknown>): Record<string, unknown> {
   if ("charge_windows" in over) return over;
   const start = (over.delivery_start ?? "2026-05-01T09:00:00.000-05:00") as string;
   const end = (over.collection_start ?? "2026-05-10T15:00:00.000-05:00") as string;
-  return { ...over, charge_windows: [{ start, end, days: (over.days_charged ?? 6) as number }] };
+  return { ...over, charge_windows: [{ start, end }] };
 }
 
 const resolve4 = (merged: Record<string, unknown>, source: Record<string, unknown>, downstream: Record<string, unknown>) =>
@@ -417,9 +418,11 @@ const CAT: TaxCatalog = (() => {
 
 const ctx: PriceDocumentContext = {
   document: { kind: "order", status: "draft", stored_items: [] },
-  // Two windows (3 + 4 days) under every path, so the derived `chargeable_days`
-  // moves off the sentinel's 5 and the tag check sees the pricer write it.
-  charge_windows: [{ divider_path: [], days: [3, 4] }],
+  // Two windows (3 + 4 business days) under every path, so the derived `counts`
+  // move off the sentinel's 5/5 and the tag check sees the pricer write them.
+  charge_windows: [{ divider_path: [], windows: businessDayWindows([3, 4]) }],
+  formulas: FORMULAS,
+  holidays: [],
   tax: {
     destinations: [{ uid: null, jurisdiction: undefined, delivery: { uid: null, address: { city: "Chicago", region: "IL" } } }],
     origin: "chicago",
@@ -458,10 +461,8 @@ function derivedMismatches(tagged: ReadonlySet<string>): { untagged: string[]; u
     path: ["line-1"],
     price: {
       ...(lineBase.price as Record<string, unknown>),
-      base_cents: 10000,
+      ...fdwPrice(10000, 5),
       base_percent: null,
-      chargeable_days: 5,
-      formula: "five_day_week",
       discount: { type: "percent", rate: 10, amount_cents: SENTINEL },
       subtotal_cents: SENTINEL,
       subtotal_discounted_cents: SENTINEL,
@@ -534,6 +535,11 @@ function vary(v: unknown, r: () => number): unknown {
   if (typeof v === "number") return v + 1 + Math.floor(r() * 50);
   if (typeof v === "string") return `${v}~${Math.floor(r() * 1000)}`;
   if (typeof v === "boolean") return !v;
+  // A line's `rates` (a whole value, ruling 8): move the first rate's amount.
+  if (Array.isArray(v) && v.length > 0 && typeof (v[0] as { amount_cents?: unknown }).amount_cents === "number") {
+    const [first, ...rest] = v as { rate_key: string; amount_cents: number }[];
+    return [{ ...first, amount_cents: first.amount_cents + 1 + Math.floor(r() * 50) }, ...rest];
+  }
   return undefined;
 }
 
@@ -596,7 +602,7 @@ Deno.test("mergeSharedFields: an override on ONE field keeps that field and lets
     overriddenFields.add(pick);
   }
   // Anti-vacuity: the sweep overrode quantity, a price input, a label and a nested leaf.
-  for (const f of ["quantity", "price.base_cents", "name", "price.discount.rate"]) {
+  for (const f of ["quantity", "price.rates", "name", "price.discount.rate"]) {
     assert(overriddenFields.has(f), `never overrode ${f}: ${[...overriddenFields]}`);
   }
 });

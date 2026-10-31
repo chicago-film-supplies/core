@@ -17,6 +17,7 @@ import {
   invoiceRepriceRefusal,
 } from "../src/utils/price-document.ts";
 import { linePairs } from "./helpers/charge-windows.ts";
+import { fdwCounts, FORMULAS, legacyPrice as legacyLinePrice, tier } from "./helpers/formulas.ts";
 import { assignLineTaxes, type DocumentTaxContext, type TaxDestination } from "../src/utils/taxes.ts";
 import { pricingTaxesOf, type TaxCatalog } from "../src/utils/tax-classes.ts";
 import { type LegacyTax, type LegacyTaxRow, migrateLegacyTaxCatalog } from "./helpers/legacyTaxCatalog.ts";
@@ -66,13 +67,15 @@ const taxCtx = (city = "Chicago", exempt = false): DocumentTaxContext => ({
 const ORDER: PriceDocumentContext["document"] = { kind: "order", status: "draft", stored_items: [] };
 /**
  * `ctx()` leaves `charge_windows` to {@link priceDoc}, which gives every rental
- * line its own single-window pair carrying the line's days, so a test keeps the
- * `chargeable_days` it gives a line. The charge-window tests build their own pairs.
+ * line its own single-window pair holding the line's days, so a test keeps the
+ * days it gives a line. The charge-window tests build their own pairs.
  */
 const ctx = (over: Partial<PriceDocumentContext> = {}): PriceDocumentContext => ({
   document: ORDER,
   tax: taxCtx(),
   charge_windows: LINE_PAIRS,
+  formulas: FORMULAS,
+  holidays: [],
   ...over,
 });
 const LINE_PAIRS: PriceDocumentContext["charge_windows"] = [];
@@ -89,7 +92,7 @@ function line(over: Partial<LineItem> = {}, price: Record<string, unknown> = {})
     quantity: 1,
     path: [`line-${uidSeq}`],
     ...over,
-    price: { ...priceBase, base_cents: 10000, chargeable_days: 5, formula: "five_day_week", taxes: [], ...price },
+    price: { ...priceBase, ...legacyLinePrice({ base_cents: 10000, chargeable_days: 5, formula: "five_day_week", taxes: [], ...price }) },
   } as unknown as LineItem;
 }
 function fee(over: Partial<LineItem> = {}, price: Record<string, unknown> = {}): LineItem {
@@ -147,7 +150,8 @@ Deno.test("priceDocument: an extension line bills its OWN added days with the we
       path: ["dest-ext"],
       path_extension_for: ["dest-order"],
     } as unknown as LineItem;
-    const rental = line({ path: ["dest-ext", "r1"] }, { base_cents: 10000, chargeable_days: addedDays });
+    // The section's writer STATES the added days, minimum skipped.
+    const rental = line({ path: ["dest-ext", "r1"] }, { base_cents: 10000, counts: addedDays === null ? [] : fdwCounts(addedDays, { stated: true }) });
     const items = [divider, rental];
     return priceDoc(items, ctx({
       document: { kind: "invoice", status: "draft", has_settlement: false },
@@ -164,8 +168,8 @@ Deno.test("priceDocument: an extension line bills its OWN added days with the we
   })).items[1]).subtotal_cents, 4000);
   // The same line outside a section is charged its week minimum: 2 days → 10000.
   assertEquals(p(priceDoc([line({}, { chargeable_days: 2 })], ctx()).items[0]).subtotal_cents, 10000);
-  // A section line with no day count has nothing to extend by.
-  assertThrows(() => section(null), Error, "chargeable_days");
+  // A section line with no counts has nothing to extend by.
+  assertThrows(() => section(null), Error, "states no counts");
 });
 
 Deno.test("invoiceExtensionSections: only destination dividers carrying path_extension_for open a section", () => {
@@ -181,12 +185,15 @@ Deno.test("invoiceExtensionSections: only destination dividers carrying path_ext
   );
 });
 
-Deno.test("priceDocument: an extension section refuses a fixed-formula line", () => {
-  assertThrows(
-    () => priceDoc([line({ type: "sale", path: ["dx", "s"] }, { formula: "fixed", chargeable_days: 2 })], ctx({ extensions: [{ divider_path: ["dx"] }] })),
-    Error,
-    "five_day_week",
+Deno.test("priceDocument: an extension line prices at its stated counts, whatever its formula", () => {
+  // A flat line in a section states `[{ flat, 1, 1 }]` like anywhere else; the
+  // section writer never builds one, but pricing it is not a refusal (ruling 8:
+  // the counts are the line's, not the section's).
+  const r = priceDoc(
+    [line({ type: "sale", path: ["dx", "s"] }, { formula: "fixed", base_cents: 700 })],
+    ctx({ extensions: [{ divider_path: ["dx"] }] }),
   );
+  assertEquals(p(r.items[0]).subtotal_cents, 700);
 });
 
 Deno.test("priceDocument: a settled invoice is refused (D3)", () => {
@@ -318,7 +325,7 @@ Deno.test("priceDocument: totals equal the legacy reprice + the audit oracle on 
     });
 
     docs++;
-    if (items.some((it) => it.price?.formula === "percent_of_total")) withPercentFee++;
+    if (items.some((it) => it.price?.base_percent != null)) withPercentFee++;
     if (items.some((it) => it.price?.discount)) withDiscount++;
     if (expected.taxes.length > 0) taxedDocs++;
   }
@@ -337,7 +344,7 @@ Deno.test("…and a fee costed on the PRE-TAX basis DOES disagree with it", () =
   for (let n = 0; n < 2000; n++) {
     const { items, city, exempt } = generateDocument(rand);
     const r = priceDoc(items, ctx({ tax: taxCtx(city, exempt) }));
-    const feeLine = r.items.find((it) => it.price?.formula === "percent_of_total");
+    const feeLine = r.items.find((it) => it.price?.base_percent != null);
     if (!feeLine) continue;
     const wrong = calculateTransactionFeeAmountCents(feeLine, r.totals.subtotal_discounted_cents);
     if (wrong !== p(feeLine).total_cents) disagreements++;
@@ -365,7 +372,7 @@ Deno.test("priceCreditNote: credits a discounted, taxed line at the credited qua
   );
   assertEquals(price.taxes.map((t) => [t.uid, t.amount_cents]), [["chi-rental-tax", 2700]]);
   assertEquals(Object.keys(price).sort(), [
-    "base_cents", "chargeable_days", "discount", "formula", "subtotal_cents", "subtotal_discounted_cents", "taxes", "total_cents",
+    "counts", "discount", "price_formula", "rates", "subtotal_cents", "subtotal_discounted_cents", "taxes", "total_cents",
   ]);
   assertEquals(r.totals, {
     discount_amount_cents: 2000, subtotal_cents: 20000, subtotal_discounted_cents: 18000,
@@ -392,7 +399,7 @@ Deno.test("priceCreditNote: keeps the charged rate VERSION, never today's, and a
 
 // ── Crediting DAYS: a shortened charge window (api-cloudrun#1028 phase 1c) ──
 
-Deno.test("priceCreditNote: credited_days credits DAYS at the line's terms, with the week floor skipped", () => {
+Deno.test("priceCreditNote: credited_counts credits TIME at the line's terms, with the week floor skipped", () => {
   // Billed 3 units × 10000 at 10 billable days. The order shortened the window by
   // 4 billable days, so the credit is 3 × 10000 × 4 ÷ 5 = 24000, 15% tax → 27600.
   // 🔴 Priced as an ordinary line of 4 days it would FLOOR to a week —
@@ -402,30 +409,30 @@ Deno.test("priceCreditNote: credited_days credits DAYS at the line's terms, with
     chargeable_days: 10,
     taxes: [{ uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent", amount_cents: 0 }],
   });
-  const r = priceCreditNote([{ line: src, quantity: 3, credited_days: 4 }], pricingTaxesOf(CAT), []);
+  const r = priceCreditNote([{ line: src, quantity: 3, credited_counts: [tier("week", 4, 5)] }], pricingTaxesOf(CAT), []);
   assertEquals([r.prices[0].subtotal_cents, r.prices[0].total_cents], [24000, 27600]);
-  // The stored line says how many days it CREDITED, not how many the invoice charged.
-  assertEquals(r.prices[0].chargeable_days, 4);
+  // The stored line says how much time it CREDITED, not how much the invoice charged.
+  assertEquals(r.prices[0].counts, [tier("week", 4, 5)]);
 });
 
-Deno.test("priceCreditNote: a days credit refuses a line whose formula never read its days", () => {
+Deno.test("priceCreditNote: a time credit refuses a line whose formula never read its time", () => {
   // A `fixed` price has no day factor, so there are no days of it to give back.
   // Crediting one would silently credit the whole line at its full amount.
   const fixed = creditSource({ type: "sale" }, { formula: "fixed", base_cents: 40000, chargeable_days: null, taxes: [] });
   assertThrows(
-    () => priceCreditNote([{ line: fixed, quantity: 1, credited_days: 3 }], pricingTaxesOf(CAT), []),
+    () => priceCreditNote([{ line: fixed, quantity: 1, credited_counts: [tier("flat", 1, 1)] }], pricingTaxesOf(CAT), []),
     Error,
-    "never read its days",
+    "never read its time",
   );
 });
 
-Deno.test("priceCreditNote: credited_days must be a positive integer of BILLABLE days", () => {
+Deno.test("priceCreditNote: credited_counts must name the line's own keys and credit a positive amount", () => {
   const src = creditSource({ quantity: 1 }, { base_cents: 10000, chargeable_days: 10, taxes: [] });
-  for (const bad of [0, -2, 1.5]) {
+  for (const bad of [[], [tier("week", 0, 1)], [tier("week", -2, 5)], [tier("month", 1, 1)]]) {
     assertThrows(
-      () => priceCreditNote([{ line: src, quantity: 1, credited_days: bad }], pricingTaxesOf(CAT), []),
+      () => priceCreditNote([{ line: src, quantity: 1, credited_counts: bad }], pricingTaxesOf(CAT), []),
       Error,
-      "BILLABLE days",
+      "positive amount of time",
     );
   }
 });
@@ -446,7 +453,11 @@ Deno.test("priceCreditNote: a days credit composes to within a cent or two of re
           priceCreditNote([{ line: creditSource({ quantity: 1 }, { base_cents: base, chargeable_days: days, taxes: [] }), quantity: 1 }], [], [])
             .prices[0].subtotal_cents;
         const credit = priceCreditNote(
-          [{ line: creditSource({ quantity: 1 }, { base_cents: base, chargeable_days: billedDays, taxes: [] }), quantity: 1, credited_days: credited }],
+          [{
+            line: creditSource({ quantity: 1 }, { base_cents: base, chargeable_days: billedDays, taxes: [] }),
+            quantity: 1,
+            credited_counts: [tier("week", credited, 5)],
+          }],
           [],
           [],
         ).prices[0].subtotal_cents;
@@ -463,13 +474,15 @@ Deno.test("priceCreditNote: an extension line is credited at its own added days,
   // Priced as an ordinary line, 2 days floors to a week: 10000 → 11500 credited.
   const ext = creditSource({ path: ["o", "dest-ext", "r1"] }, {
     base_cents: 10000,
-    chargeable_days: 2,
+    counts: fdwCounts(2, { stated: true }),
     taxes: [{ uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent", amount_cents: 0 }],
   });
   const inSection = priceCreditNote([{ line: ext, quantity: 1 }], pricingTaxesOf(CAT), [{ divider_path: ["o", "dest-ext"] }]);
   assertEquals([inSection.prices[0].subtotal_cents, inSection.totals.total_cents], [4000, 4600]);
-  const floored = priceCreditNote([{ line: ext, quantity: 1 }], pricingTaxesOf(CAT), []);
-  assertEquals(floored.prices[0].subtotal_cents, 10000);
+  // Outside a section a credit is at the line's OWN stored counts too — the
+  // floor lived in the meter that wrote them, so nothing re-floors them here.
+  const outside = priceCreditNote([{ line: ext, quantity: 1 }], pricingTaxesOf(CAT), []);
+  assertEquals(outside.prices[0].subtotal_cents, 4000);
 });
 
 Deno.test("priceCreditNote: refuses a divider, a fee, and a non-positive or fractional quantity", () => {

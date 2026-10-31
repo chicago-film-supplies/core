@@ -4,6 +4,7 @@
  * computed by the code under test.
  */
 import { assertEquals } from "@std/assert";
+import { FORMULAS, fdwPrice } from "./helpers/formulas.ts";
 import type { Fulfillment, Invoice, InvoiceDocItemType, Order } from "../src/schemas/mod.ts";
 import { buildOrderScopedItems } from "../src/utils/invoices.ts";
 import type { LineItem } from "../src/utils/orders.ts";
@@ -26,16 +27,20 @@ const G = "0b6c3a51-6c1a-4f0e-9a51-6f1f2b9d0a02";
 const LIGHT = "prod-light";
 const TRIPOD = "prod-tripod";
 
-const CONTEXT: DocumentDiffContext = { taxNameByUid: new Map(), isOrderFrozen: () => false };
+const CONTEXT: DocumentDiffContext = { taxNameByUid: new Map(), isOrderFrozen: () => false, formulas: FORMULAS, holidays: [] };
 
 function line(uid: string, path: string[], quantity: number, baseCents: number, extra: Record<string, unknown> = {}): LineItem {
   return {
     uid, type: "rental", name: uid, description: "", quantity, path,
     stock_method: "reserve", zero_priced: false, uid_tax_class: "TaxC1assDefau1tAAAAA",
     price: {
-      base_cents: baseCents, chargeable_days: 5, formula: "five_day_week",
-      subtotal_cents: baseCents * quantity, subtotal_discounted_cents: baseCents * quantity,
-      discount: null, taxes: [], total_cents: baseCents * quantity, replacement_cents: 1000,
+      ...fdwPrice(baseCents, 5),
+      subtotal_cents: baseCents * quantity,
+      subtotal_discounted_cents: baseCents * quantity,
+      discount: null,
+      taxes: [],
+      total_cents: baseCents * quantity,
+      replacement_cents: 1000,
     },
     ...extra,
   } as unknown as LineItem;
@@ -215,11 +220,11 @@ Deno.test("documentDiff: derived money alone NEVER produces a row, split or no s
 
   const declared = invoice("inv-1", [{ order: O, items: orderItems() }]);
   patchLine(declared.items, `${O}/${D}/${LIGHT}`, (it) => {
-    (it.price as Record<string, unknown>).base_cents = 111;
+    (it as { price: Record<string, unknown> }).price = { ...(it as { price: Record<string, unknown> }).price, rates: [{ rate_key: "week", amount_cents: 111 }] };
   });
   assertEquals(
     summary(computeDocumentDiffs({ orders: [order()], invoices: [declared] }, { kind: "order", uid: O }, CONTEXT).lines),
-    { [`${D}/${LIGHT}`]: ["invoice#2241:differs(price.base_cents=1000→111)"] },
+    { [`${D}/${LIGHT}`]: ['invoice#2241:differs(price.rates=[{"rate_key":"week","amount_cents":1000}]→[{"rate_key":"week","amount_cents":111}])'] },
     "a DECLARED input still reports — the suppression is not swallowing real edits",
   );
 });
@@ -527,13 +532,13 @@ Deno.test("documentDiff: a transaction fee is compared order ↔ invoice but nev
   // differs between an order and an invoice billing part of it, and derived
   // money no longer produces a row at all — so mutating it would make this test
   // pass vacuously against the very suppression it is not about.
-  patchLine(inv.items, `${O}/${D}/fee-1`, (it) => { (it.price as Record<string, unknown>).base_cents = 999; });
+  patchLine(inv.items, `${O}/${D}/fee-1`, (it) => { (it as { price: Record<string, unknown> }).price = { ...(it as { price: Record<string, unknown> }).price, rates: [{ rate_key: "week", amount_cents: 999 }] }; });
   const diff = computeDocumentDiffs(
     { orders: [order(items)], fulfillments: [fulfillment(items)], invoices: [inv] },
     { kind: "invoice", uid: "inv-1" },
     CONTEXT,
   );
-  assertEquals(summary(diff.lines), { [`${O}/${D}/fee-1`]: ["order#1001:differs(price.base_cents=999→500)"] });
+  assertEquals(summary(diff.lines), { [`${O}/${D}/fee-1`]: ['order#1001:differs(price.rates=[{"rate_key":"week","amount_cents":999}]→[{"rate_key":"week","amount_cents":500}])'] });
 });
 
 /** One order line, and the invoices that bill it, for the sum tests. */
@@ -703,9 +708,9 @@ Deno.test("documentDiff: a discount whose AMOUNT alone moved is no row — its t
 
 Deno.test("documentDiff: a split bill still reports a base price the invoice changed", () => {
   const a = billing("inv-a", 2241, 3);
-  patchLine(a.items, `${O}/${D}/${G}/${LIGHT}`, (it) => { (it.price as Record<string, unknown>).base_cents = 900; });
+  patchLine(a.items, `${O}/${D}/${G}/${LIGHT}`, (it) => { (it as { price: Record<string, unknown> }).price = { ...(it as { price: Record<string, unknown> }).price, rates: [{ rate_key: "week", amount_cents: 900 }] }; });
   const diff = computeDocumentDiffs({ orders: [billedOrder(5)], invoices: [a, billing("inv-b", 2250, 2)] }, { kind: "order", uid: O }, CONTEXT);
-  assertEquals(summary(diff.lines), { [`${D}/${G}/${LIGHT}`]: ["invoice#2241:differs(price.base_cents=1000→900)"] });
+  assertEquals(summary(diff.lines), { [`${D}/${G}/${LIGHT}`]: ['invoice#2241:differs(price.rates=[{"rate_key":"week","amount_cents":1000}]→[{"rate_key":"week","amount_cents":900}])'] });
 });
 
 // ── Document-level differences (G13) ────────────────────────────

@@ -47,7 +47,7 @@ import type {
   DocLineItemTypeType,
   InvoiceDocLineItemType,
   OrderDocLineItemType,
-  PriceFormulaType,
+  PriceFormulaRef,
   ProductTypeType,
   RateType,
   StockMethodType,
@@ -55,12 +55,20 @@ import type {
 import type { ProductDocument, ProductDocumentComponent } from "../schemas/typesense/mod.ts";
 import { isDividerItemType } from "../schemas/mod.ts";
 import { getItemSubtreeRange } from "./orders.ts";
+import {
+  type CatalogRateLike,
+  catalogRateSnapshot,
+  type PricingFormula,
+  type PricingFormulas,
+  priceFormulaRefOf,
+  type RateSnapshot,
+} from "./price-formulas.ts";
 
 // ── Typesense enum narrowing ─────────────────────────────────────
 //
-// A Typesense document projects every enum as a bare `string`, so the three
-// enum-typed fields read off a `ProductDocument` below (`type`, `stock_method`,
-// `price.formula`) need narrowing. The narrowings are FIELD-LEVEL on purpose:
+// A Typesense document projects every enum as a bare `string`, so the two
+// enum-typed fields read off a `ProductDocument` below (`type`, `stock_method`)
+// need narrowing. The narrowings are FIELD-LEVEL on purpose:
 // each builder used to end in one `as OrderDocLineItemType`, which also absorbed
 // every other field and would have swallowed any future schema drift silently.
 //
@@ -73,8 +81,6 @@ import { getItemSubtreeRange } from "./orders.ts";
 // declared independently: a `T extends keyof typeof TABLE` guard over a table
 // already annotated `Record<T, …>` reads `T extends T` and cannot fail, which is
 // why three of those were deleted rather than kept as reassurance.
-// (`price.formula` has no list to compare — it is written from
-// `PriceFormulaEnum` by the product writer.)
 type _ProductTypesAreLineTypes = ProductTypeType extends DocLineItemTypeType ? true : never;
 const _productTypeParity: _ProductTypesAreLineTypes = true;
 void _productTypeParity;
@@ -96,11 +102,24 @@ export interface CatalogLineSource {
   readonly price?: {
     /** The revenue account — a bare `number` on a Typesense hit, `COARevenueEnum`-written by the product writer. */
     readonly coa_revenue?: number | null;
-    readonly base_cents?: number;
+    /** `null` exactly on a percent-of-total fee product. */
+    readonly uid_price_formula?: string | null;
+    /** Dated rows on a stored product; a search hit's OPEN rows, undated. */
+    readonly rates?: readonly CatalogRateLike[];
     readonly base_percent?: number | null;
     readonly replacement_cents?: number | null;
-    readonly formula?: string;
   } | null;
+}
+
+/**
+ * What a builder needs to snapshot a line's price (D4, Q13): every formula its
+ * products name, and the line's pricing date — order → earliest delivery
+ * start, invoice → `invoice.date`. `asOf: null` takes the catalog's open rows
+ * ({@link catalogRateSnapshot}).
+ */
+export interface LinePriceSnapshotContext {
+  formulas: PricingFormulas;
+  asOf: string | null;
 }
 
 /** What a parent's `components[]` row says about the SLOT a component line fills. */
@@ -124,10 +143,12 @@ export interface LineCatalogFacts {
   /** The catalog's revenue account, or `null` when it states none (`LinePostingCore`). */
   coa_revenue: COARevenueType | null;
   price: {
-    base_cents: number;
+    /** `null` exactly on a percent-of-total fee product. */
+    price_formula: PriceFormulaRef | null;
+    /** The snapshot the line will own; every amount `0` on a flagged component. */
+    rates: RateSnapshot[];
     base_percent: number | null;
     replacement_cents: number | null;
-    formula: PriceFormulaType;
   };
 }
 
@@ -169,15 +190,6 @@ function roundRatio(ratio: number): number {
 }
 
 /**
- * The formula a line takes when its catalog states none: the type's default.
- * Measured 2026-10-12, every prod product states one, so this is a floor and not
- * a policy.
- */
-function defaultFormulaFor(type: string | undefined): PriceFormulaType {
-  return type === "rental" ? "five_day_week" : "fixed";
-}
-
-/**
  * The ONE author of a product line's catalog facts — type, stock method,
  * `zero_priced` and the catalog half of the price — decided together, so no
  * writer can produce a pair this function would not (api-cloudrun#1286). The
@@ -189,20 +201,35 @@ function defaultFormulaFor(type: string | undefined): PriceFormulaType {
  *   writer: a builder takes {@link zeroPricedForSlot} of the catalog row, while
  *   api-cloudrun's order writer carries the STORED flag by row and derives only
  *   for a new row — a SNAPSHOT (owner, 2026-10-12). Whatever it is, the price
- *   follows it here: flagged → `base_cents: 0`.
- * - **`formula` is the catalog's**, falling back to the type default only when
- *   the catalog states none. Two prod rentals are deliberately `fixed` (Combo
- *   Hangers); a type-derived formula would bill them per day.
- * - **`percent_of_total`** carries its unit in `base_percent` and must state
- *   `base_cents: 0` (`checkPriceBaseUnit`); every other formula states
+ *   follows it here: flagged → every rate `0`.
+ * - **The formula is the catalog's** (`uid_price_formula`), never the type's.
+ *   Two prod rentals are deliberately on Fixed (Combo Hangers); a type-derived
+ *   formula would bill them per day.
+ * - **The rates are the catalog's in force at `ctx.asOf`** ({@link catalogRateSnapshot}).
+ * - **A percent-of-total fee** carries its unit in `base_percent` and no formula
+ *   or rates ({@link checkLinePrice}); every other product states
  *   `base_percent: null`.
+ *
+ * @throws when the catalog names a formula `ctx.formulas` does not carry, or
+ *   names neither a formula nor a percentage.
  */
 export function deriveLineCatalogFacts(
   product: CatalogLineSource,
   zeroPriced: boolean | null,
+  ctx: LinePriceSnapshotContext,
 ): LineCatalogFacts {
-  const formula = (product.price?.formula as PriceFormulaType | undefined) ?? defaultFormulaFor(product.type);
-  const isPercent = formula === "percent_of_total";
+  return { ...deriveLineCatalogShape(product, zeroPriced), price: deriveLineCatalogPrice(product, zeroPriced, ctx) };
+}
+
+/**
+ * The catalog facts of a line that carries NO price — type, stock method,
+ * `zero_priced` and the revenue account. A fulfillment row reads these and
+ * needs no formula.
+ */
+export function deriveLineCatalogShape(
+  product: CatalogLineSource,
+  zeroPriced: boolean | null,
+): Omit<LineCatalogFacts, "price"> {
   return {
     type: product.type as DocLineItemTypeType,
     stock_method: product.stock_method as StockMethodType,
@@ -210,12 +237,35 @@ export function deriveLineCatalogFacts(
     // A Typesense hit projects the enum as a bare number; the product writer
     // writes it from `COARevenueEnum`, so the field-level narrowing is sound.
     coa_revenue: (product.price?.coa_revenue as COARevenueType | null | undefined) ?? null,
-    price: {
-      base_cents: zeroPriced === true || isPercent ? 0 : (product.price?.base_cents ?? 0),
-      base_percent: isPercent ? (product.price?.base_percent ?? null) : null,
-      replacement_cents: product.price?.replacement_cents ?? null,
-      formula,
-    },
+  };
+}
+
+/** The catalog half of a line's price — see {@link deriveLineCatalogFacts}. */
+function deriveLineCatalogPrice(
+  product: CatalogLineSource,
+  zeroPriced: boolean | null,
+  ctx: LinePriceSnapshotContext,
+): LineCatalogFacts["price"] {
+  // A stored catalog states exactly one ({@link checkCatalogPrice}); on a stray
+  // pair the formula wins, as the retired `formula` field always decided.
+  const isPercent = product.price?.uid_price_formula == null && product.price?.base_percent != null;
+  let price_formula: PriceFormulaRef | null = null;
+  let rates: RateSnapshot[] = [];
+  if (!isPercent) {
+    const uid = product.price?.uid_price_formula;
+    const formula = uid ? ctx.formulas.get(uid) : undefined;
+    if (!formula) {
+      throw new Error(uid ? `Price formula ${uid} is not loaded` : "The catalog price names no formula");
+    }
+    price_formula = priceFormulaRefOf(formula);
+    rates = catalogRateSnapshot(product.price?.rates ?? [], ctx.asOf)
+      .map((r) => zeroPriced === true ? { ...r, amount_cents: 0 } : r);
+  }
+  return {
+    price_formula,
+    rates,
+    base_percent: isPercent ? (product.price?.base_percent ?? null) : null,
+    replacement_cents: product.price?.replacement_cents ?? null,
   };
 }
 
@@ -273,9 +323,8 @@ export function catalogComponentAt<C extends { readonly uid?: string; readonly p
  * value, and every line carried `order_number: 0` for a number only the server
  * can allocate. Each builder now writes every field it emits.
  */
-export interface OrderLineBuildOptions {
+export interface OrderLineBuildOptions extends LinePriceSnapshotContext {
   quantity: number;
-  chargeDays: number | null;
   /**
    * Component ancestors of the item being built (parent product uids only,
    * structural destination/group uids stripped). Used by the substitute flow to
@@ -327,9 +376,8 @@ export function buildOrderLineFromProduct(
 ): OrderDocLineItemType {
   // A top-level line fills no slot, so its flag is `null` and its price is the
   // catalog's — see `deriveLineCatalogFacts`.
-  const facts = deriveLineCatalogFacts(doc, zeroPricedForSlot(null));
+  const facts = deriveLineCatalogFacts(doc, zeroPricedForSlot(null), opts);
   const type = facts.type;
-  const isRental = type === "rental";
   return {
     uid: doc.uid,
     type,
@@ -354,11 +402,12 @@ export function buildOrderLineFromProduct(
     coa_revenue: facts.coa_revenue,
     uid_tracking_category: doc.uid_tracking_category ?? null,
     price: {
-      base_cents: facts.price.base_cents,
+      price_formula: facts.price.price_formula,
+      rates: facts.price.rates,
+      // Metered by `priceDocument` from the line's pair (ruling 8).
+      counts: [],
       base_percent: facts.price.base_percent,
       replacement_cents: facts.price.replacement_cents,
-      chargeable_days: isRental ? opts.chargeDays : null,
-      formula: facts.price.formula,
       discount: null,
       subtotal_cents: 0,
       subtotal_discounted_cents: 0,
@@ -381,9 +430,14 @@ export interface CustomLineBuildOptions {
   type: DocLineItemTypeType;
   name?: string;
   quantity?: number;
-  base_cents?: number;
-  formula?: PriceFormulaType;
-  chargeDays: number | null;
+  /**
+   * The formula the operator picked — the caller's default is Five-day week
+   * for a rental and Fixed otherwise. A custom line has no catalog to read one
+   * from.
+   */
+  formula: PricingFormula;
+  /** The rate per segment key; a key not given starts at `0`. */
+  rates?: readonly RateSnapshot[];
   taxes: ReadonlyArray<{ uid: string; name: string; rate: number; type: RateType }>;
   /**
    * The line's tax class. A custom line has no product to snapshot one from, so
@@ -422,10 +476,10 @@ export function buildCustomOrderLine(opts: CustomLineBuildOptions): OrderDocLine
     coa_revenue: null,
     uid_tracking_category: null,
     price: {
-      base_cents: opts.base_cents ?? 0,
+      price_formula: priceFormulaRefOf(opts.formula),
+      rates: customRates(opts.formula, opts.rates),
+      counts: [],
       replacement_cents: isRental ? 0 : null,
-      chargeable_days: isRental ? opts.chargeDays : null,
-      formula: opts.formula ?? (isRental ? "five_day_week" : "fixed"),
       discount: null,
       subtotal_cents: 0,
       subtotal_discounted_cents: 0,
@@ -452,7 +506,6 @@ export function buildCustomOrderLine(opts: CustomLineBuildOptions): OrderDocLine
 export function buildCustomInvoiceLine(
   opts: Omit<CustomLineBuildOptions, "uidOrder">,
 ): InvoiceDocLineItemType {
-  const isRental = opts.type === "rental";
   return {
     uid: "custom-" + crypto.randomUUID(),
     name: opts.name ?? "Custom Item",
@@ -465,9 +518,9 @@ export function buildCustomInvoiceLine(
     coa_revenue: null,
     uid_tracking_category: null,
     price: {
-      base_cents: opts.base_cents ?? 0,
-      chargeable_days: isRental ? opts.chargeDays : null,
-      formula: opts.formula ?? (isRental ? "five_day_week" : "fixed"),
+      price_formula: priceFormulaRefOf(opts.formula),
+      rates: customRates(opts.formula, opts.rates),
+      counts: [],
       discount: null,
       subtotal_cents: 0,
       subtotal_discounted_cents: 0,
@@ -477,29 +530,48 @@ export function buildCustomInvoiceLine(
   };
 }
 
+/** One rate per segment key of `formula`: the given amount, else `0`. */
+function customRates(formula: PricingFormula, given: readonly RateSnapshot[] = []): RateSnapshot[] {
+  return formula.segments.map((seg) => ({
+    rate_key: seg.rate_key,
+    amount_cents: given.find((r) => r.rate_key === seg.rate_key)?.amount_cents ?? 0,
+  }));
+}
+
 /**
  * A custom line's price after its TYPE changes — the one rule both manager
  * stores' `setItemType` apply (api-cloudrun#1286). They used to disagree:
  * retyping rental → sale, the order store nulled `replacement_cents` and the
  * invoice store kept it.
  *
- * The formula and `chargeable_days` follow the new type, exactly as
- * {@link buildCustomOrderLine} defaults them. `replacement_cents` is restated
- * ONLY where the key is present (an invoice line has none; a writer's key set
- * is a claim about its stored lines): `0` for a rental, `null` otherwise.
- * `taxes` is cleared — the reprice re-derives them from the line's class.
- *
- * `chargeDays` is the caller's: an order passes its destination's charged days,
- * an invoice `null` (its operator fills the Duration cell).
+ * The formula follows the new type — `formula` is the caller's default for it
+ * (Five-day week for a rental, Fixed otherwise), exactly as
+ * {@link buildCustomOrderLine} is defaulted. The rates move onto the new
+ * formula's keys: a key both formulas name keeps its amount, a new key takes
+ * the line's first amount, so a one-key line keeps its price. `counts` are
+ * cleared for the pricer to re-meter. `replacement_cents` is restated ONLY where
+ * the key is present (an invoice line has none): `0` for a rental, `null`
+ * otherwise. `taxes` is cleared — the reprice re-derives them from the class.
  */
 export function retypedLinePrice<
-  P extends { formula: PriceFormulaType; chargeable_days?: number | null; replacement_cents?: number | null; taxes: unknown[] },
->(price: P, type: DocLineItemTypeType, chargeDays: number | null): P {
+  P extends {
+    price_formula: PriceFormulaRef | null;
+    rates: RateSnapshot[];
+    counts: unknown[];
+    replacement_cents?: number | null;
+    taxes: unknown[];
+  },
+>(price: P, type: DocLineItemTypeType, formula: PricingFormula): P {
   const isRental = type === "rental";
+  const first = price.rates[0]?.amount_cents ?? 0;
   return {
     ...price,
-    formula: isRental ? "five_day_week" : "fixed",
-    chargeable_days: isRental ? chargeDays : null,
+    price_formula: priceFormulaRefOf(formula),
+    rates: formula.segments.map((seg) => ({
+      rate_key: seg.rate_key,
+      amount_cents: price.rates.find((r) => r.rate_key === seg.rate_key)?.amount_cents ?? first,
+    })),
+    counts: [],
     ...("replacement_cents" in price ? { replacement_cents: isRental ? 0 : null } : {}),
     taxes: [],
   };
@@ -685,7 +757,7 @@ export function buildOrderComponentLines(
   ).map(({ component: comp, quantity, path }) => {
     // The row is both the slot (its `zero_priced`) and the product (it mirrors
     // the component product's type, stock method and price).
-    const facts = deriveLineCatalogFacts(comp, zeroPricedForSlot(comp));
+    const facts = deriveLineCatalogFacts(comp, zeroPricedForSlot(comp), opts);
     const type = facts.type;
     return {
       uid: comp.uid!,
@@ -715,10 +787,10 @@ export function buildOrderComponentLines(
       price: {
         // No `base_percent` key: a component line never wrote one, and a
         // writer's key set is a claim about its stored lines.
-        base_cents: facts.price.base_cents,
+        price_formula: facts.price.price_formula,
+        rates: facts.price.rates,
+        counts: [],
         replacement_cents: facts.price.replacement_cents,
-        chargeable_days: type === "rental" ? opts.chargeDays : null,
-        formula: facts.price.formula,
         discount: null,
         subtotal_cents: 0,
         subtotal_discounted_cents: 0,

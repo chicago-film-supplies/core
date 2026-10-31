@@ -877,91 +877,12 @@ type _TaxJurisdictionParity = [TaxJurisdictionType] extends [_TaxJurisdictionExp
 const _taxJurisdictionParity: _TaxJurisdictionParity = true;
 void _taxJurisdictionParity;
 
-/**
- * How a line's `price.base` becomes money.
- *
- * - `five_day_week` — `base × quantity × max(chargeable_days / 5, 1)`.
- * - `fixed` — `base × quantity`, no day factor.
- * - `percent_of_total` — `base` is a **percentage of the document's
- *   `subtotal_discounted`**, not a per-unit dollar amount. A line priced this
- *   way cannot be costed from itself, so `calculateItemSubtotal` rejects it;
- *   the amount is computed once per document by `calculateTransactionFeeAmount`
- *   during the totals pass. Only a `transaction_fee` line is priced this way —
- *   a credit-card fee is a percentage of what is being charged, which is the
- *   whole reason the fee type exists.
- */
-const PRICE_FORMULAS = ["five_day_week", "fixed", "percent_of_total"] as const;
-/** Allowed values for pricing formula. */
-export type PriceFormulaType = typeof PRICE_FORMULAS[number];
-/** Zod schema for PriceFormulaType. */
-export const PriceFormulaEnum: z.ZodType<PriceFormulaType> = z.enum(PRICE_FORMULAS);
-
-/**
- * The formulas a COMPONENT may be priced by — {@link PRICE_FORMULAS} without
- * `percent_of_total` (core#78).
- *
- * **A component can never legitimately price from a document total.** Only a
- * `transaction_fee` line does that, and {@link ComponentTypeEnum} excludes
- * `transaction_fee` — so `percent_of_total` on a component names a line that
- * cannot exist.
- *
- * 🔴 **This is a TYPE-level statement of a rule the RUNTIME already enforced,
- * and core#78 is wrong about that — measured 2026-09-07 against the unmodified
- * schema.** `ComponentSchema` and `AuthoredComponentSchema` both carry
- * `.superRefine(checkItemContract)`, which calls {@link checkItemPriceFormula},
- * which rejects `percent_of_total` for any item whose contract is not
- * `from_total`. A component parse was refused with *"only valid on a
- * transaction_fee"* both with and without a `base_percent`. The issue's claim
- * that the state is *representable*, and that `manager`'s two hand-listed
- * selects were "the only thing preventing" it, is false in both halves.
- *
- * ⭐ **So what was missing was not a guard — it was a VOCABULARY.** The declared
- * type said a component's formula may be `percent_of_total`, which is not true
- * of any component that can parse, and a consumer had nothing to derive the
- * correct option set from. That is the actual gap manager#378 hit: its sweep
- * replaced two hand-listed selects with the full {@link PriceFormulaEnum}, and
- * the result was a UI offering an option the API answers with a 400. **A
- * restriction that lives only in a refinement is invisible to every consumer
- * that renders a choice.** Exporting the subset states it once, here, in the
- * package that owns the vocabulary — the same shape as `CREDIT_NOTE_REASONS`
- * (`SETTLEMENT_CONTRACTS.credit.reasons`).
- *
- * ✅ **Safe to narrow, measured before it landed**, not assumed: every
- * `components[]` and `component_of[]` entry across all 568 products in BOTH
- * environments carried `five_day_week` or `fixed`, and every `base_percent` was
- * `null`. The one product priced `percent_of_total` is the "Card Fee"
- * (`transaction_fee`, `base_percent: 4`), which `ComponentTypeEnum` already
- * forbids from being a component and which is a component of nothing.
- *
- * ⚠️ **The half of core#78 that IS real is the mirror one**, and it is closed by
- * the `checkPriceBaseUnit` now attached to the component arm rather than by this
- * enum: a `base_percent` beside a `fixed` formula parsed cleanly (measured, same
- * run). `base_percent` has to stay declared — `createProduct` copies a product
- * price in by spread and a `z.strictObject` refuses an undeclared key — so a
- * refinement is the only thing that can forbid a value in it.
- */
-// ⚠️ **Plain `as const`, no `satisfies`.** The subset relation is asserted below
-// instead, because `as const satisfies readonly PriceFormulaType[]` is not
-// syntactically derivable — `deno task check:declarations` catches it as TS9010,
-// and without that gate JSR would emit a *different, wrong* type to npm
-// consumers rather than failing. Same family as core#43's truncated spread.
-const COMPONENT_PRICE_FORMULAS = ["five_day_week", "fixed"] as const;
-
-// `COMPONENT_PRICE_FORMULAS` must be a strict SUBSET of `PRICE_FORMULAS` — one
-// direction only, deliberately, because being smaller is the whole point. The
-// second clause is what stops it silently becoming the full set again.
-type _ComponentFormulaSubset = [typeof COMPONENT_PRICE_FORMULAS[number]] extends [PriceFormulaType]
-  ? [PriceFormulaType] extends [typeof COMPONENT_PRICE_FORMULAS[number]] ? never : true
-  : never;
-const _componentFormulaSubset: _ComponentFormulaSubset = true;
-void _componentFormulaSubset;
-
-/** Allowed pricing formulas for a component — see {@link COMPONENT_PRICE_FORMULAS}. */
-export type ComponentPriceFormulaType = typeof COMPONENT_PRICE_FORMULAS[number];
-/** Zod schema for ComponentPriceFormulaType. */
-export const ComponentPriceFormulaEnum: z.ZodType<ComponentPriceFormulaType> = z.enum(
-  COMPONENT_PRICE_FORMULAS,
-);
+// `PRICE_FORMULAS` / `PriceFormulaEnum` / `ComponentPriceFormulaEnum` were
+// removed by purchases-as-documents Phase 2 ruling 8: a line's price formula is
+// a `price-formulas/{uid}` document, snapshotted on the line as
+// `price.price_formula` (`PriceFormulaRef`, `schemas/price-formula.ts`), and
+// `percent_of_total` is the `transaction_fee` type contract — a fee line states
+// `base_percent` and no formula (see {@link checkLinePrice}).
 
 // `ITEM_TAX_PROFILES` / `ItemTaxProfileType` / `ItemTaxProfileEnum` were removed
 // here (api-cloudrun#435). They were a THIRD tax vocabulary beside
@@ -1121,10 +1042,10 @@ void _itemTypeParity;
  *   property of WHERE the goods went as much as of the line, so it is not a
  *   type invariant. (This bullet named `tax_class` and `tax_profile` until
  *   2026-08-22; neither is a field any more.)
- * - **no per-type `formula` whitelist.** Order `sale`/`service`/`surcharge` rows
- *   are `fixed` while their invoice projections are `five_day_week` (617 sale,
- *   643 service, 137 surcharge). A whitelist keyed on type would reject the
- *   invoice side of the same line.
+ * - **no per-type formula whitelist.** A line's formula is the catalog's (or the
+ *   operator's) and the formulas are a collection, not a closed vocabulary; the
+ *   pre-ruling-8 corpus already disagreed by type (617 sale, 643 service, 137
+ *   surcharge rows `fixed` on the order and `five_day_week` on the invoice).
  * - **`replacement` is `optional`, not `forbidden`, off the rental arm.** All
  *   1,480 non-rental order line items carry a `price.replacement`; the builder
  *   writes it for every type.
@@ -1136,7 +1057,7 @@ export interface ItemContract {
    * How the line meets the document total: `pre_tax` counts INTO the subtotal,
    * `from_total` is priced FROM it (a transaction fee), `none` is not priced at
    * all. This is the single fact behind `isPreTaxItem` / `isTransactionFeeItem`
-   * / `isPriceableItem`, and it is what makes `percent_of_total` legal.
+   * / `isPriceableItem`, and it is what makes a percent-of-total price legal.
    */
   pricing: "pre_tax" | "from_total" | "none";
   /** Whether `price.replacement` must appear. Rentals need one once stocked. */
@@ -1261,31 +1182,30 @@ export function itemContract(type: string): ItemContract | undefined {
 }
 
 /**
- * The `pricing` half of {@link ITEM_CONTRACTS}: a `percent_of_total` price is
- * legal only where the contract says the line is priced FROM the document total.
+ * The `pricing` half of {@link ITEM_CONTRACTS}: a percent-of-total price — a
+ * `base_percent` — is legal only where the contract says the line is priced
+ * FROM the document total.
  *
  * Applies to every price shape in the package, so it is the check the invoice
  * arm attaches on its own — an invoice line has no `stock_method` and its price
  * has no `replacement` key, which leaves this as the only axis it can express.
  *
- * `percent_of_total` prices a line from the DOCUMENT total, which only
- * `calculateTransactionFeeAmount` knows how to do — `calculateItemSubtotal`
- * throws on it. Before this axis the combination was merely thrown on at
- * runtime, deep in `perUnitSubtotal`; here it is unwritable. The converse is
- * deliberately NOT asserted: a flat-amount fee is legitimate, and
- * `calculateTransactionFeeAmount` prices one.
+ * Since purchases-as-documents ruling 8 a percent-of-total line is no formula at
+ * all: it states `base_percent` and `price_formula: null` ({@link checkLinePrice}).
+ * The converse is deliberately NOT asserted: a flat-amount fee is legitimate and
+ * prices on a formula like any other line.
  */
 export function checkItemPriceFormula(
-  item: { type: string; price?: { formula?: string } | null },
+  item: { type: string; price?: { base_percent?: number | null } | null },
   ctx: z.RefinementCtx,
 ): void {
   const contract = itemContract(item.type);
   if (!contract || item.price == null) return;
-  if (contract.pricing !== "from_total" && item.price.formula === "percent_of_total") {
+  if (contract.pricing !== "from_total" && item.price.base_percent != null) {
     ctx.addIssue({
       code: "custom",
-      path: ["price", "formula"],
-      message: `"percent_of_total" prices from the document total and is only valid on a transaction_fee`,
+      path: ["price", "base_percent"],
+      message: `A percent-of-total price (base_percent) prices from the document total and is only valid on a transaction_fee`,
     });
   }
 }
@@ -1323,7 +1243,7 @@ export function checkItemContract(
   item: {
     type: string;
     stock_method?: string | null;
-    price?: { formula?: string; replacement_cents?: number | null } | null;
+    price?: { base_percent?: number | null; replacement_cents?: number | null } | null;
   },
   ctx: z.RefinementCtx,
 ): void {
@@ -1356,31 +1276,6 @@ export function checkItemContract(
 }
 
 /**
- * The unit half of a line's price: which of `base_cents` / `base_percent` a
- * `formula` is allowed to carry.
- *
- * **This exists because `price.base` used to carry two units.** On a
- * `transaction_fee` line with `formula === "percent_of_total"`, `base` was a
- * *percentage* of the document's `subtotal_discounted`; on every other line it
- * was a per-unit dollar amount. One field, two units, discriminated only by a
- * sibling — so a reader that did not consult `formula` first multiplied a 2.9%
- * card fee as if it were $2.90, and integer cents would have made 2.9%
- * unrepresentable outright.
- *
- * The split puts the unit in the NAME: `base_cents` is money (integer cents),
- * `base_percent` is a percentage stored at 4dp — the quantum Xero's
- * `DiscountRate` holds, and deliberately NOT the `RATE_SCALE = 1_000_000n`
- * widening `utils/orders.ts` uses to *apply* a rate exactly. Conflating those
- * two would store six decimals Xero cannot carry.
- *
- * **The rule is exactly-one-of, in the only form a `.default(0)` leaves
- * checkable.** `base_cents` keeps its default, so it is materialized by the
- * parse before any object-level refinement runs and can never be observed
- * "absent" here; asserting it is *zero* on the fee arm is the same guarantee
- * against the same failure, and it is the half that can actually fail. The
- * `base_percent` half is asserted in both directions.
- */
-/**
  * **Invariant (1) of the `zero_priced` campaign: a line flagged `zero_priced`
  * carries no charge.** Owner ruling, 2026-09-07: *"zero priced should prevent a
  * charge"*, restated 2026-09-08 to cover the catalog grain too — the rule holds
@@ -1388,9 +1283,9 @@ export function checkItemContract(
  *
  * 🔴 **Nothing used to tie the flag to the amount, and that is precisely how the
  * corpus drifted.** `zero_priced` is applied to a price in exactly one place —
- * `core/src/utils/order-lines.ts`, `base_cents: comp.zero_priced ? 0 : (…)` —
+ * `core/src/utils/order-lines.ts`, which zeroed the line's base for a flagged component —
  * which runs client-side, ONCE, at line construction, and the resulting `0` is
- * then stored. Every pricer downstream reads the stored `base_cents` and never
+ * then stored. Every pricer downstream reads the stored rates and never
  * consults the flag, so once a non-zero amount arrives by any route nothing
  * re-zeroes it. Measured before this refinement existed: **53 order lines across
  * 35 documents** and **65 catalog component entries across 37 products**, both
@@ -1411,19 +1306,21 @@ export function checkItemContract(
 export function checkZeroPricedAmount(
   item: {
     zero_priced?: boolean | null;
-    price?: { base_cents?: number } | null;
+    price?: { rates?: readonly { rate_key: string; amount_cents: number }[] } | null;
   },
   ctx: z.RefinementCtx,
 ): void {
   if (item.zero_priced !== true) return;
-  const base = item.price?.base_cents;
-  if (base === undefined || base === null || base === 0) return;
-  ctx.addIssue({
-    code: "custom",
-    path: ["price", "base_cents"],
-    message:
-      `zero_priced is true, so base_cents must be 0 — got ${base}. ` +
-      `A flagged line carries no charge (api-cloudrun#917); if this line should be charged, clear zero_priced instead.`,
+  const rates = item.price?.rates ?? [];
+  rates.forEach((rate, i) => {
+    if (rate.amount_cents === 0) return;
+    ctx.addIssue({
+      code: "custom",
+      path: ["price", "rates", i, "amount_cents"],
+      message:
+        `zero_priced is true, so every rate must be 0 — "${rate.rate_key}" is ${rate.amount_cents}. ` +
+        `A flagged line carries no charge (api-cloudrun#917); if this line should be charged, clear zero_priced instead.`,
+    });
   });
 }
 
@@ -1642,43 +1539,72 @@ export function checkZeroQuantityComponents(
   }
 }
 
-export function checkPriceBaseUnit(
+/**
+ * **The shape of a line's price: a formula, or a percentage of the document —
+ * exactly one** (purchases-as-documents Phase 2 ruling 8).
+ *
+ * A formula-priced line snapshots `price_formula` (`{ uid, name, basis }`), the
+ * `rates` it priced with and the frozen tier `counts`; its money is
+ * `priceFromFormula(rates, counts, quantity, discount)`. A percent-of-total line
+ * — only a `transaction_fee` ({@link checkItemPriceFormula}) — states
+ * `base_percent` instead, a percentage of the document's discounted subtotal at
+ * 4dp, and carries no formula, rates or counts: it is priced from the document,
+ * not from itself.
+ *
+ * **Why `base_percent` stays a separate field.** `price.base` once carried two
+ * units — dollars per unit, or a percentage of the document — discriminated only
+ * by a sibling `formula`, so a reader that skipped the sibling billed a 2.9% card
+ * fee as $2.90. The unit lives in the NAME, and a percentage is never a rate row.
+ *
+ * `requireFormula` is the stored half: a stored line states `price_formula`
+ * (non-null exactly when `base_percent` is null). An input price may omit it —
+ * the writer resolves it from the product.
+ */
+export function checkLinePrice(
   price: {
-    formula?: string;
-    base_cents?: number;
+    price_formula?: { uid: string } | null;
+    rates?: readonly unknown[];
+    counts?: readonly unknown[];
     base_percent?: number | null;
   } | null | undefined,
   ctx: z.RefinementCtx,
+  requireFormula = true,
 ): void {
   if (price == null) return;
-
-  if (price.formula === "percent_of_total") {
-    if (price.base_percent == null) {
+  if (price.base_percent != null) {
+    if (price.price_formula != null) {
       ctx.addIssue({
         code: "custom",
-        path: ["base_percent"],
-        message: `"percent_of_total" prices from a percentage of the document total; base_percent is required`,
+        path: ["price_formula"],
+        message: "A percent-of-total price (base_percent) carries no price_formula; it prices from the document total",
       });
     }
-    if (price.base_cents) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["base_cents"],
-        message:
-          `"percent_of_total" carries its rate in base_percent; base_cents must be 0, got ${price.base_cents}`,
-      });
+    for (const key of ["rates", "counts"] as const) {
+      if ((price[key]?.length ?? 0) > 0) {
+        ctx.addIssue({
+          code: "custom",
+          path: [key],
+          message: `A percent-of-total price (base_percent) carries no ${key}`,
+        });
+      }
     }
     return;
   }
-
-  if (price.base_percent != null) {
+  if (requireFormula && price.price_formula == null) {
     ctx.addIssue({
       code: "custom",
-      path: ["base_percent"],
-      message:
-        `base_percent is only meaningful on a "percent_of_total" price; this one is "${price.formula}"`,
+      path: ["price_formula"],
+      message: "A line priced from itself names its price_formula; only a percent-of-total fee states none",
     });
   }
+}
+
+/** {@link checkLinePrice} on an INPUT price, where the writer resolves the formula. */
+export function checkLinePriceInput(
+  price: Parameters<typeof checkLinePrice>[0],
+  ctx: z.RefinementCtx,
+): void {
+  checkLinePrice(price, ctx, false);
 }
 
 // `ITEM_CONTRACTS`' totality over `ITEM_TYPES` is enforced by the
@@ -1746,7 +1672,7 @@ void _preTaxParity;
 
 /**
  * The `pricing: "from_total"` members — priced FROM the document total rather
- * than into it, which is what makes a `percent_of_total` formula legal on them.
+ * than into it, which is what makes a percent-of-total price (`base_percent`) legal on them.
  */
 export type FromTotalItemType = {
   [K in ItemTypeType]: typeof ITEM_CONTRACTS_INNER[K]["pricing"] extends "from_total" ? K : never;

@@ -205,7 +205,7 @@ const LINKED_TWIN_TESTED: EnforcementRef = {
   ref:
     "api-cloudrun/tests/integration/products/products.test.ts::PUT active on a rental writes its replacement twin",
   clause:
-    "both directions of the `active` copy and the replacement's `base_cents` reaching its rental's `replacement_cents`, each asserted on the twin document and on `rules_fired` after the PUT (`PUT base price on a replacement writes its rental's replacement_cents` is the price arm); the unlink and reuse arms are asserted in the same file's replacement-twin steps",
+    "both directions of the `active` copy and the replacement's open rate reaching its rental's `replacement_cents`, each asserted on the twin document and on `rules_fired` after the PUT (`PUT base price on a replacement writes its rental's replacement_cents` is the price arm); the unlink and reuse arms are asserted in the same file's replacement-twin steps",
   gates: true,
 };
 
@@ -713,15 +713,15 @@ const updateProductRules: CollectionRule[] = [
     target: "products",
     mode: "co-write",
     invariant:
-      "A counted rental and its replacement twin (`uid_linked_replacement` on the rental, `uid_linked_rental` on the replacement) are written together inside `update-product`. `active` is copied in BOTH directions — a rental's flip reaches its twin and a replacement's flip reaches its rental — and a replacement's own `price.base_cents` is the rental's `price.replacement_cents`. A write that stops the rental counting (the stock_method or type unlink arm) deactivates the twin and drops the rental's link fields; one that makes it a counted rental again reuses the twin found by `uid_linked_rental` (renamed, repriced, `active` following the rental) or mints one. ⚠️ The pair is keyed by each side's OWN link field, so a one-way link (api-cloudrun#1374) lets this cascade write a twin that does not point back. ⚠️ Superseding a product forces `active: false` through this same edge.",
+      "A counted rental and its replacement twin (`uid_linked_replacement` on the rental, `uid_linked_rental` on the replacement) are written together inside `update-product`. `active` is copied in BOTH directions — a rental's flip reaches its twin and a replacement's flip reaches its rental — and a replacement's own open rate (its flat formula's one key) is the rental's `price.replacement_cents`. A write that stops the rental counting (the stock_method or type unlink arm) deactivates the twin and drops the rental's link fields; one that makes it a counted rental again reuses the twin found by `uid_linked_rental` (renamed, repriced, `active` following the rental) or mints one. ⚠️ The pair is keyed by each side's OWN link field, so a one-way link (api-cloudrun#1374) lets this cascade write a twin that does not point back. ⚠️ Superseding a product forces `active: false` through this same edge.",
     enforced_by: [LINKED_TWIN_TESTED],
     transaction: "update-product",
     fields: [
       { source: ["active"], target: ["active"], transform: "rental → its replacement, and replacement → its rental" },
       {
-        source: ["price", "base_cents"],
+        source: ["price", "rates", "amount_cents"],
         target: ["price", "replacement_cents"],
-        transform: "a replacement's own base price onto its rental",
+        transform: "a replacement's own OPEN rate (its flat formula's one key) onto its rental",
       },
       {
         source: ["stock_method"],
@@ -742,9 +742,9 @@ const updateProductRules: CollectionRule[] = [
       },
       {
         source: ["price", "replacement_cents"],
-        target: ["price", "base_cents"],
+        target: ["price", "rates", "amount_cents"],
         transform:
-          "a rental's own replacement price onto its twin's base price — on an ordinary price edit, and when the reuse arm reprices a twin it re-links",
+          "a rental's own replacement price onto its twin's open rate (closing the old row and opening a new one when it changed) — on an ordinary price edit, and when the reuse arm reprices a twin it re-links",
       },
     ],
   },
@@ -985,21 +985,19 @@ const updateProductPriceRules: CollectionRule[] = [
       "onUpdate:products — post-commit CAS fan-out over the TARGETS' reverse indexes (query_by_components / query_by_component_of), never the source's forward arrays",
     fields: [
       {
-        source: ["price", "base_cents"],
-        target: ["components", "price", "base_cents"],
+        source: ["price", "rates"],
+        target: ["components", "price", "rates"],
         transform:
           "written only where the entry still carries the product's PRE-update value; absent and null are normalized equal before the compare",
       },
-      { source: ["price", "base_percent"], target: ["components", "price", "base_percent"] },
+      { source: ["price", "uid_price_formula"], target: ["components", "price", "uid_price_formula"] },
       { source: ["price", "replacement_cents"], target: ["components", "price", "replacement_cents"] },
       { source: ["price", "coa_revenue"], target: ["components", "price", "coa_revenue"] },
-      { source: ["price", "formula"], target: ["components", "price", "formula"] },
       { source: ["price", "discountable"], target: ["components", "price", "discountable"] },
-      { source: ["price", "base_cents"], target: ["component_of", "price", "base_cents"] },
-      { source: ["price", "base_percent"], target: ["component_of", "price", "base_percent"] },
+      { source: ["price", "rates"], target: ["component_of", "price", "rates"] },
+      { source: ["price", "uid_price_formula"], target: ["component_of", "price", "uid_price_formula"] },
       { source: ["price", "replacement_cents"], target: ["component_of", "price", "replacement_cents"] },
       { source: ["price", "coa_revenue"], target: ["component_of", "price", "coa_revenue"] },
-      { source: ["price", "formula"], target: ["component_of", "price", "formula"] },
       { source: ["price", "discountable"], target: ["component_of", "price", "discountable"] },
     ],
   },
@@ -1015,17 +1013,17 @@ const updateProductPriceRules: CollectionRule[] = [
       "onUpdate:products — post-commit, follows update-product:price-to-components on those products carrying a webshop mirror",
     fields: [
       {
-        source: ["price", "base_cents"],
-        target: ["components", "price", "base_cents"],
+        source: ["price", "rates"],
+        target: ["components", "price", "rates"],
         transform:
           "mirrors the refreshed entry price; internal keys never reach the webshop shape",
       },
+      { source: ["price", "uid_price_formula"], target: ["components", "price", "uid_price_formula"] },
       { source: ["price", "replacement_cents"], target: ["components", "price", "replacement_cents"] },
-      { source: ["price", "formula"], target: ["components", "price", "formula"] },
       { source: ["price", "discountable"], target: ["components", "price", "discountable"] },
-      { source: ["price", "base_cents"], target: ["component_of", "price", "base_cents"] },
+      { source: ["price", "rates"], target: ["component_of", "price", "rates"] },
+      { source: ["price", "uid_price_formula"], target: ["component_of", "price", "uid_price_formula"] },
       { source: ["price", "replacement_cents"], target: ["component_of", "price", "replacement_cents"] },
-      { source: ["price", "formula"], target: ["component_of", "price", "formula"] },
       { source: ["price", "discountable"], target: ["component_of", "price", "discountable"] },
     ],
   },
@@ -1051,8 +1049,9 @@ const updateProductOrderRules: CollectionRule[] = [
       },
       { source: ["stock_method"], target: ["items", "stock_method"] },
       {
-        source: ["price", "base_cents"],
-        target: ["items", "price", "base_cents"],
+        source: ["price", "rates"],
+        target: ["items", "price", "rates"],
+        transform: "the rows in force at the order's pricing date, snapshotted (D4)",
       },
       {
         source: ["price", "replacement_cents"],

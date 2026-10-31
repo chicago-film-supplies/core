@@ -87,6 +87,7 @@ import { invoiceFieldIsFrozen, invoiceHasMoneySettlement, type InvoiceSettledTot
 import { invoiceStatusTracksXeroEdits, type InvoiceXeroSyncStatus } from "./invoice-xero-sync.ts";
 import {
   type AccountedCreditNote,
+  type AccountingContext,
   type AccountedInvoice,
   buildOverbillingCredits,
   type OverbillingCredits,
@@ -121,12 +122,60 @@ export interface CreditableLine {
   uid: string;
   /** Units the line billed. */
   billed: number;
-  /** The line's own `chargeable_days`, or 1 for a line with none. */
-  billed_days: number;
-  /** Unit-days still creditable: `billed × billed_days − Σ prior`. */
-  unit_days: number;
-  /** Whole units still creditable at the line's full days: `⌊unit_days ÷ billed_days⌋`. */
+  /**
+   * The time one unit billed: Σ the line's `counts` as an exact rational (in
+   * its formula's own periods — weeks on Five-day week), `1/1` on a flat line.
+   */
+  billed_time: TimeAmount;
+  /** Unit-time still creditable: `billed × billed_time − Σ prior`, exact. */
+  unit_time: TimeAmount;
+  /** Whole units still creditable at the line's full time: `⌊unit_time ÷ billed_time⌋`. */
   units: number;
+}
+
+/** An exact, non-negative-denominator rational — a quantity of a formula's periods. */
+export interface TimeAmount {
+  num: number;
+  den: number;
+}
+
+function gcd(a: number, b: number): number {
+  a = Math.abs(a);
+  b = Math.abs(b);
+  while (b) [a, b] = [b, a % b];
+  return a || 1;
+}
+
+function reduceTime(t: TimeAmount): TimeAmount {
+  const g = gcd(t.num, t.den);
+  return { num: t.num / g, den: t.den / g };
+}
+
+function addTime(a: TimeAmount, b: TimeAmount): TimeAmount {
+  return reduceTime({ num: a.num * b.den + b.num * a.den, den: a.den * b.den });
+}
+
+function scaleTime(t: TimeAmount, k: number): TimeAmount {
+  return reduceTime({ num: t.num * k, den: t.den });
+}
+
+/** `a − b ≥ 0`? and `a < b`? — compared exactly by cross-multiplying. */
+function compareTime(a: TimeAmount, b: TimeAmount): number {
+  return a.num * b.den - b.num * a.den;
+}
+
+/**
+ * **One unit's billed time**: Σ a line's `counts`, exact. A line with no counts
+ * (none stored) counts as one period, so the budget is exactly its unit count.
+ */
+export function countsTime(counts: readonly { num: number; den: number }[] | null | undefined): TimeAmount {
+  if (!counts || counts.length === 0) return { num: 1, den: 1 };
+  return counts.reduce<TimeAmount>((acc, c) => addTime(acc, { num: c.num, den: c.den }), { num: 0, den: 1 });
+}
+
+/** A time amount for a message: `2`, or `3/2`. */
+function timeLabel(t: TimeAmount): string {
+  return t.den === 1 ? String(t.num) : `${t.num}/${t.den}`;
 }
 
 /**
@@ -178,7 +227,7 @@ export interface CappedCreditLine {
   quantity: number;
   uid_invoice_item: string | null;
   path_invoice_item?: readonly string[];
-  price: { chargeable_days: number | null };
+  price: { counts?: readonly { num: number; den: number }[] };
 }
 
 /** A prior credit note, as the credit cap reads it. Void notes are skipped. */
@@ -229,40 +278,52 @@ const pathKey = (path: readonly string[]): string => path.join("/");
  * api's credit-note cap, lifted here** (`api-cloudrun/src/lib/creditNoteCap.ts`)
  * so the manager offers exactly what the server will accept.
  *
- * ONE budget, in unit-days. A null `chargeable_days` on a prior note line means
- * "whole units at the row's own terms", NOT one day — every note stored before
- * api-cloudrun#1028 has it null, and reading those as one day would leave room
- * to credit units the note already gave back. A line with no `chargeable_days`
- * of its own counts as 1 day, which makes the budget exactly the unit count.
+ * ONE budget, in unit-TIME: quantity × Σ `counts`, exact (ruling 8 — the days
+ * a line bills are its frozen counts, in its formula's own periods). A prior
+ * note line credited its own counts: the invoice line's for whole units, the
+ * credited days stated through the formula for a days credit
+ * (`priceCreditNote`). A line with no counts counts as one period, which makes
+ * the budget exactly the unit count.
  */
 export function creditableLines(
   items: readonly InvoiceDocItemType[],
   priorNotes: readonly CappedNote[],
 ): CreditableLine[] {
   const lines = items.filter(isInvoiceLineItem);
-  const credited = new Map<string, number>();
+  const credited = new Map<string, TimeAmount>();
   for (const note of priorNotes) {
     if (note.status === "void") continue;
     for (const line of note.items) {
       const target = creditedLine(lines, line);
       if (!target) continue;
-      const days = target.price.chargeable_days ?? 1;
       const k = pathKey(target.path);
-      credited.set(k, (credited.get(k) ?? 0) + line.quantity * (line.price.chargeable_days ?? days));
+      const spent = scaleTime(noteLineTime(line, target), line.quantity);
+      credited.set(k, addTime(credited.get(k) ?? { num: 0, den: 1 }, spent));
     }
   }
   return lines.map((line) => {
-    const billedDays = line.price.chargeable_days ?? 1;
-    const unitDays = line.quantity * billedDays - (credited.get(pathKey(line.path)) ?? 0);
+    const billedTime = countsTime(line.price.counts);
+    const already = credited.get(pathKey(line.path)) ?? { num: 0, den: 1 };
+    const unitTime = addTime(scaleTime(billedTime, line.quantity), scaleTime(already, -1));
+    // ⌊unit_time ÷ billed_time⌋, exact: (u.num·b.den) ÷ (u.den·b.num).
+    const units = Math.floor((unitTime.num * billedTime.den) / (unitTime.den * billedTime.num));
     return {
       path: [...line.path],
       uid: line.uid,
       billed: line.quantity,
-      billed_days: billedDays,
-      unit_days: unitDays,
-      units: Math.max(0, Math.floor(unitDays / billedDays)),
+      billed_time: billedTime,
+      unit_time: unitTime,
+      units: Math.max(0, units),
     };
   });
+}
+
+/** The time one unit of a note line credited: its own counts, else (none stored) the invoice line's. */
+function noteLineTime(
+  line: CappedCreditLine,
+  target: { price: { counts?: readonly { num: number; den: number }[] } },
+): TimeAmount {
+  return line.price.counts && line.price.counts.length > 0 ? countsTime(line.price.counts) : countsTime(target.price.counts);
 }
 
 /** The invoice line a note line credits: by path, or — for a note stored before paths — the first line with its uid. */
@@ -297,23 +358,25 @@ export function creditNoteOverCredit(
   for (const line of requested) {
     const target = creditedLine(lines, line);
     const billed = target?.quantity ?? 0;
-    const billedDays = target?.price.chargeable_days ?? 1;
     if (line.quantity > billed) {
       return `crediting ${line.quantity} of "${line.name}" exceeds what invoice ${invoiceNumber} billed (${billed})`;
     }
-    const capacity = billed * billedDays;
-    const remaining = target ? (left.get(pathKey(target.path))?.unit_days ?? 0) : 0;
-    const already = capacity - remaining;
-    const consumed = line.quantity * (line.price.chargeable_days ?? billedDays);
-    if (consumed > remaining) {
-      return billedDays === 1
+    if (!target) continue;
+    const billedTime = countsTime(target.price.counts);
+    const capacity = scaleTime(billedTime, billed);
+    const remaining = left.get(pathKey(target.path))?.unit_time ?? { num: 0, den: 1 };
+    const already = addTime(capacity, scaleTime(remaining, -1));
+    const lineTime = noteLineTime(line, target);
+    const consumed = scaleTime(lineTime, line.quantity);
+    if (compareTime(consumed, remaining) > 0) {
+      // A row billing one whole period per unit (a sale, a flat line) keeps the
+      // plain unit wording; a time row names the periods it spends.
+      return billedTime.num === 1 && billedTime.den === 1
         ? `crediting ${line.quantity} of "${line.name}" exceeds what invoice ${invoiceNumber} ` +
-          `billed (${billed}) less what is already credited (${already})`
-        // `?? billedDays`, not the api's old `?? 1`: a null-day line spends the
-        // row's full days (see `creditableLines`), so "× 1 day(s)" misstated it.
-        : `crediting ${line.quantity} × ${line.price.chargeable_days ?? billedDays} day(s) of "${line.name}" is ` +
-          `${consumed} unit-days, and invoice ${invoiceNumber} billed ${capacity} ` +
-          `(${billed} × ${billedDays}) less ${already} already credited`;
+          `billed (${billed}) less what is already credited (${timeLabel(already)})`
+        : `crediting ${line.quantity} × ${timeLabel(lineTime)} period(s) of "${line.name}" is ` +
+          `${timeLabel(consumed)} unit-periods, and invoice ${invoiceNumber} billed ${timeLabel(capacity)} ` +
+          `(${billed} × ${timeLabel(billedTime)}) less ${timeLabel(already)} already credited`;
     }
   }
   return null;
@@ -383,7 +446,7 @@ export function invoiceActionsFor(invoice: OfferInvoice, ctx: InvoiceOfferContex
   }
 
   if (contract.live_in_xero) {
-    const lines = creditableLines(invoice.items ?? [], ctx.creditNotes ?? []).filter((l) => l.unit_days > 0);
+    const lines = creditableLines(invoice.items ?? [], ctx.creditNotes ?? []).filter((l) => l.unit_time.num > 0);
     if (lines.length > 0) offer("add_credit_note", { lines });
   }
 
@@ -663,6 +726,12 @@ export interface OrderInvoiceOfferContext {
   /** Every credit note against those invoices. Absent ⇒ none. */
   creditNotes?: readonly AccountedCreditNote[];
   /**
+   * The formulas and holidays an extension is metered with (ruling 8).
+   * **Absent ⇒ unknown**, exactly like `invoices`: Invoice Remaining is offered
+   * and the over-billing credit is not.
+   */
+  accounting?: AccountingContext;
+  /**
    * Lost and damaged units not yet billed (`seedReplacementLines`). **Absent ⇒
    * 0**: an unknown count offers nothing rather than an empty invoice.
    */
@@ -712,14 +781,14 @@ export function orderInvoiceActionsFor(order: OfferOrder, ctx: OrderInvoiceOffer
 
 /** Lines the remainder build would bill, or `null` when the invoices are unknown. */
 function remainingLines(order: OfferOrder, ctx: OrderInvoiceOfferContext): number | null {
-  if (!ctx.invoices) return null;
-  return remainingForOrder(order.uid, order.items, ctx.invoices, order.destinations, ctx.creditNotes ?? []).lines
+  if (!ctx.invoices || !ctx.accounting) return null;
+  return remainingForOrder(order.uid, order.items, ctx.invoices, order.destinations, ctx.accounting, ctx.creditNotes ?? []).lines
     .filter((l) => l.bills).length;
 }
 
 function overbilling(order: OfferOrder, ctx: OrderInvoiceOfferContext): OverbillingCredits | null {
-  if (!ctx.invoices) return null;
-  return buildOverbillingCredits(order, ctx.invoices, ctx.creditNotes ?? []);
+  if (!ctx.invoices || !ctx.accounting) return null;
+  return buildOverbillingCredits(order, ctx.invoices, ctx.accounting, ctx.creditNotes ?? []);
 }
 
 /** What an operator route asks to do from an order. */

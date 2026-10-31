@@ -7,6 +7,7 @@
  * than reading as a clean corpus.
  */
 import { assertEquals, assertThrows } from "@std/assert";
+import { fdwCounts, fdwPrice, FORMULAS } from "./helpers/formulas.ts";
 import {
   CREDIT_NOTE_STATUS_CONTRACTS,
   type CreditNoteStatusType,
@@ -57,7 +58,7 @@ function line(uid: string, qty: number, days: number | null): InvoiceDocItemType
     type: "rental",
     name: uid,
     quantity: qty,
-    price: { chargeable_days: days },
+    price: { ...fdwPrice(0, days) },
   } as unknown as InvoiceDocItemType;
 }
 
@@ -254,37 +255,38 @@ const credit = (uid: string, quantity: number, days: number | null = null) => ({
   quantity,
   uid_invoice_item: uid,
   path_invoice_item: ["ord", "dest", uid],
-  price: { chargeable_days: days },
+  // A days credit STATES the time it gave back, unfloored; a whole-unit credit carries none of its own.
+  price: { ...fdwPrice(0), counts: days === null ? [] : fdwCounts(days, { stated: true }) },
 });
 
-Deno.test("D3 creditableLines nets prior notes in unit-days; void notes and dividers are skipped", () => {
+Deno.test("D3 creditableLines nets prior notes in unit-TIME, exactly; void notes and dividers are skipped", () => {
   const items = [DIVIDER, line("cam", 5, 10), line("bag", 2, null)];
   const prior = [
-    note("issued", credit("cam", 1, 4)), // a 4-day shortening of one unit: 4 unit-days
+    note("issued", credit("cam", 1, 4)), // a 4-day shortening of one unit: 4/5 of a week
     note("void", credit("cam", 5)), // void: ignored
-    note("applied", credit("bag", 1)), // a sale unit: 1 unit-day
+    note("applied", credit("bag", 1)), // a sale unit: 1 unit
   ];
-  assertEquals(creditableLines(items, prior).map((l) => [l.uid, l.unit_days, l.units]), [
-    ["cam", 46, 4],
-    ["bag", 1, 1],
+  // cam: 5 units × 2 weeks = 10, less 4/5 → 46/5 unit-weeks; ⌊(46/5) ÷ 2⌋ = 4 whole units.
+  assertEquals(creditableLines(items, prior).map((l) => [l.uid, l.unit_time, l.units]), [
+    ["cam", { num: 46, den: 5 }, 4],
+    ["bag", { num: 1, den: 1 }, 1],
   ]);
 });
 
-Deno.test("D3: a legacy note line with null chargeable_days consumes the row's FULL days, not one", () => {
-  // Every note stored before api-cloudrun#1028 has null days. Read as one day,
-  // crediting all 5 units of a 5 × 5 row would leave room for 4 more.
+Deno.test("D3: a note line stating no counts consumes the row's FULL time, not one period", () => {
+  // Read as one period, crediting all 5 units of a 5 × 5-day row would leave room for more.
   const items = [line("cam", 5, 5)];
-  assertEquals(creditableLines(items, [note("issued", credit("cam", 5))])[0].unit_days, 0);
+  assertEquals(creditableLines(items, [note("issued", credit("cam", 5))])[0].unit_time, { num: 0, den: 1 });
 });
 
 Deno.test("D3 creditNoteOverCredit: the api's two arms, with its messages", () => {
   const items = [line("cam", 5, 10)];
   // Arm A — more units than the row billed, checked first.
   assertEquals(creditNoteOverCredit(2001, items, [credit("cam", 6)], []), 'crediting 6 of "cam" exceeds what invoice 2001 billed (5)');
-  // Arm B — the 140% counter-example: 20 unit-days already, then 5 whole units (50).
+  // Arm B — the 140% counter-example: 5 × 4/5 = 4 unit-weeks already, then 5 whole units (10).
   assertEquals(
     creditNoteOverCredit(2001, items, [credit("cam", 5)], [note("issued", credit("cam", 5, 4))]),
-    'crediting 5 × 10 day(s) of "cam" is 50 unit-days, and invoice 2001 billed 50 (5 × 10) less 20 already credited',
+    'crediting 5 × 2 period(s) of "cam" is 10 unit-periods, and invoice 2001 billed 10 (5 × 2) less 4 already credited',
   );
   // A sale line keeps the plain wording.
   assertEquals(
@@ -525,7 +527,7 @@ Deno.test("api-cloudrun#1163: lost/damaged and cleaning/maintenance are offered 
 
 Deno.test("D7: Invoice Remaining reads remainingForOrder once the invoices are known", () => {
   // No lines, invoices known ⇒ nothing remains ⇒ not offered.
-  const offers = orderInvoiceActionsFor(order("active"), { invoices: [] });
+  const offers = orderInvoiceActionsFor(order("active"), { invoices: [], accounting: { formulas: FORMULAS, holidays: [] } });
   assertEquals(has(offers, "create_remaining_invoice"), false);
   assertEquals(has(offers, "credit_overbilling"), false);
   assertEquals(has(offers, "create_replacement_invoice"), false, "absent replacement_units ⇒ 0");
@@ -535,14 +537,19 @@ Deno.test("D7: Invoice Remaining reads remainingForOrder once the invoices are k
 Deno.test("core#120: an order that is ONLY over-billed is offered the credit, not Invoice Remaining", () => {
   // Ordered 2, billed 3: the one remainder line is −1 unit. The remainder build
   // has nothing to bill, so offering it sends the operator to a 409.
-  const window = { start: "2026-09-06T00:00:00.000-05:00", end: "2026-09-11T00:00:00.000-05:00", days: 5 };
+  const window = { start: "2026-09-06T00:00:00.000-05:00", end: "2026-09-11T00:00:00.000-05:00" };
   const pair = { uid: "dest", dates: { charge_windows: [window] } };
   const cam = (path: string[], quantity: number) => ({
     uid: "cam", type: "rental", name: "cam", description: "", quantity, path,
     stock_method: "reserve", zero_priced: false, uid_tax_class: "TaxC1assDefau1tAAAAA",
     price: {
-      base_cents: 1000, chargeable_days: 5, formula: "five_day_week",
-      subtotal_cents: 0, subtotal_discounted_cents: 0, discount: null, taxes: [], total_cents: 0, replacement_cents: 1000,
+      ...fdwPrice(1000, 5),
+      subtotal_cents: 0,
+      subtotal_discounted_cents: 0,
+      discount: null,
+      taxes: [],
+      total_cents: 0,
+      replacement_cents: 1000,
     },
   });
   const overBilled = {
@@ -560,11 +567,11 @@ Deno.test("core#120: an order that is ONLY over-billed is offered the credit, no
     ],
     destinations: [{ ...pair, uid_order: "ord" }],
   } as unknown as AccountedInvoice;
-  const offers = orderInvoiceActionsFor(overBilled, { invoices: [billed], creditNotes: [] });
+  const offers = orderInvoiceActionsFor(overBilled, { invoices: [billed], creditNotes: [], accounting: { formulas: FORMULAS, holidays: [] } });
   assertEquals(has(offers, "credit_overbilling"), true, "the over-billing is real and offered");
   assertEquals(has(offers, "create_remaining_invoice"), false, "and there is nothing to invoice");
   assertThrows(
-    () => assertOrderInvoiceAction(overBilled, { invoices: [billed], creditNotes: [] }, { action: "create_remaining_invoice" }),
+    () => assertOrderInvoiceAction(overBilled, { invoices: [billed], creditNotes: [], accounting: { formulas: FORMULAS, holidays: [] } }, { action: "create_remaining_invoice" }),
     InvoiceActionRefusal,
     "nothing to do",
   );

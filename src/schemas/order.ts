@@ -19,7 +19,8 @@ import {
   checkZeroPricedComponents,
   checkZeroQuantityComponents,
   checkItemPriceFormula,
-  checkPriceBaseUnit,
+  checkLinePrice,
+  checkLinePriceInput,
   COARevenueEnum,
   type COARevenueType,
   DOC_LINE_ITEM_TYPES,
@@ -35,8 +36,6 @@ import {
   NamePartsFieldsInput,
   type NamePartsInput,
   Phone,
-  PriceFormulaEnum,
-  type PriceFormulaType,
   RATE_UNIT_META,
   RateTypeEnum,
   type RateType,
@@ -55,6 +54,16 @@ import {
   isFulfillableItemType,
   isLineItemType,
 } from "./common.ts";
+import {
+  type PriceFormulaRef,
+  PriceFormulaRefSchema,
+  RateKey,
+  RateSnapshotSchema,
+  type RateSnapshotType,
+  TierCountSchema,
+  type TierCountType,
+} from "./price-formula.ts";
+import { checkFormulaLineMoney } from "./_line-money.ts";
 
 export const ORDER_STATUSES = [
   "draft", "quoted", "reserved", "active", "complete", "canceled",
@@ -236,10 +245,8 @@ export function isValidOrderStatusTransition(
 const INCLUSION_TYPES_NULLABLE = ["default", "mandatory", "optional"] as const;
 
 /**
- * One charge window as a client states it: a start and an end instant.
- *
- * The day count is not an input. The server counts it once, when the window is
- * written (`canonicalChargeWindows` in `@cfs/core/utils/dates`).
+ * One charge window as a client states it: a start and an end instant — the
+ * same shape as the stored {@link ChargeWindow}.
  */
 export interface ChargeWindowInputType {
   start: string;
@@ -253,32 +260,30 @@ export const ChargeWindowInput: z.ZodType<ChargeWindowInputType> = z.object({
 });
 
 /**
- * One stored charge window: a start, an end, and the business days it charges.
+ * One stored charge window: a start and an end instant, and nothing else.
  *
  * A pair holds one or more of these (`OrderDocDates.charge_windows`). A hotspot
  * out for three months and switched on three times is one pair with three
  * windows: splitting it into three pairs would invent deliveries and free up the
  * stock between windows.
  *
- * - **`days` is counted once, when the window is written**, and stored. The
- *   holiday list has no versions, so recounting on read would move the days on a
- *   document already sent out.
- * - **`days` may be 0.** A window over a weekend charges nothing of its own; the
- *   one-week minimum still applies to it when priced (`billableDays`).
+ * - 🔴 **No day count** (purchases-as-documents Phase 2 ruling 8). A window
+ *   used to store the business days it charged, but a pair's lines may be on
+ *   different price formulas, so no one count per window is every line's. Each
+ *   priced line freezes its OWN tier counts (`price.counts`), metered from these
+ *   windows by its formula when the line is priced.
  * - **No `_fs` twins and no `uid`.** The array is one value to the shared-field
  *   merge (`shared: "value"` on the field).
  */
 export interface ChargeWindowType {
   start: string;
   end: string;
-  days: number;
 }
 
 /** Zod schema for {@link ChargeWindowType}. */
 export const ChargeWindow: z.ZodType<ChargeWindowType> = z.strictObject({
   start: chicagoInstant(),
   end: chicagoInstant(),
-  days: z.int().min(0).meta({ derived: true }),
 });
 
 /** A window's Chicago calendar date, as `YYYY-MM-DD`. */
@@ -359,8 +364,8 @@ export interface OrderDocDatesType {
    * no days**.
    *
    * 🔴 **`null` exactly when the document has no line that bills days**
-   * (api-cloudrun#1154, owner 2026-09-28). A window prices only a `rental` on
-   * `five_day_week` (`daysFromWindows`, `@cfs/core/utils/price-document`); on a
+   * (api-cloudrun#1154, owner 2026-09-28). A window meters only a `rental` on a
+   * time-basis formula (`metersWindows`, `@cfs/core/utils/price-document`); on a
    * sale, replacement or service document it billed nothing and only fed quote
    * expiry and a charge-period row the operator could not act on. Keyed on the
    * same predicate as the collection leg ({@link hasCollectionLine}),
@@ -1762,10 +1767,20 @@ export const DiscountInput: z.ZodType<DiscountInputType> = z.object({
  * Price breakdown for an order item (input — client sends partial data, server computes the rest).
  */
 export interface ItemPriceType {
-  base_cents?: number;
+  /**
+   * The `price-formulas/{uid}` to price by. Omitted, the writer takes the
+   * product's (or keeps the stored line's); the line then snapshots the
+   * formula's `{ uid, name, basis }` as `price_formula`.
+   */
+  uid_price_formula?: string;
+  /**
+   * The rates to price with, per `rate_key` — the operator's override. Omitted,
+   * the writer snapshots the product's rates in force on the line's pricing
+   * date (or keeps the stored line's).
+   */
+  rates?: RateSnapshotType[];
   base_percent?: number | null;
   replacement_cents?: number | null;
-  formula?: PriceFormulaType;
   subtotal_cents?: number;
   discount?: DiscountInputType | null;
   taxes?: Array<{ uid: string }>;
@@ -1774,18 +1789,18 @@ export interface ItemPriceType {
 
 /** Zod schema for item price breakdown (input). */
 export const ItemPrice: z.ZodType<ItemPriceType> = z.object({
-  base_cents: z.int().optional(),
+  uid_price_formula: FirestoreId.optional(),
+  rates: z.array(z.object({ rate_key: RateKey, amount_cents: z.int() })).optional(),
   base_percent: z.number().nullable().optional(),
   replacement_cents: z.int().nullable().optional(),
-  // No `chargeable_days`: a line's days are derived from its pair's charge
-  // windows by `priceDocument` (charge-windows decision 3). A client that still
-  // sends one has it stripped.
-  formula: PriceFormulaEnum.optional(),
+  // No `counts`: a line's tier counts are metered from its pair's charge windows
+  // by `priceDocument` (Phase 2 ruling 8). A client that sends them has them
+  // stripped.
   subtotal_cents: z.int().optional(),
   discount: DiscountInput.nullable().optional(),
   taxes: z.array(z.object({ uid: FirestoreId })).optional(),
   total_cents: z.int().optional(),
-}).superRefine(checkPriceBaseUnit);
+}).superRefine(checkLinePriceInput);
 
 /**
  * A billable order line as a client sends it — the input mirror of
@@ -2177,21 +2192,44 @@ export const UndoRentalExtensionInput: z.ZodType<UndoRentalExtensionInputType> =
 
 /**
  * Line item price in the full order document (all fields required after server compute).
- * subtotal = pre-discount (base × qty × days_factor).
- * subtotal_discounted = post-discount.
- * total = subtotal_discounted + sum(taxes[].amount).
+ *
+ * - subtotal = `priceFromFormula(rates, counts, quantity)` — Σ tier
+ *   `rate × quantity × num ÷ den`, each tier rounded once (purchases-as-documents
+ *   Phase 2 ruling 8).
+ * - subtotal_discounted = post-discount.
+ * - total = subtotal_discounted + sum(taxes[].amount).
+ *
+ * A percent-of-total fee line states `base_percent` instead of a formula
+ * ({@link checkLinePrice}).
  */
 export interface OrderDocItemPriceType {
-  base_cents: number;
   /**
-   * The `percent_of_total` percentage, at 4dp — present on exactly the lines
-   * where `base_cents` is meaningless, and absent everywhere else. See
-   * {@link checkPriceBaseUnit}, which enforces the biconditional.
+   * The formula the line priced by — `null` exactly on a percent-of-total fee.
+   * A point-in-time snapshot: a formula is immutable once referenced.
+   */
+  price_formula: PriceFormulaRef | null;
+  /**
+   * The rates the line priced with, one per `rate_key` its formula names — the
+   * snapshot the line OWNS (Q13): taken from the product for the line's pricing
+   * date, overridable by the operator, never repriced by a later rate change.
+   */
+  rates: RateSnapshotType[];
+  /**
+   * The engine's exact tier counts, FROZEN when the line was priced (ruling 8):
+   * the holiday list and the formula documents are editable and unversioned, so
+   * recounting on read would move a sent document's money. With `rates`,
+   * `quantity` and `discount` they reproduce the line's money from the line
+   * alone. Derived by `priceDocument`; an extension section's line states the
+   * days it ADDS, and a complete or canceled order's line keeps what it stored.
+   */
+  counts: TierCountType[];
+  /**
+   * The percent-of-total percentage, at 4dp — present on exactly the fee lines
+   * that carry no formula, and absent everywhere else. See
+   * {@link checkLinePrice}, which enforces the biconditional.
    */
   base_percent?: number | null;
   replacement_cents?: number | null;
-  chargeable_days: number | null;
-  formula: PriceFormulaType;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
@@ -2213,17 +2251,15 @@ export interface OrderDocItemPriceType {
 }
 
 export const OrderDocItemPrice: z.ZodType<OrderDocItemPriceType> = z.strictObject({
-  base_cents: z.int().meta({ column: true, label: "Base Price", propagate: true }),
+  price_formula: PriceFormulaRefSchema.nullable().meta({ propagate: true }),
+  // Merged WHOLE, like `charge_windows`: the entries carry no `uid`.
+  rates: z.array(RateSnapshotSchema).meta({ shared: "value", propagate: true, label: "Rate" }),
+  counts: z.array(TierCountSchema).meta({ derived: true }),
   base_percent: z.number().nullable().optional().meta({ propagate: true }),
   // `.nullable().optional()` and NOT defaulted: a null replacement means "this
   // line has no replacement value", which is not the fact `0` states, and
   // `checkItemContract`'s `forbidden` arm reads the difference.
   replacement_cents: z.int().nullable().optional().meta({ column: true, label: "Replacement" }),
-  // Derived: `priceDocument` stamps it from the pair's charge windows (one window's days; `billableDays` of 2+)
-  // on a rental `five_day_week` line, `null` on every other line. The key stays
-  // present. See `lineChargeableDays` in `@cfs/core/utils/price-document`.
-  chargeable_days: z.int().nullable().meta({ column: true, label: "Chargeable Days", derived: true }),
-  formula: PriceFormulaEnum.meta({ column: true, label: "Formula", propagate: true }),
   subtotal_cents: z.int().meta({ column: true, label: "Subtotal", derived: true }),
   subtotal_discounted_cents: z.int().meta({ column: true, label: "Discounted Subtotal", derived: true }),
   discount: Discount.nullable().meta({ label: "Discount" }),
@@ -2234,7 +2270,7 @@ export const OrderDocItemPrice: z.ZodType<OrderDocItemPriceType> = z.strictObjec
   // this the pre-override snapshot would collide with the live `taxes`.
   taxes_base: z.array(TaxRef).optional().meta({ label: "Base Tax", derived: true }),
   total_cents: z.int().meta({ column: true, label: "Total", derived: true }),
-}).superRefine(checkPriceBaseUnit);
+}).superRefine((price, ctx) => checkLinePrice(price, ctx));
 
 /**
  * Line item in the full order document.
@@ -2402,7 +2438,7 @@ const OrderDocLineItemInner = z.strictObject({
   // Plain `.optional()`, matching `substituted_for` and `path_extension_for`:
   // only an exchange's replacement line carries it. See the interface docblock.
   exchanged_for: ExchangedForList.optional().meta({ shared: "value" }),
-}).superRefine(checkItemContract).superRefine(checkZeroPricedAmount);
+}).superRefine(checkItemContract).superRefine(checkZeroPricedAmount).superRefine(checkFormulaLineMoney);
 
 export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = OrderDocLineItemInner;
 
@@ -2438,7 +2474,7 @@ export const OrderDocGroupItem: z.ZodType<OrderDocGroupItemType> = GroupDividerA
  * `OrderDocTransactionFeeItem` arm carrying a `PriceModifier` instead of an
  * `OrderDocItemPrice` — and Zod answers a duplicate discriminator with a bare
  * `Error`, not a `ZodError`, so `safeParse` could not trap it. A fee is now an
- * ordinary line item whose `price.formula` says `percent_of_total`; the
+ * ordinary line item whose `price.base_percent` makes it percent-of-total; the
  * per-document rollup (`totals.transaction_fees`) keeps the `PriceModifier`
  * shape, because that IS a rate-and-amount summary rather than a line.
  */

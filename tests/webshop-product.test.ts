@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import { datedPrice, FIVE_DAY_WEEK, FIXED } from "./helpers/formulas.ts";
 import { WebshopProductSchema } from "../src/schemas/webshop-product.ts";
 import { getInitialValues } from "../src/schemas/initial.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
@@ -9,7 +10,11 @@ const validWebshopProduct = {
   uid: "testwp10000000000000",
   name: "Canon C300",
   active: true,
-  price: { ...(base.price as Record<string, unknown>), base_cents: 50000, discountable: true },
+  price: {
+    uid_price_formula: "FiveDayWeekFormu1aAA",
+    rates: [{ uid: "00000000-0000-4000-8000-000000000001", rate_key: "week", amount_cents: 50000, applied_from: "2026-01-01T00:00:00.000-06:00", applied_to: null }],
+    discountable: true,
+  },
   webshop: { available: true, description: "Great camera" },
   created_at: mockTimestamp,
   updated_at: mockTimestamp,
@@ -64,7 +69,7 @@ Deno.test("WebshopProductSchema rejects additional properties", () => {
 Deno.test("WebshopProductSchema rejects percent_of_total on the product price", () => {
   const doc = {
     ...validWebshopProduct,
-    price: { ...(validWebshopProduct.price as Record<string, unknown>), formula: "percent_of_total" },
+    price: { ...(validWebshopProduct.price as Record<string, unknown>), uid_price_formula: null, rates: [] },
   };
   assertEquals(WebshopProductSchema.safeParse(doc).success, false);
 });
@@ -76,7 +81,7 @@ Deno.test("WebshopProductSchema rejects percent_of_total on a component's price"
     name: "Battery",
     type: "rental",
     quantity: 1,
-    price: { base_cents: 0, formula: "percent_of_total", discountable: false },
+    price: { uid_price_formula: null, rates: [], discountable: false },
   };
   const doc = { ...validWebshopProduct, components: [component] };
   assertEquals(WebshopProductSchema.safeParse(doc).success, false);
@@ -86,14 +91,14 @@ Deno.test("WebshopProductSchema rejects percent_of_total on a component's price"
 // schema that rejected EVERY formula, or every component. A member the subset
 // keeps has to still be accepted, or the narrowing is indistinguishable from a
 // ban.
-Deno.test("WebshopProductSchema still accepts a component priced five_day_week", () => {
+Deno.test("WebshopProductSchema accepts a component priced on a time formula", () => {
   const component = {
     uid: "testwpc00000000000000".slice(0, 20),
     path: [],
     name: "Battery",
     type: "rental",
     quantity: 1,
-    price: { base_cents: 0, formula: "five_day_week", discountable: false },
+    price: { ...datedPrice(FIVE_DAY_WEEK, 0), discountable: false },
   };
   const doc = { ...validWebshopProduct, components: [component] };
   assertEquals(WebshopProductSchema.safeParse(doc).success, true);
@@ -142,7 +147,7 @@ for (const arm of ["components", "component_of"] as const) {
       name: "Battery",
       type: "rental",
       quantity: 1,
-      price: { base_cents: 0, formula: "fixed", discountable: false },
+      price: { ...datedPrice(FIXED, 0), discountable: false },
     };
     assertEquals(WebshopProductSchema.safeParse({ ...validWebshopProduct, [arm]: [component] }).success, true);
   });

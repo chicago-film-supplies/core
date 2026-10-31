@@ -34,6 +34,7 @@
  * else would pass an import-based check and fail this one.
  */
 import { assert, assertEquals, assertThrows } from "@std/assert";
+import { fdwPrice } from "./helpers/formulas.ts";
 import { LINE_POSTING_FIELDS, LINE_TAX_FIELDS, LineItemCore, LinePostingCore, LineTaxCore } from "../src/schemas/_items.ts";
 import { pickLinePostingFields, pickLineTaxFields } from "../src/utils/invoices.ts";
 import { InvoiceDocItem, schemas } from "../src/schemas/mod.ts";
@@ -160,9 +161,7 @@ Deno.test("checkZeroPricedAmount now runs when an INVOICE DOCUMENT parses", () =
     coa_revenue: 4000,
     uid_tracking_category: null,
     price: {
-      base_cents: 1000,
-      formula: "five_day_week",
-      chargeable_days: 1,
+      ...fdwPrice(1000, 1),
       subtotal_cents: 1000,
       subtotal_discounted_cents: 1000,
       total_cents: 1000,
@@ -179,24 +178,26 @@ Deno.test("checkZeroPricedAmount now runs when an INVOICE DOCUMENT parses", () =
   assertEquals(
     InvoiceDocItem.safeParse(line({ zero_priced: true })).success,
     false,
-    "a zero_priced line carrying a non-zero base_cents must be REFUSED by the document union",
+    "a zero_priced line carrying a non-zero rate must be REFUSED by the document union",
   );
   // And the flag itself is not what makes it fail — only the contradiction does.
   const zeroed = line({ zero_priced: true });
-  (zeroed.price as Record<string, unknown>).base_cents = 0;
+  (zeroed.price as Record<string, unknown>).rates = [{ rate_key: "week", amount_cents: 0 }];
   (zeroed.price as Record<string, unknown>).subtotal_cents = 0;
   (zeroed.price as Record<string, unknown>).subtotal_discounted_cents = 0;
   (zeroed.price as Record<string, unknown>).total_cents = 0;
   assertEquals(InvoiceDocItem.safeParse(zeroed).success, true, "a genuinely zero-priced line must parse");
 });
 
-Deno.test("invoice items[].price.chargeable_days is integral", () => {
-  const days = (v: number) =>
+Deno.test("invoice items[].price.counts are integral rationals", () => {
+  // The day count's successor (ruling 8): a tier count is `num / den`, both integers.
+  const counts = (v: unknown) =>
     // deno-lint-ignore no-explicit-any
-    (lineArmShape("invoices").price as any)._zod.def.shape.chargeable_days.safeParse(v).success;
-  assertEquals(days(2.5), false, "a fractional chargeable_days must be refused — a count of days is integral");
-  assertEquals(days(3), true);
-  assertEquals(days(0), true);
+    (lineArmShape("invoices").price as any)._zod.def.shape.counts.safeParse(v).success;
+  assertEquals(counts([{ rate_key: "week", num: 2.5, den: 5 }]), false, "a fractional numerator is refused");
+  assertEquals(counts([{ rate_key: "week", num: 3, den: 0 }]), false, "a zero denominator is refused");
+  assertEquals(counts([{ rate_key: "week", num: 3, den: 5 }]), true);
+  assertEquals(counts([]), true);
 });
 
 Deno.test("all three grain guards are reachable from the BARREL, not just their own module", async () => {

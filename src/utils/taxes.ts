@@ -785,7 +785,7 @@ export function resolveLineTax(
  * This is the half a `charge_total`-authoritative caller needs on its own: a
  * writer that supplies its own subtotals must call THIS and never
  * `priceDocument`, because a reprice would recompute its
- * subtotals from `base_cents × quantity × days_factor` and under-bill by a
+ * subtotals from the line's rates × quantity × counts and under-bill by a
  * measured 28.6% on a real line (api-cloudrun#236).
  *
  * ## `taxes` and `taxes_base` have ONE author

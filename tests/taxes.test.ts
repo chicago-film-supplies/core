@@ -1,4 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
+import { fdwPrice, FORMULAS, legacyPrice } from "./helpers/formulas.ts";
 import { linePairs } from "./helpers/charge-windows.ts";
 import { getInitialValues, OrderDocLineItem } from "../src/schemas/mod.ts";
 import {
@@ -95,8 +96,7 @@ function makeItem(
     ...overrides,
     price: {
       ...priceBase,
-      base_cents: 10000,
-      chargeable_days: 5,
+      ...fdwPrice(10000, 5),
       subtotal_cents: 10000,
       subtotal_discounted_cents: 10000,
       total_cents: 11500,
@@ -107,7 +107,7 @@ function makeItem(
         type: "percent",
         amount_cents: 1500,
       }],
-      ...priceOverrides,
+      ...legacyPrice({ base_cents: 10000, chargeable_days: 5, ...priceOverrides }),
     },
   } as LineItem;
 }
@@ -235,7 +235,7 @@ const ctx = (overrides: Partial<DocumentTaxContext> & { taxes?: LegacyTax[] } = 
  */
 function materialize(items: LineItem[], taxCtx: DocumentTaxContext) {
   return sited(items, (doc) => {
-    const priced = priceDocument(doc, { document: { kind: "order", status: "draft", stored_items: [] }, tax: taxCtx, charge_windows: linePairs(doc) });
+    const priced = priceDocument(doc, { document: { kind: "order", status: "draft", stored_items: [] }, tax: taxCtx, charge_windows: linePairs(doc), formulas: FORMULAS, holidays: [] });
     doc.splice(0, doc.length, ...priced.items);
     return priced.warnings;
   });
@@ -707,7 +707,8 @@ Deno.test("materialize: preserves every price key it does not compute", () => {
   const items = [makeItem({}, { replacement_cents: 250000, base_percent: null, chargeable_days: 3 })];
   materialize(items, ctx());
   assertEquals(pxFull(items[0]).replacement_cents, 250000);
-  assertEquals(pxFull(items[0]).chargeable_days, 3);
+  // The declared snapshot rides through untouched; the counts are re-metered (floored to a week).
+  assertEquals(pxFull(items[0]).rates, [{ rate_key: "week", amount_cents: 10000 }]);
 });
 
 Deno.test("materialize: never writes an `undefined` price key (Firestore rejects one)", () => {

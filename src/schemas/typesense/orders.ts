@@ -4,11 +4,11 @@ import { typesenseAddressFields } from "./types.ts";
 /** Typesense collection config for orders. */
 export const orders: TypesenseCollectionConfig = {
   alias: "orders",
-  version: 25,
+  version: 26,
   firestoreCollection: "orders",
-  collectionName: "orders_v25",
+  collectionName: "orders_v26",
   schema: {
-    name: "orders_v25",
+    name: "orders_v26",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -108,7 +108,11 @@ export const orders: TypesenseCollectionConfig = {
       { name: "items.order_number", type: "int32[]", optional: true },
       { name: "items.path", type: "string[]", optional: true, facet: false },
       { name: "items.price", type: "object[]", optional: true },
-      { name: "items.price.base_cents", type: "int64[]", optional: true, money: true },
+      { name: "items.price.price_formula", type: "object[]", optional: true },
+      { name: "items.price.price_formula.name", type: "string[]", optional: true },
+      { name: "items.price.rates", type: "object[]", optional: true },
+      { name: "items.price.rates.rate_key", type: "string[]", optional: true },
+      { name: "items.price.rates.amount_cents", type: "int64[]", optional: true, money: true },
       { name: "items.price.subtotal_cents", type: "int64[]", optional: true, money: true },
       { name: "items.price.subtotal_discounted_cents", type: "int64[]", optional: true, money: true },
       { name: "items.price.total_cents", type: "int64[]", optional: true, money: true },
@@ -122,9 +126,7 @@ export const orders: TypesenseCollectionConfig = {
       { name: "items.price.taxes.rate", type: "float[]", optional: true },
       { name: "items.price.taxes.type", type: "string[]", optional: true },
       { name: "items.price.taxes.amount_cents", type: "int64[]", optional: true, money: true },
-      { name: "items.price.chargeable_days", type: "int32[]", optional: true },
       { name: "items.price.replacement_cents", type: "int64[]", optional: true, money: true },
-      { name: "items.price.formula", type: "string[]", optional: true },
       { name: "invoices", type: "object[]", optional: true },
       { name: "invoices.uid", type: "string[]", optional: true },
       { name: "invoices.number", type: "int64[]", optional: true },

@@ -41,7 +41,13 @@
  * The input items are not mutated. Items come back as copies with a new `price`
  * on every priced line; dividers are returned as they were.
  */
-import { type InvoiceStatusType, type OrderStatusType, type TaxRefType, TERMINAL_ORDER_STATUSES } from "../schemas/mod.ts";
+import {
+  type InvoiceStatusType,
+  type OrderStatusType,
+  type PriceFormulaRef,
+  type TaxRefType,
+  TERMINAL_ORDER_STATUSES,
+} from "../schemas/mod.ts";
 import {
   assembleLinePrice,
   calculateReplacementTotals,
@@ -60,7 +66,14 @@ import {
   type StructuralItem,
   type Tax,
 } from "./orders.ts";
-import { billableDays } from "./dates.ts";
+import {
+  meterUnits,
+  type PricingFormula,
+  type PricingFormulas,
+  priceFormulaRefOf,
+  type RateSnapshot,
+  type TierCount,
+} from "./price-formulas.ts";
 import { pairItemsAcrossRebuild, type PathedItem } from "./item-pairing.ts";
 import { assignLineTaxes, type DocumentTaxContext, type UnreviewedTaxWarning } from "./taxes.ts";
 import { pricingTaxesOf } from "./tax-classes.ts";
@@ -85,7 +98,7 @@ import { pricingTaxesOf } from "./tax-classes.ts";
  * "no line is carried" re-derives every frozen line's money.
  *
  * 🔴 **A carried line's days are read off its STORED row, never off the row
- * being priced.** The order input schema strips `chargeable_days`, so on a PUT
+ * being priced.** The order input schema strips `counts`, so on a PUT
  * every incoming row arrives with none. Reading the incoming row is how an
  * operator's quantity nudge on complete order 1013 nulled 25 lines' days and
  * repriced it from $4,952.91 to $2,667.17 at the one-week floor (2026-10-08).
@@ -94,14 +107,13 @@ export type PriceDocumentKind =
   | { kind: "order"; status: OrderStatusType; stored_items: readonly StoredDaysRow[] }
   | { kind: "invoice"; status: InvoiceStatusType; has_settlement: boolean };
 
-/** A stored order row as {@link carriedLines} reads it: its identity, and the days it carries. */
+/** A stored order row as {@link carriedLines} reads it: its identity, and the counts it carries. */
 export interface StoredDaysRow extends PathedItem {
-  readonly price?: { readonly chargeable_days?: number | null } | null;
+  readonly price?: { readonly counts?: readonly TierCount[] | null } | null;
 }
 
 /**
- * The charge windows of one destination pair, as the pricer reads them: stored
- * day counts only, so pricing never needs the holiday list.
+ * The charge windows of one destination pair, as the pricer reads them.
  */
 export interface PairChargeWindows {
   /**
@@ -110,8 +122,8 @@ export interface PairChargeWindows {
    * divider path is a prefix of its own.
    */
   divider_path: readonly string[];
-  /** Each window's stored `days`, in order. */
-  days: readonly number[];
+  /** The pair's windows, in order — instants only (ruling 8). */
+  windows: readonly { start: string; end: string }[];
 }
 
 /** The pair shape {@link chargeWindowContext} reads. */
@@ -121,17 +133,17 @@ export interface ChargeWindowPair {
   uid_order?: string | null;
   dates: {
     /** `null` on a pair that bills no days (a document with no rental). */
-    charge_windows: readonly { days: number }[] | null;
+    charge_windows: readonly { start: string; end: string }[] | null;
   };
 }
 
 /**
  * **Build {@link PriceDocumentContext.charge_windows}** from a document's stored
- * `destinations`. Reads stored window days only.
+ * `destinations`.
  *
  * A pair whose windows are `null` bills no days (a document with no rental —
- * api-cloudrun#1154) and is simply absent from the context; a rental line under
- * it is refused where it is priced ({@link lineChargeableDays}), which names the
+ * api-cloudrun#1154) and is simply absent from the context; a time-formula line
+ * under it is refused where it is priced ({@link lineCounts}), which names the
  * line rather than the pair.
  *
  * @throws PriceRefusalError on a pair whose windows are an EMPTY array — never a
@@ -153,20 +165,10 @@ export function chargeWindowContext(destinations: readonly ChargeWindowPair[]): 
  * {@link chargeWindowContext} with the pricer's refusal left off, for a READER
  * rather than a writer (core#112).
  *
- * The two differ on one input and it is not a style choice. A pair with no
- * windows is unpriceable — its rental lines have no days to bill — so
- * {@link chargeWindowContext} refuses it. A pair with no windows is perfectly
- * *readable*: the answer is simply that this pair states none, and a comparator's
- * correct response is to explain nothing about the lines under it.
- *
  * 🔴 **Use this one wherever a throw would be the wrong outcome**, which is every
- * comparator: `computeDocumentDiffs` documents itself as pure and never-throwing
- * (*"a source the caller did not pass yields no entries — never an 'in sync'
- * answer"*), and raising a `PriceRefusalError` out of a diff view because one pair
- * predates the windows campaign would take the whole page down to say nothing.
- * The stored schema requires `.min(1)`, so in practice this only diverges on a
- * partial or hand-built document — which is exactly the population a comparator
- * has to survive and a pricer does not.
+ * comparator: `computeDocumentDiffs` documents itself as pure and never-throwing,
+ * and raising a `PriceRefusalError` out of a diff view because one pair is
+ * partial would take the whole page down to say nothing.
  */
 export function statedChargeWindows(destinations: readonly ChargeWindowPair[]): PairChargeWindows[] {
   const out: PairChargeWindows[] = [];
@@ -176,27 +178,18 @@ export function statedChargeWindows(destinations: readonly ChargeWindowPair[]): 
     if (!windows || windows.length === 0) continue;
     out.push({
       divider_path: pair.uid_order ? [pair.uid_order, pair.uid] : [pair.uid],
-      days: windows.map((w) => w.days),
+      windows: windows.map((w) => ({ start: w.start, end: w.end })),
     });
   }
   return out;
 }
 
 /**
- * A date-extension section (#680, D7): every line whose `path` starts with
- * `divider_path` bills the days the order's window grew past what was billed.
- *
- * The day count is the LINE's own `chargeable_days` — the ADDED days, computed
- * once by the writer that builds the section (owner, 2026-09-15) — priced with
- * the one-week floor skipped. The section supplies only the rule, never a count,
- * so a re-price reads nothing beyond the document. Derive the sections with
- * {@link invoiceExtensionSections}.
- */
-/**
- * A pricer refusal caused by the document it was handed — a rental line under no
- * pair, a percent fee line of quantity ≠ 1, a line under two extension sections,
- * a bad credit request — rather than by a fault in the pricer. The API maps it
- * to a 400; every other throw from this module stays a 500.
+ * A pricer refusal caused by the document it was handed — a time-formula line
+ * under no pair, a percent fee line of quantity ≠ 1, a line under two extension
+ * sections, a formula the context does not carry, a bad credit request — rather
+ * than by a fault in the pricer. The API maps it to a 400; every other throw
+ * from this module stays a 500.
  */
 export class PriceRefusalError extends Error {
   constructor(message: string) {
@@ -205,6 +198,16 @@ export class PriceRefusalError extends Error {
   }
 }
 
+/**
+ * A date-extension section (#680, D7): every line whose `path` starts with
+ * `divider_path` bills the days the order's window grew past what was billed.
+ *
+ * The count is the LINE's own `counts` — the ADDED days, stated once by the
+ * writer that builds the section (owner, 2026-09-15) with the minimum skipped.
+ * The section supplies only the rule, never a count, so a re-price reads
+ * nothing beyond the document. Derive the sections with
+ * {@link invoiceExtensionSections}.
+ */
 export interface PriceDocumentExtension {
   /** The path of the invoice destination divider that opens the section. */
   divider_path: readonly string[];
@@ -216,7 +219,7 @@ export interface PriceDocumentExtension {
  *
  * The one derivation of {@link PriceDocumentContext.extensions}, shared by every
  * invoice writer and the manager's optimistic recompute — a caller that forgets
- * to pass it re-prices extension lines at the one-week floor.
+ * to pass it re-meters extension lines from their window, minimum included.
  */
 export function invoiceExtensionSections(
   items: readonly { type: string; path: readonly string[]; path_extension_for?: readonly string[] }[],
@@ -226,13 +229,7 @@ export function invoiceExtensionSections(
     .map((it) => ({ divider_path: [...it.path] }));
 }
 
-/** The two day counts a D7 extension is priced from. */
-export interface LineExtension {
-  /** The ORDER's charge days for the destination being extended. */
-  order_charge_days: number;
-  /** The charge days already billed for it. */
-  billed_charge_days: number;
-}
+export { formulaUidsOf, type PricingFormula, type PricingFormulas, priceFormulaRefOf } from "./price-formulas.ts";
 
 /** Everything {@link priceDocument} reads besides the items. */
 export interface PriceDocumentContext {
@@ -243,10 +240,16 @@ export interface PriceDocumentContext {
   extensions?: readonly PriceDocumentExtension[];
   /**
    * Every destination pair's charge windows — build it with
-   * {@link chargeWindowContext}. Required: a line's `chargeable_days` and a
-   * multi-window line's price both come from here.
+   * {@link chargeWindowContext}. Required: a time-formula line meters them.
    */
   charge_windows: readonly PairChargeWindows[];
+  /** Every formula the lines name ({@link formulaUidsOf}). */
+  formulas: PricingFormulas;
+  /**
+   * CFS holidays, read by a `business_day` meter. Required (ruling 8): a
+   * window no longer stores a count, so metering one needs the list.
+   */
+  holidays: readonly string[];
 }
 
 /** What {@link priceDocument} returns. */
@@ -292,21 +295,20 @@ function assertRepriceable(document: PriceDocumentKind): void {
  * document — `accountLine` (`./quantityAccounting.ts`), which prices a
  * remainder and a billed row's extension (#997 D11).
  *
- * `extensionDays` is D7: the line is priced for that many days with the
- * one-week minimum skipped, which is what an extension section on an invoice
- * bills. A document line passes its own `chargeable_days`; `accountLine` passes
- * the days an extension group adds for a billed row.
+ * The line must already carry its `counts` ({@link lineCounts}). `extension`
+ * marks a line whose counts are the days an extension section ADDS, stated with
+ * the minimum skipped — only a flat tax reads it, and is refused.
  *
- * @throws Error on a line with no pricing rule, and on an extension of a line
- *   that is not `five_day_week` or carries a flat tax.
+ * @throws Error on a line with no pricing rule, and on an extension line that
+ *   carries a flat tax.
  */
 export function priceLine(
   item: LineItem,
   taxes: Tax[],
-  extensionDays?: number,
+  extension = false,
 ): LinePriceMoney {
   const opts: LinePricingOptions = {};
-  if (extensionDays !== undefined) opts.extensionDays = extensionDays;
+  if (extension) opts.extension = true;
   return computeLineMoney(item, taxes, item.uid, opts);
 }
 
@@ -325,276 +327,222 @@ function pairOf(item: { path: readonly string[] }, pairs: readonly PairChargeWin
 }
 
 /**
- * Is this a line whose days come from its pair's windows? A `rental` priced
- * `five_day_week`. Every other line (a `sale`, `service` or `surcharge` stored
- * as `five_day_week` included) has `chargeable_days: null` and prices at
- * factor 1.
- */
-function daysFromWindows(item: LineItem): boolean {
-  return item.type === "rental" && item.price?.formula === "five_day_week";
-}
-
-/**
- * **The lines that keep the day counts they carry, and those days**: on a
+ * **The lines that keep the counts they carry, and those counts**: on a
  * `complete` or `canceled` order (charge-windows census decision, 2026-09-16),
  * every line that pairs with a row of `stored_items`, mapped to THAT STORED
- * ROW's `chargeable_days` — never its own, which an API write has stripped (see
- * {@link PriceDocumentKind}). Empty on any other document. A void,
- * paid or settled invoice never reaches here: it is refused outright.
+ * ROW's `counts` — never its own, which an API write has stripped (see
+ * {@link PriceDocumentKind}). Empty on any other document. A void, paid or
+ * settled invoice never reaches here: it is refused outright.
  *
- * The census decision protects days the order ALREADY carried. A line the edit
- * adds has none to protect, so it derives its days from its pair's windows like
- * any live line (api-cloudrun#1341) — a `custom-` line books nothing, so adding
- * one does not reopen the order.
+ * The census decision protects counts the order ALREADY carried. A line the
+ * edit adds has none to protect, so it meters its windows like any live line
+ * (api-cloudrun#1341).
  *
  * ⚠️ **Paired with `pairItemsAcrossRebuild`, never by exact `path` and never by
  * `uid` alone.** A path changes when a line moves under another group or a
- * divider is re-minted, and re-deriving a moved line would change a finished
- * job's money — including one-window lines whose legacy days the census left
- * alone on purpose. A uid repeats, so a uid set would let a second row of a
- * product the order already carries keep the client's days. The pairing's
- * `(uid, k-th occurrence)` fallback gives both: a moved row stays carried, an
- * extra occurrence does not.
+ * divider is re-minted; a uid repeats. The pairing's `(uid, k-th occurrence)`
+ * fallback gives both: a moved row stays carried, an extra occurrence does not.
  */
 export function carriedLines<T extends PathedItem>(
   items: readonly T[],
   document: PriceDocumentKind,
-): ReadonlyMap<T, number | null> {
+): ReadonlyMap<T, readonly TierCount[]> {
   if (document.kind !== "order" || !TERMINAL_ORDER_STATUSES.includes(document.status)) return new Map();
   const pairs = pairItemsAcrossRebuild(items, document.stored_items).forward;
-  return new Map([...pairs].map(([item, stored]) => [item, stored.price?.chargeable_days ?? null]));
+  return new Map([...pairs].map(([item, stored]) => [item, stored.price?.counts ?? []]));
+}
+
+/** The formula a line names, from the context — refused by name when absent. */
+function formulaOf(item: LineItem, formulas: PricingFormulas): PricingFormula {
+  const uid = item.price?.price_formula?.uid;
+  if (!uid) {
+    throw new PriceRefusalError(`Line ${item.uid} names no price formula`);
+  }
+  const formula = formulas.get(uid);
+  if (!formula) {
+    throw new PriceRefusalError(`Line ${item.uid} names price formula ${uid}, which the pricing context does not carry`);
+  }
+  return formula;
 }
 
 /**
- * **A line's `chargeable_days`, the one derivation of it** (charge-windows
- * decision 3), and the window days that price it.
+ * **What a line's formula meters from its pair's windows** — `null` when the
+ * line hangs under no pair with windows. A flat formula meters no time and
+ * answers `[{ flat, 1, 1 }]` wherever the line sits.
  *
- * | line | `chargeable_days` |
- * |---|---|
- * | in an extension section | Σ its pair's window days (the days added) |
- * | in `carried` (a line a `complete`/`canceled` order already had) | its STORED row's days |
- * | `rental` + `five_day_week` on a one-window pair | that window's days |
- * | `rental` + `five_day_week` on a 2+ window pair | `billableDays(windows)` |
- * | `rental` + `five_day_week` on no pair | refused |
- * | anything else | `null` |
- *
- * A 2+ window pair stores its BILLABLE days, Σ `max(days, 5)`, so the line's
- * own numbers multiply out to its subtotal: `quantity × base × days ÷ 5` (owner,
- * 2026-09-17, core#114). A one window pair keeps its raw count; the pricer's
- * `max(days, 5)` floor is the same thing for one window.
- *
- * `carried` is {@link carriedLines} over the whole document, which needs every
- * row at once, so a single-line call cannot work it out. Pass an empty map for
- * a document that keeps no stored days.
- *
- * @throws Error on a rental `five_day_week` line that hangs under no pair.
+ * ⚠️ **It knows nothing about extension sections or carried lines**, which keep
+ * counts they STATE. {@link lineCounts} owns that; this is the window half,
+ * split out so the invoice sync comparator can ask the same question
+ * (core#112).
  */
-export function lineChargeableDays(
+export function meteredLineCounts(
   item: LineItem,
-  ctx: Pick<PriceDocumentContext, "document" | "charge_windows" | "extensions">,
-  carried: ReadonlyMap<LineItem, number | null>,
-): { chargeable_days: number | null } {
-  const stored = item.price?.chargeable_days ?? null;
-  if (extensionFor(item, ctx.extensions)) {
-    // An extension pair's one window carries the days the section ADDS, never
-    // recounted, so its lines bill that.
-    const pair = pairOf(item, ctx.charge_windows);
-    if (pair) return { chargeable_days: pair.days.reduce((total, d) => total + d, 0) };
-    return { chargeable_days: stored };
+  ctx: Pick<PriceDocumentContext, "charge_windows" | "formulas" | "holidays">,
+): TierCount[] | null {
+  const formula = formulaOf(item, ctx.formulas);
+  if (formula.meter.source === "none") {
+    return meterUnits(formula, { windows: [], holidays: ctx.holidays }).tiers;
   }
-  if (carried.has(item)) return { chargeable_days: carried.get(item) ?? null };
-  if (!daysFromWindows(item)) return { chargeable_days: null };
-  const days = windowChargeableDays(item, ctx.charge_windows);
-  if (days === null) {
+  const pair = pairOf(item, ctx.charge_windows);
+  if (!pair) return null;
+  const envelope = { start: pair.windows[0].start, end: pair.windows[pair.windows.length - 1].end };
+  return meterUnits(formula, { windows: pair.windows, span: envelope, holidays: ctx.holidays }).tiers;
+}
+
+/**
+ * **A line's `counts`, the one derivation of them** (ruling 8).
+ *
+ * | line | `counts` |
+ * |---|---|
+ * | percent-of-total fee (no formula) | `[]` |
+ * | in an extension section | its OWN stated counts — the days the section adds |
+ * | in `carried` (a line a `complete`/`canceled` order already had) | its STORED row's counts |
+ * | on a flat formula | `[{ flat, 1, 1 }]` |
+ * | on a time formula under a pair with windows | what the formula meters from them |
+ * | on a time formula under no such pair | refused |
+ *
+ * Five-day week's per-window minimum is the formula's own (`minimum.scope:
+ * "window"`), so a 2+ window line stores Σ `max(days, 5)` business days ÷ 5 and
+ * its own numbers multiply out to its subtotal.
+ *
+ * @throws PriceRefusalError on a time-formula line under no pair, an extension
+ *   line that states no counts, and a formula the context does not carry.
+ */
+export function lineCounts(
+  item: LineItem,
+  ctx: Pick<PriceDocumentContext, "charge_windows" | "extensions" | "formulas" | "holidays">,
+  carried: ReadonlyMap<LineItem, readonly TierCount[]>,
+): TierCount[] {
+  if (item.price?.price_formula == null) return [];
+  if (extensionFor(item, ctx.extensions)) {
+    const stated = item.price.counts ?? [];
+    if (stated.length === 0) {
+      throw new PriceRefusalError(`Line ${item.uid} sits in an extension section and states no counts to extend by`);
+    }
+    return [...stated];
+  }
+  if (carried.has(item)) return [...(carried.get(item) ?? [])];
+  const counts = meteredLineCounts(item, ctx);
+  if (counts === null) {
     throw new PriceRefusalError(
-      `Rental line ${item.uid} is under no destination pair with charge windows, so it has no days to bill. ` +
+      `Line ${item.uid} is on a time formula but under no destination pair with charge windows, so it has no time to bill. ` +
         "Move it under a destination, or give its pair charge dates",
     );
   }
-  return { chargeable_days: days };
+  return counts;
 }
 
 /**
- * **What a line's pair's windows bill it for** — the window half of
- * {@link lineChargeableDays}, split out so the invoice sync comparator can ask
- * the same question without re-deriving the rule (core#112).
+ * **The counts to SEED on a line about to land under one destination divider**
+ * (core#130 row 5) — the same rule {@link meteredLineCounts} prices with, for a
+ * client building a line before the pricer has run. Joins the pair by the
+ * divider's own `path`, exactly as the pricer does.
  *
- * `null` means *this line does not take its days from windows at all*: it is not
- * a `rental` priced `five_day_week`, or it hangs under no pair. The two cases are
- * deliberately not distinguished here — {@link lineChargeableDays} owns the
- * refusal, because a pairless rental is a document defect and reporting it twice
- * would be two findings for one fault (the same split {@link chargeWindowPairViolations}
- * makes).
- *
- * ⚠️ **It knows nothing about extension sections**, which bill the days their
- * section ADDS rather than their pair's total. A caller holding items that may
- * sit in one must exclude them first, as {@link lineChargeableDays} does through
- * {@link extensionFor}.
+ * @returns `null` when that pair states no windows or the divider is unknown
+ *   (a flat formula still answers).
  */
-export function windowChargeableDays(
-  item: LineItem,
-  pairs: readonly PairChargeWindows[],
-): number | null {
-  if (!daysFromWindows(item)) return null;
-  const pair = pairOf(item, pairs);
-  if (!pair) return null;
-  return pairBilledDays(pair);
-}
-
-/** A pair's billed days: Σ `max(d, 5)` over 2+ windows, the raw count over one. */
-function pairBilledDays(pair: PairChargeWindows): number {
-  return pair.days.length >= 2 ? billableDays(pair.days) : pair.days[0];
-}
-
-/**
- * **The `chargeable_days` to SEED on a rental line about to land under one
- * destination divider** (core#130 row 5) — the same rule
- * {@link windowChargeableDays} prices with, for a client building a line before
- * the pricer has run.
- *
- * The manager seeded `chargedDays` (a plain Σ) and found the pair by its
- * POSITION in `destinations[]`, so on a 2+ window pair `[8, 3]` it showed 11
- * where the pricer bills 13, and on a reordered pair list it read the wrong
- * pair. This joins by the divider's own `path` — `[pair.uid]` on an order,
- * `[uid_order, pair.uid]` on an invoice — exactly as the pricer does.
- *
- * The seed is display-only for a live document (the server reprices); it
- * matters because it is what the operator sees until then.
- *
- * @param items - The document's items, to read the divider's `path`
- * @param destinations - The document's stored pairs
- * @param dividerUid - The destination divider the line lands under
- * @returns `null` when that pair states no windows, or the divider is unknown
- */
-export function seedChargeableDays(
+export function seedLineCounts(
   items: readonly StructuralItem[],
   destinations: readonly ChargeWindowPair[],
   dividerUid: string,
-): number | null {
+  formula: PricingFormula,
+  holidays: readonly string[],
+): TierCount[] | null {
+  if (formula.meter.source === "none") return meterUnits(formula, { windows: [], holidays }).tiers;
   const divider = items.find((it) => it.uid === dividerUid && it.type === "destination");
   if (!divider?.path) return null;
   const path = divider.path;
   const pair = statedChargeWindows(destinations).find((p) =>
     p.divider_path.length === path.length && p.divider_path.every((segment, i) => path[i] === segment)
   );
-  return pair ? pairBilledDays(pair) : null;
+  if (!pair) return null;
+  const envelope = { start: pair.windows[0].start, end: pair.windows[pair.windows.length - 1].end };
+  return meterUnits(formula, { windows: pair.windows, span: envelope, holidays }).tiers;
 }
 
 /**
  * One line that breaks the charge-window pair invariant (core#113).
  *
- * `stored` is what the document carries; `expected` is what the pair's windows
- * bill. Both are stated so a report can show the difference without re-deriving
- * either.
+ * `stored` is what the line carries; `expected` is what its formula meters from
+ * the pair's windows. Both are stated so a report can show the difference
+ * without re-deriving either.
  */
 export interface ChargeWindowPairViolation {
   /** The offending line's `uid`. ⚠️ NOT a row identity — `path` is. */
   item_uid: string;
   /** The line's `path`, which IS its row identity within this document. */
   path: readonly string[];
-  /** The divider path of the pair whose windows the line should bill. */
+  /** The divider path of the pair whose windows the line should meter. */
   divider_path: readonly string[];
-  /** The pair's stored window day counts. */
-  window_days: readonly number[];
-  /** The line's stored `price.chargeable_days`. */
-  stored: number | null;
-  /** `billableDays(window_days)` — what the line must state. */
-  expected: number;
+  /** The line's stored `price.counts`. */
+  stored: readonly TierCount[];
+  /** What the line's formula meters from the pair's windows. */
+  expected: readonly TierCount[];
 }
 
 /**
- * Does this document keep the line day counts it already carries, rather than
- * re-deriving them from its windows?
+ * Does this document keep the line counts it already carries, rather than
+ * re-metering them from its windows?
  *
  * ⚠️ **Deliberately WIDER than the pricer's own {@link carriedLines}, and it must
  * not be merged with it.** The pricer only ever sees orders in this state,
- * because {@link assertRepriceable} refuses a frozen invoice before
- * {@link lineChargeableDays} is reached — so `carriedLines` correctly names
- * the order arm alone. A WRITE is the other case: a void, paid or settled
- * invoice is still written (`updateInvoice` admits non-money edits on one), and
- * it carries its stored days through by design (charge-windows decision 10).
- * A guard that used the pricer's predicate would therefore flag exactly the
- * documents the campaign promised never to re-derive.
- *
- * It is wider on an order too. The guard sees only the document being written,
- * never the stored one, so it cannot tell a line the edit added from one the
- * order carried, and exempts both. An added line is right by construction
- * instead, because the pricer derives its days (api-cloudrun#1341).
+ * because {@link assertRepriceable} refuses a frozen invoice first. A WRITE is
+ * the other case: a void, paid or settled invoice is still written
+ * (`updateInvoice` admits non-money edits on one), and it carries its stored
+ * counts through by design (charge-windows decision 10).
  */
 function keepsStoredLineDays(document: PriceDocumentKind): boolean {
   if (document.kind === "order") return TERMINAL_ORDER_STATUSES.includes(document.status);
   return document.status === "void" || document.status === "paid" || document.has_settlement;
 }
 
+/** Two count lists name the same tiers with the same exact values. */
+function sameCounts(a: readonly TierCount[], b: readonly TierCount[]): boolean {
+  return a.length === b.length &&
+    a.every((t, i) => t.rate_key === b[i].rate_key && t.num * b[i].den === b[i].num * t.den);
+}
+
 /**
  * **The charge-window pair invariant, checked (core#113):** in a pair holding
- * two or more charge windows, every `rental` + `five_day_week` line outside an
- * extension section states `chargeable_days === billableDays(window days)`.
+ * two or more charge windows, every time-formula line outside an extension
+ * section stores the counts its formula meters from those windows.
  *
- * Because it holds, a reader never has to ask whether a line follows its pair —
- * which is what lets `perUnitSubtotal` price a multi-window line from its stored
- * days alone, with no window input (charge-windows plan §4).
+ * It holds **by construction**: {@link lineCounts} is the one author of a
+ * line's counts and every order/invoice writer prices through
+ * {@link priceDocument}. This exists for the writers that do not — a `scripts/`
+ * repair, a direct Firestore write — and is called from api-cloudrun's
+ * `assertValidForWrite`, so a divergent document is refused at the write.
  *
- * It holds **by construction** today: {@link lineChargeableDays} is the one
- * author of a line's days and every order/invoice writer prices through
- * {@link priceDocument}. This function exists for the writers that do not — a
- * `scripts/` repair, a direct Firestore write, a future service — and is called
- * from api-cloudrun's `assertValidForWrite`, so a divergent document is refused
- * at the write rather than found later by an audit.
+ * ⚠️ **Returns violations rather than throwing** — the write path turns one into
+ * a 400, the audit script reports every row.
  *
- * ⚠️ **Returns violations rather than throwing**, because the two callers need
- * different outcomes from the same answer: the write path turns one into an
- * operator-facing 400 (core throws plain `Error`, which api's middleware maps to
- * a 500 — see `api-cloudrun/src/lib/linePrice.ts`, the same reasoning), while
- * the audit script reports every row across both projects and exits non-zero.
- *
- * ⚠️ **Single-window pairs are NOT checked, and that is the invariant's scope
- * rather than an omission.** A one-window line whose stored days differ from its
- * window is legacy CRMS divergence, which the 2026-09-16 census measured and the
- * backfill resolved per owner decision; re-asserting it here would refuse
- * documents the campaign deliberately left alone.
+ * ⚠️ **Single-window pairs are NOT checked**: a one-window line whose counts
+ * differ from its window is legacy CRMS divergence the 2026-09-16 census left
+ * alone on purpose, carried into `counts` by the ruling-8 backfill.
  */
 export function chargeWindowPairViolations(
   items: readonly LineItem[],
-  ctx: Pick<PriceDocumentContext, "document" | "charge_windows" | "extensions">,
+  ctx: Pick<PriceDocumentContext, "document" | "charge_windows" | "extensions" | "formulas" | "holidays">,
 ): ChargeWindowPairViolation[] {
   if (keepsStoredLineDays(ctx.document)) return [];
   const out: ChargeWindowPairViolation[] = [];
   for (const item of items) {
-    if (!daysFromWindows(item)) continue;
+    if (!isPriceableItem(item) || item.price.price_formula?.basis !== "time") continue;
     // An extension line bills the days its section ADDS, not its pair's total.
     if (extensionFor(item, ctx.extensions)) continue;
     const pair = pairOf(item, ctx.charge_windows);
-    // A rental with no pair at all is `lineChargeableDays`'s refusal to make,
-    // not this one's — it throws a named error there. Flagging it here too
-    // would report one defect as two.
-    if (!pair || pair.days.length < 2) continue;
-    const expected = billableDays(pair.days);
-    const stored = item.price?.chargeable_days ?? null;
-    if (stored === expected) continue;
-    out.push({
-      item_uid: item.uid,
-      path: item.path,
-      divider_path: pair.divider_path,
-      window_days: pair.days,
-      stored,
-      expected,
-    });
+    // A time line with no pair at all is `lineCounts`' refusal to make.
+    if (!pair || pair.windows.length < 2) continue;
+    const expected = meteredLineCounts(item, ctx) ?? [];
+    const stored = item.price.counts ?? [];
+    if (sameCounts(stored, expected)) continue;
+    out.push({ item_uid: item.uid, path: item.path, divider_path: pair.divider_path, stored, expected });
   }
   return out;
 }
 
-/** The added days an extension line bills: its own `chargeable_days`, which it must state. */
-function extensionDaysOf(item: LineItem): number {
-  const days = item.price?.chargeable_days;
-  if (typeof days !== "number") {
-    throw new PriceRefusalError(`Line ${item.uid} sits in an extension section and states no chargeable_days to extend by`);
-  }
-  return days;
-}
-
 function extensionFor(
-  item: LineItem,
+  item: { uid: string; path: readonly string[] },
   extensions: readonly PriceDocumentExtension[] | undefined,
 ): PriceDocumentExtension | undefined {
   if (!extensions?.length) return undefined;
@@ -628,8 +576,9 @@ function declaredHalf(price: PriceObject): Record<string, unknown> {
  *
  * @throws Error on a settled or void invoice (D3); on a line whose type has no
  *   pricing rule; on a percent fee line whose quantity is not 1 (D6); on an
- *   extension section holding a fixed-formula line or a flat tax (D7); and when
- *   assembled money fails its identities.
+ *   extension line carrying a flat tax (D7); and when assembled money fails its
+ *   identities. PriceRefusalError on a line whose counts cannot be derived
+ *   ({@link lineCounts}).
  */
 export function priceDocument<T extends LineItem>(
   items: readonly T[],
@@ -650,15 +599,19 @@ export function priceDocument<T extends LineItem>(
   const warnings = assignLineTaxes(out, ctx.tax);
   const pricing = pricingTaxesOf(ctx.tax.catalog);
 
-  // ── Stages 2 + 3: per-line money, assembled ──
+  // ── Stages 2 + 3: per-line counts and money, assembled ──
+  // Each line's `counts` are metered here from its pair's windows through its
+  // own formula (ruling 8), and its `price_formula` snapshot is re-stamped from
+  // the formula document — the formula is immutable once referenced, so this
+  // only ever fills `name`/`basis` on a line a writer built from a uid.
   const carried = carriedLines(out, ctx.document);
   for (const item of out) {
     if (!isPriceableItem(item)) continue;
     const extension = extensionFor(item, ctx.extensions);
-    const derived = isPreTaxItem(item) ? lineChargeableDays(item, ctx, carried) : { chargeable_days: null };
-    if (isPreTaxItem(item)) item.price = { ...item.price, chargeable_days: derived.chargeable_days };
+    const formulaRef = item.price.price_formula == null ? null : priceFormulaRefOf(formulaOf(item, ctx.formulas));
+    item.price = { ...item.price, price_formula: formulaRef, counts: lineCounts(item, ctx, carried) };
     const price = item.price;
-    const money: LinePriceMoney = priceLine(item, pricing, extension && extensionDaysOf(item));
+    const money: LinePriceMoney = priceLine(item, pricing, extension !== undefined);
     // ⚠️ Stage 1 has ALREADY written `taxes_base` on every pre-tax line, so it is
     // always present here, as the deleted `materializeDocumentTax` also left it.
     // That widens the key set of a stored line that never carried it (measured
@@ -679,7 +632,7 @@ export function priceDocument<T extends LineItem>(
   const basis = sumPricedLines(out);
   const feeBasisCents = basis.subtotal_discounted_cents + basis.taxes.reduce((sum, tax) => sum + tax.amount_cents, 0);
   for (const item of out) {
-    if (!isTransactionFeeItem(item) || item.price.formula !== "percent_of_total") continue;
+    if (!isTransactionFeeItem(item) || item.price.base_percent == null) continue;
     if (item.quantity !== 1) {
       // Xero's UnitAmount is amount ÷ quantity, so a percent fee at any other
       // quantity would push a different unit price than the one CFS stored.
@@ -715,9 +668,9 @@ export interface CreditSourceLine {
   type: LineItem["type"];
   quantity: number;
   price: {
-    base_cents: number;
-    chargeable_days: number | null;
-    formula: PriceObject["formula"];
+    price_formula: PriceFormulaRef | null;
+    rates: readonly RateSnapshot[];
+    counts: readonly TierCount[];
     discount: { rate: number; type: "percent" | "flat" } | null;
     taxes: readonly { uid: string }[];
   };
@@ -728,30 +681,28 @@ export interface CreditSelectionLine<L extends CreditSourceLine = CreditSourceLi
   line: L;
   quantity: number;
   /**
-   * Credit DAYS rather than whole units: a charge window the order SHORTENED
-   * after this line was billed (api-cloudrun#1028 phase 1c).
+   * Credit TIME rather than whole units: a charge window the order SHORTENED
+   * after this line was billed (api-cloudrun#1028 phase 1c) — the magnitude of
+   * the over-billing offer's `extension_counts` (`buildOverbillingCredits`).
    *
-   * 🔴 **A BILLABLE-day count — `−extension_days` — never a count of calendar
-   * days.** `billableDays` floors EACH window at five, and both the billed and
-   * the ordered side are already floored before their difference is taken, so a
-   * window that shrank from 7 calendar days to 6 credits nothing at all. Passing
-   * a calendar delta here credits days the invoice never charged.
+   * 🔴 **A difference of METERED counts, never a count of calendar days.** Both
+   * sides were metered through the line's formula with its minimum (Five-day
+   * week floors EACH window at five), so a window that shrank from 7 calendar
+   * days to 6 credits nothing at all. The credit is priced at these counts
+   * directly — pricing it as an ordinary line of N days would floor to a week
+   * and credit more than was billed.
    *
-   * Priced through the same `priceLine` day arm the extension branch uses, so
-   * the one-week minimum is SKIPPED — pricing it as an ordinary line of N days
-   * would floor to a week and credit more than was billed.
-   *
-   * ⚠️ Refused on a `fixed` line: a `fixed` price never read its days, so there
-   * are no days of it to give back.
+   * ⚠️ Refused on a flat-formula line: it never read its time, so there is no
+   * time of it to give back.
    */
-  credited_days?: number;
+  credited_counts?: readonly TierCount[];
 }
 
 /** The stored price of one credit-note line: the invoice line's declared half plus money. */
 export interface CreditLinePrice extends LinePriceMoney {
-  base_cents: number;
-  chargeable_days: number | null;
-  formula: PriceObject["formula"];
+  price_formula: PriceFormulaRef | null;
+  rates: RateSnapshot[];
+  counts: TierCount[];
 }
 
 /** What {@link priceCreditNote} returns. */
@@ -767,31 +718,23 @@ export interface PricedCreditNote {
  * The server stores this result, and the manager renders it as a preview.
  *
  * - **Stages 2 + 3 only.** Each line goes through {@link priceLine} and
- *   {@link assembleLinePrice} at the credited quantity. Nothing scales money by
- *   `credited ÷ billed`: that would be a float factor on cents.
+ *   {@link assembleLinePrice} at the credited quantity, on the invoice line's own
+ *   rates and counts. Nothing scales money by `credited ÷ billed`: that would be
+ *   a float factor on cents.
  * - **Stage 1 is deliberately skipped.** The line keeps the tax refs STORED on
- *   the invoice line, so a credit is taxed at the rate that was charged. It never
- *   re-resolves jurisdiction, exemption or version. An exempt line carries
- *   `taxes: []` and credits untaxed. `taxes` must therefore be the WHOLE rate
- *   catalog, superseded versions included.
+ *   the invoice line, so a credit is taxed at the rate that was charged.
  * - **No D3 refusal.** Credit is raised on settled invoices as a matter of
  *   course; crediting prices a NEW document and moves no invoice money.
  * - **Totals are stage 5's sum** ({@link sumPricedLines}).
- * - **A line may credit DAYS instead of whole units** —
- *   {@link CreditSelectionLine.credited_days}, for a charge window the order
- *   shortened after it was billed (api-cloudrun#1028). It takes the same day arm
- *   the extension branch uses, so the one-week minimum is skipped, and it is
- *   refused on a line whose formula never read its days.
+ * - **A line may credit TIME instead of whole units** —
+ *   {@link CreditSelectionLine.credited_counts}: the line is priced at those
+ *   counts, minimum already out of them.
  *
  * ⚠️ **The credit composes to within a rounding of re-charging the difference,
- * and that is the SHIPPED property rather than a defect.** It mirrors the
- * extension — priced at the credited days directly — so
- * `charged(billed) − credit(credited)` sits a cent or so from
- * `charged(billed − credited)`; both round once, they just round different
- * products. Measured worst 1¢ over the sweep in
+ * and that is the SHIPPED property rather than a defect.** Both round once,
+ * they just round different products. Measured worst 1¢ over the sweep in
  * `tests/price-document.test.ts`. 🔴 **Do not "fix" it by pricing the credit as a
- * difference of two charges**: a credit line stores its own declared half beside
- * its money, and {@link assembleLinePrice} is the one door.
+ * difference of two charges.**
  *
  * @throws Error on a line that is not a pre-tax line (a divider or a fee has no
  *   credit), on a quantity that is not a positive integer, and when assembled
@@ -804,55 +747,54 @@ export function priceCreditNote(
 ): PricedCreditNote {
   const prices: CreditLinePrice[] = [];
   const priced: LineItem[] = [];
-  for (const { line, quantity, credited_days } of selection) {
+  for (const { line, quantity, credited_counts } of selection) {
     if (!Number.isInteger(quantity) || quantity <= 0) {
       throw new PriceRefusalError(`Credit quantity for line ${line.uid} must be a positive integer, got ${quantity}`);
     }
-    if (credited_days !== undefined) {
-      if (!Number.isInteger(credited_days) || credited_days <= 0) {
-        throw new PriceRefusalError(
-          `Credited days for line ${line.uid} must be a positive integer of BILLABLE days, got ${credited_days}`,
-        );
-      }
-      if (line.price.formula !== "five_day_week") {
-        throw new PriceRefusalError(
-          `Line ${line.uid} is priced "${line.price.formula}", which never read its days — there are no days of it to credit`,
-        );
-      }
-    }
     // A line in an extension section is credited as it was billed: at its own
-    // added days with the week minimum skipped. Priced as an ordinary line it
-    // would be floored to a week and credit more than the invoice charged.
-    const extension = extensionFor({ uid: line.uid, path: [...line.path] } as LineItem, extensions);
-    const item = {
+    // stated added days, minimum skipped.
+    const extension = extensionFor({ uid: line.uid, path: line.path }, extensions);
+    const source = {
       uid: line.uid,
       path: [line.uid],
       name: "",
       type: line.type,
       quantity,
       price: {
-        base_cents: line.price.base_cents,
-        chargeable_days: line.price.chargeable_days,
-        formula: line.price.formula,
+        price_formula: line.price.price_formula,
+        rates: [...line.price.rates],
+        counts: [...line.price.counts],
         discount: line.price.discount,
         taxes: [...line.price.taxes],
       },
     } as unknown as LineItem;
-    if (!isPreTaxItem(item)) {
+    if (!isPreTaxItem(source)) {
       throw new PriceRefusalError(`Line ${line.uid} has type "${line.type}", which cannot be credited — only a pre-tax line has a credit`);
     }
-    // The day arm, in priority order: an explicit shortening credit, else the
-    // added days of an extension section, else none (an ordinary whole-unit
-    // credit, priced at the line's own stored days).
-    //
-    // ⚠️ `chargeable_days` on the DECLARED half is what the stored line says it
-    // credited, so a days credit carries `credited_days` there rather than the
-    // invoice line's own count. Re-stating the invoice's days beside a smaller
-    // money figure would make the stored line describe a charge nobody made.
-    const dayArm = credited_days ?? (extension ? extensionDaysOf(item) : undefined);
+    let counts = [...line.price.counts];
+    if (credited_counts !== undefined) {
+      if (line.price.price_formula?.basis !== "time") {
+        throw new PriceRefusalError(
+          `Line ${line.uid} is priced "${line.price.price_formula?.name ?? "from the document"}", which never read its time — there is no time of it to credit`,
+        );
+      }
+      const keys = new Set(line.price.rates.map((r) => r.rate_key));
+      if (
+        credited_counts.length === 0 || credited_counts.some((t) => !keys.has(t.rate_key) || t.den < 1) ||
+        credited_counts.every((t) => t.num <= 0)
+      ) {
+        throw new PriceRefusalError(
+          `Credited counts for line ${line.uid} must name the line's own rate keys and credit a positive amount of time`,
+        );
+      }
+      // ⚠️ The DECLARED counts are what the stored line credited, so a time
+      // credit carries the credited counts rather than the invoice line's own.
+      counts = credited_counts.map((t) => ({ ...t }));
+    }
+    const item = { ...source, price: { ...source.price, counts } } as unknown as LineItem;
     const price = assembleLinePrice(
-      { base_cents: line.price.base_cents, chargeable_days: credited_days ?? line.price.chargeable_days, formula: line.price.formula },
-      priceLine(item, taxes, dayArm),
+      { price_formula: line.price.price_formula, rates: [...line.price.rates], counts },
+      priceLine(item, taxes, credited_counts !== undefined || extension !== undefined),
       item,
     ) as CreditLinePrice;
     prices.push(price);

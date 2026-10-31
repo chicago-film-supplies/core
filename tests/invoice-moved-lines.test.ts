@@ -10,6 +10,7 @@
  * Every expectation is written out by hand.
  */
 import { assert, assertEquals } from "@std/assert";
+import { FORMULAS, fdwPrice } from "./helpers/formulas.ts";
 import type { DocDestinationType, Invoice, InvoiceDocItemType, Order } from "../src/schemas/mod.ts";
 import { CreditNoteDocLineItem, InvoiceDocLineItem, InvoiceItemInputLine } from "../src/schemas/mod.ts";
 import { getInitialValues } from "../src/schemas/initial.ts";
@@ -44,9 +45,13 @@ function line(uid: string, path: string[], quantity = 1, baseCents = 1000): Line
     uid, type: "rental", name: uid, description: "", quantity, path,
     stock_method: "reserve", zero_priced: false, uid_tax_class: "TaxC1assDefau1tAAAAA",
     price: {
-      base_cents: baseCents, chargeable_days: 5, formula: "five_day_week",
-      subtotal_cents: baseCents * quantity, subtotal_discounted_cents: baseCents * quantity,
-      discount: null, taxes: [], total_cents: baseCents * quantity, replacement_cents: 1000,
+      ...fdwPrice(baseCents, 5),
+      subtotal_cents: baseCents * quantity,
+      subtotal_discounted_cents: baseCents * quantity,
+      discount: null,
+      taxes: [],
+      total_cents: baseCents * quantity,
+      replacement_cents: 1000,
     },
   } as unknown as LineItem;
 }
@@ -178,7 +183,7 @@ const START = "2026-09-06T00:00:00.000-05:00";
 const END = "2026-09-11T00:00:00.000-05:00";
 const pair = (): DocDestinationType => ({
   uid: D,
-  dates: { charge_windows: [{ start: START, end: END, days: 5 }] },
+  dates: { charge_windows: [{ start: START, end: END }] },
   delivery: { uid: `dlv-${D}`, address: null, instructions: null, contact: null },
   collection: { uid: `col-${D}`, address: null, instructions: null, contact: null },
   customer_collecting: false, customer_returning: false, jurisdiction: null, exchange: null,
@@ -198,7 +203,7 @@ Deno.test("🔴 coverage: the moved line covers X — not uninvoiced, not an ext
   assertEquals(billed.byPath.get(X.join("/"))?.quantity, 4);
   assertEquals(billed.byPath.has(AT.join("/")), false);
 
-  assertEquals(remainingForOrder(O, order, [inv], [pair()]).lines, []);
+  assertEquals(remainingForOrder(O, order, [inv], [pair()], { formulas: FORMULAS, holidays: [] }).lines, []);
 });
 
 Deno.test("coverage: claims are SUMMED — a split bills X in full, two copies over-bill it", () => {
@@ -260,7 +265,7 @@ function documents(scope: InvoiceDocItemType[]) {
   } as unknown as Invoice;
   return { orders: [ord], invoices: [inv] };
 }
-const ctx = { taxNameByUid: new Map<string, string>(), isOrderFrozen: () => false };
+const ctx = { taxNameByUid: new Map<string, string>(), isOrderFrozen: () => false, formulas: FORMULAS, holidays: [] };
 
 Deno.test("🔴 diff: ONE moved entry per side for a move — no not_on_source, no unbilled X", () => {
   const sources = documents(movedInvoice());

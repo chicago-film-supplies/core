@@ -923,8 +923,8 @@ const billTimeLine = (over: Record<string, unknown> = {}) =>
     path_purchase_item: [iuid(2)],
     price: { ...weeklyPrice, counts: [{ rate_key: "month", num: 0, den: 1 }, { rate_key: "week", num: 2, den: 1 }] },
     units: [
-      { uid_unit: "unit-1001", charge_windows: [{ start: "2025-05-12T09:00:00.000-05:00", end: "2025-05-17T09:00:00.000-05:00", days: 5 }] },
-      { uid_unit: "unit-1002", charge_windows: [{ start: "2025-05-12T09:00:00.000-05:00", end: "2025-05-17T09:00:00.000-05:00", days: 5 }] },
+      { uid_unit: "unit-1001", charge_windows: [{ start: "2025-05-12T09:00:00.000-05:00", end: "2025-05-17T09:00:00.000-05:00" }] },
+      { uid_unit: "unit-1002", charge_windows: [{ start: "2025-05-12T09:00:00.000-05:00", end: "2025-05-17T09:00:00.000-05:00" }] },
     ],
     dates: null,
     ...over,

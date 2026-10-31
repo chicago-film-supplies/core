@@ -3,11 +3,11 @@ import type { TypesenseCollectionConfig } from "./types.ts";
 /** Typesense collection config for products. */
 export const products: TypesenseCollectionConfig = {
   alias: "products",
-  version: 15,
+  version: 16,
   firestoreCollection: "products",
-  collectionName: "products_v15",
+  collectionName: "products_v16",
   schema: {
-    name: "products_v15",
+    name: "products_v16",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -26,14 +26,18 @@ export const products: TypesenseCollectionConfig = {
       // stamps, replacing the copied `price.taxes` refs (api-cloudrun#993).
       { name: "uid_tax_class", type: "string", facet: true, optional: true },
       { name: "price", type: "object", optional: true },
-      { name: "price.base_cents", type: "int64", optional: true, money: true },
-      // A RATE, not an amount: the `percent_of_total` percentage at 4dp. Without
-      // it a transaction-fee hit carries its formula and no rate, and every line
+      { name: "price.uid_price_formula", type: "string", facet: true, optional: true },
+      // The OPEN row per rate key only (the api translator filters): a closed
+      // or future row would make a search answer a price nobody pays today.
+      { name: "price.rates", type: "object[]", optional: true },
+      { name: "price.rates.rate_key", type: "string[]", facet: true, optional: true },
+      { name: "price.rates.amount_cents", type: "int64[]", optional: true, money: true },
+      // A RATE, not an amount: the percent-of-total percentage at 4dp. Without
+      // it a transaction-fee hit carries no formula and no rate, and every line
       // built from the hit prices at $0.
       { name: "price.base_percent", type: "float", optional: true },
       { name: "price.replacement_cents", type: "int64", optional: true, money: true },
       { name: "price.coa_revenue", type: "int32", facet: true, optional: true },
-      { name: "price.formula", type: "string", facet: true, optional: true },
       { name: "price.discountable", type: "bool", facet: true, optional: true },
       { name: "webshop", type: "object", optional: true },
       { name: "webshop.available", type: "bool", facet: true, optional: true },
@@ -78,10 +82,14 @@ export const products: TypesenseCollectionConfig = {
       { name: "components.uid_tracking_category", type: "string[]", optional: true },
       { name: "components.zero_priced", type: "bool[]", facet: true, optional: true },
       { name: "components.price", type: "object[]", optional: true },
-      { name: "components.price.base_cents", type: "int64[]", optional: true, money: true },
+      { name: "components.price.uid_price_formula", type: "string[]", facet: true, optional: true },
+      // The OPEN row per rate key only (the api translator filters): a closed
+      // or future row would make a search answer a price nobody pays today.
+      { name: "components.price.rates", type: "object[]", optional: true },
+      { name: "components.price.rates.rate_key", type: "string[]", facet: true, optional: true },
+      { name: "components.price.rates.amount_cents", type: "int64[]", optional: true, money: true },
       { name: "components.price.replacement_cents", type: "int64[]", optional: true, money: true },
       { name: "components.price.coa_revenue", type: "int32[]", facet: true, optional: true },
-      { name: "components.price.formula", type: "string[]", facet: true, optional: true },
       { name: "components.price.discountable", type: "bool[]", facet: true, optional: true },
       { name: "component_of", type: "object[]", optional: true },
       { name: "component_of.uid", type: "string[]", optional: true },
@@ -99,10 +107,14 @@ export const products: TypesenseCollectionConfig = {
       { name: "component_of.uid_tracking_category", type: "string[]", optional: true },
       { name: "component_of.zero_priced", type: "bool[]", facet: true, optional: true },
       { name: "component_of.price", type: "object[]", optional: true },
-      { name: "component_of.price.base_cents", type: "int64[]", optional: true, money: true },
+      { name: "component_of.price.uid_price_formula", type: "string[]", facet: true, optional: true },
+      // The OPEN row per rate key only (the api translator filters): a closed
+      // or future row would make a search answer a price nobody pays today.
+      { name: "component_of.price.rates", type: "object[]", optional: true },
+      { name: "component_of.price.rates.rate_key", type: "string[]", facet: true, optional: true },
+      { name: "component_of.price.rates.amount_cents", type: "int64[]", optional: true, money: true },
       { name: "component_of.price.replacement_cents", type: "int64[]", optional: true, money: true },
       { name: "component_of.price.coa_revenue", type: "int32[]", facet: true, optional: true },
-      { name: "component_of.price.formula", type: "string[]", facet: true, optional: true },
       { name: "component_of.price.discountable", type: "bool[]", facet: true, optional: true },
       { name: "crms_stock_level_ids", type: "int64[]", optional: true },
       // `images` is declared as a nested object array, NOT as the flat

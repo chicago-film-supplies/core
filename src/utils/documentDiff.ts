@@ -45,7 +45,7 @@
  * `amount_cents` can differ from the order's with no operator edit and no
  * quantity split. Reporting that is G2, the false override this whole campaign
  * exists to delete, and the suppression is therefore unconditional. A real
- * change still reports through its CAUSE — a declared input (`base_cents`,
+ * change still reports through its CAUSE — a declared input (`rates`,
  * `base_percent`), a discount's `rate`/`type`, a line's tax class — never
  * through its arithmetic. A price key is judged at the classification's LEAF
  * grain, so `price.discount.rate` and `price.discount.amount_cents` are told
@@ -174,7 +174,7 @@ import {
   projectOrderItemToInvoiceItem,
 } from "./invoices.ts";
 import type { LineItem } from "./orders.ts";
-import { statedChargeWindows } from "./price-document.ts";
+import { type PricingFormulas, statedChargeWindows } from "./price-document.ts";
 import {
   collectSubstitutionAnchors,
   isAtOrBelow,
@@ -535,6 +535,12 @@ export interface DocumentDiffContext {
    * (`api-cloudrun/src/lib/orderTaxPricing.ts` `REPRICEABLE_ORDER_STATUSES`).
    */
   isOrderFrozen: (order: Order) => boolean;
+  /**
+   * Every formula the documents' lines name, and the holiday list — what an
+   * extension's counts are metered with (ruling 8: a window stores no count).
+   */
+  formulas: PricingFormulas;
+  holidays: readonly string[];
 }
 
 /**
@@ -701,18 +707,19 @@ function lineFields(
       taxNameByUid: context.taxNameByUid,
       orderFrozen: context.isOrderFrozen(order),
       // ⚠️ The `invoice_windows` arm cannot change this function's OUTPUT — the
-      // day count and every money field it covers are `derived`, and the filters
+      // counts and every money field it covers are `derived`, and the filters
       // below drop those unconditionally (see the G2 comment). It is passed
-      // anyway, and truthfully: the alternative is an empty array that reads as
-      // "this invoice states no windows", which is a lie that would rot the day a
-      // non-derived field joined the arm's coverage.
+      // anyway, and truthfully: an empty context reads as "this invoice states
+      // no windows", which would rot the day a non-derived field joined the arm.
       invoiceChargeWindows: statedChargeWindows(invoice.destinations ?? []),
+      formulas: context.formulas,
+      holidays: context.holidays,
     },
   );
   const derived = derivedLineFields();
   return unexplained
     // How many units and days are billed is the `quantity` entry's, over the sum.
-    .filter((f) => f !== "quantity" && f !== "price.chargeable_days")
+    .filter((f) => f !== "quantity" && f !== "price.counts")
     // The comparator names a price difference at the KEY (`price.discount`);
     // the classification is per LEAF (`price.discount.rate` propagated,
     // `.amount_cents` derived). Judge it at the classification's grain.
@@ -725,7 +732,7 @@ function lineFields(
     // "overridden" means.
     //
     // A difference an operator caused still reports, through its CAUSE: a
-    // declared input (`base_cents`, `base_percent`), a discount's `rate`/`type`,
+    // declared input (`rates`, `price_formula`, `base_percent`), a discount's `rate`/`type`,
     // or a tax's causes (`uid_tax_class`, `uid_tax_class_override`, the doc's
     // `tax_exempt`/`uid_store`, the pair's `jurisdiction`). `price.taxes` itself
     // is derived WHOLE, rate included: a document's rate is the one whose window
@@ -1213,6 +1220,7 @@ export function computeDocumentDiffs(
       orderLine,
       at,
       orderLineWindow(order!.destinations ?? [], orderLine.path ?? []),
+      { formulas: context.formulas, holidays: context.holidays },
       fulfilled ?? undefined,
     );
     const fulfilledDisagrees = fulfilled !== null && fulfilled !== account.ordered && fulfilled !== invoiced;
