@@ -56,6 +56,17 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
   // `name_key === foldDepartmentTypeName(name)` is a CROSS-FIELD equality, the
   // class the walker cannot derive.
   "department-type": { name: "Locations", name_key: "locations" },
+  // ⚠️ **Added with `price-formulas`** (purchases-as-documents D1). Its ladder
+  // is a web of cross-field rules — a `month` needs an anchor, only the last
+  // segment takes the remainder, a `none` meter prices one flat segment — so the
+  // walker's first enum member of each field cannot satisfy it. Fixed is the
+  // smallest legal formula.
+  "price-formula": {
+    uid_superseded_by: null,
+    meter: { source: "none", count: "calendar_day", gap_allowance: null },
+    segments: [{ rate_key: "flat", unit: "none", anchor: null, consume: "remainder", rounding: "ceil", divisor: null }],
+    minimum: null,
+  },
   transaction: {
     uid_booking: BOOKING_ID,
     custody: { from: "quoted", to: "prepped" },
@@ -196,7 +207,7 @@ function isInputOptional(node: z.ZodType): boolean {
 
 Deno.test("corpus gate — every registry schema has a minimal fixture that parses", () => {
   const all = distinctSchemas();
-  assertEquals(all.size, 68, "registry size moved; re-measure the override list");
+  assertEquals(all.size, 69, "registry size moved; re-measure the override list");
 
   const failures: string[] = [];
   for (const [name, schema] of all) {
@@ -214,8 +225,8 @@ Deno.test("corpus gate — every registry schema has a minimal fixture that pars
   // walker has stopped keeping up with the schemas.
   // 6 since core#103's booking delivery mirror, 7 since the purchase mirrors
   // became required, 8 since a bill item's `path` is `[uid]` (api-cloudrun#1407)
-  // — each a new cross-field refinement.
-  assertEquals(Object.keys(OVERRIDES).length, 8, "a schema now needs hand-written fixture knowledge");
+  // — each a new cross-field refinement — and 9 with `price-formulas`' ladder.
+  assertEquals(Object.keys(OVERRIDES).length, 9, "a schema now needs hand-written fixture knowledge");
 });
 
 Deno.test("corpus gate companion — an unsatisfiable invariant still throws, naming its path", () => {

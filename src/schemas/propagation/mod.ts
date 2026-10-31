@@ -45,6 +45,7 @@ import { settlements } from "./settlements.ts";
 import { creditNotes } from "./credit-notes.ts";
 import { fulfillments } from "./fulfillments.ts";
 import { taxes } from "./taxes.ts";
+import { priceFormulas } from "./price-formulas.ts";
 import { referenceData } from "./reference-data.ts";
 import { stores } from "./stores.ts";
 import { locations } from "./locations.ts";
@@ -107,6 +108,7 @@ const MODULES: readonly PropagationModule[] = [
   creditNotes,
   fulfillments,
   taxes,
+  priceFormulas,
   referenceData,
   stores,
   locations,

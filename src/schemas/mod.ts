@@ -1062,6 +1062,42 @@ export {
 } from "./taxes-class.ts";
 
 export {
+  PriceFormulaSchema,
+  CreatePriceFormulaInput,
+  UpdatePriceFormulaInput,
+  PriceFormulaMeterSourceEnum,
+  PriceFormulaMeterCountEnum,
+  PriceFormulaSegmentUnitEnum,
+  PriceFormulaSegmentConsumeEnum,
+  PriceFormulaSegmentRoundingEnum,
+  PriceFormulaMinimumUnitEnum,
+  PriceFormulaMinimumScopeEnum,
+  PriceFormulaGapAllowanceSchema,
+  PriceFormulaMeterSchema,
+  PriceFormulaAnchorSchema,
+  PriceFormulaSegmentSchema,
+  PriceFormulaMinimumSchema,
+  RateKey,
+  priceFormulaRuleIssues,
+  type PriceFormula,
+  type PriceFormulaRule,
+  type PriceFormulaMeter,
+  type PriceFormulaMeterSource,
+  type PriceFormulaMeterCount,
+  type PriceFormulaGapAllowance,
+  type PriceFormulaAnchor,
+  type PriceFormulaSegment,
+  type PriceFormulaSegmentUnit,
+  type PriceFormulaSegmentConsume,
+  type PriceFormulaSegmentRounding,
+  type PriceFormulaMinimum,
+  type PriceFormulaMinimumUnit,
+  type PriceFormulaMinimumScope,
+  type CreatePriceFormulaInputType,
+  type UpdatePriceFormulaInputType,
+} from "./price-formula.ts";
+
+export {
   InventoryLedgerSchema,
   type InventoryLedger,
 } from "./inventory-ledger.ts";
@@ -1619,6 +1655,7 @@ import type { Tag } from "./tag.ts";
 import type { TaxCode } from "./taxes-code.ts";
 import type { TaxRate } from "./taxes-rate.ts";
 import type { TaxClass } from "./taxes-class.ts";
+import type { PriceFormula } from "./price-formula.ts";
 import type { TrackingCategory } from "./tracking-category.ts";
 import type { Movement } from "./transaction.ts";
 import type { TypesenseConfig } from "./typesense-config.ts";
@@ -1730,6 +1767,7 @@ import { TagSchema } from "./tag.ts";
 import { TaxCodeSchema as TaxCodeSchema_ } from "./taxes-code.ts";
 import { TaxRateSchema as TaxRateSchema_ } from "./taxes-rate.ts";
 import { TaxClassSchema as TaxClassSchema_ } from "./taxes-class.ts";
+import { PriceFormulaSchema as PriceFormulaSchema_ } from "./price-formula.ts";
 import { ThreadSchema } from "./thread.ts";
 import { TrackingCategorySchema } from "./tracking-category.ts";
 import { MovementSchema } from "./transaction.ts";
@@ -1884,6 +1922,8 @@ export interface CollectionDocs {
   "taxes-codes": TaxCode;
   "taxes-rates": TaxRate;
   "taxes-classes": TaxClass;
+  "price-formula": PriceFormula;
+  "price-formulas": PriceFormula;
   thread: Thread;
   threads: Thread;
   "tracking-category": TrackingCategory;
@@ -1985,6 +2025,7 @@ const schemasTyped: { [C in CollectionName]: z.ZodType<CollectionDocs[C]> } = {
   "taxes-codes": TaxCodeSchema_,
   "taxes-rates": TaxRateSchema_,
   "taxes-classes": TaxClassSchema_,
+  "price-formula": PriceFormulaSchema_, "price-formulas": PriceFormulaSchema_,
   "thread": ThreadSchema, "threads": ThreadSchema,
   "tracking-category": TrackingCategorySchema, "tracking-categories": TrackingCategorySchema,
   "transaction": MovementSchema, "transactions": MovementSchema,

@@ -283,6 +283,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "statedChargeWindows", expr: "it.price-document.statedChargeWindows(destinations)", desc: "**The windows a document STATES** — the same traversal as {@link chargeWindowContext} with the pricer's refusal left off, for a READER rather than a writer (core#112).", returns: "PairChargeWindows[]" },
     { name: "windowChargeableDays", expr: "it.price-document.windowChargeableDays(item, pairs)", desc: "**What a line's pair's windows bill it for** — the window half of {@link lineChargeableDays}, split out so the invoice sync comparator can ask the same question without re-deriving the rule (core#112).", returns: "number | null" },
   ],
+  "price-formulas": [
+
+  ],
   "products": [
     { name: "buildComponentEntries", expr: "it.products.buildComponentEntries(parentUid, sourceComponents, baseDepth, maxDepth)", desc: "Build component entries for a parent product from a component product's own `components` array. Each entry's `path` is prepended with `parentUid` so it reflects its position in the parent's tree.", returns: "T[]" },
     { name: "productCountsStock", expr: "it.products.productCountsStock(type, stockMethod)", desc: "True iff a product with this `type` + `stock_method` holds a COUNTED stock — a ledger whose `quantity_held` is a number. `stock_method: \"none\"` has a ledger with a `null` count (supply unbounded), so nothing can be moved against it.", returns: "stockMethod is CountedStockMethod" },

@@ -931,4 +931,14 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "remainingUsageToBill",
     "spanInstants",
   ],
+  // `utils/price-formulas.ts` is the engine that WRITES a line's money from its
+  // formula, windows and dated rates (purchases-as-documents D1). A template
+  // renders money already written, and a render context holds no formula.
+  "price-formulas": [
+    "meterUnits",
+    "priceFromFormula",
+    "rateInForce",
+    "snapshotRates",
+    "statedUnits",
+  ],
 };

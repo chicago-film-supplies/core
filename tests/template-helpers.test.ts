@@ -30,6 +30,7 @@ import * as allocationUtils from "../src/utils/allocation.ts";
 import * as bookingIdUtils from "../src/utils/booking-id.ts";
 import * as bookingUtils from "../src/utils/bookings.ts";
 import * as cogsUtils from "../src/utils/cogs.ts";
+import * as priceFormulaUtils from "../src/utils/price-formulas.ts";
 import * as cardUtils from "../src/utils/cards.ts";
 import * as contentHashUtils from "../src/utils/contentHash.ts";
 import * as contactNameUtils from "../src/utils/contact-name.ts";
@@ -181,6 +182,10 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // never shows cost, and no render context holds a product or a unit. Listed
   // so the drift guard sees its exports.
   cogs: cogsUtils,
+  // And again: `utils/price-formulas.ts` WRITES a line's money from its formula.
+  // A template renders money already written. Listed so the drift guard sees
+  // its exports.
+  "price-formulas": priceFormulaUtils,
   // And again: `utils/price-document.ts` WRITES a document's money. A template
   // renders money already written. Listed so the drift guard sees its exports.
   "price-document": priceDocumentUtils,

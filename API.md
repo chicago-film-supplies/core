@@ -2573,6 +2573,8 @@ interface CollectionDocs {
   taxes-codes: TaxCode;
   taxes-rates: TaxRate;
   taxes-classes: TaxClass;
+  price-formula: PriceFormula;
+  price-formulas: PriceFormula;
   thread: Thread;
   threads: Thread;
   tracking-category: TrackingCategory;
@@ -3269,6 +3271,26 @@ interface CreateOutOfServiceInputType {
   destination?: OOSDestinationInputType | null;
   supplier?: typeLiteral | null;
   units?: number[];
+}
+```
+
+### `CreatePriceFormulaInput`
+
+Zod schema for {@link CreatePriceFormulaInputType}.
+
+```ts
+const CreatePriceFormulaInput: z.ZodType<CreatePriceFormulaInputType>;
+```
+
+### `CreatePriceFormulaInputType`
+
+Input for creating a price formula.
+
+```ts
+interface CreatePriceFormulaInputType {
+  name: string;
+  description?: string | null;
+  active: boolean;
 }
 ```
 
@@ -8974,7 +8996,7 @@ type OutOfServiceUpdated = EventEnvelope<OutOfService> & typeLiteral;
 The full catalog of permissions. Adding a new route? Add its permission here first.
 
 ```ts
-const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "statements.create" | "statements.read" | "statements.update" | "statements.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxCodes.create" | "taxCodes.read" | "taxCodes.update" | "taxRates.create" | "taxRates.read" | "taxRates.update" | "taxClasses.create" | "taxClasses.read" | "taxClasses.update" | "suppliers.create" | "suppliers.read" | "suppliers.update" | "suppliers.delete" | "suppliers.search" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "billingSettings.update" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "destinations.update" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "purchases.create" | "purchases.read" | "purchases.search" | "purchases.update" | "purchases.receive" | "purchases.bill" | "stockSummaries.read" | "typesenseSync.read" | "units.create" | "units.read" | "units.update" | "units.activate" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "activities.read" | "reports.read" | "reports.readFinancial" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
+const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "statements.create" | "statements.read" | "statements.update" | "statements.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxCodes.create" | "taxCodes.read" | "taxCodes.update" | "taxRates.create" | "taxRates.read" | "taxRates.update" | "taxClasses.create" | "taxClasses.read" | "taxClasses.update" | "priceFormulas.create" | "priceFormulas.read" | "priceFormulas.update" | "suppliers.create" | "suppliers.read" | "suppliers.update" | "suppliers.delete" | "suppliers.search" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "billingSettings.update" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "destinations.update" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "purchases.create" | "purchases.read" | "purchases.search" | "purchases.update" | "purchases.receive" | "purchases.bill" | "stockSummaries.read" | "typesenseSync.read" | "units.create" | "units.read" | "units.update" | "units.activate" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "activities.read" | "reports.read" | "reports.readFinancial" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
 ```
 
 ### `PICK_SHEET_GATES`
@@ -9633,12 +9655,275 @@ Zod schema for PreviewRecord.
 const PreviewRecordSchema: z.ZodType<PreviewRecord>;
 ```
 
+### `PriceFormula`
+
+A price formula document in Firestore.
+
+```ts
+interface PriceFormula {
+  uid: string;
+  name: string;
+  description: string | null;
+  active: boolean;
+  uid_superseded_by: string | null;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `PriceFormulaAnchor`
+
+Where a `month` segment's periods start.
+
+```ts
+type PriceFormulaAnchor = "window_start" | typeLiteral;
+```
+
+### `PriceFormulaAnchorSchema`
+
+Zod schema for {@link PriceFormulaAnchor}. A `day_of_month` past a month's
+last day anchors on that last day — a start on the 31st is the month's end,
+defined once in `@cfs/core/utils/price-formulas`.
+
+```ts
+const PriceFormulaAnchorSchema: z.ZodType<PriceFormulaAnchor>;
+```
+
 ### `PriceFormulaEnum`
 
 Zod schema for PriceFormulaType.
 
 ```ts
 const PriceFormulaEnum: z.ZodType<PriceFormulaType>;
+```
+
+### `PriceFormulaGapAllowance`
+
+Free suspension time per line, over a ROLLING window: a gap day is free while
+fewer than `free_days` gap days were free in the `per_months` months up to
+and including it. Gap days beyond it are metered again (Verizon, Q2).
+
+```ts
+interface PriceFormulaGapAllowance {
+  free_days: number;
+  per_months: number;
+}
+```
+
+### `PriceFormulaGapAllowanceSchema`
+
+Zod schema for {@link PriceFormulaGapAllowance}.
+
+```ts
+const PriceFormulaGapAllowanceSchema: z.ZodType<PriceFormulaGapAllowance>;
+```
+
+### `PriceFormulaMeter`
+
+WHAT time counts, and how.
+
+```ts
+interface PriceFormulaMeter {
+  source: PriceFormulaMeterSource;
+  count: PriceFormulaMeterCount;
+  gap_allowance: PriceFormulaGapAllowance | null;
+}
+```
+
+### `PriceFormulaMeterCount`
+
+Which days count. See the module docblock for the two conventions.
+
+```ts
+type PriceFormulaMeterCount = indexedAccess;
+```
+
+### `PriceFormulaMeterCountEnum`
+
+Zod schema for {@link PriceFormulaMeterCount}.
+
+```ts
+const PriceFormulaMeterCountEnum: z.ZodType<PriceFormulaMeterCount>;
+```
+
+### `PriceFormulaMeterSchema`
+
+Zod schema for {@link PriceFormulaMeter}.
+
+```ts
+const PriceFormulaMeterSchema: z.ZodType<PriceFormulaMeter>;
+```
+
+### `PriceFormulaMeterSource`
+
+WHAT time counts.
+
+- `windows` — only the line's charge windows (Five-day week, Vision). Each
+  window is metered on its own: a `window_start` anchor restarts at every
+  window (Q1, Q5).
+- `span_less_gaps` — the line's whole span, minus the gaps between windows
+  the allowance forgives (Verizon: a gap is a suspension).
+- `none` — no time; a flat amount (Fixed).
+
+```ts
+type PriceFormulaMeterSource = indexedAccess;
+```
+
+### `PriceFormulaMeterSourceEnum`
+
+Zod schema for {@link PriceFormulaMeterSource}.
+
+```ts
+const PriceFormulaMeterSourceEnum: z.ZodType<PriceFormulaMeterSource>;
+```
+
+### `PriceFormulaMinimum`
+
+A floor on metered days, applied before the ladder's last (count) segment.
+
+```ts
+interface PriceFormulaMinimum {
+  units: number;
+  unit: PriceFormulaMinimumUnit;
+  scope: PriceFormulaMinimumScope;
+}
+```
+
+### `PriceFormulaMinimumSchema`
+
+Zod schema for {@link PriceFormulaMinimum}.
+
+```ts
+const PriceFormulaMinimumSchema: z.ZodType<PriceFormulaMinimum>;
+```
+
+### `PriceFormulaMinimumScope`
+
+Whether a minimum floors each window (Five-day week) or the line's total.
+
+```ts
+type PriceFormulaMinimumScope = indexedAccess;
+```
+
+### `PriceFormulaMinimumScopeEnum`
+
+Zod schema for {@link PriceFormulaMinimumScope}.
+
+```ts
+const PriceFormulaMinimumScopeEnum: z.ZodType<PriceFormulaMinimumScope>;
+```
+
+### `PriceFormulaMinimumUnit`
+
+The unit a minimum is stated in. Must agree with the meter's count (refine).
+
+```ts
+type PriceFormulaMinimumUnit = indexedAccess;
+```
+
+### `PriceFormulaMinimumUnitEnum`
+
+Zod schema for {@link PriceFormulaMinimumUnit}.
+
+```ts
+const PriceFormulaMinimumUnitEnum: z.ZodType<PriceFormulaMinimumUnit>;
+```
+
+### `PriceFormulaRule`
+
+The rule half of a formula — everything the engine reads.
+
+```ts
+interface PriceFormulaRule {
+  meter: PriceFormulaMeter;
+  segments: PriceFormulaSegment[];
+  reprice: "remainder";
+  minimum: PriceFormulaMinimum | null;
+}
+```
+
+### `PriceFormulaSchema`
+
+Zod schema for {@link PriceFormula}.
+
+```ts
+const PriceFormulaSchema: z.ZodType<PriceFormula>;
+```
+
+### `PriceFormulaSegment`
+
+One rung of the ladder.
+
+```ts
+interface PriceFormulaSegment {
+  rate_key: string;
+  unit: PriceFormulaSegmentUnit;
+  anchor: PriceFormulaAnchor | null;
+  consume: PriceFormulaSegmentConsume;
+  rounding: PriceFormulaSegmentRounding;
+  divisor: number | "days_in_period" | null;
+}
+```
+
+### `PriceFormulaSegmentConsume`
+
+`whole` takes only complete periods and passes the rest on; `remainder` prices what is left.
+
+```ts
+type PriceFormulaSegmentConsume = indexedAccess;
+```
+
+### `PriceFormulaSegmentConsumeEnum`
+
+Zod schema for {@link PriceFormulaSegmentConsume}.
+
+```ts
+const PriceFormulaSegmentConsumeEnum: z.ZodType<PriceFormulaSegmentConsume>;
+```
+
+### `PriceFormulaSegmentRounding`
+
+How a partial period counts: not at all, as a whole one, or as its fraction.
+
+```ts
+type PriceFormulaSegmentRounding = indexedAccess;
+```
+
+### `PriceFormulaSegmentRoundingEnum`
+
+Zod schema for {@link PriceFormulaSegmentRounding}.
+
+```ts
+const PriceFormulaSegmentRoundingEnum: z.ZodType<PriceFormulaSegmentRounding>;
+```
+
+### `PriceFormulaSegmentSchema`
+
+Zod schema for {@link PriceFormulaSegment}.
+
+```ts
+const PriceFormulaSegmentSchema: z.ZodType<PriceFormulaSegment>;
+```
+
+### `PriceFormulaSegmentUnit`
+
+A segment's period. `month` is a CALENDAR period walked from its anchor;
+`week` and `day` are COUNT periods (a week is `divisor ?? 7` counted days);
+`none` is the single period of a flat formula.
+
+```ts
+type PriceFormulaSegmentUnit = indexedAccess;
+```
+
+### `PriceFormulaSegmentUnitEnum`
+
+Zod schema for {@link PriceFormulaSegmentUnit}.
+
+```ts
+const PriceFormulaSegmentUnitEnum: z.ZodType<PriceFormulaSegmentUnit>;
 ```
 
 ### `PriceFormulaType`
@@ -10670,6 +10955,14 @@ A tax or rate change may reprice these (`repriceable`): `{draft, quoted, reserve
 
 ```ts
 const REPRICEABLE_ORDER_STATUSES: readonly OrderStatusType[];
+```
+
+### `RateKey`
+
+A rate key: names a dated rate row, never an amount.
+
+```ts
+const RateKey: z.ZodType<string>;
 ```
 
 ### `RateLimit`
@@ -13521,7 +13814,7 @@ Every `TransactionDefinition.id` in the catalog.
 now, not by the shape of the call that consumes them.
 
 ```ts
-type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "extend-rental" | "undo-extend-rental" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "reverse-stock-reclass" | "create-purchase" | "update-purchase" | "close-purchase" | "receive-purchase" | "reverse-purchase-receipt" | "return-purchase" | "reverse-purchase-return" | "create-purchase-bill" | "settle-purchase-bill" | "void-purchase-bill-from-xero" | "create-purchase-credit" | "allocate-purchase-credit" | "reverse-purchase-credit-allocation" | "settle-purchase-credit" | "void-purchase-credit" | "void-purchase-credit-from-xero" | "create-store-transfer" | "create-units" | "update-unit" | "open-unit-activation" | "update-unit-activation" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "close-invoice" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "record-credit-note-refund" | "sync-xero-credit-note-refunds" | "reverse-credit-note-refund" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "reconcile-order-from-invoices" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "set-location-product-default" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
+type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "extend-rental" | "undo-extend-rental" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "reverse-stock-reclass" | "create-purchase" | "update-purchase" | "close-purchase" | "receive-purchase" | "reverse-purchase-receipt" | "return-purchase" | "reverse-purchase-return" | "create-purchase-bill" | "settle-purchase-bill" | "void-purchase-bill-from-xero" | "create-purchase-credit" | "allocate-purchase-credit" | "reverse-purchase-credit-allocation" | "settle-purchase-credit" | "void-purchase-credit" | "void-purchase-credit-from-xero" | "create-store-transfer" | "create-units" | "update-unit" | "open-unit-activation" | "update-unit-activation" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "close-invoice" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "record-credit-note-refund" | "sync-xero-credit-note-refunds" | "reverse-credit-note-refund" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "reconcile-order-from-invoices" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-price-formula" | "update-price-formula" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "set-location-product-default" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
 ```
 
 ### `TransactionLogRecord`
@@ -14832,6 +15125,35 @@ interface UpdateOutOfServiceInputType {
   uid_purchase?: string;
   uuid_session: string;
   version: number;
+}
+```
+
+### `UpdatePriceFormulaInput`
+
+Zod schema for {@link UpdatePriceFormulaInputType}.
+
+```ts
+const UpdatePriceFormulaInput: z.ZodType<UpdatePriceFormulaInputType>;
+```
+
+### `UpdatePriceFormulaInputType`
+
+Input for updating a price formula.
+
+⚠️ **Only labels and retirement.** The rule (`meter`, `segments`, `minimum`)
+is not on this input at all: a formula any line has priced with is
+immutable, and core cannot see references — so the safe shape is the one
+that cannot express the edit. A changed rule is a new formula, and this one
+points at it with `uid_superseded_by`.
+
+```ts
+interface UpdatePriceFormulaInputType {
+  uid: string;
+  version?: number;
+  name?: string;
+  description?: string | null;
+  active?: boolean;
+  uid_superseded_by?: string | null;
 }
 ```
 
@@ -16890,6 +17212,13 @@ goods went out would derive `collection` and change identity. Use this to
 RESOLVE {@link PickSheet.leg} once, at build time; then read the stamped
 field. Derivation supplies the default; the stamped value is the fact.
 
+### `priceFormulaRuleIssues(rule: PriceFormulaRule): typeLiteral[]`
+
+Every rule a formula can break on its own. Exported so the input schemas and
+the engine's own guard read the same list.
+
+Returns `{ path, message }[]`; empty means the rule is well-formed.
+
 ### `purchaseItemCanceled(item: PurchaseItem): boolean`
 
 Was this item canceled in full — nothing will come and nothing is billed?
@@ -17295,7 +17624,7 @@ Every `TransactionDefinition.id` in the catalog.
 now, not by the shape of the call that consumes them.
 
 ```ts
-type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "extend-rental" | "undo-extend-rental" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "reverse-stock-reclass" | "create-purchase" | "update-purchase" | "close-purchase" | "receive-purchase" | "reverse-purchase-receipt" | "return-purchase" | "reverse-purchase-return" | "create-purchase-bill" | "settle-purchase-bill" | "void-purchase-bill-from-xero" | "create-purchase-credit" | "allocate-purchase-credit" | "reverse-purchase-credit-allocation" | "settle-purchase-credit" | "void-purchase-credit" | "void-purchase-credit-from-xero" | "create-store-transfer" | "create-units" | "update-unit" | "open-unit-activation" | "update-unit-activation" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "close-invoice" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "record-credit-note-refund" | "sync-xero-credit-note-refunds" | "reverse-credit-note-refund" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "reconcile-order-from-invoices" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "set-location-product-default" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
+type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "extend-rental" | "undo-extend-rental" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "reverse-stock-reclass" | "create-purchase" | "update-purchase" | "close-purchase" | "receive-purchase" | "reverse-purchase-receipt" | "return-purchase" | "reverse-purchase-return" | "create-purchase-bill" | "settle-purchase-bill" | "void-purchase-bill-from-xero" | "create-purchase-credit" | "allocate-purchase-credit" | "reverse-purchase-credit-allocation" | "settle-purchase-credit" | "void-purchase-credit" | "void-purchase-credit-from-xero" | "create-store-transfer" | "create-units" | "update-unit" | "open-unit-activation" | "update-unit-activation" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "close-invoice" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "record-credit-note-refund" | "sync-xero-credit-note-refunds" | "reverse-credit-note-refund" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "reconcile-order-from-invoices" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-price-formula" | "update-price-formula" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "set-location-product-default" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
 ```
 
 ### `aggregates`
@@ -25181,6 +25510,335 @@ Zod schema for PasswordReset.
 ```ts
 const PasswordResetSchema: z.ZodType<PasswordReset>;
 ```
+
+## `@cfs/core/schemas/price-formula`
+
+### `CreatePriceFormulaInput`
+
+Zod schema for {@link CreatePriceFormulaInputType}.
+
+```ts
+const CreatePriceFormulaInput: z.ZodType<CreatePriceFormulaInputType>;
+```
+
+### `CreatePriceFormulaInputType`
+
+Input for creating a price formula.
+
+```ts
+interface CreatePriceFormulaInputType {
+  name: string;
+  description?: string | null;
+  active: boolean;
+}
+```
+
+### `PriceFormula`
+
+A price formula document in Firestore.
+
+```ts
+interface PriceFormula {
+  uid: string;
+  name: string;
+  description: string | null;
+  active: boolean;
+  uid_superseded_by: string | null;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `PriceFormulaAnchor`
+
+Where a `month` segment's periods start.
+
+```ts
+type PriceFormulaAnchor = "window_start" | typeLiteral;
+```
+
+### `PriceFormulaAnchorSchema`
+
+Zod schema for {@link PriceFormulaAnchor}. A `day_of_month` past a month's
+last day anchors on that last day — a start on the 31st is the month's end,
+defined once in `@cfs/core/utils/price-formulas`.
+
+```ts
+const PriceFormulaAnchorSchema: z.ZodType<PriceFormulaAnchor>;
+```
+
+### `PriceFormulaGapAllowance`
+
+Free suspension time per line, over a ROLLING window: a gap day is free while
+fewer than `free_days` gap days were free in the `per_months` months up to
+and including it. Gap days beyond it are metered again (Verizon, Q2).
+
+```ts
+interface PriceFormulaGapAllowance {
+  free_days: number;
+  per_months: number;
+}
+```
+
+### `PriceFormulaGapAllowanceSchema`
+
+Zod schema for {@link PriceFormulaGapAllowance}.
+
+```ts
+const PriceFormulaGapAllowanceSchema: z.ZodType<PriceFormulaGapAllowance>;
+```
+
+### `PriceFormulaMeter`
+
+WHAT time counts, and how.
+
+```ts
+interface PriceFormulaMeter {
+  source: PriceFormulaMeterSource;
+  count: PriceFormulaMeterCount;
+  gap_allowance: PriceFormulaGapAllowance | null;
+}
+```
+
+### `PriceFormulaMeterCount`
+
+Which days count. See the module docblock for the two conventions.
+
+```ts
+type PriceFormulaMeterCount = indexedAccess;
+```
+
+### `PriceFormulaMeterCountEnum`
+
+Zod schema for {@link PriceFormulaMeterCount}.
+
+```ts
+const PriceFormulaMeterCountEnum: z.ZodType<PriceFormulaMeterCount>;
+```
+
+### `PriceFormulaMeterSchema`
+
+Zod schema for {@link PriceFormulaMeter}.
+
+```ts
+const PriceFormulaMeterSchema: z.ZodType<PriceFormulaMeter>;
+```
+
+### `PriceFormulaMeterSource`
+
+WHAT time counts.
+
+- `windows` — only the line's charge windows (Five-day week, Vision). Each
+  window is metered on its own: a `window_start` anchor restarts at every
+  window (Q1, Q5).
+- `span_less_gaps` — the line's whole span, minus the gaps between windows
+  the allowance forgives (Verizon: a gap is a suspension).
+- `none` — no time; a flat amount (Fixed).
+
+```ts
+type PriceFormulaMeterSource = indexedAccess;
+```
+
+### `PriceFormulaMeterSourceEnum`
+
+Zod schema for {@link PriceFormulaMeterSource}.
+
+```ts
+const PriceFormulaMeterSourceEnum: z.ZodType<PriceFormulaMeterSource>;
+```
+
+### `PriceFormulaMinimum`
+
+A floor on metered days, applied before the ladder's last (count) segment.
+
+```ts
+interface PriceFormulaMinimum {
+  units: number;
+  unit: PriceFormulaMinimumUnit;
+  scope: PriceFormulaMinimumScope;
+}
+```
+
+### `PriceFormulaMinimumSchema`
+
+Zod schema for {@link PriceFormulaMinimum}.
+
+```ts
+const PriceFormulaMinimumSchema: z.ZodType<PriceFormulaMinimum>;
+```
+
+### `PriceFormulaMinimumScope`
+
+Whether a minimum floors each window (Five-day week) or the line's total.
+
+```ts
+type PriceFormulaMinimumScope = indexedAccess;
+```
+
+### `PriceFormulaMinimumScopeEnum`
+
+Zod schema for {@link PriceFormulaMinimumScope}.
+
+```ts
+const PriceFormulaMinimumScopeEnum: z.ZodType<PriceFormulaMinimumScope>;
+```
+
+### `PriceFormulaMinimumUnit`
+
+The unit a minimum is stated in. Must agree with the meter's count (refine).
+
+```ts
+type PriceFormulaMinimumUnit = indexedAccess;
+```
+
+### `PriceFormulaMinimumUnitEnum`
+
+Zod schema for {@link PriceFormulaMinimumUnit}.
+
+```ts
+const PriceFormulaMinimumUnitEnum: z.ZodType<PriceFormulaMinimumUnit>;
+```
+
+### `PriceFormulaRule`
+
+The rule half of a formula — everything the engine reads.
+
+```ts
+interface PriceFormulaRule {
+  meter: PriceFormulaMeter;
+  segments: PriceFormulaSegment[];
+  reprice: "remainder";
+  minimum: PriceFormulaMinimum | null;
+}
+```
+
+### `PriceFormulaSchema`
+
+Zod schema for {@link PriceFormula}.
+
+```ts
+const PriceFormulaSchema: z.ZodType<PriceFormula>;
+```
+
+### `PriceFormulaSegment`
+
+One rung of the ladder.
+
+```ts
+interface PriceFormulaSegment {
+  rate_key: string;
+  unit: PriceFormulaSegmentUnit;
+  anchor: PriceFormulaAnchor | null;
+  consume: PriceFormulaSegmentConsume;
+  rounding: PriceFormulaSegmentRounding;
+  divisor: number | "days_in_period" | null;
+}
+```
+
+### `PriceFormulaSegmentConsume`
+
+`whole` takes only complete periods and passes the rest on; `remainder` prices what is left.
+
+```ts
+type PriceFormulaSegmentConsume = indexedAccess;
+```
+
+### `PriceFormulaSegmentConsumeEnum`
+
+Zod schema for {@link PriceFormulaSegmentConsume}.
+
+```ts
+const PriceFormulaSegmentConsumeEnum: z.ZodType<PriceFormulaSegmentConsume>;
+```
+
+### `PriceFormulaSegmentRounding`
+
+How a partial period counts: not at all, as a whole one, or as its fraction.
+
+```ts
+type PriceFormulaSegmentRounding = indexedAccess;
+```
+
+### `PriceFormulaSegmentRoundingEnum`
+
+Zod schema for {@link PriceFormulaSegmentRounding}.
+
+```ts
+const PriceFormulaSegmentRoundingEnum: z.ZodType<PriceFormulaSegmentRounding>;
+```
+
+### `PriceFormulaSegmentSchema`
+
+Zod schema for {@link PriceFormulaSegment}.
+
+```ts
+const PriceFormulaSegmentSchema: z.ZodType<PriceFormulaSegment>;
+```
+
+### `PriceFormulaSegmentUnit`
+
+A segment's period. `month` is a CALENDAR period walked from its anchor;
+`week` and `day` are COUNT periods (a week is `divisor ?? 7` counted days);
+`none` is the single period of a flat formula.
+
+```ts
+type PriceFormulaSegmentUnit = indexedAccess;
+```
+
+### `PriceFormulaSegmentUnitEnum`
+
+Zod schema for {@link PriceFormulaSegmentUnit}.
+
+```ts
+const PriceFormulaSegmentUnitEnum: z.ZodType<PriceFormulaSegmentUnit>;
+```
+
+### `RateKey`
+
+A rate key: names a dated rate row, never an amount.
+
+```ts
+const RateKey: z.ZodType<string>;
+```
+
+### `UpdatePriceFormulaInput`
+
+Zod schema for {@link UpdatePriceFormulaInputType}.
+
+```ts
+const UpdatePriceFormulaInput: z.ZodType<UpdatePriceFormulaInputType>;
+```
+
+### `UpdatePriceFormulaInputType`
+
+Input for updating a price formula.
+
+⚠️ **Only labels and retirement.** The rule (`meter`, `segments`, `minimum`)
+is not on this input at all: a formula any line has priced with is
+immutable, and core cannot see references — so the safe shape is the one
+that cannot express the edit. A changed rule is a new formula, and this one
+points at it with `uid_superseded_by`.
+
+```ts
+interface UpdatePriceFormulaInputType {
+  uid: string;
+  version?: number;
+  name?: string;
+  description?: string | null;
+  active?: boolean;
+  uid_superseded_by?: string | null;
+}
+```
+
+### `priceFormulaRuleIssues(rule: PriceFormulaRule): typeLiteral[]`
+
+Every rule a formula can break on its own. Exported so the input schemas and
+the engine's own guard read the same list.
+
+Returns `{ path, message }[]`; empty means the rule is well-formed.
 
 ## `@cfs/core/schemas/product`
 
@@ -34006,7 +34664,7 @@ const RoleSummarySchema: z.ZodType<RoleSummary>;
 The full catalog of permissions. Adding a new route? Add its permission here first.
 
 ```ts
-const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "statements.create" | "statements.read" | "statements.update" | "statements.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxCodes.create" | "taxCodes.read" | "taxCodes.update" | "taxRates.create" | "taxRates.read" | "taxRates.update" | "taxClasses.create" | "taxClasses.read" | "taxClasses.update" | "suppliers.create" | "suppliers.read" | "suppliers.update" | "suppliers.delete" | "suppliers.search" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "billingSettings.update" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "destinations.update" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "purchases.create" | "purchases.read" | "purchases.search" | "purchases.update" | "purchases.receive" | "purchases.bill" | "stockSummaries.read" | "typesenseSync.read" | "units.create" | "units.read" | "units.update" | "units.activate" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "activities.read" | "reports.read" | "reports.readFinancial" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
+const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "statements.create" | "statements.read" | "statements.update" | "statements.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxCodes.create" | "taxCodes.read" | "taxCodes.update" | "taxRates.create" | "taxRates.read" | "taxRates.update" | "taxClasses.create" | "taxClasses.read" | "taxClasses.update" | "priceFormulas.create" | "priceFormulas.read" | "priceFormulas.update" | "suppliers.create" | "suppliers.read" | "suppliers.update" | "suppliers.delete" | "suppliers.search" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "billingSettings.update" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "destinations.update" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "purchases.create" | "purchases.read" | "purchases.search" | "purchases.update" | "purchases.receive" | "purchases.bill" | "stockSummaries.read" | "typesenseSync.read" | "units.create" | "units.read" | "units.update" | "units.activate" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "activities.read" | "reports.read" | "reports.readFinancial" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
 ```
 
 ### `Permission`
@@ -47130,6 +47788,169 @@ makes).
 section ADDS rather than their pair's total. A caller holding items that may
 sit in one must exclude them first, as {@link lineChargeableDays} does through
 {@link extensionFor}.
+
+## `@cfs/core/utils/price-formulas`
+
+The price-formula engine: metered time → tier counts → money.
+
+```ts
+import { meterUnits, priceFromFormula, statedUnits } from "@cfs/core/utils/price-formulas";
+```
+
+Two pure steps, so a line that STATES its count (an operator-edited
+`chargeable_days`, an extension section, a carried line) skips the first and
+keeps the second:
+
+1. {@link meterUnits} — `(formula, windows, span, holidays)` → per-tier counts,
+   each an EXACT rational `num / den`. Nothing rounds here: a prorated month is
+   `13 / 31`, a five-day week over 7 business days is `7 / 5`.
+2. {@link priceFromFormula} — `(formula, rates, counts, quantity, discount)` →
+   `{ subtotal_cents, subtotal_discounted_cents }`. Each tier is
+   `rate × quantity × num ÷ den` in BigInt integer cents, rounded ONCE with
+   `roundDivHalfAwayFromZero` (a base may be negative, core#88); a discount is
+   scaled by the same factor, exactly as `calculateItemSubtotal` scales it
+   (`cfs-money`: closure under the storage quantum).
+
+For a single-tier formula this IS `calculateItemSubtotal`: Five-day week over
+`d` days is the tier `max(d, 5) / 5`, Fixed is `1 / 1`. The sweep in
+`tests/price-formulas.test.ts` holds the two to 0 disagreements.
+
+## Calendar arithmetic
+
+Every period is Chicago CALENDAR arithmetic on `YYYY-MM-DD` dates — instants
+are reduced to their Chicago date once, at the edge, with `toChicagoYmd`, and
+nothing below adds milliseconds (`cfs-datetime`; `addChicagoDays`'s DST note).
+A month anchored on day 29–31 lands on the month's last day where the month is
+shorter, computed from the ANCHOR each time, never chained (Jan 31 → Feb 28 →
+Mar 31).
+
+### `DatedRateLike`
+
+The fields of a dated rate row {@link rateInForce} reads. Calendar dates in Chicago offset form.
+
+```ts
+interface DatedRateLike {
+  rate_key: string;
+  amount_cents: number;
+  applied_from: string;
+  applied_to: string | null;
+}
+```
+
+### `FormulaDiscount`
+
+A line's discount as the money step reads it. `rate` is 4dp DOLLARS on `flat`.
+
+```ts
+interface FormulaDiscount {
+  rate: number;
+  type: RateType;
+}
+```
+
+### `MeterInput`
+
+{@link meterUnits}' inputs.
+
+```ts
+interface MeterInput {
+  windows: readonly MeterRange[];
+  span?: MeterRange | null;
+  holidays: readonly string[];
+}
+```
+
+### `MeterRange`
+
+A window or span the meter reads. Instants (any offset) or bare `YYYY-MM-DD`.
+
+```ts
+interface MeterRange {
+  start: string;
+  end: string;
+}
+```
+
+### `MeteredUnits`
+
+{@link meterUnits}' answer.
+
+```ts
+interface MeteredUnits {
+  tiers: TierCount[];
+  windows: TierCount[][];
+}
+```
+
+### `RateSnapshot`
+
+A rate the line priced with — the snapshot a line owns (`price.rates`).
+
+```ts
+interface RateSnapshot {
+  rate_key: string;
+  amount_cents: number;
+}
+```
+
+### `TierCount`
+
+One tier's metered count, an exact rational. `den > 0`, reduced. A count may
+be zero, and a STATED count (an extension section's added days) may be
+negative.
+
+```ts
+interface TierCount {
+  rate_key: string;
+  num: number;
+  den: number;
+}
+```
+
+### `meterUnits(formula: PriceFormulaRule, input: MeterInput): MeteredUnits`
+
+**Metered time → per-tier counts.** Pure; throws on a malformed rule.
+
+- `windows`: each window is metered on its own — a `window_start` anchor
+  restarts at each one (Q1, Q5), and a `window`-scoped minimum floors each.
+- `span_less_gaps`: the span, less forgiven gaps, metered as ONE window
+  anchored at the span's start. Needs `input.span`.
+- `none`: one flat tier `1 / 1`.
+
+A `line`-scoped minimum tops up the line's total on its last window. A line
+with no windows meters nothing — no minimum invents a window.
+
+### `priceFromFormula(rates: readonly RateSnapshot[], tiers: readonly TierCount[], quantity: number, discount: FormulaDiscount | null): typeLiteral`
+
+**Tier counts → money.** Integer cents, each tier `× n ÷ d` rounded once.
+
+- `subtotal_cents` = Σ tier `round(rate × quantity × num ÷ den)`.
+- percent discount: `round(subtotal × (100 − rate) ÷ 100)`, once, on the sum.
+- flat discount: `rate` dollars per unit per counted period, so each tier's
+  discount is `round(rate × quantity × num ÷ den)`; a discount larger than
+  the line goes negative, the caller's to surface.
+
+### `rateInForce(rates: readonly R[], rateKey: string, asOf: string): R | null`
+
+The row of `rate_key` in force at `asOf`: `applied_from ≤ asOf < applied_to`,
+compared as instants with `Date.parse`, never lexically (a `-05:00` and a
+`-06:00` string do not sort as their instants do).
+
+### `snapshotRates(formula: PriceFormulaRule, rates: readonly DatedRateLike[], asOf: string): RateSnapshot[]`
+
+The snapshot a line takes at its pricing date: one {@link RateSnapshot} per
+segment's `rate_key`, from the rows in force at `asOf`.
+
+### `statedUnits(formula: PriceFormulaRule, count: number, opts: typeLiteral): TierCount[]`
+
+**A STATED count → tier counts**, for a line whose count wins over the meter:
+an operator-edited `chargeable_days`, an extension section's added days, a
+carried line. Only a single-segment count formula (`week`/`day`) or a flat
+one can take a stated count — a ladder has no single number to state.
+
+`minimum: false` skips the floor (an extension section: its minimum was
+charged on the invoice being extended), and the count may then be zero or
+negative.
 
 ## `@cfs/core/utils/purchases`
 

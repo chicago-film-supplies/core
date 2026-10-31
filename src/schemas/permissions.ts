@@ -124,6 +124,13 @@ export const PERMISSIONS = [
   "taxClasses.read",
   "taxClasses.update",
 
+  // The price-formula catalog (purchases-as-documents D1). No `.delete`, like
+  // the tax catalog: a formula is retired (`active: false`, superseded), never
+  // removed, because lines name it in their snapshot.
+  "priceFormulas.create",
+  "priceFormulas.read",
+  "priceFormulas.update",
+
   "suppliers.create",
   "suppliers.read",
   "suppliers.update",

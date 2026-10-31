@@ -159,6 +159,9 @@ export type TransactionId =
   | "update-tax-rate"
   | "create-tax-class"
   | "update-tax-class"
+  // price-formulas.ts
+  | "create-price-formula"
+  | "update-price-formula"
   // reference-data.ts
   | "create-holiday-definition"
   | "update-holiday-definition"
