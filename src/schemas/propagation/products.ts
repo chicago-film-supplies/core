@@ -734,7 +734,8 @@ const updateProductRules: CollectionRule[] = [
       {
         source: ["price", "replacement_cents"],
         target: ["price", "base_cents"],
-        transform: "the reuse arm reprices the twin from the rental's replacement price",
+        transform:
+          "a rental's own replacement price onto its twin's base price — on an ordinary price edit, and when the reuse arm reprices a twin it re-links",
       },
     ],
   },
