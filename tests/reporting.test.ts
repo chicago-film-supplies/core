@@ -436,7 +436,7 @@ const UNIT = {
 };
 const ACTIVITY = {
   month: "2026-10", from_date: "2026-10-01T00:00:00.000-05:00", to_date: "2026-11-01T00:00:00.000-05:00",
-  as_of: "2026-11-01T00:00:00.000-05:00", provider: VISION, units: [UNIT], findings: [],
+  as_of: "2026-11-01T00:00:00.000-05:00", provider: VISION, units: [UNIT], bills: [], findings: [],
   totals: { periods: 2, idle_periods: 1, expected_cents: 9_000, idle_expected_cents: 4_500 },
 };
 
@@ -462,6 +462,22 @@ Deno.test("🔴 totals that do not tie to the units are refused", () => {
   for (const key of ["periods", "idle_periods", "expected_cents", "idle_expected_cents"] as const) {
     assertThrows(() => UnitActivityReportSchema.parse({ ...ACTIVITY, totals: { ...ACTIVITY.totals, [key]: ACTIVITY.totals[key] + 1 } }), Error, key);
   }
+});
+
+Deno.test("UnitActivityReportSchema carries the provider's linked usage bills, and refuses a malformed one", () => {
+  const bill = {
+    uid_purchase_bill: "billAAAAAAAAAAAAAAAA",
+    number: 12,
+    date: "2026-10-01T00:00:00.000-05:00",
+    xero_document: "invoice" as const,
+    periods: 3,
+    expected_cents: 13_500,
+    total_cents: 13_620,
+    diverged: true,
+  };
+  UnitActivityReportSchema.parse({ ...ACTIVITY, bills: [bill] });
+  assertThrows(() => UnitActivityReportSchema.parse({ ...ACTIVITY, bills: [{ ...bill, periods: 1.5 }] }));
+  assertThrows(() => UnitActivityReportSchema.parse({ ...ACTIVITY, bills: [{ ...bill, xero_document: "quote" }] }));
 });
 
 Deno.test("a period with several orders lists them and is not idle", () => {

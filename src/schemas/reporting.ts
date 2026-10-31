@@ -969,6 +969,46 @@ export const UnitActivityFindingSchema: z.ZodType<UnitActivityFinding> = z.stric
   message: z.string(),
 });
 
+/**
+ * One of the provider's LINKED usage bills dated in the month
+ * (serialized-subrent § 7b, § 8).
+ *
+ * A usage bill is N:1 — one provider document covers many unit-periods, billed
+ * per (product, cost entry) item — so there is no per-PERIOD billed cost to
+ * report, and the report does not invent one. It lists the bills beside the
+ * periods; the operator reconciles the two.
+ *
+ * `diverged` is DERIVED, never stored: the bill's Xero total differs from the
+ * Σ of its usage items' expected amounts, or an item posts to a different
+ * account than the purchase item it projects.
+ */
+export interface UnitActivityBill {
+  uid_purchase_bill: string;
+  number: number;
+  /** The bill's date, Chicago start of day. */
+  date: string;
+  xero_document: "invoice" | "bank_transaction";
+  /** Periods its usage items bill. */
+  periods: number;
+  /** Σ periods × rate over its usage items: what CFS expected. */
+  expected_cents: number;
+  /** The Xero document's total: what the provider billed. */
+  total_cents: number;
+  diverged: boolean;
+}
+
+/** Zod schema for {@link UnitActivityBill}. */
+export const UnitActivityBillSchema: z.ZodType<UnitActivityBill> = z.strictObject({
+  uid_purchase_bill: FirestoreId,
+  number: z.int().min(1),
+  date: z.string(),
+  xero_document: z.enum(["invoice", "bank_transaction"]),
+  periods: z.int().min(0),
+  expected_cents: z.int().min(0),
+  total_cents: z.int(),
+  diverged: z.boolean(),
+});
+
 /** The report's control totals, over periods that START in the month. */
 export interface UnitActivityTotals {
   periods: number;
@@ -1017,6 +1057,8 @@ export interface UnitActivityReport {
   provider: UidNameRefType;
   /** Ascending by product name, then number. */
   units: UnitActivityUnit[];
+  /** The provider's linked usage bills dated in the month, ascending by date then number. */
+  bills: UnitActivityBill[];
   findings: UnitActivityFinding[];
   totals: UnitActivityTotals;
 }
@@ -1029,6 +1071,7 @@ export const UnitActivityReportSchema: z.ZodType<UnitActivityReport> = z.strictO
   as_of: z.string(),
   provider: UidNameRef,
   units: z.array(UnitActivityUnitSchema),
+  bills: z.array(UnitActivityBillSchema),
   findings: z.array(UnitActivityFindingSchema),
   totals: UnitActivityTotalsSchema,
 }).superRefine((doc, ctx) => {

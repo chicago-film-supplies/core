@@ -302,6 +302,13 @@ export const DOMAIN_EVENT_MSGS = [
   // record is how it gets noticed until depreciation re-bases it
   // (api-cloudrun#1388). `warn`. `{ uid_purchase, uid_product, stranded_cents }`.
   "purchase_landed_cost_stranded",
+  // Opening a unit's activation span could not ensure its provider's standing
+  // usage purchase holds an item for the span's cost entry (serialized-subrent
+  // § 7b, api-cloudrun#1396). The span committed first and stands; the next
+  // activation under the entry ensures it again, and an operator can add the
+  // item by hand. `error`, via `logError`.
+  // `{ uid_product, uid_cogs, uid_supplier, uid_purchase? }`.
+  "usage_purchase_ensure_failed",
 ] as const;
 
 /** Discriminated msg union for Domain-archetype log records. */
@@ -381,6 +388,10 @@ export interface DomainEventLogRecord {
   uid_purchase?: string;
   /** `purchase_landed_cost_stranded` — the landed cents no receipt can now price. */
   stranded_cents?: number;
+  /** `usage_purchase_ensure_failed` — the product `cogs` activation entry. */
+  uid_cogs?: string;
+  /** `usage_purchase_ensure_failed` — the entry's provider, a supplier. */
+  uid_supplier?: string;
   [key: string]: unknown;
 }
 
@@ -409,4 +420,6 @@ export const DomainEventLogRecordSchema: z.ZodType<DomainEventLogRecord> = z.obj
   refusal: z.string().optional(),
   uid_purchase: z.string().optional(),
   stranded_cents: z.int().optional(),
+  uid_cogs: z.string().optional(),
+  uid_supplier: z.string().optional(),
 }).passthrough().meta({ title: "DomainEventLogRecord" });

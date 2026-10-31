@@ -13886,6 +13886,41 @@ interface UnitActivationType {
 }
 ```
 
+### `UnitActivityBill`
+
+One of the provider's LINKED usage bills dated in the month
+(serialized-subrent § 7b, § 8).
+
+A usage bill is N:1 — one provider document covers many unit-periods, billed
+per (product, cost entry) item — so there is no per-PERIOD billed cost to
+report, and the report does not invent one. It lists the bills beside the
+periods; the operator reconciles the two.
+
+`diverged` is DERIVED, never stored: the bill's Xero total differs from the
+Σ of its usage items' expected amounts, or an item posts to a different
+account than the purchase item it projects.
+
+```ts
+interface UnitActivityBill {
+  uid_purchase_bill: string;
+  number: number;
+  date: string;
+  xero_document: "invoice" | "bank_transaction";
+  periods: number;
+  expected_cents: number;
+  total_cents: number;
+  diverged: boolean;
+}
+```
+
+### `UnitActivityBillSchema`
+
+Zod schema for {@link UnitActivityBill}.
+
+```ts
+const UnitActivityBillSchema: z.ZodType<UnitActivityBill>;
+```
+
 ### `UnitActivityFinding`
 
 A movement the journal's roster fold refused while placing a product's
@@ -14020,6 +14055,7 @@ interface UnitActivityReport {
   as_of: string;
   provider: UidNameRefType;
   units: UnitActivityUnit[];
+  bills: UnitActivityBill[];
   findings: UnitActivityFinding[];
   totals: UnitActivityTotals;
 }
@@ -32332,7 +32368,7 @@ type CloudTaskEventMsg = indexedAccess;
 Msg literals this archetype absorbs.
 
 ```ts
-const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "store_destination_no_default" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_invoice_count_high" | "invoice_created" | "invoice_updated" | "organization_check_failed" | "organization_no_xero_id" | "organization_xero_id_shared" | "organization_merged" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "oos_overbilled" | "checkout_shelf_shortfall" | "custody_delta_unmatched" | "substitution_custody_kept" | "invoice_action_unoffered" | "fulfillment_custom_item_qty_override" | "fulfillment_sync_items_skipped_no_bookings" | "fulfillment_sync_frozen_rows" | "recurrence_horizon_failed" | "tax_priced_on_unreviewed_rate" | "invoice_sync_organization_kept" | "destination_pair_unjoined" | "purchase_landed_cost_stranded"[];
+const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "store_destination_no_default" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_invoice_count_high" | "invoice_created" | "invoice_updated" | "organization_check_failed" | "organization_no_xero_id" | "organization_xero_id_shared" | "organization_merged" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "oos_overbilled" | "checkout_shelf_shortfall" | "custody_delta_unmatched" | "substitution_custody_kept" | "invoice_action_unoffered" | "fulfillment_custom_item_qty_override" | "fulfillment_sync_items_skipped_no_bookings" | "fulfillment_sync_frozen_rows" | "recurrence_horizon_failed" | "tax_priced_on_unreviewed_rate" | "invoice_sync_organization_kept" | "destination_pair_unjoined" | "purchase_landed_cost_stranded" | "usage_purchase_ensure_failed"[];
 ```
 
 ### `DmarcAggregateLogRecord`
@@ -32410,6 +32446,8 @@ interface DomainEventLogRecord {
   refusal?: string;
   uid_purchase?: string;
   stranded_cents?: number;
+  uid_cogs?: string;
+  uid_supplier?: string;
 }
 ```
 
@@ -33360,7 +33398,7 @@ Quota-gate arms (added 2026-07 with the daily-budget gate):
   a dropped write needing a human.
 
 ```ts
-const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_invoice_push_skipped" | "xero_invoice_twin_adopted" | "xero_invoice_twin_refused" | "xero_stock_adjustment_bill" | "xero_bill_pushed" | "xero_bill_push_skipped" | "xero_bill_twin_adopted" | "xero_bill_validation_rejected" | "xero_bill_terminal" | "xero_bill_enqueue_failed" | "purchase_bill_pushed" | "purchase_bill_push_skipped" | "purchase_bill_twin_adopted" | "purchase_bill_push_rejected" | "purchase_bill_enqueue_failed" | "purchase_credit_pushed" | "purchase_credit_push_skipped" | "purchase_credit_twin_adopted" | "purchase_credit_push_rejected" | "purchase_credit_enqueue_failed" | "purchase_credit_allocation_pushed" | "purchase_credit_allocation_failed" | "xero_settlement_synced" | "xero_settlement_reaped" | "xero_settlement_resurrected" | "xero_manual_intervention_required" | "credit_note_counter_raised" | "xero_credit_note_refunds_synced" | "xero_payment_already_synced" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_locked" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_superseded" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_validation_rejected" | "xero_quota_exhausted" | "xero_rate_limit" | "xero_write_deferred" | "xero_defer_escalated" | "xero_tracking_option_create_failed" | "xero_tax_rate_create_failed" | "xero_tracking_option_unresolved" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice" | "xero_untracked_accpay"[];
+const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_invoice_push_skipped" | "xero_invoice_twin_adopted" | "xero_invoice_twin_refused" | "xero_stock_adjustment_bill" | "xero_bill_pushed" | "xero_bill_push_skipped" | "xero_bill_twin_adopted" | "xero_bill_validation_rejected" | "xero_bill_terminal" | "xero_bill_enqueue_failed" | "purchase_bill_pushed" | "purchase_bill_push_skipped" | "purchase_bill_twin_adopted" | "purchase_bill_push_rejected" | "purchase_bill_enqueue_failed" | "purchase_credit_pushed" | "purchase_credit_push_skipped" | "purchase_credit_twin_adopted" | "purchase_credit_push_rejected" | "purchase_credit_enqueue_failed" | "purchase_credit_allocation_pushed" | "purchase_credit_allocation_failed" | "xero_settlement_synced" | "xero_settlement_reaped" | "xero_settlement_resurrected" | "xero_manual_intervention_required" | "credit_note_counter_raised" | "xero_credit_note_refunds_synced" | "xero_payment_already_synced" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_locked" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_superseded" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_validation_rejected" | "xero_quota_exhausted" | "xero_rate_limit" | "xero_write_deferred" | "xero_defer_escalated" | "xero_tracking_option_create_failed" | "xero_tax_rate_create_failed" | "xero_tracking_option_unresolved" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice" | "xero_untracked_accpay" | "usage_cost_diverged" | "usage_bill_link_skipped" | "usage_bill_link_failed" | "usage_bill_poll_completed"[];
 ```
 
 ### `XeroEventLogRecord`
@@ -33390,6 +33428,17 @@ interface XeroEventLogRecord {
   purchase_bill_number?: number;
   uid_purchase_credit?: string;
   purchase_credit_number?: number;
+  uid_purchase?: string;
+  uid_supplier?: string;
+  xero_bank_transaction_id?: string;
+  divergence?: "amount" | "account";
+  expected_cents?: number;
+  actual_cents?: number;
+  expected_coa?: number;
+  actual_coa?: number;
+  window_start?: string;
+  transactions_seen?: number;
+  bills_linked?: number;
   seam?: string;
   remedy?: string;
   xero_url?: string;

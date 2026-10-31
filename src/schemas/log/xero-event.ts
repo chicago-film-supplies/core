@@ -277,6 +277,29 @@ export const XERO_EVENT_MSGS = [
   // CFS invoices at all, by id or by number. Carries `xero_invoice_id` +
   // `xero_invoice_number` + `xero_status`.
   "xero_untracked_accpay",
+  // ── Linked usage bills (serialized-subrent § 7b, api-cloudrun#1396) ──
+  // A provider's usage bill is LINKED, never pushed: CFS reads the Xero
+  // document that already exists (an ACCPAY by webhook, a card SPEND by the
+  // daily poll) and records a bill on the provider's usage purchase.
+  //
+  // A linked usage bill's actual cost differs from what CFS expected — its
+  // Xero TOTAL from Σ periods × rate (`divergence: "amount"`), or a Xero line's
+  // ACCOUNT from the purchase item's (`divergence: "account"`). Warns, never
+  // refuses (owner, 2026-10-27). Carries `uid_purchase_bill` +
+  // `purchase_bill_number` + `uid_purchase` + `uid_supplier` + `divergence`,
+  // with `expected_cents`/`actual_cents` or `expected_coa`/`actual_coa`.
+  "usage_cost_diverged",
+  // A provider's Xero document was not linked, correctly: already linked, no
+  // open usage purchase, or nothing billable. `info`. Carries `reason` +
+  // `uid_supplier` + `xero_invoice_id` or `xero_bank_transaction_id`.
+  "usage_bill_link_skipped",
+  // Linking a provider's Xero document failed. `error`, via `logError`; the
+  // next delivery or poll retries it. Same identity fields as `_skipped`.
+  "usage_bill_link_failed",
+  // One daily card-first poll ran — emitted on EVERY run, so an absence rule
+  // can tell a quiet day from a dead job. `info`. Carries `window_start` +
+  // `transactions_seen` + `bills_linked`.
+  "usage_bill_poll_completed",
 ] as const;
 
 /** Discriminated msg union for Xero-archetype log records. */
@@ -320,6 +343,26 @@ export interface XeroEventLogRecord {
   uid_purchase_credit?: string;
   /** `PurchaseCredit.number` — what `CFS-SCR-{number}` is keyed on. Never reused. */
   purchase_credit_number?: number;
+  /** The purchase a `usage_*` arm is about. Its uid IS the document id. */
+  uid_purchase?: string;
+  /** The supplier (a usage provider) a `usage_*` arm is about. */
+  uid_supplier?: string;
+  /** A card SPEND a `usage_*` arm is about — the poll's document. */
+  xero_bank_transaction_id?: string;
+  /** `usage_cost_diverged` — which fact diverged. */
+  divergence?: "amount" | "account";
+  /** `usage_cost_diverged` (amount) — what CFS expected and what Xero holds, integer cents. */
+  expected_cents?: number;
+  actual_cents?: number;
+  /** `usage_cost_diverged` (account) — the purchase item's account and the Xero line's. */
+  expected_coa?: number;
+  actual_coa?: number;
+  /** `usage_bill_poll_completed` — the poll's `UpdatedDateUTC` lower bound (ISO). */
+  window_start?: string;
+  /** `usage_bill_poll_completed` — the providers' SPENDs Xero returned. */
+  transactions_seen?: number;
+  /** `usage_bill_poll_completed` — the bills this run linked. */
+  bills_linked?: number;
   /** Which manual-intervention seam fired. @see `xero_manual_intervention_required` */
   seam?: string;
   /** What a human must do about it — carried into the alert annotation. */
@@ -424,6 +467,17 @@ export const XeroEventLogRecordSchema: z.ZodType<XeroEventLogRecord> = z.object(
   purchase_bill_number: z.number().optional(),
   uid_purchase_credit: z.string().optional(),
   purchase_credit_number: z.number().optional(),
+  uid_purchase: z.string().optional(),
+  uid_supplier: z.string().optional(),
+  xero_bank_transaction_id: z.string().optional(),
+  divergence: z.enum(["amount", "account"]).optional(),
+  expected_cents: z.int().optional(),
+  actual_cents: z.int().optional(),
+  expected_coa: z.int().optional(),
+  actual_coa: z.int().optional(),
+  window_start: z.string().optional(),
+  transactions_seen: z.int().optional(),
+  bills_linked: z.int().optional(),
   seam: z.string().optional(),
   remedy: z.string().optional(),
   xero_url: z.string().optional(),
