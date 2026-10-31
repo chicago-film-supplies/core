@@ -126,7 +126,7 @@ const VISION: PriceFormulaRule = {
       rate_key: "month",
       unit: "month",
       anchor: "window_start",
-      consume: "whole",
+      consume: "cap",
       rounding: "floor",
       divisor: null,
     },
@@ -183,13 +183,31 @@ Deno.test("each single-document rule bites, naming its path", () => {
       ...VISION,
       segments: [{ ...VISION.segments[0], anchor: null }, VISION.segments[1]],
     }, "segments.0.anchor"],
-    ["whole not floor", {
+    ["cap not floor", {
       ...VISION,
       segments: [
         { ...VISION.segments[0], rounding: "ceil" },
         VISION.segments[1],
       ],
     }, "segments.0.rounding"],
+    ["whole not floor", {
+      ...VISION,
+      segments: [
+        { ...VISION.segments[0], consume: "whole", rounding: "ceil" },
+        VISION.segments[1],
+      ],
+    }, "segments.0.rounding"],
+    ["cap as the last segment", {
+      ...VISION,
+      segments: [VISION.segments[0]],
+    }, "segments.0.consume"],
+    ["cap on a week", {
+      ...VISION,
+      segments: [
+        { ...VISION.segments[1], consume: "cap", rounding: "floor" },
+        { ...VISION.segments[1], rate_key: "day", unit: "day" },
+      ],
+    }, "segments.0.consume"],
     ["repeated rate_key", {
       ...VISION,
       segments: [VISION.segments[0], {
@@ -590,6 +608,7 @@ Deno.test("(ii) Vision: the Appendix A/B rentals meter to the weeks the SPENDs b
     const m = meterUnits(VISION, {
       windows: [{ start: day(s), end: day(e) }],
       holidays: [],
+      rates: VISION_RATES,
     });
     assertEquals(
       m.tiers.map(ratio),
@@ -600,10 +619,59 @@ Deno.test("(ii) Vision: the Appendix A/B rentals meter to the weeks the SPENDs b
   const a = meterUnits(VISION, {
     windows: [{ start: day("2025-05-12"), end: day("2025-05-19") }],
     holidays: [],
+    rates: VISION_RATES,
   });
   assertEquals(
     priceFromFormula(VISION_RATES, a.tiers, 14, null).subtotal_cents,
     63_000,
+  );
+});
+
+const VISION_RATES_2024 = [{ rate_key: "week", amount_cents: 4_500 }, {
+  rate_key: "month",
+  amount_cents: 13_500,
+}];
+
+/** The pre-Q14 ladder: whole months, then uncapped weeks — the companion. */
+const VISION_UNCAPPED: PriceFormulaRule = {
+  ...VISION,
+  segments: [{ ...VISION.segments[0], consume: "whole" }, VISION.segments[1]],
+};
+
+Deno.test("(ii) Q14: a Vision month is capped at the month PRICE, decided per anchored period at the line's own rates", () => {
+  const meter = (s: string, e: string, rates: typeof VISION_RATES) =>
+    meterUnits(VISION, { windows: [{ start: day(s), end: day(e) }], holidays: [], rates });
+  const bill = (s: string, e: string, rates: typeof VISION_RATES) =>
+    priceFromFormula(rates, meter(s, e, rates).tiers, 1, null).subtotal_cents;
+
+  // V246: 27 nights in 2024 → four started weeks ($180) ≥ $135, so one block.
+  assertEquals(meter("2024-04-03", "2024-04-30", VISION_RATES_2024).tiers.map(ratio), ["1/1", "0/1"]);
+  assertEquals(bill("2024-04-03", "2024-04-30", VISION_RATES_2024), 13_500);
+  // Companion: the uncapped ladder bills V246 four weeks.
+  const uncapped = meterUnits(VISION_UNCAPPED, {
+    windows: [{ start: day("2024-04-03"), end: day("2024-04-30") }],
+    holidays: [],
+  });
+  assertEquals(uncapped.tiers.map(ratio), ["0/1", "4/1"]);
+  assertEquals(priceFromFormula(VISION_RATES_2024, uncapped.tiers, 1, null).subtotal_cents, 18_000);
+
+  // #802: 18 nights → three weeks. At 2026 rates $135 < $157.50 stays weeks;
+  // at 2024 rates $135 ≥ $135 caps — the decision moves with the rate era.
+  assertEquals(meter("2026-01-12", "2026-01-30", VISION_RATES).tiers.map(ratio), ["0/1", "3/1"]);
+  assertEquals(meter("2026-01-12", "2026-01-30", VISION_RATES_2024).tiers.map(ratio), ["1/1", "0/1"]);
+  // 22 nights at 2026 rates: four weeks ($180) ≥ $157.50 → a block.
+  assertEquals(meter("2026-01-01", "2026-01-23", VISION_RATES).tiers.map(ratio), ["1/1", "0/1"]);
+  assertEquals(meter("2026-01-01", "2026-01-22", VISION_RATES).tiers.map(ratio), ["0/1", "3/1"]);
+
+  // A 60-night run (#690's shape): a full month, then 29 nights → capped.
+  assertEquals(meter("2025-12-01", "2026-01-30", VISION_RATES).tiers.map(ratio), ["2/1", "0/1"]);
+  assertEquals(bill("2025-12-01", "2026-01-30", VISION_RATES), 31_500);
+
+  // A capped formula refuses to meter without its rates.
+  assertThrows(
+    () => meterUnits(VISION, { windows: [{ start: day("2026-01-01"), end: day("2026-01-08") }], holidays: [] }),
+    Error,
+    "rates",
   );
 });
 
@@ -614,7 +682,7 @@ Deno.test("(ii) Vision restarts at every window — the accumulating (billablePe
     { start: day("2026-03-06"), end: day("2026-03-08") },
   ];
   assertEquals(
-    meterUnits(VISION, { windows: two, holidays: [] }).tiers.map(ratio),
+    meterUnits(VISION, { windows: two, holidays: [], rates: VISION_RATES }).tiers.map(ratio),
     ["0/1", "2/1"],
   );
   assertEquals(accumulatingWeeks(two), 1);
@@ -640,14 +708,24 @@ function accumulatingWeeks(
   return touched.size;
 }
 
-/** An independent Vision oracle on date-fns: whole months by `addMonths` from the start, then ceil weeks. */
-function visionOracle(start: string, end: string): [number, number] {
+/**
+ * An independent Vision oracle on date-fns: whole months by `addMonths` from the
+ * start; the part-month tail is one more month when its started weeks cost at
+ * least the month (Q14), else ceil weeks.
+ */
+function visionOracle(
+  start: string,
+  end: string,
+  week: number,
+  month: number,
+): [number, number] {
   const s = parseISO(start, { in: CHICAGO });
   const e = parseISO(end, { in: CHICAGO });
   let months = 0;
   while (differenceInCalendarDays(e, addMonths(s, months + 1)) >= 0) months++;
   const rest = differenceInCalendarDays(e, addMonths(s, months));
-  return [months, Math.ceil(rest / 7)];
+  const weeks = Math.ceil(rest / 7);
+  return weeks * week >= month ? [months + 1, 0] : [months, weeks];
 }
 
 Deno.test("(ii) Vision vs a date-fns oracle — 10k windows; the accumulating anchor disagrees on multi-window lines", () => {
@@ -657,8 +735,12 @@ Deno.test("(ii) Vision vs a date-fns oracle — 10k windows; the accumulating an
     withTail = 0,
     monthEnd = 0,
     multi = 0,
+    capped = 0,
     accumulateDisagrees = 0;
   for (let i = 0; i < 10_000; i++) {
+    const rates = rand() < 0.5 ? VISION_RATES : VISION_RATES_2024;
+    const week = rates.find((r) => r.rate_key === "week")!.amount_cents;
+    const month = rates.find((r) => r.rate_key === "month")!.amount_cents;
     const startDay = Date.UTC(2023, 9, 1) + int(rand, 0, 1_000) * 86_400_000;
     const windows: { start: string; end: string }[] = [];
     let cursor = startDay;
@@ -673,28 +755,33 @@ Deno.test("(ii) Vision vs a date-fns oracle — 10k windows; the accumulating an
         monthEnd++;
       }
     }
-    const m = meterUnits(VISION, { windows, holidays: [] });
+    const m = meterUnits(VISION, { windows, holidays: [], rates });
     m.windows.forEach((t, w) => {
-      const [months, weeks] = visionOracle(windows[w].start, windows[w].end);
+      const [months, weeks] = visionOracle(windows[w].start, windows[w].end, week, month);
       if (t[0].num !== months || t[1].num !== weeks) wrong++;
+      const plain = visionOracle(windows[w].start, windows[w].end, 0, 1);
+      if (months !== plain[0]) capped++;
       if (months > 0) withMonth++;
       if (weeks > 0) withTail++;
     });
     if (n > 1) {
       multi++;
-      const weeksOnly = m.windows.reduce(
+      // The anchor companion reads the UNCAPPED ladder: it tests restart vs
+      // accumulate, and the cap would absorb most of its domain.
+      const u = meterUnits(VISION_UNCAPPED, { windows, holidays: [] });
+      const weeksOnly = u.windows.reduce(
         (k, t) => k + (t[0].num === 0 ? t[1].num : 0),
         0,
       );
       if (
-        m.windows.every((t) => t[0].num === 0) &&
+        u.windows.every((t) => t[0].num === 0) &&
         weeksOnly !== accumulatingWeeks(windows)
       ) accumulateDisagrees++;
     }
   }
   assertEquals(wrong, 0);
   for (
-    const [arm, n] of Object.entries({ withMonth, withTail, monthEnd, multi })
+    const [arm, n] of Object.entries({ withMonth, withTail, monthEnd, multi, capped })
   ) assert(n > 150, `arm ${arm} barely ran: ${n}`);
   assert(
     accumulateDisagrees > 20,
@@ -704,12 +791,13 @@ Deno.test("(ii) Vision vs a date-fns oracle — 10k windows; the accumulating an
 
 Deno.test("(ii) a month anchored on the 31st lands on each month's last day, computed from the anchor", () => {
   // Jan 31 → Feb 28 → Mar 31: two whole months by Mar 31, none if chained (Feb 28 → Mar 28).
-  const m = meterUnits(VISION, {
+  // Uncapped, so the anchor alone decides (the cap would absorb a 30-night tail).
+  const m = meterUnits(VISION_UNCAPPED, {
     windows: [{ start: day("2026-01-31"), end: day("2026-03-31") }],
     holidays: [],
   });
   assertEquals(m.tiers.map(ratio), ["2/1", "0/1"]);
-  const short = meterUnits(VISION, {
+  const short = meterUnits(VISION_UNCAPPED, {
     windows: [{ start: day("2026-01-31"), end: day("2026-03-30") }],
     holidays: [],
   });

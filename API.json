@@ -4384,7 +4384,7 @@
           "kind": "typeAlias",
           "name": "PriceFormulaSegmentConsume",
           "declaration": "type PriceFormulaSegmentConsume = indexedAccess;",
-          "doc": "`whole` takes only complete periods and passes the rest on; `remainder` prices what is left."
+          "doc": "`whole` takes only complete periods and passes the rest on; `remainder`\nprices what is left. `cap` (a `month` only, Q14) takes each anchored period\nwhose days would cost at least the period's own rate on the NEXT segment —\nso a unit never costs more than the month price in a month — and passes the\ncheaper periods on. The decision reads the line's rates, so a capped formula\nmeters only with them."
         },
         {
           "kind": "variable",
@@ -12067,7 +12067,7 @@
           "kind": "typeAlias",
           "name": "PriceFormulaSegmentConsume",
           "declaration": "type PriceFormulaSegmentConsume = indexedAccess;",
-          "doc": "`whole` takes only complete periods and passes the rest on; `remainder` prices what is left."
+          "doc": "`whole` takes only complete periods and passes the rest on; `remainder`\nprices what is left. `cap` (a `month` only, Q14) takes each anchored period\nwhose days would cost at least the period's own rate on the NEXT segment —\nso a unit never costs more than the month price in a month — and passes the\ncheaper periods on. The decision reads the line's rates, so a capped formula\nmeters only with them."
         },
         {
           "kind": "variable",
@@ -22700,7 +22700,7 @@
         {
           "kind": "function",
           "name": "seedLineCounts",
-          "signature": "seedLineCounts(items: readonly StructuralItem[], destinations: readonly ChargeWindowPair[], dividerUid: string, formula: PricingFormula, holidays: readonly string[]): TierCount[] | null",
+          "signature": "seedLineCounts(items: readonly StructuralItem[], destinations: readonly ChargeWindowPair[], dividerUid: string, formula: PricingFormula, holidays: readonly string[], rates?: readonly MeterRate[] | null): TierCount[] | null",
           "doc": "**The counts to SEED on a line about to land under one destination divider**\n(core#130 row 5) — the same rule {@link meteredLineCounts} prices with, for a\nclient building a line before the pricer has run. Joins the pair by the\ndivider's own `path`, exactly as the pricer does.",
           "paramTags": [],
           "returnsTag": "`null` when that pair states no windows or the divider is unknown\n(a flat formula still answers)."
@@ -22748,7 +22748,7 @@
         {
           "kind": "interface",
           "name": "MeterInput",
-          "declaration": "interface MeterInput {\n  windows: readonly MeterRange[];\n  span?: MeterRange | null;\n  holidays: readonly string[];\n}",
+          "declaration": "interface MeterInput {\n  windows: readonly MeterRange[];\n  span?: MeterRange | null;\n  holidays: readonly string[];\n  rates?: readonly MeterRate[] | null;\n}",
           "doc": "{@link meterUnits}' inputs."
         },
         {
@@ -22756,6 +22756,12 @@
           "name": "MeterRange",
           "declaration": "interface MeterRange {\n  start: string;\n  end: string;\n}",
           "doc": "A window or span the meter reads. Instants (any offset) or bare `YYYY-MM-DD`."
+        },
+        {
+          "kind": "interface",
+          "name": "MeterRate",
+          "declaration": "interface MeterRate {\n  rate_key: string;\n  amount_cents: number;\n}",
+          "doc": "One rate a `cap` decision reads: `price.rates`' shape."
         },
         {
           "kind": "interface",
@@ -22815,7 +22821,7 @@
           "kind": "function",
           "name": "meterUnits",
           "signature": "meterUnits(formula: PriceFormulaRule, input: MeterInput): MeteredUnits",
-          "doc": "**Metered time → per-tier counts.** Pure; throws on a malformed rule.\n\n- `windows`: each window is metered on its own — a `window_start` anchor\n  restarts at each one (Q1, Q5), and a `window`-scoped minimum floors each.\n- `span_less_gaps`: the span, less forgiven gaps, metered as ONE window\n  anchored at the span's start. Needs `input.span`.\n- `none`: one flat tier `1 / 1`.\n\nA `line`-scoped minimum tops up the line's total on its last window. A line\nwith no windows meters nothing — no minimum invents a window.",
+          "doc": "**Metered time → per-tier counts.** Pure; throws on a malformed rule.\n\n- `windows`: each window is metered on its own — a `window_start` anchor\n  restarts at each one (Q1, Q5), and a `window`-scoped minimum floors each.\n- `span_less_gaps`: the span, less forgiven gaps, metered as ONE window\n  anchored at the span's start. Needs `input.span`.\n- `none`: one flat tier `1 / 1`.\n\nA `line`-scoped minimum tops up the line's total on its last window. A line\nwith no windows meters nothing — no minimum invents a window.\n\nA `cap` segment decides each period on money, so a capped formula needs\n`input.rates` (the line's snapshot) and throws without them. The counts stay\ncounts: {@link priceFromFormula} is unchanged, and a delta of two meterings\n(an extension, a bill line) may carry `+1` month and `−3` weeks.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -22868,7 +22874,7 @@
         {
           "kind": "interface",
           "name": "BillLineMeterInput",
-          "declaration": "interface BillLineMeterInput {\n  price: Pick<PurchaseDocumentLinePrice, \"price_formula\">;\n  units: readonly PurchaseDocumentLineUnit[];\n  dates: ChargeWindowType | null;\n  quantity: number;\n}",
+          "declaration": "interface BillLineMeterInput {\n  price: Pick<PurchaseDocumentLinePrice, \"price_formula\" | \"rates\">;\n  units: readonly PurchaseDocumentLineUnit[];\n  dates: ChargeWindowType | null;\n  quantity: number;\n}",
           "doc": "What {@link meterBillLine} needs about the bill line."
         },
         {

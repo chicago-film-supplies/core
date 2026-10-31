@@ -178,16 +178,17 @@ export function datedPrice(formula: PricingFormula, amountCents: number): {
 }
 
 /**
- * Vision's "weekly while on, monthly blocks" (D1): windows metered on calendar
- * nights, a whole month from each switch-on, then the remainder in weeks,
- * rounded up. Its uid is the one `tests/purchases.test.ts` snapshots.
+ * Vision's "weekly while on, capped at the month" (D1, Q14): windows metered on
+ * calendar nights; per month from each switch-on, a started week is $45, and a
+ * unit never costs more than the month price in that month (`consume: "cap"`).
+ * Its uid is the one `tests/purchases.test.ts` snapshots.
  */
 export const VISION: PricingFormula = {
   uid: "VisionWeeklyFormula0",
   name: "Weekly while on",
   meter: { source: "windows", count: "calendar_day", gap_allowance: null },
   segments: [
-    { rate_key: "month", unit: "month", anchor: "window_start", consume: "whole", rounding: "floor", divisor: null },
+    { rate_key: "month", unit: "month", anchor: "window_start", consume: "cap", rounding: "floor", divisor: null },
     { rate_key: "week", unit: "week", anchor: null, consume: "remainder", rounding: "ceil", divisor: null },
   ],
   reprice: "remainder",

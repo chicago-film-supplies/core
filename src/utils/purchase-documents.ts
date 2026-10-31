@@ -74,6 +74,7 @@ import {
 } from "../schemas/mod.ts";
 import {
   combineTierCounts,
+  type MeterRate,
   meterUnits,
   priceFromFormula,
   type PricingFormula,
@@ -338,6 +339,7 @@ function unitDeltaCounts(
   billed: readonly ChargeWindowType[],
   added: readonly ChargeWindowType[],
   holidays: readonly string[],
+  rates: readonly MeterRate[],
 ): TierCount[] {
   // The recorded windows themselves, NOT unioned: two that touch are two frames.
   const frames = recorded.map(toInterval).filter((f) => f.e > f.s).sort((a, b) => a.s - b.s);
@@ -350,7 +352,7 @@ function unitDeltaCounts(
     return out.sort((a, b) => a.s - b.s).map(fromInterval);
   };
   const meter = (windows: ChargeWindowType[]) =>
-    windows.length === 0 ? [] : meterUnits(formula, { windows, span: null, holidays }).tiers;
+    windows.length === 0 ? [] : meterUnits(formula, { windows, span: null, holidays, rates }).tiers;
   return combineTierCounts(meter(framed(after)), meter(framed(before)), -1);
 }
 
@@ -361,7 +363,7 @@ function scaleCounts(counts: readonly TierCount[], quantity: number): TierCount[
 
 /** What {@link meterBillLine} needs about the bill line. */
 export interface BillLineMeterInput {
-  price: Pick<PurchaseDocumentLinePrice, "price_formula">;
+  price: Pick<PurchaseDocumentLinePrice, "price_formula" | "rates">;
   units: readonly PurchaseDocumentLineUnit[];
   /** The span billed, for a span-metered formula. */
   dates: ChargeWindowType | null;
@@ -409,7 +411,12 @@ export function meterBillLine(
     const meterTo = (end: string, windows: readonly ChargeWindowType[]) =>
       Date.parse(end) <= Date.parse(from)
         ? []
-        : meterUnits(formula, { windows, span: { start: from, end }, holidays: ctx.holidays }).tiers;
+        : meterUnits(formula, {
+          windows,
+          span: { start: from, end },
+          holidays: ctx.holidays,
+          rates: line.price.rates,
+        }).tiers;
     const delta = (windows: readonly ChargeWindowType[]) =>
       combineTierCounts(meterTo(line.dates!.end, windows), prior === null ? [] : meterTo(prior, windows), -1);
     if (line.units.length === 0) {
@@ -429,6 +436,7 @@ export function meterBillLine(
         source.billed.get(u.uid_unit) ?? [],
         u.charge_windows,
         ctx.holidays,
+        line.price.rates,
       ),
       1,
     ), []);

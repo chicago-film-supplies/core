@@ -218,7 +218,7 @@ function meterWindows(item: LineItem, windows: readonly WindowBounds[], ctx: Acc
   const formula = ctx.formulas.get(item.price.price_formula.uid);
   if (!formula) return null;
   const span = { start: windows[0].start, end: windows[windows.length - 1].end };
-  return meterUnits(formula, { windows, span, holidays: ctx.holidays }).tiers;
+  return meterUnits(formula, { windows, span, holidays: ctx.holidays, rates: item.price.rates }).tiers;
 }
 
 /** Every tier is zero. */

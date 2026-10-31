@@ -145,6 +145,17 @@ export interface MeterInput {
   span?: MeterRange | null;
   /** CFS holidays, `YYYY-MM-DD` or instants — read only by `business_day`. */
   holidays: readonly string[];
+  /**
+   * The line's rate snapshot (`price.rates`) — read only by a `cap` segment,
+   * whose decision compares money (Q14). Required for a capped formula.
+   */
+  rates?: readonly MeterRate[] | null;
+}
+
+/** One rate a `cap` decision reads: `price.rates`' shape. */
+export interface MeterRate {
+  rate_key: string;
+  amount_cents: number;
 }
 
 // ── The meter ────────────────────────────────────────────────────────
@@ -243,16 +254,53 @@ function monthOrigin(
  * Run the ladder over ONE window's metered dates. `extra` is the minimum's
  * top-up, in counted days, which only the last (count) segment can absorb.
  */
+/** A count segment's period count for `counted` days, by its own rounding. */
+function countPeriods(seg: PriceFormulaSegment, counted: bigint): Rational {
+  const P = BigInt(
+    typeof seg.divisor === "number" ? seg.divisor : seg.unit === "week" ? 7 : 1,
+  );
+  if (seg.rounding === "prorate") return reduce({ num: counted, den: P });
+  if (seg.rounding === "ceil") return { num: (counted + P - 1n) / P, den: 1n };
+  return { num: counted / P, den: 1n };
+}
+
+/** The cents a `cap` decision compares: the period's own rate and the next segment's. */
+interface CapRates {
+  period: bigint;
+  next: bigint;
+}
+
+function capRatesFor(
+  formula: PriceFormulaRule,
+  rates: readonly MeterRate[] | null | undefined,
+): (CapRates | null)[] {
+  return formula.segments.map((seg, i) => {
+    if (seg.consume !== "cap") return null;
+    const next = formula.segments[i + 1];
+    const find = (key: string) => {
+      const r = rates?.find((x) => x.rate_key === key);
+      if (!r) {
+        throw new Error(
+          `A capped formula meters with the line's rates, and none names "${key}"`,
+        );
+      }
+      return BigInt(r.amount_cents);
+    };
+    return { period: find(seg.rate_key), next: find(next.rate_key) };
+  });
+}
+
 function runLadder(
   formula: PriceFormulaRule,
   days: readonly number[],
   windowStart: number,
   extra: number,
+  caps: readonly (CapRates | null)[] = [],
 ): Rational[] {
   const out: Rational[] = [];
   let remaining = new Set(days);
   let carried = extra; // counted days with no calendar position
-  for (const seg of formula.segments) {
+  for (const [si, seg] of formula.segments.entries()) {
     if (seg.unit === "none") {
       out.push({ num: 1n, den: 1n });
       continue;
@@ -277,6 +325,17 @@ function runLadder(
         let c = 0;
         for (let d = ps; d < pe; d++) if (remaining.has(d)) c++;
         if (c === 0) continue;
+        if (seg.consume === "cap") {
+          // Q14: one block when the period's days would cost at least the
+          // block on the next segment — the cap is the period's PRICE.
+          const cap = caps[si]!;
+          const fallback = countPeriods(formula.segments[si + 1], BigInt(c));
+          if (fallback.num * cap.next >= cap.period * fallback.den) {
+            total = addRational(total, { num: 1n, den: 1n });
+            for (let d = ps; d < pe; d++) next.delete(d);
+          }
+          continue;
+        }
         if (seg.consume === "whole") {
           if (c === length) {
             total = addRational(total, { num: 1n, den: 1n });
@@ -293,29 +352,23 @@ function runLadder(
         }
       }
       out.push(total);
-      remaining = seg.consume === "whole" ? next : new Set();
+      remaining = seg.consume === "remainder" ? new Set() : next;
       continue;
     }
     // A count segment: week or day.
     const counted = remaining.size + carried;
-    const period = typeof seg.divisor === "number"
-      ? seg.divisor
-      : seg.unit === "week"
-      ? 7
-      : 1;
-    const P = BigInt(period);
     const C = BigInt(counted);
     if (seg.consume === "whole") {
+      const P = BigInt(
+        typeof seg.divisor === "number" ? seg.divisor : seg.unit === "week" ? 7 : 1,
+      );
       const k = C / P;
       out.push({ num: k, den: 1n });
       remaining = new Set();
       carried = Number(C - k * P);
       continue;
     }
-    if (seg.rounding === "prorate") out.push(reduce({ num: C, den: P }));
-    else if (seg.rounding === "ceil") {
-      out.push({ num: (C + P - 1n) / P, den: 1n });
-    } else out.push({ num: C / P, den: 1n });
+    out.push(countPeriods(seg, C));
     remaining = new Set();
     carried = 0;
   }
@@ -349,12 +402,18 @@ function toTiers(
  *
  * A `line`-scoped minimum tops up the line's total on its last window. A line
  * with no windows meters nothing — no minimum invents a window.
+ *
+ * A `cap` segment decides each period on money, so a capped formula needs
+ * `input.rates` (the line's snapshot) and throws without them. The counts stay
+ * counts: {@link priceFromFormula} is unchanged, and a delta of two meterings
+ * (an extension, a bill line) may carry `+1` month and `−3` weeks.
  */
 export function meterUnits(
   formula: PriceFormulaRule,
   input: MeterInput,
 ): MeteredUnits {
   assertRule(formula);
+  const caps = capRatesFor(formula, input.rates);
   const holidays = new Set(input.holidays.map((h) => dayNumber(toYmd(h))));
   let perWindow: { days: number[]; start: number }[];
   if (formula.meter.source === "none") {
@@ -393,7 +452,7 @@ export function meterUnits(
   }
 
   const windows = perWindow.map((w, i) =>
-    runLadder(formula, w.days, w.start, extras[i])
+    runLadder(formula, w.days, w.start, extras[i], caps)
   );
   const sums = formula.segments.map((_, t) =>
     windows.reduce<Rational>((acc, w) => addRational(acc, w[t]), {

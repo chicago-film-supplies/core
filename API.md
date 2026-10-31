@@ -9919,7 +9919,12 @@ interface PriceFormulaSegment {
 
 ### `PriceFormulaSegmentConsume`
 
-`whole` takes only complete periods and passes the rest on; `remainder` prices what is left.
+`whole` takes only complete periods and passes the rest on; `remainder`
+prices what is left. `cap` (a `month` only, Q14) takes each anchored period
+whose days would cost at least the period's own rate on the NEXT segment —
+so a unit never costs more than the month price in a month — and passes the
+cheaper periods on. The decision reads the line's rates, so a capped formula
+meters only with them.
 
 ```ts
 type PriceFormulaSegmentConsume = indexedAccess;
@@ -26047,7 +26052,12 @@ interface PriceFormulaSegment {
 
 ### `PriceFormulaSegmentConsume`
 
-`whole` takes only complete periods and passes the rest on; `remainder` prices what is left.
+`whole` takes only complete periods and passes the rest on; `remainder`
+prices what is left. `cap` (a `month` only, Q14) takes each anchored period
+whose days would cost at least the period's own rate on the NEXT segment —
+so a unit never costs more than the month price in a month — and passes the
+cheaper periods on. The decision reads the line's rates, so a capped formula
+meters only with them.
 
 ```ts
 type PriceFormulaSegmentConsume = indexedAccess;
@@ -48198,7 +48208,7 @@ The line must already carry its `counts` ({@link lineCounts}). `extension`
 marks a line whose counts are the days an extension section ADDS, stated with
 the minimum skipped — only a flat tax reads it, and is refused.
 
-### `seedLineCounts(items: readonly StructuralItem[], destinations: readonly ChargeWindowPair[], dividerUid: string, formula: PricingFormula, holidays: readonly string[]): TierCount[] | null`
+### `seedLineCounts(items: readonly StructuralItem[], destinations: readonly ChargeWindowPair[], dividerUid: string, formula: PricingFormula, holidays: readonly string[], rates?: readonly MeterRate[] | null): TierCount[] | null`
 
 **The counts to SEED on a line about to land under one destination divider**
 (core#130 row 5) — the same rule {@link meteredLineCounts} prices with, for a
@@ -48320,6 +48330,7 @@ interface MeterInput {
   windows: readonly MeterRange[];
   span?: MeterRange | null;
   holidays: readonly string[];
+  rates?: readonly MeterRate[] | null;
 }
 ```
 
@@ -48331,6 +48342,17 @@ A window or span the meter reads. Instants (any offset) or bare `YYYY-MM-DD`.
 interface MeterRange {
   start: string;
   end: string;
+}
+```
+
+### `MeterRate`
+
+One rate a `cap` decision reads: `price.rates`' shape.
+
+```ts
+interface MeterRate {
+  rate_key: string;
+  amount_cents: number;
 }
 ```
 
@@ -48424,6 +48446,11 @@ The formula uids a set of lines name — what a caller must load into {@link Pri
 
 A `line`-scoped minimum tops up the line's total on its last window. A line
 with no windows meters nothing — no minimum invents a window.
+
+A `cap` segment decides each period on money, so a capped formula needs
+`input.rates` (the line's snapshot) and throws without them. The counts stay
+counts: {@link priceFromFormula} is unchanged, and a delta of two meterings
+(an extension, a bill line) may carry `+1` month and `−3` weeks.
 
 ### `priceFormulaRefOf(formula: PricingFormula): PriceFormulaRef`
 
@@ -48525,7 +48552,7 @@ What {@link meterBillLine} needs about the bill line.
 
 ```ts
 interface BillLineMeterInput {
-  price: Pick<PurchaseDocumentLinePrice, "price_formula">;
+  price: Pick<PurchaseDocumentLinePrice, "price_formula" | "rates">;
   units: readonly PurchaseDocumentLineUnit[];
   dates: ChargeWindowType | null;
   quantity: number;

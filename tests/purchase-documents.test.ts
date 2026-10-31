@@ -222,24 +222,26 @@ Deno.test("unitWindowsForLine: only windows naming the line, closed at `through`
 Deno.test("projector: a Vision window billed in TWO halves bills a month and two weeks in all — the counts telescope", () => {
   const item = visionLine({ quantity: 1, quantity_received: 1 });
   const units = [unit(1, [{ start: jan(1), end: null }])];
-  const first = project(item, jan(11), units)!; // 10 nights → 2 weeks
+  const first = project(item, jan(21), units)!; // 20 nights → 3 weeks, under the cap
   assertEquals(first.quantity, 1);
-  assertEquals(first.units, [{ uid_unit: "unit-1", charge_windows: [{ start: jan(1), end: jan(11) }] }]);
-  assertEquals(first.amount_cents, 9000);
+  assertEquals(first.units, [{ uid_unit: "unit-1", charge_windows: [{ start: jan(1), end: jan(21) }] }]);
+  assertEquals(first.amount_cents, 13500);
 
   const billed = { bills: [billDoc(1, [first])], credits: [] };
   const second = project(item, feb(10), units, billed, 11)!; // through 40 nights
-  assertEquals(second.units, [{ uid_unit: "unit-1", charge_windows: [{ start: jan(11), end: feb(10) }] }]);
-  // The whole window meters 1 month (Jan 1 → Feb 1) + 9 nights → 2 weeks.
-  const whole = meterUnits(VISION, { windows: [{ start: jan(1), end: feb(10) }], holidays: [] }).tiers;
+  assertEquals(second.units, [{ uid_unit: "unit-1", charge_windows: [{ start: jan(21), end: feb(10) }] }]);
+  // The whole window meters 1 month (Jan 1 → Feb 1, capped) + 9 nights → 2 weeks.
+  const whole = meterUnits(VISION, { windows: [{ start: jan(1), end: feb(10) }], holidays: [], rates: VISION_RATES }).tiers;
   assertEquals(first.amount_cents + second.amount_cents, money(whole));
-  assertEquals(second.amount_cents, 15750);
+  // The delta carries a NEGATIVE tier: +1 month, −1 week (Q14).
+  assertEquals(second.price?.counts, [{ rate_key: "month", num: 1, den: 1 }, { rate_key: "week", num: -1, den: 1 }]);
+  assertEquals(second.amount_cents, 11250);
 
-  // Companion: metering the second half ALONE restarts the month at Jan 11 and
-  // bills 30 nights as five weeks — the defect the delta exists to prevent.
-  const alone = meterUnits(VISION, { windows: [{ start: jan(11), end: feb(10) }], holidays: [] }).tiers;
+  // Companion: metering the second half ALONE restarts the month at Jan 21 and
+  // bills 20 nights as three weeks — the defect the delta exists to prevent.
+  const alone = meterUnits(VISION, { windows: [{ start: jan(21), end: feb(10) }], holidays: [], rates: VISION_RATES }).tiers;
   assertNotEquals(money(alone), second.amount_cents);
-  assertEquals(money(alone), 22500);
+  assertEquals(money(alone), 13500);
 });
 
 Deno.test("projector: two unit windows that TOUCH stay two windows — each restarts its anchor", () => {
@@ -248,7 +250,7 @@ Deno.test("projector: two unit windows that TOUCH stay two windows — each rest
   const line = project(item, feb(1), units)!;
   // 3 nights → 1 week, then 4 nights → 1 week. Merged they would be 7 nights → 1 week.
   assertEquals(line.amount_cents, 9000);
-  const merged = meterUnits(VISION, { windows: [{ start: jan(1), end: jan(8) }], holidays: [] }).tiers;
+  const merged = meterUnits(VISION, { windows: [{ start: jan(1), end: jan(8) }], holidays: [], rates: VISION_RATES }).tiers;
   assertEquals(money(merged), 4500);
 });
 
@@ -314,11 +316,11 @@ Deno.test("projector: a SPAN line bills forward from where its bills left off, a
 
 Deno.test("meterBillLine: a flat line meters nothing, a missing formula and a span-less span line throw", () => {
   const src = { span: null, recorded: new Map(), billed: new Map(), billedSpanEnd: null };
-  assertThrows(() => meterBillLine({ price: { price_formula: FIXED_REF }, units: [], dates: null, quantity: 1 }, src, CTX));
+  assertThrows(() => meterBillLine({ price: { price_formula: FIXED_REF, rates: [] }, units: [], dates: null, quantity: 1 }, src, CTX));
   const ghost = { uid: "GhostFormula00000000", name: "Ghost", basis: "time" as const };
-  assertThrows(() => meterBillLine({ price: { price_formula: ghost }, units: [], dates: null, quantity: 1 }, src, CTX), Error, "not loaded");
+  assertThrows(() => meterBillLine({ price: { price_formula: ghost, rates: [] }, units: [], dates: null, quantity: 1 }, src, CTX), Error, "not loaded");
   assertThrows(
-    () => meterBillLine({ price: { price_formula: priceFormulaRefOf(VERIZON) }, units: [], dates: null, quantity: 1 }, src, CTX),
+    () => meterBillLine({ price: { price_formula: priceFormulaRefOf(VERIZON), rates: [] }, units: [], dates: null, quantity: 1 }, src, CTX),
     Error,
     "meters a span",
   );

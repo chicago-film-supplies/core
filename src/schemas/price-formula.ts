@@ -92,8 +92,15 @@ export type PriceFormulaSegmentUnit = typeof SEGMENT_UNITS[number];
 export const PriceFormulaSegmentUnitEnum: z.ZodType<PriceFormulaSegmentUnit> = z
   .enum(SEGMENT_UNITS);
 
-const SEGMENT_CONSUME = ["whole", "remainder"] as const;
-/** `whole` takes only complete periods and passes the rest on; `remainder` prices what is left. */
+const SEGMENT_CONSUME = ["whole", "cap", "remainder"] as const;
+/**
+ * `whole` takes only complete periods and passes the rest on; `remainder`
+ * prices what is left. `cap` (a `month` only, Q14) takes each anchored period
+ * whose days would cost at least the period's own rate on the NEXT segment —
+ * so a unit never costs more than the month price in a month — and passes the
+ * cheaper periods on. The decision reads the line's rates, so a capped formula
+ * meters only with them.
+ */
 export type PriceFormulaSegmentConsume = typeof SEGMENT_CONSUME[number];
 /** Zod schema for {@link PriceFormulaSegmentConsume}. */
 export const PriceFormulaSegmentConsumeEnum: z.ZodType<
@@ -329,17 +336,29 @@ export function priceFormulaRuleIssues(
     if (last && s.consume !== "remainder") {
       add(["segments", i, "consume"], "The last segment prices the remainder.");
     }
-    if (!last && s.consume !== "whole") {
+    if (!last && s.consume === "remainder") {
       add(
         ["segments", i, "consume"],
         "Only the last segment takes the remainder.",
       );
     }
-    if (s.consume === "whole" && s.rounding !== "floor") {
+    if (s.consume !== "remainder" && s.rounding !== "floor") {
       add(
         ["segments", i, "rounding"],
-        "A `whole` segment counts complete periods only, so it rounds `floor`.",
+        `A \`${s.consume}\` segment counts whole periods only, so it rounds \`floor\`.`,
       );
+    }
+    if (s.consume === "cap") {
+      if (s.unit !== "month") {
+        add(["segments", i, "consume"], "Only a `month` segment caps.");
+      }
+      const next = segments[i + 1];
+      if (next && next.unit !== "week" && next.unit !== "day") {
+        add(
+          ["segments", i, "consume"],
+          "A cap compares against the next segment, which must be a `week` or `day` count.",
+        );
+      }
     }
     if (s.unit === "month") {
       if (s.anchor === null) {

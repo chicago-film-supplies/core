@@ -68,6 +68,7 @@ import {
 } from "./orders.ts";
 import {
   meterUnits,
+  type MeterRate,
   type PricingFormula,
   type PricingFormulas,
   priceFormulaRefOf,
@@ -386,7 +387,12 @@ export function meteredLineCounts(
   const pair = pairOf(item, ctx.charge_windows);
   if (!pair) return null;
   const envelope = { start: pair.windows[0].start, end: pair.windows[pair.windows.length - 1].end };
-  return meterUnits(formula, { windows: pair.windows, span: envelope, holidays: ctx.holidays }).tiers;
+  return meterUnits(formula, {
+    windows: pair.windows,
+    span: envelope,
+    holidays: ctx.holidays,
+    rates: item.price?.rates,
+  }).tiers;
 }
 
 /**
@@ -447,6 +453,7 @@ export function seedLineCounts(
   dividerUid: string,
   formula: PricingFormula,
   holidays: readonly string[],
+  rates?: readonly MeterRate[] | null,
 ): TierCount[] | null {
   if (formula.meter.source === "none") return meterUnits(formula, { windows: [], holidays }).tiers;
   const divider = items.find((it) => it.uid === dividerUid && it.type === "destination");
@@ -457,7 +464,7 @@ export function seedLineCounts(
   );
   if (!pair) return null;
   const envelope = { start: pair.windows[0].start, end: pair.windows[pair.windows.length - 1].end };
-  return meterUnits(formula, { windows: pair.windows, span: envelope, holidays }).tiers;
+  return meterUnits(formula, { windows: pair.windows, span: envelope, holidays, rates }).tiers;
 }
 
 /**
