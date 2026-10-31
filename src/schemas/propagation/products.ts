@@ -203,16 +203,16 @@ const COUNT_BOUNDARY_TESTED: EnforcementRef = {
 const LINKED_TWIN_TESTED: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/products/updateProductPropagation.test.ts::PUT active on a rental writes its replacement twin",
+    "api-cloudrun/tests/integration/products/products.test.ts::PUT active on a rental writes its replacement twin",
   clause:
-    "both directions of the `active` copy and the replacement's `base_cents` reaching its rental's `replacement_cents`, each asserted on the twin document after the PUT; the unlink and reuse arms are asserted in `products.test.ts`'s replacement-twin steps",
+    "both directions of the `active` copy and the replacement's `base_cents` reaching its rental's `replacement_cents`, each asserted on the twin document and on `rules_fired` after the PUT (`PUT base price on a replacement writes its rental's replacement_cents` is the price arm); the unlink and reuse arms are asserted in the same file's replacement-twin steps",
   gates: true,
 };
 
 const LINKED_TWIN_WEBSHOP_TESTED: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/products/updateProductPropagation.test.ts::PUT active on a replacement writes its rental and the rental's webshop mirror",
+    "api-cloudrun/tests/integration/products/products.test.ts::PUT active on a replacement writes its rental and the rental's webshop mirror",
   clause:
     "a replacement's `active` flip reaches its webshop-listed rental AND that rental's mirror in the same transaction — the edited product's own mirror is `update-product:to-webshop`'s, and the twin's was the hole",
   gates: true,
