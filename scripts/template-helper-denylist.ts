@@ -720,6 +720,29 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "remainingToReceive",
     "remainingToReturn",
   ],
+  // Purchase → bill machinery (purchases-as-documents D5–D7): the projector, the
+  // window coverage, the metering and pricing of a bill line, and the
+  // purchase → bill sync. A template renders a bill whose lines already carry
+  // their counts and money.
+  "purchase-documents": [
+    "billedSpanEnd",
+    "billedUnitCoverage",
+    "meterBillLine",
+    "pricePurchaseDocument",
+    "projectPurchaseLineForBill",
+    "projectPurchaseLineToBillLine",
+    "purchaseBillIsLive",
+    "purchaseBillSharedLineFields",
+    "subtractChargeWindows",
+    "syncPurchaseToBills",
+    "unbilledUnitWindows",
+    "unitWindowsForLine",
+  ],
+  // The purchase ↔ bill diff (D6) is a review surface for the manager, computed
+  // from several documents a render context never holds together.
+  purchaseDiff: [
+    "computePurchaseBillDiffs",
+  ],
   replacements: [
     "billedOutOfService",
     "isBillableOutOfService",
@@ -942,6 +965,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // Line-builder and pricer plumbing (ruling 8): a snapshot is taken at
     // write, and a render prints what the line stored.
     "catalogRateSnapshot",
+    "combineTierCounts",
     "formulaUidsOf",
     "priceFormulaRefOf",
     "meterUnits",

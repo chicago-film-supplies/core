@@ -176,3 +176,41 @@ export function datedPrice(formula: PricingFormula, amountCents: number): {
     })),
   };
 }
+
+/**
+ * Vision's "weekly while on, monthly blocks" (D1): windows metered on calendar
+ * nights, a whole month from each switch-on, then the remainder in weeks,
+ * rounded up. Its uid is the one `tests/purchases.test.ts` snapshots.
+ */
+export const VISION: PricingFormula = {
+  uid: "VisionWeeklyFormula0",
+  name: "Weekly while on",
+  meter: { source: "windows", count: "calendar_day", gap_allowance: null },
+  segments: [
+    { rate_key: "month", unit: "month", anchor: "window_start", consume: "whole", rounding: "floor", divisor: null },
+    { rate_key: "week", unit: "week", anchor: null, consume: "remainder", rounding: "ceil", divisor: null },
+  ],
+  reprice: "remainder",
+  minimum: null,
+};
+
+/**
+ * Verizon's "monthly unless suspended" (D1): the line's span less suspensions
+ * beyond 30 free days per rolling 12 months, in months anchored on the 2nd,
+ * prorated by the days in the period.
+ */
+export const VERIZON: PricingFormula = {
+  uid: "VerizonMonthlyFormul",
+  name: "Monthly unless suspended",
+  meter: { source: "span_less_gaps", count: "calendar_day", gap_allowance: { free_days: 30, per_months: 12 } },
+  segments: [{
+    rate_key: "month",
+    unit: "month",
+    anchor: { day_of_month: 2 },
+    consume: "remainder",
+    rounding: "prorate",
+    divisor: "days_in_period",
+  }],
+  reprice: "remainder",
+  minimum: null,
+};

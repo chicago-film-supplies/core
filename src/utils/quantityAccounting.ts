@@ -142,7 +142,7 @@ import { isAtOrBelow, standInUnits, substitutionCredit } from "./substitutions.t
 
 export { substitutionCredit };
 import { chargeEnvelope, chicagoDayAtTimeOf, toChicagoYmd } from "./dates.ts";
-import { meterUnits, priceFromFormula, type PricingFormulas, type TierCount } from "./price-formulas.ts";
+import { combineTierCounts, meterUnits, priceFromFormula, type PricingFormulas, type TierCount } from "./price-formulas.ts";
 import { isPreTaxItem, type LineItem } from "./orders.ts";
 import { priceLine } from "./price-document.ts";
 
@@ -221,26 +221,6 @@ function meterWindows(item: LineItem, windows: readonly WindowBounds[], ctx: Acc
   return meterUnits(formula, { windows, span, holidays: ctx.holidays }).tiers;
 }
 
-function gcdN(a: number, b: number): number {
-  a = Math.abs(a);
-  b = Math.abs(b);
-  while (b) [a, b] = [b, a % b];
-  return a || 1;
-}
-
-/** Tier-wise `a + sign × b` over the union of rate keys, each tier reduced. */
-function combineCounts(a: readonly TierCount[], b: readonly TierCount[], sign: 1 | -1): TierCount[] {
-  const keys = [...new Set([...a.map((t) => t.rate_key), ...b.map((t) => t.rate_key)])];
-  return keys.map((rate_key) => {
-    const x = a.find((t) => t.rate_key === rate_key) ?? { rate_key, num: 0, den: 1 };
-    const y = b.find((t) => t.rate_key === rate_key) ?? { rate_key, num: 0, den: 1 };
-    const num = x.num * y.den + sign * y.num * x.den;
-    const den = x.den * y.den;
-    const g = gcdN(num, den);
-    return { rate_key, num: num / g, den: den / g };
-  });
-}
-
 /** Every tier is zero. */
 function countsAreZero(counts: readonly TierCount[]): boolean {
   return counts.every((t) => t.num === 0);
@@ -248,7 +228,7 @@ function countsAreZero(counts: readonly TierCount[]): boolean {
 
 /** Two count lists name the same value per key. */
 function sameCountValues(a: readonly TierCount[], b: readonly TierCount[]): boolean {
-  return countsAreZero(combineCounts(a, b, -1));
+  return countsAreZero(combineTierCounts(a, b, -1));
 }
 
 /**
@@ -986,12 +966,12 @@ export function extensionGroups(
       if (open.length === 0) break;
       const earliest = open.reduce((a, b) => {
         const byEnd = Date.parse(b.billed_end) - Date.parse(a.billed_end);
-        return byEnd < 0 || (byEnd === 0 && countsDirection(a.item, combineCounts(b.billed_counts, a.billed_counts, -1)) < 0)
+        return byEnd < 0 || (byEnd === 0 && countsDirection(a.item, combineTierCounts(b.billed_counts, a.billed_counts, -1)) < 0)
           ? b
           : a;
       });
       const moved = Math.min(left, earliest.quantity);
-      const billedCounts = combineCounts(earliest.billed_counts, added, 1);
+      const billedCounts = combineTierCounts(earliest.billed_counts, added, 1);
       // The extension bills its own window ON TOP of what the group already carried.
       const billedSet = [...earliest.billed_set, ...row.window.windows];
       earliest.quantity -= moved;
@@ -1024,7 +1004,7 @@ export function extensionGroups(
     if (sameWindowDates(g.billed_set, orderWindow.windows)) continue;
     const ordered = meterWindows(g.item, orderWindow.windows, ctx);
     if (ordered === null) continue;
-    const extension = combineCounts(ordered, g.billed_counts, -1);
+    const extension = combineTierCounts(ordered, g.billed_counts, -1);
     const direction = countsDirection(g.item, extension);
     if (direction === 0) continue;
     out.push({ ...g, extension_counts: extension, extension_direction: direction });

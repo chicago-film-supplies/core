@@ -1008,12 +1008,24 @@ Deno.test("classifySharedFields(PurchaseSchema, bill/credit) is fail-closed — 
     assertEquals(c.rows, ["items[]"]);
   }
   const kinds = Object.fromEntries(classifySharedFields(PurchaseSchema, PurchaseBillSchema).fields.map((f) => [f.path, f.kind]));
-  // The posting and the labels follow; the billed quantity and amount are homonyms.
+  // The posting, the labels and the price TERMS follow (D5, `syncPurchaseToBills`):
+  // the formula snapshot whole, the rates as one value, the discount's terms.
   assertEquals(kinds["items[].coa_posting"], "propagated");
   assertEquals(kinds["items[].uid_tracking_category"], "propagated");
   assertEquals(kinds["items[].name"], "propagated");
+  assertEquals(kinds["items[].price.price_formula"], "atom");
+  assertEquals(kinds["items[].price.rates"], "propagated");
+  assertEquals(kinds["items[].price.discount.rate"], "propagated");
+  assertEquals(kinds["items[].price.discount.type"], "propagated");
+  // Re-derived on the bill, never compared: a bill's share of a discount is its own.
+  assertEquals(kinds["items[].price.discount.amount_cents"], "derived");
+  // What the SUPPLIER billed never follows: the billed quantity, the money and
+  // the span are homonyms, and the bill's `units` and `counts` are bill-only.
   assertEquals(kinds["items[].quantity"], "homonym");
   assertEquals(kinds["items[].amount_cents"], "homonym");
+  assertEquals(kinds["items[].dates"], "homonym");
+  assertEquals(kinds["items[].units"], undefined);
+  assertEquals(kinds["items[].price.counts"], undefined);
   assertEquals(kinds["supplier"], "atom");
 });
 

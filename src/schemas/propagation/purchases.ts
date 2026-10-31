@@ -315,6 +315,43 @@ const CARD_BILL_BORN_PAID: EnforcementRef = {
   gates: true,
 };
 
+/** The purchase → bill merge semantics — pure, in `@cfs/core/utils/purchase-documents`. */
+const PURCHASE_BILL_SYNC_SEMANTICS: EnforcementRef = {
+  kind: "test",
+  ref: "core/tests/purchase-documents.test.ts::syncPurchaseToBills",
+  clause:
+    "the three-way policy per field: a pushed, live, unsettled bill line takes the purchase line's new value of each shared field read off the two schemas (`purchaseBillSharedLineFields`) unless the bill's differs from the PREVIOUS purchase's; quantity, amount_cents and dates are homonyms and the bill's `units` are bill-only, so windows and quantities never move; a formula change re-meters the line from its own windows and every time line is re-priced from rates × counts; a linked, frozen or voided bill is skipped whole. Does NOT cover the writer's point-get of `query_by_bills` or the post-commit Xero edit push.",
+  gates: true,
+};
+
+const updatePurchaseBillRules: CollectionRule[] = [
+  {
+    id: "update-purchase:purchase-to-bills",
+    source: "purchases",
+    target: "purchase-bills",
+    mode: "co-write",
+    invariant:
+      "A pushed, unsettled bill stays in step with its purchase: each line follows the purchase line it projects on every shared field the bill has not overridden (D5, the order → invoice rule). The bill's windows, units and quantities are what the SUPPLIER billed and never follow — a purchase-side extension must not rewrite them. A linked bill is Xero's and is never written; a settled or voided one is frozen.",
+    enforced_by: [PURCHASE_BILL_SYNC_SEMANTICS],
+    transaction: "update-purchase",
+    trigger:
+      "an item's name, type, price (formula, rates, discount), coa_posting, uid_tracking_category or attribution changes on the purchase — targets every bill in `query_by_bills` that is pushed, has no money settlement and is not voided",
+    fields: [
+      {
+        source: ["items"],
+        target: ["items"],
+        transform:
+          "match each bill line to its purchase line by path_purchase_item; mergeSharedFields(prev purchase line, next purchase line, bill line) over the classification of (PurchaseSchema, PurchaseBillSchema), each purchase line first projected to the bill line's shape (`projectPurchaseLineForBill`). Then re-derive: a time line whose formula changed is re-metered from its own windows against the earlier bills' coverage, and its money is priced from rates × counts; a flat line keeps its net amount.",
+      },
+      {
+        source: ["items"],
+        target: ["totals"],
+        transform: "total_cents = Σ line money (`pricePurchaseDocument`); amount_due_cents moves with it",
+      },
+    ],
+  },
+];
+
 const createPurchaseBillRules: CollectionRule[] = [
   {
     id: "create-purchase-bill:bill-to-purchase",
@@ -322,14 +359,20 @@ const createPurchaseBillRules: CollectionRule[] = [
     target: "purchases",
     mode: "co-write",
     invariant:
-      "Every bill line bills some quantity of ONE purchase line (keyed by product) and moves that line's `quantity_billed` in the same commit, so the bucket is the sum of the bills naming it. Billing is refused past `quantity − quantity_canceled`. Each line is priced at `cumulativeShareCents(line.amount_cents, line.quantity, billed_before, billed_after)` — never a client input — so the bills of a fully billed line sum to its amount exactly. A LINKED bill's lines are priced the same way for attribution; its total is Xero's and is exempt.",
+      "Every bill product line bills ONE purchase line, named by `path_purchase_item` (never by product: one product may sit on two lines), and is defaulted from it by `projectPurchaseLineToBillLine` (`@cfs/core/utils/purchase-documents`). A FLAT line moves that line's `quantity_billed` in the same commit, so the bucket is the sum of the bills naming it, and is priced at `cumulativeShareCents(line.amount_cents, line.quantity, billed_before, billed_after)` — never a client input — so the bills of a fully billed line sum to its amount exactly. A TIME line has no billed count (`quantity_billed: null`): it bills its units' UNBILLED charge windows, metered as a delta of the cumulative meter so a window split across bills keeps one anchor. Billing past what was ordered is LEGAL and flagged by the purchase↔bill diff, never refused (D5, reversing #1396). The bill's uid is appended to the purchase's `query_by_bills` in the same commit. A LINKED bill's lines are projected the same way for attribution; its total is Xero's and is exempt.",
     enforced_by: [BILL_MOVES_THE_BUCKET],
     transaction: "create-purchase-bill",
     fields: [
       {
         source: ["items", "quantity"],
         target: ["items", "quantity_billed"],
-        transform: "+ quantity on the purchase line whose uid_product is the bill line's",
+        transform: "+ quantity on the FLAT purchase line the bill line's path_purchase_item names; a time line's stays null",
+      },
+      {
+        source: ["uid"],
+        target: ["query_by_bills"],
+        transform:
+          "appended (arrayUnion) so the purchase → bill sync can point-get every bill inside the purchase writer's transaction rather than range-read them; a void leaves it, because a voided bill is still the purchase's and liveness is read off the bill",
       },
       {
         source: ["uid_purchase"],
@@ -931,6 +974,13 @@ const createPurchaseBillTransaction: TransactionDefinition = {
   ],
 };
 
+const updatePurchaseBillTransaction: TransactionDefinition = {
+  id: "update-purchase-bill",
+  description:
+    "Edits a PUSHED, unsettled bill (`PUT /purchase-bills/{uid}`, D5): any line's shared field may be overridden until the bill settles, exactly the invoice rule; a time line's money is edited through its rates, discount, units and dates, from which the writer re-meters its counts (`meterBillLine`) and re-prices it (`pricePurchaseDocument`). Refused on a linked bill (Xero is authoritative) and, per field class, on a frozen one (`PURCHASE_BILL_FIELD_FREEZE`). The accepted edit is pushed to Xero after the commit by the ACCPAY edit push — GET-modify-POST against Xero's own InvoiceID, hash-gated so an unchanged body pushes nothing. Moves no purchase bucket: a flat line's billed quantity is the operator's override of its own count, and the diff flags it.",
+  steps: [],
+};
+
 const settlePurchaseBillTransaction: TransactionDefinition = {
   id: "settle-purchase-bill",
   description:
@@ -1030,8 +1080,14 @@ const createPurchaseTransaction: TransactionDefinition = {
 const updatePurchaseTransaction: TransactionDefinition = {
   id: "update-purchase",
   description:
-    "Amends a purchase's date, reference, notes or items, matched by item uid. On a BUY item the quantity may not fall below what is received or billed, and its amount may not change once it has any receipt or bill — a price that moved after goods arrived is a short close plus a new purchase, because every receipt already carries its share of the old price; the update fires STOCK_STEPS, since a buy item's expected_date and unreceived quantity are inbound supply. On a SUBRENT item a receipt carries no cost, so the amount and the hire end stay editable after receipt (a paid extension), and the update fires STOCK_STEPS and the return card, since the hire window is supply. An amend that adds a purchase's FIRST subrent item writes its return card in the same commit, with the card's own default thread, as a create does.",
-  steps: [...STOCK_STEPS, "purchase-card:purchases-to-card", "cowrite-thread:cards-to-thread", "cowrite-thread:thread-to-cards"],
+    "Amends a purchase's date, reference, notes or items, matched by item uid. On a BUY item the quantity may not fall below what is received or billed, and its amount may not change once it has any receipt or bill — a price that moved after goods arrived is a short close plus a new purchase, because every receipt already carries its share of the old price; the update fires STOCK_STEPS, since a buy item's expected_date and unreceived quantity are inbound supply. On a SUBRENT item a receipt carries no cost, so the amount and the hire end stay editable after receipt (a paid extension), and the update fires STOCK_STEPS and the return card, since the hire window is supply. An amend that adds a purchase's FIRST subrent item writes its return card in the same commit, with the card's own default thread, as a create does. Every pushed, unsettled bill named in `query_by_bills` is synced in the same commit (D5) — fires on: an item's shared field changing while such a bill exists — and each bill it changes is re-pushed to Xero after the commit by the ACCPAY edit push.",
+  steps: [
+    ...STOCK_STEPS,
+    "purchase-card:purchases-to-card",
+    "cowrite-thread:cards-to-thread",
+    "cowrite-thread:thread-to-cards",
+    "update-purchase:purchase-to-bills",
+  ],
 };
 
 const closePurchaseTransaction: TransactionDefinition = {
@@ -1116,6 +1172,7 @@ export const purchases: PropagationModule = {
     ...reversePurchaseReturnRules,
     ...settleToPurchaseRules,
     ...purchaseCardRules,
+    ...updatePurchaseBillRules,
     ...createPurchaseBillRules,
     ...settlePurchaseBillRules,
     settlementsToCreditRule("settle-purchase-bill:settlements-to-credit", "settle-purchase-bill"),
@@ -1138,6 +1195,7 @@ export const purchases: PropagationModule = {
     returnPurchaseTransaction,
     reversePurchaseReturnTransaction,
     createPurchaseBillTransaction,
+    updatePurchaseBillTransaction,
     settlePurchaseBillTransaction,
     voidPurchaseBillFromXeroTransaction,
     createPurchaseCreditTransaction,

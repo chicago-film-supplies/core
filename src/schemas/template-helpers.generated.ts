@@ -290,6 +290,12 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "productHasLedger", expr: "it.products.productHasLedger(type)", desc: "True iff a product of this `type` has an inventory ledger (and so a `stock/{P}` projection and a `stock-locks/{P}` token), counted or not.", returns: "boolean" },
     { name: "removeComponentEntries", expr: "it.products.removeComponentEntries(components, path)", desc: "Remove a component and all its descendants from a flat components array. An entry is removed if its `path` starts with the given path prefix — this covers the component itself and every entry nested beneath it.", returns: "T[]" },
   ],
+  "purchase-documents": [
+
+  ],
+  "purchaseDiff": [
+
+  ],
   "purchases": [
     { name: "allocateLandedCostCents", expr: "it.purchases.allocateLandedCostCents(amountCents, lines)", desc: "Spread one landed amount over several buy lines, in proportion to each line's value still to arrive ({@link landedCostWeightCents}), with {@link apportionCents}. Σ is exactly `amountCents`.", returns: "number[]" },
     { name: "isLandedCostFrozen", expr: "it.purchases.isLandedCostFrozen(entry, line)", desc: "Is a landed cost frozen? A receipt has priced part of it once `received > received_at_entry`.", returns: "boolean" },

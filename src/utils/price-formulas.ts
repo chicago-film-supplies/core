@@ -438,6 +438,32 @@ export function statedUnits(
   return toTiers(formula, r);
 }
 
+function gcdN(a: number, b: number): number {
+  a = Math.abs(a);
+  b = Math.abs(b);
+  while (b) [a, b] = [b, a % b];
+  return a || 1;
+}
+
+/**
+ * **Tier-wise `a + sign × b`** over the union of rate keys, each tier reduced.
+ * The arithmetic of count DELTAS: an extension is `meter(order) − meter(billed)`
+ * (`@cfs/core/utils/quantityAccounting`), and a supplier bill line's counts are
+ * `meter(billed ∪ new) − meter(billed)` (`@cfs/core/utils/purchase-documents`),
+ * which is what keeps a window split across two bills on one anchor.
+ */
+export function combineTierCounts(a: readonly TierCount[], b: readonly TierCount[], sign: 1 | -1): TierCount[] {
+  const keys = [...new Set([...a.map((t) => t.rate_key), ...b.map((t) => t.rate_key)])];
+  return keys.map((rate_key) => {
+    const x = a.find((t) => t.rate_key === rate_key) ?? { rate_key, num: 0, den: 1 };
+    const y = b.find((t) => t.rate_key === rate_key) ?? { rate_key, num: 0, den: 1 };
+    const num = x.num * y.den + sign * y.num * x.den;
+    const den = x.den * y.den;
+    const g = gcdN(num, den);
+    return { rate_key, num: num / g, den: den / g };
+  });
+}
+
 // ── Money ────────────────────────────────────────────────────────────
 
 // The money step lives schema-side (`schemas/_line-money.ts`) so the stored
