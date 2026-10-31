@@ -456,8 +456,7 @@ export type StockPurchaseItemSource =
     quantity_returned: number;
     dates: { start: string; end: string | null };
   }
-  | { type: "usage"; uid_product: string }
-  | { type: "direct" };
+  | { type: "charge" };
 
 /** Just enough of a purchase to reduce it to the supply it adds. */
 export interface StockPurchaseSource {
@@ -475,16 +474,16 @@ export interface StockPurchaseSource {
  * |---|---|---|
  * | `subrent` | `[dates.start, dates.end]` (`end: null` is +∞), kind `subrent` | `quantity − canceled − returned` |
  * | `buy` | `[expected_date, +∞)`, kind `inbound` | `quantity − canceled − received` |
- * | `usage`, `direct` | none — neither brings a unit into custody | — |
+ * | `charge` | none — it brings no unit into custody | — |
  *
  * Liveness is the reducers' one filter, as for bookings and out-of-service:
  * only an `active` purchase supplies anything, and an item supplying nothing is
  * dropped rather than stored as a zero.
  *
  * On a SUBRENT, RECEIPT does not enter — supply counts from the moment the
- * purchase exists (owner, 2026-10-24); receipt is custody only. Its billing
- * basis does not enter either: an activation-billed unit is supplied exactly
- * as a fixed one is. ⚠️ A unit that has not gone back by `dates.end` stops
+ * purchase exists (owner, 2026-10-24); receipt is custody only. Its price
+ * basis does not enter either: a time-priced unit is supplied exactly as a
+ * flat-priced one is. ⚠️ A unit that has not gone back by `dates.end` stops
  * counting as supply at `end` while it is still in CFS's custody
  * (`quantity_rented_in`). That is the conservative direction — late but valid;
  * the return card shows it overdue.
@@ -496,7 +495,7 @@ export interface StockPurchaseSource {
  * need a clock-driven rebuild and hide stock CFS knows is coming. An item with
  * no `expected_date` contributes nothing: there is no date to promise from.
  *
- * An exhaustive switch with a `never` default (D7): a fifth item type is a
+ * An exhaustive switch with a `never` default (D7): a fourth item type is a
  * compile error here, never a silent fall into the buy branch — which is how a
  * purchase written before `kind` existed used to be read.
  */
@@ -517,8 +516,7 @@ export function supplyFromPurchase(p: StockPurchaseSource, uidProduct: string): 
         if (quantity > 0) entries.push({ start: item.expected_date, end: null, quantity, kind: "inbound" });
         break;
       }
-      case "usage":
-      case "direct":
+      case "charge":
         break;
       default: {
         const unreachable: never = item;

@@ -359,7 +359,7 @@ const ORDER_A = { uid: "o".repeat(20), number: 4101 };
 const ORDER_B = { uid: "q".repeat(20), number: 4102 };
 const COST_LINE = {
   kind: "product" as const, uid_purchase: PO, purchase_number: 12, uid_product: "r".repeat(20),
-  name: "Arri Skypanel S60", hire_start: "2026-10-01T08:00:00.000-05:00", ordered_cents: 50_000, cost_cents: 50_000,
+  name: "Arri Skypanel S60", subrent_start: "2026-10-01T08:00:00.000-05:00", ordered_cents: 50_000, cost_cents: 50_000,
 };
 const CHARGE_LINE = {
   ...COST_LINE, kind: "purchase" as const, uid_product: null, name: "Purchase charges", ordered_cents: null, cost_cents: 7_500,
@@ -415,7 +415,10 @@ Deno.test("🔴 totals that leave out the unattributed spend are refused", () =>
 Deno.test("🔴 a cost line's kind must agree with its product and ordered amount", () => {
   const bad = (line: object) => ({ ...MARGIN, rows: [{ ...MARGIN.rows[0], lines: [line, CHARGE_LINE] }] });
   assertThrows(() => SubrentMarginReportSchema.parse(bad({ ...COST_LINE, uid_product: null })));
-  assertThrows(() => SubrentMarginReportSchema.parse(bad({ ...COST_LINE, ordered_cents: null })));
+  // A TIME line commits no amount, so a product line may carry `ordered_cents:
+  // null` (D8 — the old refine refused it, which no time line could satisfy).
+  SubrentMarginReportSchema.parse(bad({ ...COST_LINE, ordered_cents: null }));
+  assertThrows(() => SubrentMarginReportSchema.parse(bad({ ...CHARGE_LINE, ordered_cents: 1 })), Error, "orders nothing");
   assertThrows(() => SubrentMarginReportSchema.parse(bad({ ...CHARGE_LINE, cost_cents: 50_000, uid_product: "r".repeat(20) })));
 });
 
@@ -423,8 +426,9 @@ Deno.test("🔴 a cost line's kind must agree with its product and ordered amoun
 
 const VISION = { uid: "v".repeat(20), name: "Vision Communications" };
 const WEEK = (start: string, end: string, starts_in_month: boolean, orders: { uid: string; number: number | null }[]) => ({
-  uid_cogs: "00000000-0000-4000-8000-000000000001", label: "Vision weekly", start, end, starts_in_month, orders,
-  active_days: 3, instants: "cfs" as const, expected_cents: 4_500,
+  line: { uid_purchase: "w".repeat(20), path: ["00000000-0000-4000-8000-000000000001"] },
+  price_formula: { uid: "VisionWeeklyFormula0", name: "Weekly while on", basis: "time" as const },
+  label: "Vision weekly", start, end, starts_in_month, orders, active_days: 3, expected_cents: 4_500,
 });
 const STRADDLE = WEEK("2026-09-29T00:00:00.000-05:00", "2026-10-06T00:00:00.000-05:00", false, []);
 const JOB = WEEK("2026-10-06T00:00:00.000-05:00", "2026-10-13T00:00:00.000-05:00", true, [{ uid: "o".repeat(20), number: 1201 }]);
@@ -464,19 +468,19 @@ Deno.test("🔴 totals that do not tie to the units are refused", () => {
   }
 });
 
-Deno.test("UnitActivityReportSchema carries the provider's linked usage bills, and refuses a malformed one", () => {
+Deno.test("UnitActivityReportSchema carries the provider's bills, and refuses a malformed one", () => {
   const bill = {
     uid_purchase_bill: "billAAAAAAAAAAAAAAAA",
     number: 12,
     date: "2026-10-01T00:00:00.000-05:00",
     xero_document: "invoice" as const,
-    periods: 3,
     expected_cents: 13_500,
     total_cents: 13_620,
     diverged: true,
   };
   UnitActivityReportSchema.parse({ ...ACTIVITY, bills: [bill] });
-  assertThrows(() => UnitActivityReportSchema.parse({ ...ACTIVITY, bills: [{ ...bill, periods: 1.5 }] }));
+  assertThrows(() => UnitActivityReportSchema.parse({ ...ACTIVITY, bills: [{ ...bill, expected_cents: 1.5 }] }));
+  assertThrows(() => UnitActivityReportSchema.parse({ ...ACTIVITY, bills: [{ ...bill, periods: 3 }] }), Error, "periods");
   assertThrows(() => UnitActivityReportSchema.parse({ ...ACTIVITY, bills: [{ ...bill, xero_document: "quote" }] }));
 });
 

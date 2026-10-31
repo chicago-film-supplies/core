@@ -33,7 +33,7 @@
  */
 
 import { z } from "zod";
-import { FirestoreId, MovementId, UnitId } from "./_uid.ts";
+import { FirestoreId, ItemUid, MovementId, UnitId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import {
   ActorRef,
@@ -211,38 +211,49 @@ export interface UnitSerialHistoryEntryType {
   changed_by: ActorRefType;
 }
 
-/** The confirmed on/off instants of an activation, as the provider's portal or bill states them. */
-export interface UnitActivationConfirmedType {
-  /** A Chicago instant. */
-  start: string;
-  /** A Chicago instant; `null` until the off-instant is confirmed. */
-  end: string | null;
+/**
+ * The purchase line a charge window bills against — the line's purchase and
+ * its row identity (`path`), the way a bill line names its purchase line.
+ */
+export interface UnitChargeWindowLineType {
+  uid_purchase: string;
+  path: string[];
 }
 
 /**
  * One span during which a unit's service line was switched ON — a hotspot's or
- * router's data line, billed by its provider through the product's `cogs`
- * activation entry that `uid_cogs` names.
+ * router's data line — billed by its provider under a price formula
+ * (purchases-as-documents D2; Phase 2 rulings 4 and 8).
+ *
+ * The `{ start, end }` of an order pair's `ChargeWindow`, plus what a LIVE
+ * switch-on needs: `end: null` while the line is on, a `uid` because routes
+ * edit one window at a time, and the facts a window is billed by. It carries no
+ * day count: counts are a LINE's (`price.counts`), metered under that line's
+ * formula when a purchase or bill line is priced from these windows.
  *
  * RECORDED, never derived from custody: a device can sit on the shelf switched
  * on (an idle, still-billed span) or go out switched off. Present on every
  * unit, owned or rented, because CFS's own devices carry provider lines too.
- * The biller is the named cost entry's `provider`, not a field here, since one
- * product can hold units billed by different providers.
+ * What the provider billed is the BILL line's own windows, diffed against these
+ * — not a field here.
  */
-export interface UnitActivationType {
+export interface UnitChargeWindowType {
   /** An array-member uid (`crypto.randomUUID()`). */
   uid: string;
   /** When CFS asked the provider to switch the line on. A Chicago instant. */
   start: string;
   /** When it was switched off; `null` while still on. A Chicago instant. */
   end: string | null;
-  /** The order it was switched on for, or `null` for an idle or test activation. */
+  /** The order it was switched on for, or `null` for an idle or test window. */
   uid_order: string | null;
-  /** The product's `cogs` activation entry this span accrues (`CogsEntryType.uid`). */
-  uid_cogs: string;
-  /** What the provider confirms, or `null` until the on-instant is confirmed. */
-  provider_confirmed: UnitActivationConfirmedType | null;
+  /**
+   * The purchase line this window bills against, resolved when it opens; `null`
+   * when no supplier line bills it (an owned unit whose provider line is not on
+   * a purchase).
+   */
+  line: UnitChargeWindowLineType | null;
+  /** The `price-formulas/{uid}` the window is metered under. */
+  uid_price_formula: string;
   notes: string;
   changed_by: ActorRefType;
 }
@@ -262,10 +273,10 @@ export interface UnitType {
   serial_history: UnitSerialHistoryEntryType[];
   status: UnitStatusType;
   /**
-   * The unit's service-line activations, ascending by `start`, never
+   * The unit's service-line charge windows, ascending by `start`, never
    * overlapping, at most one open, and none open unless `active`.
    */
-  activations: UnitActivationType[];
+  charge_windows: UnitChargeWindowType[];
   /**
    * The `POST /products/{uid}/units` request that minted this number — its
    * `uuid_session`, the create's idempotency key. A retried count-mode create
@@ -297,30 +308,26 @@ export const UnitSerialHistoryEntry: z.ZodType<UnitSerialHistoryEntryType> = z.s
   changed_by: ActorRef.meta({ label: "Changed By" }),
 });
 
-/** Zod schema for {@link UnitActivationConfirmedType}. */
-export const UnitActivationConfirmed: z.ZodType<UnitActivationConfirmedType> = z.strictObject({
-  start: chicagoInstant().meta({ column: true, label: "Provider On" }),
-  end: chicagoInstant().nullable().meta({ column: true, label: "Provider Off" }),
-}).superRefine((c, ctx) => {
-  if (c.end !== null && Date.parse(c.end) < Date.parse(c.start)) {
-    ctx.addIssue({ code: "custom", path: ["end"], message: "a confirmed activation ends at or after it starts" });
-  }
+/** Zod schema for {@link UnitChargeWindowLineType}. */
+export const UnitChargeWindowLine: z.ZodType<UnitChargeWindowLineType> = z.strictObject({
+  uid_purchase: FirestoreId,
+  path: z.array(ItemUid).min(1),
 });
 
-/** Zod schema for {@link UnitActivationType}. */
-export const UnitActivation: z.ZodType<UnitActivationType> = z.strictObject({
+/** Zod schema for {@link UnitChargeWindowType}. */
+export const UnitChargeWindow: z.ZodType<UnitChargeWindowType> = z.strictObject({
   uid: z.uuid(),
-  start: chicagoInstant().meta({ column: true, label: "Active From" }),
-  end: chicagoInstant().nullable().meta({ column: true, label: "Active Until" }),
+  start: chicagoInstant().meta({ column: true, label: "On From" }),
+  end: chicagoInstant().nullable().meta({ column: true, label: "On Until" }),
   uid_order: FirestoreId.nullable(),
-  uid_cogs: z.uuid(),
-  provider_confirmed: UnitActivationConfirmed.nullable().meta({ label: "Confirmed" }),
+  line: UnitChargeWindowLine.nullable(),
+  uid_price_formula: FirestoreId,
   // `mask` — free text an operator writes about a unit, which can name a person.
   notes: z.string().max(500).meta({ pii: "mask" }),
   changed_by: ActorRef.meta({ label: "Changed By" }),
-}).superRefine((a, ctx) => {
-  if (a.end !== null && Date.parse(a.end) < Date.parse(a.start)) {
-    ctx.addIssue({ code: "custom", path: ["end"], message: "an activation ends at or after it starts" });
+}).superRefine((w, ctx) => {
+  if (w.end !== null && Date.parse(w.end) < Date.parse(w.start)) {
+    ctx.addIssue({ code: "custom", path: ["end"], message: "a charge window ends at or after it starts" });
   }
 });
 
@@ -334,10 +341,10 @@ export const UnitActivation: z.ZodType<UnitActivationType> = z.strictObject({
  *    serial optional, so a serial-less active unit still carries one. A vacant
  *    number's last spell is CLOSED, which is what lets a replacement open a
  *    new one;
- * 4. its activations ascend by `start` and never overlap, at most one is
+ * 4. its charge windows ascend by `start` and never overlap, at most one is
  *    open, and a number that is not `active` has none open — switching a line
- *    off is a call to the provider, so a departure refuses an activated unit
- *    rather than closing its span for it.
+ *    off is a call to the provider, so a departure refuses a unit with an open
+ *    window rather than closing it for it.
  */
 function checkUnit(doc: UnitType, ctx: z.RefinementCtx): void {
   const open = doc.serial_history.filter((e) => e.end === null);
@@ -373,32 +380,39 @@ function checkUnit(doc: UnitType, ctx: z.RefinementCtx): void {
       message: `a ${doc.status} number carries no serial; close its open history entry first`,
     });
   }
-  checkActivations(doc, ctx);
+  checkChargeWindows(doc, ctx);
 }
 
-function checkActivations(doc: UnitType, ctx: z.RefinementCtx): void {
-  const spans = doc.activations;
+function checkChargeWindows(doc: UnitType, ctx: z.RefinementCtx): void {
+  const spans = doc.charge_windows;
   for (let i = 1; i < spans.length; i++) {
     const prev = spans[i - 1];
     if (Date.parse(spans[i].start) < Date.parse(prev.start)) {
-      ctx.addIssue({ code: "custom", path: ["activations", i], message: "activations must ascend by start" });
+      ctx.addIssue({ code: "custom", path: ["charge_windows", i], message: "charge windows must ascend by start" });
       return;
     }
     if (prev.end === null || Date.parse(prev.end) > Date.parse(spans[i].start)) {
       ctx.addIssue({
         code: "custom",
-        path: ["activations", i],
-        message: "activations must not overlap: a span starts only after the previous one has ended",
+        path: ["charge_windows", i],
+        message: "charge windows must not overlap: a window starts only after the previous one has ended",
       });
       return;
     }
   }
+  const uids = new Set<string>();
+  spans.forEach((w, i) => {
+    if (uids.has(w.uid)) {
+      ctx.addIssue({ code: "custom", path: ["charge_windows", i, "uid"], message: "a charge window uid appears once" });
+    }
+    uids.add(w.uid);
+  });
   const open = spans.filter((a) => a.end === null).length;
   if (open > 0 && doc.status !== "active") {
     ctx.addIssue({
       code: "custom",
-      path: ["activations"],
-      message: `a ${doc.status} number has no line switched on; end its open activation first`,
+      path: ["charge_windows"],
+      message: `a ${doc.status} number has no line switched on; end its open charge window first`,
     });
   }
 }
@@ -411,7 +425,7 @@ export const UnitSchema: z.ZodType<UnitType> = z.strictObject({
   serial_number: SerialNumber.nullable().meta({ column: true, label: "Serial" }),
   serial_history: z.array(UnitSerialHistoryEntry).meta({ label: "Serial History" }),
   status: UnitStatusEnum.meta({ column: true, label: "Status" }),
-  activations: z.array(UnitActivation).meta({ label: "Activations" }),
+  charge_windows: z.array(UnitChargeWindow).meta({ label: "Charge Windows" }),
   uuid_session: z.uuid().nullable(),
   // Plain, not `.default(0)`: every writer states it, and a stored default is
   // inert (`tests/stored-defaults.test.ts`).
@@ -504,74 +518,67 @@ export const UpdateUnitInput: z.ZodType<UpdateUnitInputType> = z.object({
   message: "send a serial change, a status change, or both",
 });
 
-/**
- * The provider's confirmed instants as an INPUT: the stripping twin of
- * {@link UnitActivationConfirmed}, with the same `start ≤ end` refine.
- */
-const UnitActivationConfirmedInput: z.ZodType<UnitActivationConfirmedType> = z.object({
-  start: chicagoInstant(),
-  end: chicagoInstant().nullable(),
-}).superRefine((c, ctx) => {
-  if (c.end !== null && Date.parse(c.end) < Date.parse(c.start)) {
-    ctx.addIssue({ code: "custom", path: ["end"], message: "a confirmed activation ends at or after it starts" });
-  }
+const ChargeWindowLineInput: z.ZodType<UnitChargeWindowLineType> = z.object({
+  uid_purchase: FirestoreId,
+  path: z.array(ItemUid).min(1),
 });
 
 /**
- * Body of `POST /units/{uid}/activations`: switch a unit's service line ON.
+ * Body of `POST /units/{uid}/charge-windows`: switch a unit's service line ON.
  *
- * Opens a span with no `end` — the server refuses a unit that is not `active`
- * or that already has an open span, and a `uid_cogs` that names no activation
- * entry on the unit's product. `start` is when CFS asked the provider to switch
- * the line on, which may be earlier than the request (the call came first). A
- * stripping `z.object`, not the stored strict node (`tests/input-strictness.test.ts`).
+ * Opens a window with no `end` — the server refuses a unit that is not
+ * `active` or that already has an open window. `start` is when CFS asked the
+ * provider to switch the line on, which may be earlier than the request (the
+ * call came first). `line` absent asks the server to resolve the purchase line
+ * (an active purchase of the unit's provider holding a line for the product);
+ * `null` states that no supplier line bills it. A stripping `z.object`, not the
+ * stored strict node (`tests/input-strictness.test.ts`).
  */
-export interface OpenUnitActivationInputType {
+export interface OpenUnitChargeWindowInputType {
   version: number;
   start: string;
   uid_order: string | null;
-  uid_cogs: string;
-  /** Absent means unconfirmed (`null`). */
-  provider_confirmed?: UnitActivationConfirmedType | null;
+  uid_price_formula: string;
+  line?: UnitChargeWindowLineType | null;
   notes: string;
 }
 
-/** Zod schema for {@link OpenUnitActivationInputType}. */
-export const OpenUnitActivationInput: z.ZodType<OpenUnitActivationInputType> = z.object({
+/** Zod schema for {@link OpenUnitChargeWindowInputType}. */
+export const OpenUnitChargeWindowInput: z.ZodType<OpenUnitChargeWindowInputType> = z.object({
   version: z.int().min(0),
   start: chicagoInstant(),
   uid_order: FirestoreId.nullable(),
-  uid_cogs: z.uuid(),
-  provider_confirmed: UnitActivationConfirmedInput.nullable().optional(),
+  uid_price_formula: FirestoreId,
+  line: ChargeWindowLineInput.nullable().optional(),
   // `mask` — free text an operator writes about a unit, which can name a person.
   notes: z.string().max(500).meta({ pii: "mask" }),
 });
 
 /**
- * Body of `PUT /units/{uid}/activations/{activation_uid}`: close a span
- * (`end`), record what the provider confirms (`provider_confirmed`), or correct
- * any of its fields. An absent key keeps the stored value; `end: null`
- * re-opens the LAST span of an `active` unit (a switch-off recorded in error).
+ * Body of `PUT /units/{uid}/charge-windows/{window_uid}`: close a window
+ * (`end`) or correct any of its fields. An absent key keeps the stored value;
+ * `end: null` re-opens the LAST window of an `active` unit (a switch-off
+ * recorded in error).
  */
-export interface UpdateUnitActivationInputType {
+export interface UpdateUnitChargeWindowInputType {
   version: number;
   start?: string;
   end?: string | null;
   uid_order?: string | null;
-  uid_cogs?: string;
-  provider_confirmed?: UnitActivationConfirmedType | null;
+  uid_price_formula?: string;
+  line?: UnitChargeWindowLineType | null;
   notes?: string;
 }
 
-/** Zod schema for {@link UpdateUnitActivationInputType}. */
-export const UpdateUnitActivationInput: z.ZodType<UpdateUnitActivationInputType> = z.object({
+/** Zod schema for {@link UpdateUnitChargeWindowInputType}. */
+export const UpdateUnitChargeWindowInput: z.ZodType<UpdateUnitChargeWindowInputType> = z.object({
   version: z.int().min(0),
   start: chicagoInstant().optional(),
   end: chicagoInstant().nullable().optional(),
   uid_order: FirestoreId.nullable().optional(),
-  uid_cogs: z.uuid().optional(),
-  provider_confirmed: UnitActivationConfirmedInput.nullable().optional(),
+  uid_price_formula: FirestoreId.optional(),
+  line: ChargeWindowLineInput.nullable().optional(),
   notes: z.string().max(500).meta({ pii: "mask" }).optional(),
 }).refine((u) => Object.keys(u).some((k) => k !== "version"), {
-  message: "send at least one activation field to change",
+  message: "send at least one charge window field to change",
 });

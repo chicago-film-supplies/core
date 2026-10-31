@@ -5,6 +5,7 @@ import { z } from "zod";
 import { extendChecked } from "./_extend.ts";
 import { FirestoreId, ThreadId } from "./_uid.ts";
 import { uploadcareRef } from "./uploadcare/ref.ts";
+import { checkDatedRates, type DatedRate, DatedRateInput, DatedRateSchema } from "./price-formula.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -39,7 +40,8 @@ import {
 /**
  * What triggers a cost-of-revenue rule. `sale` — a sale's inventory relief;
  * `activation` — a unit's service line being switched on (a hotspot's data
- * line), billed by its provider per period. Later: `booking`, `depreciation`
+ * line): its charge windows (`UnitType.charge_windows`), billed by its provider
+ * under a price formula. Later: `booking`, `depreciation`
  * (api-cloudrun#1388).
  */
 export const COGS_TRIGGERS = ["sale", "activation"] as const;
@@ -47,24 +49,6 @@ export const COGS_TRIGGERS = ["sale", "activation"] as const;
 export type CogsTriggerType = typeof COGS_TRIGGERS[number];
 /** Zod schema for {@link CogsTriggerType}. */
 export const CogsTriggerEnum: z.ZodType<CogsTriggerType> = z.enum(COGS_TRIGGERS);
-
-/**
- * How an activation entry's periods are cut. ANY active day bills the whole
- * period (owner, 2026-10-27, Q11).
- *
- * - `per_week` — 7-day cycles anchored on the unit's FIRST activation day under
- *   the entry, so a re-activation inside a week already billed continues it.
- * - `per_calendar_month` — Chicago calendar months.
- *
- * A separate vocabulary from `PRICE_FORMULAS`, so a customer price picker never
- * offers a cost formula (the core#78 lesson). The one function that applies
- * them is `billablePeriods` (`@cfs/core/utils/cogs`).
- */
-export const COGS_ACTIVATION_FORMULAS = ["per_week", "per_calendar_month"] as const;
-/** One activation billing formula. See {@link COGS_ACTIVATION_FORMULAS}. */
-export type CogsActivationFormulaType = typeof COGS_ACTIVATION_FORMULAS[number];
-/** Zod schema for {@link CogsActivationFormulaType}. */
-export const CogsActivationFormulaEnum: z.ZodType<CogsActivationFormulaType> = z.enum(COGS_ACTIVATION_FORMULAS);
 
 /**
  * Whose units an activation entry prices: CFS's own (`cfs`, e.g. Verizon lines
@@ -86,25 +70,30 @@ export interface CogsSaleEntryType {
 }
 
 /**
- * A provider-billed service line, accrued per billed period by the unit
- * activations whose `uid_cogs` names this entry. Only activation entries carry
- * a `uid`, because only spans reference an entry.
+ * A provider-billed service line: what a unit's charge windows cost, under the
+ * formula `uid_price_formula` names, at the dated `rates` (purchases-as-documents
+ * D4). It is the DEFAULT a supplier line takes when one is raised for the
+ * product — the purchase line snapshots the formula and the rates in force, and
+ * from then on owns them (Q13). Only activation entries carry a `uid`.
  */
 export interface CogsActivationEntryType {
   trigger: "activation";
-  /** `z.uuid()`; `UnitActivationType.uid_cogs` names it. */
+  /** `z.uuid()`. */
   uid: string;
   label: string;
   coa_cost: COACostType;
-  formula: CogsActivationFormulaType;
   /** Who bills the line — not always the unit's owner. A `{uid, name}` supplier snapshot. */
   provider: UidNameRefType;
   ownership: CogsOwnershipType;
+  /** The `price-formulas/{uid}` the line is priced by — vendor-agnostic (D1). */
+  uid_price_formula: string;
   /**
-   * Cost per billed period, in cents. ONE current rate, no dated windows (owner,
-   * 2026-10-27): a past period's EXPECTED cost is recomputed at today's rate.
+   * The formula's inputs, dated per `rate_key` (D4): Vision's `month` moves in
+   * 2025-02 while its `week` does not. Every key the formula's segments name
+   * must have a row in force — the writer checks that, since the formula is
+   * another document.
    */
-  rate_cents: number;
+  rates: DatedRate[];
 }
 
 /**
@@ -127,22 +116,25 @@ const cogsActivationShape = {
   uid: z.uuid(),
   label: z.string().min(1).max(100).meta({ pii: "none", column: true, label: "Label" }),
   coa_cost: COACostEnum.meta({ column: true, label: "Account" }),
-  formula: CogsActivationFormulaEnum.meta({ column: true, label: "Formula" }),
   provider: UidNameRef.meta({ label: "Provider" }),
   ownership: CogsOwnershipEnum.meta({ column: true, label: "Ownership" }),
-  rate_cents: z.int().min(0).meta({ column: true, label: "Rate" }),
+  uid_price_formula: FirestoreId,
 };
 
 /** Zod schema for {@link CogsEntryType}. A discriminated union on `trigger`, the house shape for a stored array member. */
 export const CogsEntry: z.ZodType<CogsEntryType> = z.discriminatedUnion("trigger", [
   z.strictObject(cogsSaleShape),
-  z.strictObject(cogsActivationShape),
+  z.strictObject({ ...cogsActivationShape, rates: z.array(DatedRateSchema).min(1).superRefine(checkDatedRates) }),
 ]);
 
 /** {@link CogsEntry} for an INPUT: unknown keys are stripped, not refused. */
 export const CogsEntryInput: z.ZodType<CogsEntryType> = z.discriminatedUnion("trigger", [
   z.object(cogsSaleShape),
-  z.object({ ...cogsActivationShape, provider: UidNameRefInput }),
+  z.object({
+    ...cogsActivationShape,
+    provider: UidNameRefInput,
+    rates: z.array(DatedRateInput).min(1).superRefine(checkDatedRates),
+  }),
 ]);
 
 /**

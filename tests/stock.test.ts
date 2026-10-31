@@ -825,7 +825,7 @@ Deno.test("supplyFromPurchase: a live subrent item, net of canceled and returned
   assertEquals(supplyFromPurchase(p, "R"), []);
 });
 
-Deno.test("supplyFromPurchase: a STANDING subrent (end null) is +∞; usage and direct items supply nothing", () => {
+Deno.test("supplyFromPurchase: a STANDING subrent (end null) is +∞; a charge item supplies nothing", () => {
   const standing = {
     type: "subrent" as const,
     uid_product: "P",
@@ -836,7 +836,7 @@ Deno.test("supplyFromPurchase: a STANDING subrent (end null) is +∞; usage and 
   };
   const p = {
     status: "active" as const,
-    items: [standing, { type: "usage" as const, uid_product: "P" }, { type: "direct" as const }],
+    items: [standing, { type: "charge" as const }],
   };
   assertEquals(supplyFromPurchase(p, "P"), [{ start: H_START, end: null, quantity: 4, kind: "subrent" }]);
   const far = computeStockAvailability(stock(0, [], supplyFromPurchase(p, "P")), win("2029-01-01", "2029-12-31"));

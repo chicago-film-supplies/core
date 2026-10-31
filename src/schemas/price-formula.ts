@@ -48,6 +48,7 @@
  */
 import { z } from "zod";
 import { FirestoreId } from "./_uid.ts";
+import { chicagoStartOfDay } from "./_datetime.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -405,6 +406,171 @@ export function priceFormulaRuleIssues(
 
 function checkRule(rule: PriceFormulaRule, ctx: z.RefinementCtx): void {
   for (const issue of priceFormulaRuleIssues(rule)) {
+    ctx.addIssue({ code: "custom", path: issue.path, message: issue.message });
+  }
+}
+
+// ── What a line carries ──────────────────────────────────────────────
+
+/**
+ * Does a formula multiply TIME, or price a flat amount? Derived, never chosen:
+ * a `none` meter is `flat`, every other meter is `time`
+ * ({@link priceFormulaBasis}).
+ *
+ * A line snapshots it beside the formula's uid and name (`price.price_formula`)
+ * so a single-document rule can branch on it without reading the formula: a
+ * purchase line's money shape (flat ⇒ a stated `amount_cents`, time ⇒ dated
+ * `rates`) and whether `quantity_billed` is a co-written bucket (flat only) are
+ * both decided by it (purchases-as-documents, Phase 2 ruling 1).
+ */
+export const PRICE_FORMULA_BASES = ["flat", "time"] as const;
+/** One {@link PRICE_FORMULA_BASES} member. */
+export type PriceFormulaBasis = typeof PRICE_FORMULA_BASES[number];
+/** Zod schema for {@link PriceFormulaBasis}. */
+export const PriceFormulaBasisEnum: z.ZodType<PriceFormulaBasis> = z.enum(PRICE_FORMULA_BASES);
+
+/** The basis a formula rule implies — see {@link PRICE_FORMULA_BASES}. */
+export function priceFormulaBasis(rule: Pick<PriceFormulaRule, "meter">): PriceFormulaBasis {
+  return rule.meter.source === "none" ? "flat" : "time";
+}
+
+/**
+ * A line's snapshot of the formula it is priced by — `{ uid, name }` like
+ * `PriceModifier` and `TaxRef` (`schemas/order.ts`), plus the derived
+ * {@link PriceFormulaBasis}. A point-in-time copy: a formula is immutable once
+ * referenced, and a renamed one is a superseding formula, so the snapshot never
+ * needs re-pointing.
+ */
+export interface PriceFormulaRef {
+  uid: string;
+  name: string;
+  basis: PriceFormulaBasis;
+}
+
+/** Zod schema for {@link PriceFormulaRef}. */
+export const PriceFormulaRefSchema: z.ZodType<PriceFormulaRef> = z.strictObject({
+  uid: FirestoreId,
+  name: z.string().min(1).max(100).meta({ pii: "none", column: true, label: "Formula" }),
+  basis: PriceFormulaBasisEnum,
+});
+
+/**
+ * One rate a line PRICED with — the snapshot it owns (Q13), taken for the
+ * line's pricing date from the dated rows ({@link DatedRate}). An AMOUNT in
+ * house vocabulary (integer cents per counted period), not a 4dp rate, hence
+ * `amount_cents`. Later rate changes never reprice a line.
+ */
+export interface RateSnapshotType {
+  rate_key: string;
+  amount_cents: number;
+}
+
+/** Zod schema for {@link RateSnapshotType}. */
+export const RateSnapshotSchema: z.ZodType<RateSnapshotType> = z.strictObject({
+  rate_key: RateKey,
+  // Signed: a credit line's base is negative (core#88).
+  amount_cents: z.int().meta({ column: true, label: "Rate" }),
+});
+
+/**
+ * One tier's metered count as a line STORES it — the engine's exact rational
+ * (`TierCount`, `@cfs/core/utils/price-formulas`), frozen when the line is
+ * written because the holiday list has no versions (Phase 2 ruling 8). With
+ * the line's `rates`, `quantity` and `discount` it reproduces the line's money
+ * from the line alone. `num` may be zero, and negative on a stated extension
+ * count.
+ */
+export interface TierCountType {
+  rate_key: string;
+  num: number;
+  den: number;
+}
+
+/** Zod schema for {@link TierCountType}. */
+export const TierCountSchema: z.ZodType<TierCountType> = z.strictObject({
+  rate_key: RateKey,
+  num: z.int(),
+  den: z.int().min(1),
+});
+
+/**
+ * One dated rate row (D4): `amount_cents` for `rate_key` over
+ * `[applied_from, applied_to)`. Calendar dates (`chicagoStartOfDay`), the
+ * taxes-rate window — but an ARRAY MEMBER, so no `_fs` twins (`unit.ts`,
+ * `ChargeWindow`): nothing range-queries inside an array.
+ *
+ * Per key the rows are ordered, never overlap, leave no gap, and only the last
+ * may be open ({@link datedRatesIssues}). A new rate for a key closes that key's
+ * open row in the same write (the `POST /taxes-codes/{uid}/rates` precedent).
+ */
+export interface DatedRate {
+  /** Array-member id, minted by the writer (`crypto.randomUUID()`). */
+  uid: string;
+  rate_key: string;
+  amount_cents: number;
+  applied_from: string;
+  /** Exclusive; `null` = open. */
+  applied_to: string | null;
+}
+
+const datedRateShape = {
+  uid: z.uuid(),
+  rate_key: RateKey,
+  amount_cents: z.int().min(0).meta({ column: true, label: "Rate" }),
+  applied_from: chicagoStartOfDay().meta({ column: true, label: "From" }),
+  applied_to: chicagoStartOfDay().nullable().meta({ column: true, label: "Until" }),
+};
+
+/** Zod schema for {@link DatedRate}. */
+export const DatedRateSchema: z.ZodType<DatedRate> = z.strictObject(datedRateShape);
+/** {@link DatedRateSchema} for an INPUT: unknown keys are stripped, not refused. */
+export const DatedRateInput: z.ZodType<DatedRate> = z.object(datedRateShape);
+
+/**
+ * The single-document rules of a dated-rate array, per `rate_key`: rows ascend
+ * by `applied_from`, each closed row ends where the next begins (no overlap, no
+ * gap), only the last row of a key may be open, `applied_to > applied_from`, and
+ * uids are unique. Instants compared with `Date.parse`, never lexically.
+ *
+ * It cannot say "every key the formula names has a row in force" — the formula
+ * is another document; the writer checks that (`snapshotRates` throws).
+ */
+export function datedRatesIssues(
+  rates: readonly DatedRate[],
+): { path: (string | number)[]; message: string }[] {
+  const issues: { path: (string | number)[]; message: string }[] = [];
+  const uids = new Set<string>();
+  const byKey = new Map<string, number[]>();
+  rates.forEach((r, i) => {
+    if (uids.has(r.uid)) issues.push({ path: [i, "uid"], message: "a rate uid appears once" });
+    uids.add(r.uid);
+    if (r.applied_to !== null && Date.parse(r.applied_to) <= Date.parse(r.applied_from)) {
+      issues.push({ path: [i, "applied_to"], message: "a rate ends after it starts" });
+    }
+    byKey.set(r.rate_key, [...(byKey.get(r.rate_key) ?? []), i]);
+  });
+  for (const [key, idx] of byKey) {
+    const rows = [...idx].sort((a, b) => Date.parse(rates[a].applied_from) - Date.parse(rates[b].applied_from));
+    rows.forEach((i, k) => {
+      const r = rates[i];
+      const next = rows[k + 1];
+      if (next === undefined) return;
+      if (r.applied_to === null) {
+        issues.push({ path: [i, "applied_to"], message: `only the last "${key}" rate may be open` });
+      } else if (Date.parse(r.applied_to) !== Date.parse(rates[next].applied_from)) {
+        issues.push({
+          path: [next, "applied_from"],
+          message: `"${key}" rates leave no gap and never overlap: each starts where the one before ends`,
+        });
+      }
+    });
+  }
+  return issues;
+}
+
+/** Refine adapter for {@link datedRatesIssues}, for a `rates` array node. */
+export function checkDatedRates(rates: readonly DatedRate[], ctx: z.RefinementCtx): void {
+  for (const issue of datedRatesIssues(rates)) {
     ctx.addIssue({ code: "custom", path: issue.path, message: issue.message });
   }
 }

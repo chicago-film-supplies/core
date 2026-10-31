@@ -1236,7 +1236,7 @@ interface BulkBookingUpdateResponseType {
 
 ### `BuyItem`
 
-A BUY item — ownership of `quantity` units of one product.
+A BUY item — ownership of `quantity` units of one product. Always flat.
 
 ```ts
 interface BuyItem {
@@ -1244,6 +1244,7 @@ interface BuyItem {
   uid_product: string;
   quantity: number;
   amount_cents: number;
+  price?: PurchaseLinePrice;
   coa_posting: COAAssetType;
   expected_date: string | null;
   quantity_received: number;
@@ -1479,23 +1480,6 @@ owned devices; `api-cloudrun/.claude/plans/serialized-subrent.md` § 7a).
 const COA_COST_CODES: 5000 | 5001 | 5100 | 5150 | 5200 | 5300 | 5400 | 5500 | 5600 | 5700[];
 ```
 
-### `COGS_ACTIVATION_FORMULAS`
-
-How an activation entry's periods are cut. ANY active day bills the whole
-period (owner, 2026-10-27, Q11).
-
-- `per_week` — 7-day cycles anchored on the unit's FIRST activation day under
-  the entry, so a re-activation inside a week already billed continues it.
-- `per_calendar_month` — Chicago calendar months.
-
-A separate vocabulary from `PRICE_FORMULAS`, so a customer price picker never
-offers a cost formula (the core#78 lesson). The one function that applies
-them is `billablePeriods` (`@cfs/core/utils/cogs`).
-
-```ts
-const COGS_ACTIVATION_FORMULAS: "per_week" | "per_calendar_month"[];
-```
-
 ### `COGS_OWNERSHIPS`
 
 Whose units an activation entry prices: CFS's own (`cfs`, e.g. Verizon lines
@@ -1510,7 +1494,8 @@ const COGS_OWNERSHIPS: "cfs" | "supplier"[];
 
 What triggers a cost-of-revenue rule. `sale` — a sale's inventory relief;
 `activation` — a unit's service line being switched on (a hotspot's data
-line), billed by its provider per period. Later: `booking`, `depreciation`
+line): its charge windows (`UnitType.charge_windows`), billed by its provider
+under a price formula. Later: `booking`, `depreciation`
 (api-cloudrun#1388).
 
 ```ts
@@ -2139,6 +2124,59 @@ A collection name valid in a {@link DocSourceType}.
 type CfsSourceCollectionType = indexedAccess;
 ```
 
+### `ChargeItem`
+
+A CHARGE item — something CFS pays for with no custody: a carrier line on a
+device CFS owns (Verizon), freight, a fee, Vision's standing history line.
+Flat (freight: one amount) or time (a carrier line, priced from the device's
+charge windows).
+
+Attribution, as on a bill's charge item (api-cloudrun#1360, #1364):
+`uid_product` is the product the spend is for, `uid_out_of_service` the
+record a loss or damage charge is for. Both permanently optional — freight
+attributes nothing.
+
+```ts
+interface ChargeItem {
+  type: "charge";
+  quantity: number;
+  amount_cents: number | null;
+  price: PurchaseLinePrice;
+  dates: PurchaseItemDates | null;
+  quantity_billed: number | null;
+  quantity_canceled: number;
+  auto_link: boolean;
+  uid_product?: string;
+  uid_out_of_service?: string;
+}
+```
+
+### `ChargeItemInputType`
+
+A charge item as an operator raises it. Its account is the operator's — there is no default.
+
+```ts
+interface ChargeItemInputType {
+  type: "charge";
+  name: string;
+  quantity?: number;
+  amount_cents?: number | null;
+  coa_posting: COACodeType;
+  dates?: PurchaseItemDates | null;
+  auto_link?: boolean;
+  uid_product?: string;
+  uid_out_of_service?: string;
+}
+```
+
+### `ChargeItemSchema`
+
+Zod schema for ChargeItem.
+
+```ts
+const ChargeItemSchema: z.ZodType<ChargeItem>;
+```
+
 ### `ChargeWindow`
 
 Zod schema for {@link ChargeWindowType}.
@@ -2299,12 +2337,12 @@ const ClosePurchaseInput: z.ZodType<ClosePurchaseInputType>;
 Input for a short close or a cancel.
 
 Sets each named buy or subrent item's `quantity_canceled` to
-`quantity − quantity_received`, and each named UNBILLED direct item's to 1 (a
-billed one has nothing left to cancel). `uid_items` absent closes every such
-item; a
+`quantity − quantity_received`, a flat charge's to `quantity − quantity_billed`,
+and a time charge's to `quantity` (it stops accruing). `uid_items` absent
+closes every such item; a
 cancel is a close of a purchase with nothing received. When the close leaves
-an item billed beyond what was received, the writer raises a
-`purchase-credits` document for the excess.
+a FLAT item billed beyond what was received, the writer raises a
+`purchase-credits` document for the excess; a time line has no billed count.
 
 ```ts
 interface ClosePurchaseInputType {
@@ -2316,9 +2354,11 @@ interface ClosePurchaseInputType {
 
 ### `CogsActivationEntryType`
 
-A provider-billed service line, accrued per billed period by the unit
-activations whose `uid_cogs` names this entry. Only activation entries carry
-a `uid`, because only spans reference an entry.
+A provider-billed service line: what a unit's charge windows cost, under the
+formula `uid_price_formula` names, at the dated `rates` (purchases-as-documents
+D4). It is the DEFAULT a supplier line takes when one is raised for the
+product — the purchase line snapshots the formula and the rates in force, and
+from then on owns them (Q13). Only activation entries carry a `uid`.
 
 ```ts
 interface CogsActivationEntryType {
@@ -2326,27 +2366,11 @@ interface CogsActivationEntryType {
   uid: string;
   label: string;
   coa_cost: COACostType;
-  formula: CogsActivationFormulaType;
   provider: UidNameRefType;
   ownership: CogsOwnershipType;
-  rate_cents: number;
+  uid_price_formula: string;
+  rates: DatedRate[];
 }
-```
-
-### `CogsActivationFormulaEnum`
-
-Zod schema for {@link CogsActivationFormulaType}.
-
-```ts
-const CogsActivationFormulaEnum: z.ZodType<CogsActivationFormulaType>;
-```
-
-### `CogsActivationFormulaType`
-
-One activation billing formula. See {@link COGS_ACTIVATION_FORMULAS}.
-
-```ts
-type CogsActivationFormulaType = indexedAccess;
 ```
 
 ### `CogsEntry`
@@ -3349,10 +3373,13 @@ const CreatePurchaseBillInput: z.ZodType<CreatePurchaseBillInputType>;
 Input for billing a purchase — push a new ACCPAY, or link an existing Xero
 bill or card payment.
 
-A PUSHED bill item carries no amount: the writer prices it at the purchase
-item's cumulative share, so a price the purchase does not hold cannot be
-billed, and stamps the purchase item's `name`, `coa_posting` and
-`uid_tracking_category`. A LINKED bill carries `total_cents` as Xero has it.
+A PUSHED bill item carries no amount: the writer defaults it from the
+purchase item (`projectPurchaseLineToBillLine`, `@cfs/core/utils/purchase-documents`) —
+a flat line at the item's cumulative share, a time line priced from its
+units' UNBILLED charge windows — and stamps the purchase item's `name`,
+`price`, `coa_posting` and `uid_tracking_category`. The operator then
+overrides any of them until the bill is settled ({@link UpdatePurchaseBillInput}).
+A LINKED bill carries `total_cents` as Xero has it.
 
 ```ts
 type CreatePurchaseBillInputType = typeLiteral | typeLiteral;
@@ -3374,7 +3401,7 @@ ACCPAYCREDIT, or link one the supplier's credit was entered as in Xero.
 Each `items` entry UN-bills that quantity of its purchase item: it lowers
 `quantity_billed`, and a PUSHED credit prices it at the item's cumulative
 share of the range it un-bills, so a price the purchase does not hold cannot
-be credited. A price correction with no quantity is a `direct_items` entry
+be credited. A price correction with no quantity is a `charge_items` entry
 (push only). A LINKED credit reads its date, reference and total from Xero,
 as a linked bill does.
 
@@ -3996,6 +4023,43 @@ Billable line item types stored in order/invoice documents (excludes destination
 const DOC_LINE_ITEM_TYPES: "rental" | "replacement" | "sale" | "service" | "surcharge" | "transaction_fee"[];
 ```
 
+### `DatedRate`
+
+One dated rate row (D4): `amount_cents` for `rate_key` over
+`[applied_from, applied_to)`. Calendar dates (`chicagoStartOfDay`), the
+taxes-rate window — but an ARRAY MEMBER, so no `_fs` twins (`unit.ts`,
+`ChargeWindow`): nothing range-queries inside an array.
+
+Per key the rows are ordered, never overlap, leave no gap, and only the last
+may be open ({@link datedRatesIssues}). A new rate for a key closes that key's
+open row in the same write (the `POST /taxes-codes/{uid}/rates` precedent).
+
+```ts
+interface DatedRate {
+  uid: string;
+  rate_key: string;
+  amount_cents: number;
+  applied_from: string;
+  applied_to: string | null;
+}
+```
+
+### `DatedRateInput`
+
+{@link DatedRateSchema} for an INPUT: unknown keys are stripped, not refused.
+
+```ts
+const DatedRateInput: z.ZodType<DatedRate>;
+```
+
+### `DatedRateSchema`
+
+Zod schema for {@link DatedRate}.
+
+```ts
+const DatedRateSchema: z.ZodType<DatedRate>;
+```
+
 ### `DeleteTagInput`
 
 Input schema for deleting a tag.
@@ -4262,59 +4326,6 @@ interface DestinationType {
   jurisdiction?: JurisdictionType | null;
   exchange?: DestinationExchangeType | null;
 }
-```
-
-### `DirectItem`
-
-A DIRECT item — something ordered that is not a product: freight, a fee, a
-service. Posts to any account and never touches basis (a landed cost on a buy
-item is how freight reaches basis). `name` equals `description`, so every arm
-answers "what is this row" from one key.
-
-A direct item is ONE thing, billed once or canceled: `quantity_billed` and
-`quantity_canceled` are each 0 or 1, and never both 1 (owner, 2026-10-30). A
-close cancels an unbilled direct item exactly as it cancels a buy's
-unreceived units, so a purchase holding unbilled freight can still be closed
-or canceled.
-
-Attribution, as on a bill's direct item (api-cloudrun#1360, #1364):
-`uid_product` is the RENTAL product the spend is for, `uid_out_of_service` the
-record a loss or damage charge is for. Both permanently optional — freight
-attributes nothing.
-
-```ts
-interface DirectItem {
-  type: "direct";
-  description: string;
-  amount_cents: number;
-  quantity_billed: number;
-  quantity_canceled: number;
-  uid_product?: string;
-  uid_out_of_service?: string;
-}
-```
-
-### `DirectItemInputType`
-
-A direct item as an operator orders it. Its account is the operator's — there is no default.
-
-```ts
-interface DirectItemInputType {
-  type: "direct";
-  description: string;
-  amount_cents: number;
-  coa_posting: COACodeType;
-  uid_product?: string;
-  uid_out_of_service?: string;
-}
-```
-
-### `DirectItemSchema`
-
-Zod schema for DirectItem.
-
-```ts
-const DirectItemSchema: z.ZodType<DirectItem>;
 ```
 
 ### `Discount`
@@ -8162,31 +8173,33 @@ interface OosChargeProducts {
 }
 ```
 
-### `OpenUnitActivationInput`
+### `OpenUnitChargeWindowInput`
 
-Zod schema for {@link OpenUnitActivationInputType}.
+Zod schema for {@link OpenUnitChargeWindowInputType}.
 
 ```ts
-const OpenUnitActivationInput: z.ZodType<OpenUnitActivationInputType>;
+const OpenUnitChargeWindowInput: z.ZodType<OpenUnitChargeWindowInputType>;
 ```
 
-### `OpenUnitActivationInputType`
+### `OpenUnitChargeWindowInputType`
 
-Body of `POST /units/{uid}/activations`: switch a unit's service line ON.
+Body of `POST /units/{uid}/charge-windows`: switch a unit's service line ON.
 
-Opens a span with no `end` — the server refuses a unit that is not `active`
-or that already has an open span, and a `uid_cogs` that names no activation
-entry on the unit's product. `start` is when CFS asked the provider to switch
-the line on, which may be earlier than the request (the call came first). A
-stripping `z.object`, not the stored strict node (`tests/input-strictness.test.ts`).
+Opens a window with no `end` — the server refuses a unit that is not
+`active` or that already has an open window. `start` is when CFS asked the
+provider to switch the line on, which may be earlier than the request (the
+call came first). `line` absent asks the server to resolve the purchase line
+(an active purchase of the unit's provider holding a line for the product);
+`null` states that no supplier line bills it. A stripping `z.object`, not the
+stored strict node (`tests/input-strictness.test.ts`).
 
 ```ts
-interface OpenUnitActivationInputType {
+interface OpenUnitChargeWindowInputType {
   version: number;
   start: string;
   uid_order: string | null;
-  uid_cogs: string;
-  provider_confirmed?: UnitActivationConfirmedType | null;
+  uid_price_formula: string;
+  line?: UnitChargeWindowLineType | null;
   notes: string;
 }
 ```
@@ -9085,6 +9098,22 @@ honest, checked in BOTH directions.
 const PRE_TAX_ITEM_TYPES: "rental" | "replacement" | "sale" | "service" | "surcharge"[];
 ```
 
+### `PRICE_FORMULA_BASES`
+
+Does a formula multiply TIME, or price a flat amount? Derived, never chosen:
+a `none` meter is `flat`, every other meter is `time`
+({@link priceFormulaBasis}).
+
+A line snapshots it beside the formula's uid and name (`price.price_formula`)
+so a single-document rule can branch on it without reading the formula: a
+purchase line's money shape (flat ⇒ a stated `amount_cents`, time ⇒ dated
+`rates`) and whether `quantity_billed` is a co-written bucket (flat only) are
+both decided by it (purchases-as-documents, Phase 2 ruling 1).
+
+```ts
+const PRICE_FORMULA_BASES: "flat" | "time"[];
+```
+
 ### `PURCHASE_BILL_FIELD_CLASSES`
 
 The classes a bill's editable fields fall into, for the freeze question
@@ -9163,23 +9192,24 @@ seeds a buy.
 
 🔴 **Closed, and read through exhaustive switches.** Every reader that
 branches on an item's arm switches over this union with a `never` default
-(`purchaseItemSupplies`, `purchaseItemResolved`, …), so a fifth member is a
+(`purchaseItemSupplies`, `purchaseItemResolved`, …), so a fourth member is a
 compile error at every one of them rather than a silent fall-through into
-the buy branch — which is how a pre-`kind` purchase used to be read.
+the buy branch.
 
 Explicit tuple type rather than `as const` alone: core#43 is JSR's npm
 `.d.ts` emit truncating an inferred tuple.
 
 ```ts
-const PURCHASE_ITEM_TYPES: readonly ["buy", "subrent", "usage", "direct"];
+const PURCHASE_ITEM_TYPES: readonly ["buy", "subrent", "charge"];
 ```
 
 ### `PURCHASE_PRODUCT_ITEM_TYPES`
 
-The arms that name a product and are billed by a product projection on a bill.
+The arms that ORDER a product (a required `uid_product`). A `charge` line's
+`uid_product` is attribution only, so it is not one.
 
 ```ts
-const PURCHASE_PRODUCT_ITEM_TYPES: readonly ["buy", "subrent", "usage"];
+const PURCHASE_PRODUCT_ITEM_TYPES: readonly ["buy", "subrent"];
 ```
 
 ### `PURCHASE_STATUSES`
@@ -9692,6 +9722,22 @@ defined once in `@cfs/core/utils/price-formulas`.
 const PriceFormulaAnchorSchema: z.ZodType<PriceFormulaAnchor>;
 ```
 
+### `PriceFormulaBasis`
+
+One {@link PRICE_FORMULA_BASES} member.
+
+```ts
+type PriceFormulaBasis = indexedAccess;
+```
+
+### `PriceFormulaBasisEnum`
+
+Zod schema for {@link PriceFormulaBasis}.
+
+```ts
+const PriceFormulaBasisEnum: z.ZodType<PriceFormulaBasis>;
+```
+
 ### `PriceFormulaEnum`
 
 Zod schema for PriceFormulaType.
@@ -9830,6 +9876,30 @@ Zod schema for {@link PriceFormulaMinimumUnit}.
 
 ```ts
 const PriceFormulaMinimumUnitEnum: z.ZodType<PriceFormulaMinimumUnit>;
+```
+
+### `PriceFormulaRef`
+
+A line's snapshot of the formula it is priced by — `{ uid, name }` like
+`PriceModifier` and `TaxRef` (`schemas/order.ts`), plus the derived
+{@link PriceFormulaBasis}. A point-in-time copy: a formula is immutable once
+referenced, and a renamed one is a superseding formula, so the snapshot never
+needs re-pointing.
+
+```ts
+interface PriceFormulaRef {
+  uid: string;
+  name: string;
+  basis: PriceFormulaBasis;
+}
+```
+
+### `PriceFormulaRefSchema`
+
+Zod schema for {@link PriceFormulaRef}.
+
+```ts
+const PriceFormulaRefSchema: z.ZodType<PriceFormulaRef>;
 ```
 
 ### `PriceFormulaRule`
@@ -10331,6 +10401,7 @@ interface Purchase {
   query_by_products: string[];
   query_by_orders: string[];
   query_by_item_types: PurchaseItemTypeType[];
+  query_by_bills?: string[];
   uid_thread?: string;
   version: number;
   created_by: ActorRefType;
@@ -10386,6 +10457,31 @@ interface PurchaseBillFieldFreezeContract {
   frozen_when: "frozen" | "void" | "never";
   xero_accepts_on_settled: boolean;
   members: readonly parenthesized[];
+}
+```
+
+### `PurchaseBillLineEditInputType`
+
+One line of a PUSHED bill as an operator edits it (D5): any shared field may
+be overridden until the bill is settled — exactly the invoice rule. Matched
+to the stored line by `uid`; an absent key KEEPS the stored value.
+
+Money is edited through its INPUTS, never typed over the result on a time
+line: `price.rates`, `price.discount`, `units` and `dates`, from which the
+writer re-meters `counts` and re-prices `amount_cents`. A flat line's
+`amount_cents` is stated directly (gross when a discount is set).
+
+```ts
+interface PurchaseBillLineEditInputType {
+  uid: string;
+  name?: string;
+  quantity?: number;
+  amount_cents?: number;
+  coa_posting?: COACodeType;
+  uid_tracking_category?: string | null;
+  price?: typeLiteral;
+  units?: PurchaseDocumentLineUnit[];
+  dates?: ChargeWindowType | null;
 }
 ```
 
@@ -10512,51 +10608,51 @@ One {@link PURCHASE_CREDIT_STATUSES} member.
 type PurchaseCreditStatusType = indexedAccess;
 ```
 
-### `PurchaseDocumentDirectItem`
+### `PurchaseDocumentChargeItem`
 
-A bill or credit item billing something that is not a purchase product item —
-freight, a fee, or a supplier's loss or damage charge on a subrent. Posts to
-its own account and never touches basis. `name` equals `description`.
+A bill or credit CHARGE line — freight, a fee, a carrier line, or a supplier's
+loss or damage charge on a subrent. Posts to its own account and never
+touches basis.
 
-A **document-only** direct item (no `path_purchase_item`) is the document's
-own row, like an invoice's loss-and-damage line: freight nobody expected, and
-serialized-subrent's historic Vision bills. One that projects a purchase
-`direct` item names it.
+A **document-only** charge (no `path_purchase_item`) is the document's own
+row, like an invoice's loss-and-damage line: freight nobody expected, and
+Vision's historic SPENDs. One that projects a purchase `charge` item names it.
 
 ## Attribution (api-cloudrun#1360, #1364)
 
-- `uid_product` — the RENTAL product the spend is attributed to. The writer
-  emits the product's Xero `ItemCode` beside the stated account; rental items
-  are untracked in Xero, so the code moves no Xero quantity or value.
+- `uid_product` — the product the spend is attributed to. The writer emits
+  the product's Xero `ItemCode` beside the stated account when it has one;
+  rental items are untracked in Xero, so the code moves no Xero quantity or
+  value.
 - `uid_out_of_service` — the record a loss or damage charge is for. A
   `mark_lost` record's id is a `MovementId`, hence `OutOfServiceId`.
 
-Both permanent `.optional()`: freight and fees name nothing. The tracking is
-`uid_tracking_category`, a bare category uid as on every other line; the Xero
-option is resolved when the body is built (line-tracking-uid D1), so the old
-stamped `xero_tracking_option_id` is gone.
+Both permanent `.optional()`: freight and fees name nothing.
 
 ```ts
-interface PurchaseDocumentDirectItem {
-  type: "direct";
+interface PurchaseDocumentChargeItem {
+  type: "charge";
   uid: string;
   path: string[];
   name: string;
-  description: string;
   quantity: number;
   amount_cents: number;
   coa_posting: COACodeType;
   uid_tracking_category: string | null;
+  price: PurchaseDocumentLinePrice;
+  units: PurchaseDocumentLineUnit[];
+  dates: ChargeWindowType | null;
   uid_product?: string;
   uid_out_of_service?: string;
   path_purchase_item?: string[];
 }
 ```
 
-### `PurchaseDocumentDirectItemInputType`
+### `PurchaseDocumentChargeItemInputType`
 
-A document-only direct item as an operator states it on a PUSHED bill or
-credit. The writer mints its `uid`/`path` and sets `name` = `description`.
+A document-only charge item as an operator states it on a PUSHED bill or
+credit (freight nobody expected, a fee). The writer mints its `uid`/`path`,
+stamps a Fixed formula snapshot and `quantity: 1`.
 `uid_tracking_category` follows the order/invoice line rule: absent or `null`
 takes the attributed product's category (none when it names no product); a
 uid sets it and must name a live category.
@@ -10566,8 +10662,8 @@ would let an api that predates a field silently drop it rather than 400, and
 an attribution would vanish with nothing failing (api-cloudrun#1360).
 
 ```ts
-interface PurchaseDocumentDirectItemInputType {
-  description: string;
+interface PurchaseDocumentChargeItemInputType {
+  name: string;
   coa_posting: COACodeType;
   amount_cents: number;
   uid_product?: string;
@@ -10576,12 +10672,12 @@ interface PurchaseDocumentDirectItemInputType {
 }
 ```
 
-### `PurchaseDocumentDirectItemSchema`
+### `PurchaseDocumentChargeItemSchema`
 
-Zod schema for PurchaseDocumentDirectItem.
+Zod schema for PurchaseDocumentChargeItem.
 
 ```ts
-const PurchaseDocumentDirectItemSchema: z.ZodType<PurchaseDocumentDirectItem>;
+const PurchaseDocumentChargeItemSchema: z.ZodType<PurchaseDocumentChargeItem>;
 ```
 
 ### `PurchaseDocumentItem`
@@ -10589,7 +10685,7 @@ const PurchaseDocumentDirectItemSchema: z.ZodType<PurchaseDocumentDirectItem>;
 Union of a bill or credit item's arms, discriminated on `type`.
 
 ```ts
-type PurchaseDocumentItem = PurchaseDocumentProductItem | PurchaseDocumentDirectItem;
+type PurchaseDocumentItem = PurchaseDocumentProductItem | PurchaseDocumentChargeItem;
 ```
 
 ### `PurchaseDocumentItemInput`
@@ -10619,6 +10715,59 @@ Zod schema for any bill or credit item — discriminated on `type`.
 const PurchaseDocumentItemSchema: z.ZodType<PurchaseDocumentItem>;
 ```
 
+### `PurchaseDocumentLinePrice`
+
+How a bill or credit line is priced: the purchase line's {@link PurchaseLinePrice}
+(formula snapshot, rates, discount — each `propagate: true` there, so an
+un-overridden bill line follows its purchase line) plus the line's frozen
+metered `counts` (ruling 8).
+
+- **flat** — `rates: []`, `counts: []`; `amount_cents` is the stated net share.
+- **time** — `rates` ≥ 1, and `counts` are the UNIT-periods the line bills:
+  the engine's tier counts summed over every unit's windows, so the line's
+  money is `priceFromFormula(rates, counts, 1, discount)` — quantity is
+  folded into the counts, because each unit meters its own windows and a
+  per-unit count does not factor out. On a PUSHED document the refine
+  asserts `amount_cents` equals exactly that; a LINKED document's money is
+  Xero's and is diffed, never refused.
+
+```ts
+interface PurchaseDocumentLinePrice {
+  counts: TierCountType[];
+}
+```
+
+### `PurchaseDocumentLinePriceSchema`
+
+Zod schema for {@link PurchaseDocumentLinePrice}.
+
+```ts
+const PurchaseDocumentLinePriceSchema: z.ZodType<PurchaseDocumentLinePrice>;
+```
+
+### `PurchaseDocumentLineUnit`
+
+One unit's charge windows on a time bill line — what the SUPPLIER billed for
+that unit, defaulted at create from the unit's unbilled windows
+(`UnitType.charge_windows`) and owned by the line from then on. The windows
+are core's time-only `ChargeWindow`; `uid_unit` names the unit (`MovementUnit`'s
+spelling). The purchase↔bill diff compares their coverage with the units'.
+
+```ts
+interface PurchaseDocumentLineUnit {
+  uid_unit: string;
+  charge_windows: ChargeWindowType[];
+}
+```
+
+### `PurchaseDocumentLineUnitSchema`
+
+Zod schema for {@link PurchaseDocumentLineUnit}.
+
+```ts
+const PurchaseDocumentLineUnitSchema: z.ZodType<PurchaseDocumentLineUnit>;
+```
+
 ### `PurchaseDocumentOriginEnum`
 
 Zod schema for PurchaseDocumentOriginType.
@@ -10638,17 +10787,17 @@ type PurchaseDocumentOriginType = indexedAccess;
 ### `PurchaseDocumentProductItem`
 
 A bill or credit item that PROJECTS a purchase item — some quantity of one
-buy, subrent or usage item (D5). It names that item by `path_purchase_item`,
-as an invoice line names its order line by `path_order_item`, and carries its
-own copy of the shared fields, each of which it may override: the billed
-`quantity` and `amount_cents` (homonyms of the purchase item's ordered ones),
-`coa_posting` and `uid_tracking_category` (`propagate: true`).
+buy or subrent item (D5). It names that item by `path_purchase_item`, as an
+invoice line names its order line by `path_order_item`, and carries its own
+copy of the shared fields, each of which it may override until the bill is
+settled: the billed `quantity` and `amount_cents` (homonyms of the purchase
+item's ordered ones), `price`, `name`, `coa_posting` and
+`uid_tracking_category` (`propagate: true` on the purchase side).
 
 On a LINKED bill the posting is the Xero document's where it has one; the
 purchase item's is the expected one, so an account divergence is an ordinary
-field difference between projection and source (serialized-subrent § 7b).
-That is why `coa_posting` here is any `COACode`, not the purchase arm's
-subset.
+field difference between projection and source. That is why `coa_posting`
+here is any `COACode`, not the purchase arm's subset.
 
 ```ts
 interface PurchaseDocumentProductItem {
@@ -10678,22 +10827,22 @@ const PurchaseDocumentProductItemSchema: z.ZodType<PurchaseDocumentProductItem>;
 Union of every purchase item arm, discriminated on `type`.
 
 ```ts
-type PurchaseItem = BuyItem | SubrentItem | UsageItem | DirectItem;
+type PurchaseItem = BuyItem | SubrentItem | ChargeItem;
 ```
 
 ### `PurchaseItemDates`
 
-A subrent item's hire window. `start` is when the units come; `end` is when
-they are due back to the SUPPLIER, not when the customer returns them.
+A line's span. On a subrent, the hire window: `start` is when the units
+come; `end` is when they are due back to the SUPPLIER, not when the customer
+returns them. On a charge, the span a span-metered formula reads (Verizon:
+from the line's start to its end, less suspensions).
 
-`end: null` is a STANDING subrent — open-ended, `+∞` in availability as on
-bookings and out-of-service records (serialized-subrent slice 2, folded in
-here; api-cloudrun#1392). The hire window doubles as the expected delivery:
-a subrent item has no separate `expected_date`.
+`end: null` is open-ended — `+∞` in availability as on bookings and
+out-of-service records (api-cloudrun#1392). The hire window doubles as the
+expected delivery: a subrent item has no separate `expected_date`.
 
 Named `dates` after out-of-service, bookings and cards. The object carries no
-label of its own; its children are labelled, so the composed heading stays
-"Item Hire Start" rather than doubling a word.
+label of its own; its children are labelled.
 
 ```ts
 interface PurchaseItemDates {
@@ -10723,7 +10872,7 @@ const PurchaseItemInput: z.ZodType<PurchaseItemInputType>;
 Union of every item input arm.
 
 ```ts
-type PurchaseItemInputType = BuyItemInputType | SubrentItemInputType | UsageItemInputType | DirectItemInputType;
+type PurchaseItemInputType = BuyItemInputType | SubrentItemInputType | ChargeItemInputType;
 ```
 
 ### `PurchaseItemSchema`
@@ -10757,9 +10906,9 @@ to the units still to arrive (api-cloudrun#1227). It is cost basis, so it
 reaches the ledger only through the receipts that price it.
 
 ⚠️ **It lives on the PURCHASE ITEM, not on the bill.** 276 of 299 historic
-bills are linked card-purchase bills with no direct items, and the receipt
+bills are linked card-purchase bills with no charge items, and the receipt
 transaction reads the purchase, never its bills. The Xero side is unchanged:
-the freight still posts through a bill's direct item to its own account.
+the freight still posts through a bill's charge item to its own account.
 `uid_purchase_bill` is traceability only.
 
 **What it spreads over is fixed at entry.** `quantity` is the item's
@@ -10822,6 +10971,66 @@ Zod schema for PurchaseLandedCost.
 
 ```ts
 const PurchaseLandedCostSchema: z.ZodType<PurchaseLandedCost>;
+```
+
+### `PurchaseLinePrice`
+
+How a purchase line is priced (purchases-as-documents Phase 2 rulings 1, 2,
+7): the formula it is priced by, the rates it snapshots, and a supplier
+discount.
+
+- A **flat** line (`price_formula.basis === "flat"`: a buy, a fixed-cost
+  subrent, freight or a fee) states its WHOLE cost in the line's
+  `amount_cents` and carries `rates: []`. Measured: most stored buys cost a
+  total that does not divide by their quantity, and every reader slices the
+  total with `cumulativeShareCents`, so no per-unit rate is stored.
+- A **time** line (Vision's "weekly while on", Verizon's "monthly unless
+  suspended") has `amount_cents: null` and the rates in force when it was
+  raised (Q13); what it costs is decided by the bills, priced from the
+  units' charge windows.
+
+`discount` is core's `Discount`. On a time line the engine applies it; on a
+flat line it records what came off the operator's GROSS, and `amount_cents`
+is the NET — what CFS pays, which receipts, basis and bills slice.
+
+There is no subtotal/discounted/taxes/total triple: purchases are
+resale-exempt (no tax), and gross = `amount_cents + discount.amount_cents`.
+
+```ts
+interface PurchaseLinePrice {
+  price_formula: PriceFormulaRef;
+  rates: RateSnapshotType[];
+  discount: DiscountType | null;
+}
+```
+
+### `PurchaseLinePriceInputType`
+
+How an operator prices an item input (ruling 1, 7). `uid_price_formula`
+names the formula; absent takes the writer's default (a buy and a flat charge
+Fixed; a subrent or a time charge the product's `cogs` activation entry's
+formula, else Fixed). The writer snapshots the formula's name and basis.
+
+- `rates` — a time line's rates; absent takes the rates in force today on
+  the product's activation entry. Refused on a flat line.
+- `discount` — a supplier discount, `{ rate, type }`; the writer computes its
+  `amount_cents`. On a flat line `amount_cents` is then the GROSS the
+  operator states, and the stored amount is net of the discount.
+
+```ts
+interface PurchaseLinePriceInputType {
+  uid_price_formula?: string;
+  rates?: RateSnapshotType[];
+  discount?: DiscountInputType | null;
+}
+```
+
+### `PurchaseLinePriceSchema`
+
+Zod schema for {@link PurchaseLinePrice}.
+
+```ts
+const PurchaseLinePriceSchema: z.ZodType<PurchaseLinePrice>;
 ```
 
 ### `PurchaseProductItemTypeType`
@@ -10979,6 +11188,28 @@ interface RateLimit {
 
 ```ts
 const RateLimitSchema: z.ZodType<RateLimit>;
+```
+
+### `RateSnapshotSchema`
+
+Zod schema for {@link RateSnapshotType}.
+
+```ts
+const RateSnapshotSchema: z.ZodType<RateSnapshotType>;
+```
+
+### `RateSnapshotType`
+
+One rate a line PRICED with — the snapshot it owns (Q13), taken for the
+line's pricing date from the dated rows ({@link DatedRate}). An AMOUNT in
+house vocabulary (integer cents per counted period), not a 4dp rate, hence
+`amount_cents`. Later rate changes never reprice a line.
+
+```ts
+interface RateSnapshotType {
+  rate_key: string;
+  amount_cents: number;
+}
 ```
 
 ### `RateType`
@@ -11745,14 +11976,6 @@ What made an interval unavailable. The only non-quantitative fact a reader gets.
 
 ```ts
 const STOCK_UNAVAILABLE_KINDS: "booking" | "oos"[];
-```
-
-### `SUBRENT_BILLING_BASES`
-
-How a subrent's cost is decided — see {@link SubrentBilling}.
-
-```ts
-const SUBRENT_BILLING_BASES: readonly ["fixed", "activation"];
 ```
 
 ### `SUBRENT_MOVEMENT_TYPES`
@@ -12530,83 +12753,42 @@ interface StoreTransferLineInputType {
 type StoreUpdated = EventEnvelope<Store> & typeLiteral;
 ```
 
-### `SubrentBilling`
-
-How a subrent item's cost is decided (owner, 2026-10-28; D9).
-
-- **`fixed`** — a per-job subrent: the supplier quotes the hire and
-  `amount_cents` is what it costs. Every subrent before 2026-10 is this arm.
-- **`activation`** — pay only while a unit is ACTIVE (Vision): the cost is
-  derived from the units' activation spans under the product's `cogs`
-  activation entry `uid_cogs` (`Product.cogs[].uid`), so there is no amount
-  and no rate here. `quantity_billed` then counts billed PERIODS, not units.
-
-A nested discriminated union rather than a nullable `amount_cents` beside a
-nullable `uid_cogs` — the house preference for an arm over a nullable pair
-with a refine. See the module docblock: it is the one stored union nested
-inside another union's arm.
-
-```ts
-type SubrentBilling = typeLiteral | typeLiteral;
-```
-
-### `SubrentBillingBasisType`
-
-One {@link SUBRENT_BILLING_BASES} member.
-
-```ts
-type SubrentBillingBasisType = indexedAccess;
-```
-
-### `SubrentBillingInput`
-
-The input twin of {@link SubrentBillingSchema} — non-strict arms, so extra keys strip.
-
-```ts
-const SubrentBillingInput: z.ZodType<SubrentBilling>;
-```
-
-### `SubrentBillingSchema`
-
-Zod schema for SubrentBilling.
-
-```ts
-const SubrentBillingSchema: z.ZodType<SubrentBilling>;
-```
-
 ### `SubrentItem`
 
-A SUBRENT item — `quantity` units borrowed for a hire window and given back.
+A SUBRENT item — `quantity` units borrowed for a hire window and given back. Flat or time.
 
 ```ts
 interface SubrentItem {
   type: "subrent";
   uid_product: string;
   quantity: number;
+  amount_cents: number | null;
+  price: PurchaseLinePrice;
   coa_posting: COACostType;
-  billing: SubrentBilling;
   dates: PurchaseItemDates;
   quantity_received: number;
-  quantity_billed: number;
+  quantity_billed: number | null;
   quantity_canceled: number;
   quantity_returned: number;
   uid_orders: string[];
+  auto_link: boolean;
 }
 ```
 
 ### `SubrentItemInputType`
 
-A subrent item as an operator orders it.
+A subrent item as an operator orders it. `amount_cents` on a flat line only (gross when discounted).
 
 ```ts
 interface SubrentItemInputType {
   type: "subrent";
   uid_product: string;
   quantity: number;
+  amount_cents?: number | null;
   coa_posting?: COACostType;
-  billing: SubrentBilling;
   dates: PurchaseItemDates;
   uid_orders?: string[];
+  auto_link?: boolean;
 }
 ```
 
@@ -12624,9 +12806,9 @@ One cost contribution to a margin row: what CFS paid a supplier for one
 subrent purchase line, or for a charge on that purchase that names no line.
 
 `product` is a purchase line: the bill lines for that product net of the
-credit lines for it, plus every bill direct line attributed to the product
-(a loss or damage charge, api-cloudrun#1360), net of credit direct lines.
-`purchase` is a direct line naming no product on the purchase's lines —
+credit lines for it, plus every bill charge line attributed to the product
+(a loss or damage charge, api-cloudrun#1360), net of credit charge lines.
+`purchase` is a charge line naming no product on the purchase's lines —
 freight or a fee — which serves every order the purchase was raised for.
 
 ```ts
@@ -12636,7 +12818,7 @@ interface SubrentMarginCostLine {
   purchase_number: number;
   uid_product: string | null;
   name: string;
-  hire_start: string;
+  subrent_start: string;
   ordered_cents: number | null;
   cost_cents: number;
 }
@@ -13732,6 +13914,31 @@ const ThreadSchema: z.ZodType<Thread>;
 type ThreadUpdated = EventEnvelope<Thread> & typeLiteral;
 ```
 
+### `TierCountSchema`
+
+Zod schema for {@link TierCountType}.
+
+```ts
+const TierCountSchema: z.ZodType<TierCountType>;
+```
+
+### `TierCountType`
+
+One tier's metered count as a line STORES it — the engine's exact rational
+(`TierCount`, `@cfs/core/utils/price-formulas`), frozen when the line is
+written because the holiday list has no versions (Phase 2 ruling 8). With
+the line's `rates`, `quantity` and `discount` it reproduces the line's money
+from the line alone. `num` may be zero, and negative on a stated extension
+count.
+
+```ts
+interface TierCountType {
+  rate_key: string;
+  num: number;
+  den: number;
+}
+```
+
 ### `TimestampFields`
 
 Standard timestamp fields present on most documents.
@@ -13814,7 +14021,7 @@ Every `TransactionDefinition.id` in the catalog.
 now, not by the shape of the call that consumes them.
 
 ```ts
-type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "extend-rental" | "undo-extend-rental" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "reverse-stock-reclass" | "create-purchase" | "update-purchase" | "close-purchase" | "receive-purchase" | "reverse-purchase-receipt" | "return-purchase" | "reverse-purchase-return" | "create-purchase-bill" | "settle-purchase-bill" | "void-purchase-bill-from-xero" | "create-purchase-credit" | "allocate-purchase-credit" | "reverse-purchase-credit-allocation" | "settle-purchase-credit" | "void-purchase-credit" | "void-purchase-credit-from-xero" | "create-store-transfer" | "create-units" | "update-unit" | "open-unit-activation" | "update-unit-activation" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "close-invoice" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "record-credit-note-refund" | "sync-xero-credit-note-refunds" | "reverse-credit-note-refund" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "reconcile-order-from-invoices" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-price-formula" | "update-price-formula" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "set-location-product-default" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
+type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "extend-rental" | "undo-extend-rental" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "reverse-stock-reclass" | "create-purchase" | "update-purchase" | "close-purchase" | "receive-purchase" | "reverse-purchase-receipt" | "return-purchase" | "reverse-purchase-return" | "create-purchase-bill" | "settle-purchase-bill" | "void-purchase-bill-from-xero" | "create-purchase-credit" | "allocate-purchase-credit" | "reverse-purchase-credit-allocation" | "settle-purchase-credit" | "void-purchase-credit" | "void-purchase-credit-from-xero" | "create-store-transfer" | "create-units" | "update-unit" | "open-unit-charge-window" | "update-unit-charge-window" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "close-invoice" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "record-credit-note-refund" | "sync-xero-credit-note-refunds" | "reverse-credit-note-refund" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "reconcile-order-from-invoices" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-price-formula" | "update-price-formula" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "set-location-product-default" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
 ```
 
 ### `TransactionLogRecord`
@@ -13984,16 +14191,6 @@ for the two that carry cost — the exact relief.
 const UNDO_MOVEMENT_TYPES: "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning_undo" | "mark_maintenance_undo" | "sale_undo" | "sale_return_undo" | "sale_lost_undo" | "sale_damaged_undo"[];
 ```
 
-### `UNIT_ACTIVITY_INSTANT_SOURCES`
-
-Which instants a billed period was cut from: the provider's confirmed ones,
-CFS's own, or `mixed` when the spans touching it disagree
-(`@cfs/core/utils/cogs` `spanInstants`).
-
-```ts
-const UNIT_ACTIVITY_INSTANT_SOURCES: "provider" | "cfs" | "mixed"[];
-```
-
 ### `UNIT_ROSTER_STATES`
 
 The states a rostered unit can be in. See {@link UnitRosterEntryType}.
@@ -14127,71 +14324,19 @@ interface UndoRentalExtensionInputType {
 }
 ```
 
-### `UnitActivation`
-
-Zod schema for {@link UnitActivationType}.
-
-```ts
-const UnitActivation: z.ZodType<UnitActivationType>;
-```
-
-### `UnitActivationConfirmed`
-
-Zod schema for {@link UnitActivationConfirmedType}.
-
-```ts
-const UnitActivationConfirmed: z.ZodType<UnitActivationConfirmedType>;
-```
-
-### `UnitActivationConfirmedType`
-
-The confirmed on/off instants of an activation, as the provider's portal or bill states them.
-
-```ts
-interface UnitActivationConfirmedType {
-  start: string;
-  end: string | null;
-}
-```
-
-### `UnitActivationType`
-
-One span during which a unit's service line was switched ON — a hotspot's or
-router's data line, billed by its provider through the product's `cogs`
-activation entry that `uid_cogs` names.
-
-RECORDED, never derived from custody: a device can sit on the shelf switched
-on (an idle, still-billed span) or go out switched off. Present on every
-unit, owned or rented, because CFS's own devices carry provider lines too.
-The biller is the named cost entry's `provider`, not a field here, since one
-product can hold units billed by different providers.
-
-```ts
-interface UnitActivationType {
-  uid: string;
-  start: string;
-  end: string | null;
-  uid_order: string | null;
-  uid_cogs: string;
-  provider_confirmed: UnitActivationConfirmedType | null;
-  notes: string;
-  changed_by: ActorRefType;
-}
-```
-
 ### `UnitActivityBill`
 
-One of the provider's LINKED usage bills dated in the month
-(serialized-subrent § 7b, § 8).
+One of the provider's bills dated in the month, pushed or linked
+(purchases-as-documents D8).
 
-A usage bill is N:1 — one provider document covers many unit-periods, billed
-per (product, cost entry) item — so there is no per-PERIOD billed cost to
-report, and the report does not invent one. It lists the bills beside the
+A bill is N:1 — one provider document covers many unit-periods — so there is
+no per-PERIOD billed cost to report, and the report does not invent one. It lists the bills beside the
 periods; the operator reconciles the two.
 
-`diverged` is DERIVED, never stored: the bill's Xero total differs from the
-Σ of its usage items' expected amounts, or an item posts to a different
-account than the purchase item it projects.
+`diverged` is DERIVED, never stored, from the purchase↔bill diff
+(`computePurchaseBillDiffs`): the bill's lines differ from what the units'
+windows and the purchase lines say they should be — money, windows or
+account.
 
 ```ts
 interface UnitActivityBill {
@@ -14199,7 +14344,6 @@ interface UnitActivityBill {
   number: number;
   date: string;
   xero_document: "invoice" | "bank_transaction";
-  periods: number;
   expected_cents: number;
   total_cents: number;
   diverged: boolean;
@@ -14235,22 +14379,6 @@ Zod schema for {@link UnitActivityFinding}.
 
 ```ts
 const UnitActivityFindingSchema: z.ZodType<UnitActivityFinding>;
-```
-
-### `UnitActivityInstantSourceEnum`
-
-Zod enum for {@link UNIT_ACTIVITY_INSTANT_SOURCES}.
-
-```ts
-const UnitActivityInstantSourceEnum: z.ZodEnum<typeLiteral>;
-```
-
-### `UnitActivityInstantSourceType`
-
-One of {@link UNIT_ACTIVITY_INSTANT_SOURCES}.
-
-```ts
-type UnitActivityInstantSourceType = z.infer<UnitActivityInstantSourceEnum>;
 ```
 
 ### `UnitActivityOrderRef`
@@ -14298,20 +14426,22 @@ const UnitActivityOutSpellSchema: z.ZodType<UnitActivityOutSpell>;
 
 ### `UnitActivityPeriod`
 
-One billed period of one unit's line under one `cogs` activation entry:
-`@cfs/core/utils/cogs` `billablePeriods`, which bills the WHOLE period for
-any active day (owner, 2026-10-27, Q11).
+One billed period of one unit's charge windows under the purchase line they
+bill against. Periods come from the line's FORMULA — its largest segment's
+unit (a Vision month block, a Verizon month), cut whether or not the unit
+was on (Q9) — and each period's `expected_cents` is the formula money step
+over the windows inside it, at the line's snapshotted rates (D8).
 
 ```ts
 interface UnitActivityPeriod {
-  uid_cogs: string;
+  line: UnitChargeWindowLineType | null;
+  price_formula: PriceFormulaRef;
   label: string;
   start: string;
   end: string;
   starts_in_month: boolean;
   orders: UnitActivityOrderRef[];
   active_days: number;
-  instants: UnitActivityInstantSourceType;
   expected_cents: number;
 }
 ```
@@ -14329,13 +14459,12 @@ const UnitActivityPeriodSchema: z.ZodType<UnitActivityPeriod>;
 The unit activity report (api-cloudrun#1395;
 `api-cloudrun/.claude/plans/serialized-subrent.md` § 8): for ONE provider
 and ONE Chicago calendar month, every unit whose line that provider bills,
-cut into billed periods, with the orders each period served and the days the
-unit was physically out.
+cut into billed periods by each line's formula, with the orders each period
+served and the days the unit was physically out.
 
-It covers owned and rented units alike — activation is a fact about the
-device's service, not its owner. It reports EXPECTED cost only; what the
-provider actually billed arrives with the linked usage bills
-(api-cloudrun#1396).
+It covers owned and rented units alike — a charge window is a fact about the
+device's service, not its owner. Periods carry EXPECTED cost; what the
+provider actually billed is its bills, listed beside them.
 
 🔴 **The refinement is the control total**: every unit's sums tie to its
 periods, and the totals tie to the units.
@@ -14409,6 +14538,65 @@ Zod schema for {@link UnitActivityUnit}.
 
 ```ts
 const UnitActivityUnitSchema: z.ZodType<UnitActivityUnit>;
+```
+
+### `UnitChargeWindow`
+
+Zod schema for {@link UnitChargeWindowType}.
+
+```ts
+const UnitChargeWindow: z.ZodType<UnitChargeWindowType>;
+```
+
+### `UnitChargeWindowLine`
+
+Zod schema for {@link UnitChargeWindowLineType}.
+
+```ts
+const UnitChargeWindowLine: z.ZodType<UnitChargeWindowLineType>;
+```
+
+### `UnitChargeWindowLineType`
+
+The purchase line a charge window bills against — the line's purchase and
+its row identity (`path`), the way a bill line names its purchase line.
+
+```ts
+interface UnitChargeWindowLineType {
+  uid_purchase: string;
+  path: string[];
+}
+```
+
+### `UnitChargeWindowType`
+
+One span during which a unit's service line was switched ON — a hotspot's or
+router's data line — billed by its provider under a price formula
+(purchases-as-documents D2; Phase 2 rulings 4 and 8).
+
+The `{ start, end }` of an order pair's `ChargeWindow`, plus what a LIVE
+switch-on needs: `end: null` while the line is on, a `uid` because routes
+edit one window at a time, and the facts a window is billed by. It carries no
+day count: counts are a LINE's (`price.counts`), metered under that line's
+formula when a purchase or bill line is priced from these windows.
+
+RECORDED, never derived from custody: a device can sit on the shelf switched
+on (an idle, still-billed span) or go out switched off. Present on every
+unit, owned or rented, because CFS's own devices carry provider lines too.
+What the provider billed is the BILL line's own windows, diffed against these
+— not a field here.
+
+```ts
+interface UnitChargeWindowType {
+  uid: string;
+  start: string;
+  end: string | null;
+  uid_order: string | null;
+  line: UnitChargeWindowLineType | null;
+  uid_price_formula: string;
+  notes: string;
+  changed_by: ActorRefType;
+}
 ```
 
 ### `UnitId`
@@ -14611,7 +14799,7 @@ interface UnitType {
   serial_number: string | null;
   serial_history: UnitSerialHistoryEntryType[];
   status: UnitStatusType;
-  activations: UnitActivationType[];
+  charge_windows: UnitChargeWindowType[];
   uuid_session: string | null;
   version: number;
   created_by: ActorRefType;
@@ -15199,6 +15387,32 @@ interface UpdateProductInputType {
 }
 ```
 
+### `UpdatePurchaseBillInput`
+
+Zod schema for UpdatePurchaseBillInputType.
+
+```ts
+const UpdatePurchaseBillInput: z.ZodType<UpdatePurchaseBillInputType>;
+```
+
+### `UpdatePurchaseBillInputType`
+
+Input for editing a PUSHED, unsettled bill (`PUT /purchase-bills/{uid}`) — a
+PATCH. `items`, when present, names lines to edit by `uid`; lines it omits are
+kept. Refused on a linked bill (Xero is authoritative) and, per field class,
+once the bill is frozen (`PURCHASE_BILL_FIELD_FREEZE`). An accepted edit is
+pushed to Xero through the ACCPAY edit push (D5).
+
+```ts
+interface UpdatePurchaseBillInputType {
+  version: number;
+  date?: string;
+  due_date?: string;
+  reference?: string | null;
+  items?: PurchaseBillLineEditInputType[];
+}
+```
+
 ### `UpdatePurchaseInput`
 
 Zod schema for UpdatePurchaseInputType.
@@ -15222,8 +15436,8 @@ facts the writer holds, so they are not refined here.
 
 ⚠️ **A SUBRENT item's price is not frozen by a receipt**, because its receipts
 carry no cost (`subrent_in` is cost-forbidden). So on a subrent the writer lets
-`billing.amount_cents` and `dates.end` move after receipt — a paid hire
-extension — with `quantity` still floored at what is received.
+`amount_cents` and `dates.end` move after receipt — a paid hire extension —
+with `quantity` still floored at what is received.
 
 ```ts
 interface UpdatePurchaseInputType {
@@ -15492,29 +15706,29 @@ interface UpdateTransactionInputType {
 }
 ```
 
-### `UpdateUnitActivationInput`
+### `UpdateUnitChargeWindowInput`
 
-Zod schema for {@link UpdateUnitActivationInputType}.
+Zod schema for {@link UpdateUnitChargeWindowInputType}.
 
 ```ts
-const UpdateUnitActivationInput: z.ZodType<UpdateUnitActivationInputType>;
+const UpdateUnitChargeWindowInput: z.ZodType<UpdateUnitChargeWindowInputType>;
 ```
 
-### `UpdateUnitActivationInputType`
+### `UpdateUnitChargeWindowInputType`
 
-Body of `PUT /units/{uid}/activations/{activation_uid}`: close a span
-(`end`), record what the provider confirms (`provider_confirmed`), or correct
-any of its fields. An absent key keeps the stored value; `end: null`
-re-opens the LAST span of an `active` unit (a switch-off recorded in error).
+Body of `PUT /units/{uid}/charge-windows/{window_uid}`: close a window
+(`end`) or correct any of its fields. An absent key keeps the stored value;
+`end: null` re-opens the LAST window of an `active` unit (a switch-off
+recorded in error).
 
 ```ts
-interface UpdateUnitActivationInputType {
+interface UpdateUnitChargeWindowInputType {
   version: number;
   start?: string;
   end?: string | null;
   uid_order?: string | null;
-  uid_cogs?: string;
-  provider_confirmed?: UnitActivationConfirmedType | null;
+  uid_price_formula?: string;
+  line?: UnitChargeWindowLineType | null;
   notes?: string;
 }
 ```
@@ -15661,47 +15875,6 @@ is not worth a redundant column.
 
 ```ts
 const UploadcareWorkListEntrySchema: z.ZodType<UploadcareWorkListEntry>;
-```
-
-### `UsageItem`
-
-A USAGE item — a carrier line on a device CFS OWNS (Verizon): CFS pays a
-party that has no custody of anything. No quantity, no amount and no rate:
-it names its cost entry (`uid_cogs`, `Product.cogs[].uid`), every reader
-takes the rate from that entry, and the billable quantity is derived from the
-units' activation spans (`remainingUsageToBill`, serialized-subrent § 7b).
-A supplier's own device billed only while active is an activation-billed
-{@link SubrentItem}, never a usage item beside a custody item (D9).
-
-```ts
-interface UsageItem {
-  type: "usage";
-  uid_product: string;
-  coa_posting: COACostType;
-  uid_cogs: string;
-  quantity_billed: number;
-}
-```
-
-### `UsageItemInputType`
-
-A usage item as an operator raises it.
-
-```ts
-interface UsageItemInputType {
-  type: "usage";
-  uid_product: string;
-  uid_cogs: string;
-  coa_posting?: COACostType;
-}
-```
-
-### `UsageItemSchema`
-
-Zod schema for UsageItem.
-
-```ts
-const UsageItemSchema: z.ZodType<UsageItem>;
 ```
 
 ### `User`
@@ -16161,6 +16334,10 @@ Xero-quote writeback, the invoice mirror) do not normalize; they preserve the
 stored legs and items, so they stay legal only because the corpus already
 is. The only paths out of draft run through `updateOrder`, which normalizes.
 
+### `checkDatedRates(rates: readonly DatedRate[], ctx: z.RefinementCtx): void`
+
+Refine adapter for {@link datedRatesIssues}, for a `rates` array node.
+
 ### `checkDestinationJoin(doc: typeLiteral, ctx: z.RefinementCtx): void`
 
 {@link destinationJoinViolations} as a document-level refinement. Attached to
@@ -16389,6 +16566,16 @@ out of `cleaning`/`maintenance`, whose id is its reason's own (the api's
 
 The rule with `id`. Total over {@link CustodyRuleId}; the table test proves it.
 
+### `datedRatesIssues(rates: readonly DatedRate[]): typeLiteral[]`
+
+The single-document rules of a dated-rate array, per `rate_key`: rows ascend
+by `applied_from`, each closed row ends where the next begins (no overlap, no
+gap), only the last row of a key may be open, `applied_to > applied_from`, and
+uids are unique. Instants compared with `Date.parse`, never lexically.
+
+It cannot say "every key the formula names has a row in force" — the formula
+is another document; the writer checks that (`snapshotRates` throws).
+
 ### `deriveCreditPostingAccount(reason: SettlementReasonType, coaRevenue: number | null): number | null`
 
 Where a credit line posts, from the two facts that decide it.
@@ -16473,8 +16660,8 @@ Derive `query_by_orders` — the distinct union of the subrent items' `uid_order
 ### `deriveQueryByProducts(items: readonly PurchaseItem[]): string[]`
 
 Derive `query_by_products` — the distinct products the items ORDER, in first
-appearance order. A direct item's attribution is not an order and is left
-out. The one author of the mirror, called by every writer.
+appearance order. A charge's attribution is not an order and is left out.
+The one author of the mirror, called by every writer.
 
 ### `destinationJoinViolations(items: ReadonlyArray<unknown>, destinations: ReadonlyArray<unknown>): DestinationJoinViolation[]`
 
@@ -17212,6 +17399,10 @@ goods went out would derive `collection` and change identity. Use this to
 RESOLVE {@link PickSheet.leg} once, at build time; then read the stamped
 field. Derivation supplies the default; the stamped value is the fact.
 
+### `priceFormulaBasis(rule: Pick<PriceFormulaRule, "meter">): PriceFormulaBasis`
+
+The basis a formula rule implies — see {@link PRICE_FORMULA_BASES}.
+
 ### `priceFormulaRuleIssues(rule: PriceFormulaRule): typeLiteral[]`
 
 Every rule a formula can break on its own. Exported so the input schemas and
@@ -17219,37 +17410,46 @@ the engine's own guard read the same list.
 
 Returns `{ path, message }[]`; empty means the rule is well-formed.
 
+### `purchaseItemBasis(item: typeLiteral): PriceFormulaBasis`
+
+The basis of an item's formula; a buy written before `price` existed is flat.
+
 ### `purchaseItemCanceled(item: PurchaseItem): boolean`
 
 Was this item canceled in full — nothing will come and nothing is billed?
-A direct item is canceled when its one unit is. A usage item has no cancel
-bucket, so it is never canceled; a purchase holding one is canceled only once
-that item has gone (an update).
 
 ### `purchaseItemCommittedCents(item: PurchaseItem): number`
 
 The amount an item COMMITS up front — the term of the purchase's
-`total_cents` (owner, 2026-10-30). An activation-billed subrent and a usage
-item commit nothing: their cost is decided as they accrue.
+`total_cents` (owner, 2026-10-30): a flat line's net amount, and 0 for a time
+line, whose cost is decided as it accrues.
 
 ### `purchaseItemProduct(item: PurchaseItem): string | undefined`
 
-The product an item names, or `undefined` — a direct item's `uid_product` is attribution, not an order.
+The product an item ORDERS, or `undefined` — a charge's `uid_product` is attribution, not an order.
 
 ### `purchaseItemResolved(item: PurchaseItem): boolean`
 
 Has this item nothing left to happen?
 
-- **buy** — every unit received or canceled, and billed for exactly what was
-  not canceled.
-- **subrent** — the same, plus every unit received has gone back: a hire with
-  units still in CFS's custody is not finished. An ACTIVATION-billed subrent
-  has no billing axis to close (it bills periods as they accrue), so custody
-  alone resolves it.
-- **usage** — never: a carrier line accrues for as long as it exists.
-- **direct** — billed or canceled.
+- **buy** — every unit received or canceled, and billed for at least what was
+  not canceled (over-billing is flagged, not held open).
+- **subrent** — every unit received or canceled, every unit received gone
+  back (a hire with units still in CFS's custody is not finished), and on a
+  flat line billed in full. A TIME line resolves on custody alone (Q7): it
+  bills windows as they accrue, with no count to close.
+- **charge** — a flat one when billed or canceled in full; a time one only
+  once canceled in full, since a carrier line accrues for as long as it lives.
 
 Payment is the bill's business and holds nothing open.
+
+### `purchaseLineMoneyIssues(item: typeLiteral): typeLiteral[]`
+
+The single-document money rule (ruling 1), shared by every arm and by the
+bill line: a flat line states an amount and no rates, a time line states
+rates and — on a purchase — no amount. A refine rather than a union arm
+because `basis` cuts across all three line types; arms would split each in
+two.
 
 ### `resolveFieldMeta(schema: z.ZodType, fieldPath: string): Record<string, unknown> | null`
 
@@ -17624,7 +17824,7 @@ Every `TransactionDefinition.id` in the catalog.
 now, not by the shape of the call that consumes them.
 
 ```ts
-type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "extend-rental" | "undo-extend-rental" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "reverse-stock-reclass" | "create-purchase" | "update-purchase" | "close-purchase" | "receive-purchase" | "reverse-purchase-receipt" | "return-purchase" | "reverse-purchase-return" | "create-purchase-bill" | "settle-purchase-bill" | "void-purchase-bill-from-xero" | "create-purchase-credit" | "allocate-purchase-credit" | "reverse-purchase-credit-allocation" | "settle-purchase-credit" | "void-purchase-credit" | "void-purchase-credit-from-xero" | "create-store-transfer" | "create-units" | "update-unit" | "open-unit-activation" | "update-unit-activation" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "close-invoice" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "record-credit-note-refund" | "sync-xero-credit-note-refunds" | "reverse-credit-note-refund" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "reconcile-order-from-invoices" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-price-formula" | "update-price-formula" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "set-location-product-default" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
+type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "extend-rental" | "undo-extend-rental" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "reverse-stock-reclass" | "create-purchase" | "update-purchase" | "close-purchase" | "receive-purchase" | "reverse-purchase-receipt" | "return-purchase" | "reverse-purchase-return" | "create-purchase-bill" | "settle-purchase-bill" | "void-purchase-bill-from-xero" | "create-purchase-credit" | "allocate-purchase-credit" | "reverse-purchase-credit-allocation" | "settle-purchase-credit" | "void-purchase-credit" | "void-purchase-credit-from-xero" | "create-store-transfer" | "create-units" | "update-unit" | "open-unit-charge-window" | "update-unit-charge-window" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "close-invoice" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "record-credit-note-refund" | "sync-xero-credit-note-refunds" | "reverse-credit-note-refund" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "reconcile-order-from-invoices" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-price-formula" | "update-price-formula" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "set-location-product-default" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
 ```
 
 ### `aggregates`
@@ -25533,6 +25733,59 @@ interface CreatePriceFormulaInputType {
 }
 ```
 
+### `DatedRate`
+
+One dated rate row (D4): `amount_cents` for `rate_key` over
+`[applied_from, applied_to)`. Calendar dates (`chicagoStartOfDay`), the
+taxes-rate window — but an ARRAY MEMBER, so no `_fs` twins (`unit.ts`,
+`ChargeWindow`): nothing range-queries inside an array.
+
+Per key the rows are ordered, never overlap, leave no gap, and only the last
+may be open ({@link datedRatesIssues}). A new rate for a key closes that key's
+open row in the same write (the `POST /taxes-codes/{uid}/rates` precedent).
+
+```ts
+interface DatedRate {
+  uid: string;
+  rate_key: string;
+  amount_cents: number;
+  applied_from: string;
+  applied_to: string | null;
+}
+```
+
+### `DatedRateInput`
+
+{@link DatedRateSchema} for an INPUT: unknown keys are stripped, not refused.
+
+```ts
+const DatedRateInput: z.ZodType<DatedRate>;
+```
+
+### `DatedRateSchema`
+
+Zod schema for {@link DatedRate}.
+
+```ts
+const DatedRateSchema: z.ZodType<DatedRate>;
+```
+
+### `PRICE_FORMULA_BASES`
+
+Does a formula multiply TIME, or price a flat amount? Derived, never chosen:
+a `none` meter is `flat`, every other meter is `time`
+({@link priceFormulaBasis}).
+
+A line snapshots it beside the formula's uid and name (`price.price_formula`)
+so a single-document rule can branch on it without reading the formula: a
+purchase line's money shape (flat ⇒ a stated `amount_cents`, time ⇒ dated
+`rates`) and whether `quantity_billed` is a co-written bucket (flat only) are
+both decided by it (purchases-as-documents, Phase 2 ruling 1).
+
+```ts
+const PRICE_FORMULA_BASES: "flat" | "time"[];
+```
+
 ### `PriceFormula`
 
 A price formula document in Firestore.
@@ -25568,6 +25821,22 @@ defined once in `@cfs/core/utils/price-formulas`.
 
 ```ts
 const PriceFormulaAnchorSchema: z.ZodType<PriceFormulaAnchor>;
+```
+
+### `PriceFormulaBasis`
+
+One {@link PRICE_FORMULA_BASES} member.
+
+```ts
+type PriceFormulaBasis = indexedAccess;
+```
+
+### `PriceFormulaBasisEnum`
+
+Zod schema for {@link PriceFormulaBasis}.
+
+```ts
+const PriceFormulaBasisEnum: z.ZodType<PriceFormulaBasis>;
 ```
 
 ### `PriceFormulaGapAllowance`
@@ -25702,6 +25971,30 @@ Zod schema for {@link PriceFormulaMinimumUnit}.
 const PriceFormulaMinimumUnitEnum: z.ZodType<PriceFormulaMinimumUnit>;
 ```
 
+### `PriceFormulaRef`
+
+A line's snapshot of the formula it is priced by — `{ uid, name }` like
+`PriceModifier` and `TaxRef` (`schemas/order.ts`), plus the derived
+{@link PriceFormulaBasis}. A point-in-time copy: a formula is immutable once
+referenced, and a renamed one is a superseding formula, so the snapshot never
+needs re-pointing.
+
+```ts
+interface PriceFormulaRef {
+  uid: string;
+  name: string;
+  basis: PriceFormulaBasis;
+}
+```
+
+### `PriceFormulaRefSchema`
+
+Zod schema for {@link PriceFormulaRef}.
+
+```ts
+const PriceFormulaRefSchema: z.ZodType<PriceFormulaRef>;
+```
+
 ### `PriceFormulaRule`
 
 The rule half of a formula — everything the engine reads.
@@ -25804,6 +26097,53 @@ A rate key: names a dated rate row, never an amount.
 const RateKey: z.ZodType<string>;
 ```
 
+### `RateSnapshotSchema`
+
+Zod schema for {@link RateSnapshotType}.
+
+```ts
+const RateSnapshotSchema: z.ZodType<RateSnapshotType>;
+```
+
+### `RateSnapshotType`
+
+One rate a line PRICED with — the snapshot it owns (Q13), taken for the
+line's pricing date from the dated rows ({@link DatedRate}). An AMOUNT in
+house vocabulary (integer cents per counted period), not a 4dp rate, hence
+`amount_cents`. Later rate changes never reprice a line.
+
+```ts
+interface RateSnapshotType {
+  rate_key: string;
+  amount_cents: number;
+}
+```
+
+### `TierCountSchema`
+
+Zod schema for {@link TierCountType}.
+
+```ts
+const TierCountSchema: z.ZodType<TierCountType>;
+```
+
+### `TierCountType`
+
+One tier's metered count as a line STORES it — the engine's exact rational
+(`TierCount`, `@cfs/core/utils/price-formulas`), frozen when the line is
+written because the holiday list has no versions (Phase 2 ruling 8). With
+the line's `rates`, `quantity` and `discount` it reproduces the line's money
+from the line alone. `num` may be zero, and negative on a stated extension
+count.
+
+```ts
+interface TierCountType {
+  rate_key: string;
+  num: number;
+  den: number;
+}
+```
+
 ### `UpdatePriceFormulaInput`
 
 Zod schema for {@link UpdatePriceFormulaInputType}.
@@ -25832,6 +26172,24 @@ interface UpdatePriceFormulaInputType {
   uid_superseded_by?: string | null;
 }
 ```
+
+### `checkDatedRates(rates: readonly DatedRate[], ctx: z.RefinementCtx): void`
+
+Refine adapter for {@link datedRatesIssues}, for a `rates` array node.
+
+### `datedRatesIssues(rates: readonly DatedRate[]): typeLiteral[]`
+
+The single-document rules of a dated-rate array, per `rate_key`: rows ascend
+by `applied_from`, each closed row ends where the next begins (no overlap, no
+gap), only the last row of a key may be open, `applied_to > applied_from`, and
+uids are unique. Instants compared with `Date.parse`, never lexically.
+
+It cannot say "every key the formula names has a row in force" — the formula
+is another document; the writer checks that (`snapshotRates` throws).
+
+### `priceFormulaBasis(rule: Pick<PriceFormulaRule, "meter">): PriceFormulaBasis`
+
+The basis a formula rule implies — see {@link PRICE_FORMULA_BASES}.
 
 ### `priceFormulaRuleIssues(rule: PriceFormulaRule): typeLiteral[]`
 
@@ -25898,23 +26256,6 @@ interface AuthoredProductComponent {
 }
 ```
 
-### `COGS_ACTIVATION_FORMULAS`
-
-How an activation entry's periods are cut. ANY active day bills the whole
-period (owner, 2026-10-27, Q11).
-
-- `per_week` — 7-day cycles anchored on the unit's FIRST activation day under
-  the entry, so a re-activation inside a week already billed continues it.
-- `per_calendar_month` — Chicago calendar months.
-
-A separate vocabulary from `PRICE_FORMULAS`, so a customer price picker never
-offers a cost formula (the core#78 lesson). The one function that applies
-them is `billablePeriods` (`@cfs/core/utils/cogs`).
-
-```ts
-const COGS_ACTIVATION_FORMULAS: "per_week" | "per_calendar_month"[];
-```
-
 ### `COGS_OWNERSHIPS`
 
 Whose units an activation entry prices: CFS's own (`cfs`, e.g. Verizon lines
@@ -25929,7 +26270,8 @@ const COGS_OWNERSHIPS: "cfs" | "supplier"[];
 
 What triggers a cost-of-revenue rule. `sale` — a sale's inventory relief;
 `activation` — a unit's service line being switched on (a hotspot's data
-line), billed by its provider per period. Later: `booking`, `depreciation`
+line): its charge windows (`UnitType.charge_windows`), billed by its provider
+under a price formula. Later: `booking`, `depreciation`
 (api-cloudrun#1388).
 
 ```ts
@@ -25959,9 +26301,11 @@ const COMPONENT_QUANTITY_DECIMALS: 4;
 
 ### `CogsActivationEntryType`
 
-A provider-billed service line, accrued per billed period by the unit
-activations whose `uid_cogs` names this entry. Only activation entries carry
-a `uid`, because only spans reference an entry.
+A provider-billed service line: what a unit's charge windows cost, under the
+formula `uid_price_formula` names, at the dated `rates` (purchases-as-documents
+D4). It is the DEFAULT a supplier line takes when one is raised for the
+product — the purchase line snapshots the formula and the rates in force, and
+from then on owns them (Q13). Only activation entries carry a `uid`.
 
 ```ts
 interface CogsActivationEntryType {
@@ -25969,27 +26313,11 @@ interface CogsActivationEntryType {
   uid: string;
   label: string;
   coa_cost: COACostType;
-  formula: CogsActivationFormulaType;
   provider: UidNameRefType;
   ownership: CogsOwnershipType;
-  rate_cents: number;
+  uid_price_formula: string;
+  rates: DatedRate[];
 }
-```
-
-### `CogsActivationFormulaEnum`
-
-Zod schema for {@link CogsActivationFormulaType}.
-
-```ts
-const CogsActivationFormulaEnum: z.ZodType<CogsActivationFormulaType>;
-```
-
-### `CogsActivationFormulaType`
-
-One activation billing formula. See {@link COGS_ACTIVATION_FORMULAS}.
-
-```ts
-type CogsActivationFormulaType = indexedAccess;
 ```
 
 ### `CogsEntry`
@@ -26421,12 +26749,14 @@ copies every part of it:
 (`OrderDocItem`, `InvoiceDocItem`), and the ARM is per item — there is no
 document-level `kind`, so one purchase may mix arms:
 
-| `type` | what CFS gets | custody | supply | cost |
+| `type` | what CFS gets | custody | supply | priced |
 |---|---|---|---|---|
-| `buy` | ownership | receipts raise `quantity_held` and basis | `inbound` until received | `amount_cents` |
-| `subrent` | units for a hire window | `subrent_in` / `subrent_out`, never owned | `subrent` over `dates` | `billing` — fixed or activation-billed |
-| `usage` | a carrier line on a device CFS OWNS | none | none | derived from activation spans |
-| `direct` | freight, a fee, anything not a product | none | none | `amount_cents` |
+| `buy` | ownership | receipts raise `quantity_held` and basis | `inbound` until received | flat |
+| `subrent` | units for a hire window | `subrent_in` / `subrent_out`, never owned | `subrent` over `dates` | flat or time |
+| `charge` | a service with no custody — a carrier line on an owned device, freight, a fee | none | none | flat or time |
+
+(`usage` and `direct` retired into `charge`, and the nested `SubrentBilling`
+union into the price rule below — purchases-as-documents Phase 2.)
 
 Each item carries its own **row identity** (`uid`, and `path` = `[uid]`
 until a divider type exists — the writer is its one author), so one product
@@ -26437,32 +26767,37 @@ names its order line.
 Each item also carries its own **posting** — `coa_posting` and
 `uid_tracking_category`, stamped at write rather than worked out at push.
 The account is constrained per arm: a buy posts to an inventory asset
-account (`COA_ASSET_CODES`), a subrent or usage item to a Direct Costs account
-(`COA_COST_CODES`), a direct item to any account. Both are
-`propagate: true`, so a bill item follows its purchase item's posting until an
-operator changes it there.
+account (`COA_ASSET_CODES`), a subrent to a Direct Costs account
+(`COA_COST_CODES`), a charge to any account. Both are `propagate: true`, so a
+bill item follows its purchase item's posting until an operator changes it
+there.
 
-⚠️ **`SubrentItem.billing` is a discriminated union NESTED inside an arm of
-the item union** (`basis: "fixed" | "activation"`) — a deliberate NEW PATTERN
-for a stored document (owner, 2026-10-30, at the core-conformance pass). A
-Vision unit is custody AND cost on one item: "we only pay when it's active".
-The precedent for a payload union is `Product.cogs` and the card's sources;
-neither sits inside another union's arm. Its walkers are pinned in
-`tests/purchases.test.ts`.
+## Money — flat lines state a total, time lines carry rates
 
-## Money
+Every item snapshots the formula it is priced by
+(`price.price_formula = { uid, name, basis }`, see {@link PurchaseLinePrice}):
 
-`amount_cents` is what the whole item costs, integer cents. The k-th receipt
-or bill against an item is priced by `cumulativeShareCents`
-(`@cfs/core/utils/purchases`), which rounds the CUMULATIVE share once, so the
-partials sum to `amount_cents` exactly with no remainder rule. There is no
-stored `unit_cost`: it is a display rate, derivable by `perUnitCostAt4dp`, and
-a stored copy beside the amount it derives from is a second source of truth.
+- **flat** — `amount_cents` is what the whole item costs, NET of any supplier
+  discount, integer cents, and `price.rates` is empty. The k-th receipt or
+  bill against an item is priced by `cumulativeShareCents`
+  (`@cfs/core/utils/purchases`), which rounds the CUMULATIVE share once, so the
+  partials sum to `amount_cents` exactly with no remainder rule. There is no
+  stored per-unit rate: measured on prod, most buys cost a total that does
+  not divide by their quantity, and no reader needs one (`perUnitCostAt4dp`
+  derives the display rate).
+- **time** — `amount_cents: null` and `price.rates` holds the rates in force
+  when the line was raised. What it costs is decided by its bills, priced
+  from the units' charge windows (`pricePurchaseDocument`).
 
-`total_cents` is the COMMITTED amount (owner, 2026-10-30): Σ over the items
-that state an amount up front — buy, fixed-basis subrent and direct. An
-activation-billed subrent and a usage item have no amount and add 0; what was
-billed against them is their bills' totals.
+A per-line REFINE ({@link purchaseLineMoneyIssues}) rather than union arms,
+because `basis` cuts across all three types; arms would split each in two.
+It also makes `quantity_billed` null exactly on time lines: billed is a
+co-written bucket only on flat lines, and a time line resolves on custody
+(Q7). Over-billing is never refused (D5) — the purchase↔bill diff flags it.
+
+`total_cents` is the COMMITTED amount (owner, 2026-10-30): Σ of the flat
+lines' amounts. A time line adds 0; what was billed against it is its bills'
+totals.
 
 There is no tax anywhere on a purchase (owner, 2026-10-05): stock bought for
 sale or rent is bought resale-exempt and the tax is collected from the end
@@ -26475,7 +26810,7 @@ all assume a root object.
 
 ### `BuyItem`
 
-A BUY item — ownership of `quantity` units of one product.
+A BUY item — ownership of `quantity` units of one product. Always flat.
 
 ```ts
 interface BuyItem {
@@ -26483,6 +26818,7 @@ interface BuyItem {
   uid_product: string;
   quantity: number;
   amount_cents: number;
+  price?: PurchaseLinePrice;
   coa_posting: COAAssetType;
   expected_date: string | null;
   quantity_received: number;
@@ -26516,6 +26852,59 @@ Zod schema for BuyItem.
 const BuyItemSchema: z.ZodType<BuyItem>;
 ```
 
+### `ChargeItem`
+
+A CHARGE item — something CFS pays for with no custody: a carrier line on a
+device CFS owns (Verizon), freight, a fee, Vision's standing history line.
+Flat (freight: one amount) or time (a carrier line, priced from the device's
+charge windows).
+
+Attribution, as on a bill's charge item (api-cloudrun#1360, #1364):
+`uid_product` is the product the spend is for, `uid_out_of_service` the
+record a loss or damage charge is for. Both permanently optional — freight
+attributes nothing.
+
+```ts
+interface ChargeItem {
+  type: "charge";
+  quantity: number;
+  amount_cents: number | null;
+  price: PurchaseLinePrice;
+  dates: PurchaseItemDates | null;
+  quantity_billed: number | null;
+  quantity_canceled: number;
+  auto_link: boolean;
+  uid_product?: string;
+  uid_out_of_service?: string;
+}
+```
+
+### `ChargeItemInputType`
+
+A charge item as an operator raises it. Its account is the operator's — there is no default.
+
+```ts
+interface ChargeItemInputType {
+  type: "charge";
+  name: string;
+  quantity?: number;
+  amount_cents?: number | null;
+  coa_posting: COACodeType;
+  dates?: PurchaseItemDates | null;
+  auto_link?: boolean;
+  uid_product?: string;
+  uid_out_of_service?: string;
+}
+```
+
+### `ChargeItemSchema`
+
+Zod schema for ChargeItem.
+
+```ts
+const ChargeItemSchema: z.ZodType<ChargeItem>;
+```
+
 ### `ClosePurchaseInput`
 
 Zod schema for ClosePurchaseInputType.
@@ -26529,12 +26918,12 @@ const ClosePurchaseInput: z.ZodType<ClosePurchaseInputType>;
 Input for a short close or a cancel.
 
 Sets each named buy or subrent item's `quantity_canceled` to
-`quantity − quantity_received`, and each named UNBILLED direct item's to 1 (a
-billed one has nothing left to cancel). `uid_items` absent closes every such
-item; a
+`quantity − quantity_received`, a flat charge's to `quantity − quantity_billed`,
+and a time charge's to `quantity` (it stops accruing). `uid_items` absent
+closes every such item; a
 cancel is a close of a purchase with nothing received. When the close leaves
-an item billed beyond what was received, the writer raises a
-`purchase-credits` document for the excess.
+a FLAT item billed beyond what was received, the writer raises a
+`purchase-credits` document for the excess; a time line has no billed count.
 
 ```ts
 interface ClosePurchaseInputType {
@@ -26572,59 +26961,6 @@ interface CreatePurchaseInputType {
 }
 ```
 
-### `DirectItem`
-
-A DIRECT item — something ordered that is not a product: freight, a fee, a
-service. Posts to any account and never touches basis (a landed cost on a buy
-item is how freight reaches basis). `name` equals `description`, so every arm
-answers "what is this row" from one key.
-
-A direct item is ONE thing, billed once or canceled: `quantity_billed` and
-`quantity_canceled` are each 0 or 1, and never both 1 (owner, 2026-10-30). A
-close cancels an unbilled direct item exactly as it cancels a buy's
-unreceived units, so a purchase holding unbilled freight can still be closed
-or canceled.
-
-Attribution, as on a bill's direct item (api-cloudrun#1360, #1364):
-`uid_product` is the RENTAL product the spend is for, `uid_out_of_service` the
-record a loss or damage charge is for. Both permanently optional — freight
-attributes nothing.
-
-```ts
-interface DirectItem {
-  type: "direct";
-  description: string;
-  amount_cents: number;
-  quantity_billed: number;
-  quantity_canceled: number;
-  uid_product?: string;
-  uid_out_of_service?: string;
-}
-```
-
-### `DirectItemInputType`
-
-A direct item as an operator orders it. Its account is the operator's — there is no default.
-
-```ts
-interface DirectItemInputType {
-  type: "direct";
-  description: string;
-  amount_cents: number;
-  coa_posting: COACodeType;
-  uid_product?: string;
-  uid_out_of_service?: string;
-}
-```
-
-### `DirectItemSchema`
-
-Zod schema for DirectItem.
-
-```ts
-const DirectItemSchema: z.ZodType<DirectItem>;
-```
-
 ### `PURCHASE_ITEM_TYPES`
 
 The item arms — see the module docblock. `buy` is FIRST so `getInitialValues`
@@ -26632,23 +26968,24 @@ seeds a buy.
 
 🔴 **Closed, and read through exhaustive switches.** Every reader that
 branches on an item's arm switches over this union with a `never` default
-(`purchaseItemSupplies`, `purchaseItemResolved`, …), so a fifth member is a
+(`purchaseItemSupplies`, `purchaseItemResolved`, …), so a fourth member is a
 compile error at every one of them rather than a silent fall-through into
-the buy branch — which is how a pre-`kind` purchase used to be read.
+the buy branch.
 
 Explicit tuple type rather than `as const` alone: core#43 is JSR's npm
 `.d.ts` emit truncating an inferred tuple.
 
 ```ts
-const PURCHASE_ITEM_TYPES: readonly ["buy", "subrent", "usage", "direct"];
+const PURCHASE_ITEM_TYPES: readonly ["buy", "subrent", "charge"];
 ```
 
 ### `PURCHASE_PRODUCT_ITEM_TYPES`
 
-The arms that name a product and are billed by a product projection on a bill.
+The arms that ORDER a product (a required `uid_product`). A `charge` line's
+`uid_product` is attribution only, so it is not one.
 
 ```ts
-const PURCHASE_PRODUCT_ITEM_TYPES: readonly ["buy", "subrent", "usage"];
+const PURCHASE_PRODUCT_ITEM_TYPES: readonly ["buy", "subrent"];
 ```
 
 ### `PURCHASE_STATUSES`
@@ -26685,6 +27022,7 @@ interface Purchase {
   query_by_products: string[];
   query_by_orders: string[];
   query_by_item_types: PurchaseItemTypeType[];
+  query_by_bills?: string[];
   uid_thread?: string;
   version: number;
   created_by: ActorRefType;
@@ -26699,22 +27037,22 @@ interface Purchase {
 Union of every purchase item arm, discriminated on `type`.
 
 ```ts
-type PurchaseItem = BuyItem | SubrentItem | UsageItem | DirectItem;
+type PurchaseItem = BuyItem | SubrentItem | ChargeItem;
 ```
 
 ### `PurchaseItemDates`
 
-A subrent item's hire window. `start` is when the units come; `end` is when
-they are due back to the SUPPLIER, not when the customer returns them.
+A line's span. On a subrent, the hire window: `start` is when the units
+come; `end` is when they are due back to the SUPPLIER, not when the customer
+returns them. On a charge, the span a span-metered formula reads (Verizon:
+from the line's start to its end, less suspensions).
 
-`end: null` is a STANDING subrent — open-ended, `+∞` in availability as on
-bookings and out-of-service records (serialized-subrent slice 2, folded in
-here; api-cloudrun#1392). The hire window doubles as the expected delivery:
-a subrent item has no separate `expected_date`.
+`end: null` is open-ended — `+∞` in availability as on bookings and
+out-of-service records (api-cloudrun#1392). The hire window doubles as the
+expected delivery: a subrent item has no separate `expected_date`.
 
 Named `dates` after out-of-service, bookings and cards. The object carries no
-label of its own; its children are labelled, so the composed heading stays
-"Item Hire Start" rather than doubling a word.
+label of its own; its children are labelled.
 
 ```ts
 interface PurchaseItemDates {
@@ -26744,7 +27082,7 @@ const PurchaseItemInput: z.ZodType<PurchaseItemInputType>;
 Union of every item input arm.
 
 ```ts
-type PurchaseItemInputType = BuyItemInputType | SubrentItemInputType | UsageItemInputType | DirectItemInputType;
+type PurchaseItemInputType = BuyItemInputType | SubrentItemInputType | ChargeItemInputType;
 ```
 
 ### `PurchaseItemSchema`
@@ -26778,9 +27116,9 @@ to the units still to arrive (api-cloudrun#1227). It is cost basis, so it
 reaches the ledger only through the receipts that price it.
 
 ⚠️ **It lives on the PURCHASE ITEM, not on the bill.** 276 of 299 historic
-bills are linked card-purchase bills with no direct items, and the receipt
+bills are linked card-purchase bills with no charge items, and the receipt
 transaction reads the purchase, never its bills. The Xero side is unchanged:
-the freight still posts through a bill's direct item to its own account.
+the freight still posts through a bill's charge item to its own account.
 `uid_purchase_bill` is traceability only.
 
 **What it spreads over is fixed at entry.** `quantity` is the item's
@@ -26843,6 +27181,66 @@ Zod schema for PurchaseLandedCost.
 
 ```ts
 const PurchaseLandedCostSchema: z.ZodType<PurchaseLandedCost>;
+```
+
+### `PurchaseLinePrice`
+
+How a purchase line is priced (purchases-as-documents Phase 2 rulings 1, 2,
+7): the formula it is priced by, the rates it snapshots, and a supplier
+discount.
+
+- A **flat** line (`price_formula.basis === "flat"`: a buy, a fixed-cost
+  subrent, freight or a fee) states its WHOLE cost in the line's
+  `amount_cents` and carries `rates: []`. Measured: most stored buys cost a
+  total that does not divide by their quantity, and every reader slices the
+  total with `cumulativeShareCents`, so no per-unit rate is stored.
+- A **time** line (Vision's "weekly while on", Verizon's "monthly unless
+  suspended") has `amount_cents: null` and the rates in force when it was
+  raised (Q13); what it costs is decided by the bills, priced from the
+  units' charge windows.
+
+`discount` is core's `Discount`. On a time line the engine applies it; on a
+flat line it records what came off the operator's GROSS, and `amount_cents`
+is the NET — what CFS pays, which receipts, basis and bills slice.
+
+There is no subtotal/discounted/taxes/total triple: purchases are
+resale-exempt (no tax), and gross = `amount_cents + discount.amount_cents`.
+
+```ts
+interface PurchaseLinePrice {
+  price_formula: PriceFormulaRef;
+  rates: RateSnapshotType[];
+  discount: DiscountType | null;
+}
+```
+
+### `PurchaseLinePriceInputType`
+
+How an operator prices an item input (ruling 1, 7). `uid_price_formula`
+names the formula; absent takes the writer's default (a buy and a flat charge
+Fixed; a subrent or a time charge the product's `cogs` activation entry's
+formula, else Fixed). The writer snapshots the formula's name and basis.
+
+- `rates` — a time line's rates; absent takes the rates in force today on
+  the product's activation entry. Refused on a flat line.
+- `discount` — a supplier discount, `{ rate, type }`; the writer computes its
+  `amount_cents`. On a flat line `amount_cents` is then the GROSS the
+  operator states, and the stored amount is net of the discount.
+
+```ts
+interface PurchaseLinePriceInputType {
+  uid_price_formula?: string;
+  rates?: RateSnapshotType[];
+  discount?: DiscountInputType | null;
+}
+```
+
+### `PurchaseLinePriceSchema`
+
+Zod schema for {@link PurchaseLinePrice}.
+
+```ts
+const PurchaseLinePriceSchema: z.ZodType<PurchaseLinePrice>;
 ```
 
 ### `PurchaseProductItemTypeType`
@@ -27019,91 +27417,42 @@ interface ReversePurchaseReturnInputType {
 }
 ```
 
-### `SUBRENT_BILLING_BASES`
-
-How a subrent's cost is decided — see {@link SubrentBilling}.
-
-```ts
-const SUBRENT_BILLING_BASES: readonly ["fixed", "activation"];
-```
-
-### `SubrentBilling`
-
-How a subrent item's cost is decided (owner, 2026-10-28; D9).
-
-- **`fixed`** — a per-job subrent: the supplier quotes the hire and
-  `amount_cents` is what it costs. Every subrent before 2026-10 is this arm.
-- **`activation`** — pay only while a unit is ACTIVE (Vision): the cost is
-  derived from the units' activation spans under the product's `cogs`
-  activation entry `uid_cogs` (`Product.cogs[].uid`), so there is no amount
-  and no rate here. `quantity_billed` then counts billed PERIODS, not units.
-
-A nested discriminated union rather than a nullable `amount_cents` beside a
-nullable `uid_cogs` — the house preference for an arm over a nullable pair
-with a refine. See the module docblock: it is the one stored union nested
-inside another union's arm.
-
-```ts
-type SubrentBilling = typeLiteral | typeLiteral;
-```
-
-### `SubrentBillingBasisType`
-
-One {@link SUBRENT_BILLING_BASES} member.
-
-```ts
-type SubrentBillingBasisType = indexedAccess;
-```
-
-### `SubrentBillingInput`
-
-The input twin of {@link SubrentBillingSchema} — non-strict arms, so extra keys strip.
-
-```ts
-const SubrentBillingInput: z.ZodType<SubrentBilling>;
-```
-
-### `SubrentBillingSchema`
-
-Zod schema for SubrentBilling.
-
-```ts
-const SubrentBillingSchema: z.ZodType<SubrentBilling>;
-```
-
 ### `SubrentItem`
 
-A SUBRENT item — `quantity` units borrowed for a hire window and given back.
+A SUBRENT item — `quantity` units borrowed for a hire window and given back. Flat or time.
 
 ```ts
 interface SubrentItem {
   type: "subrent";
   uid_product: string;
   quantity: number;
+  amount_cents: number | null;
+  price: PurchaseLinePrice;
   coa_posting: COACostType;
-  billing: SubrentBilling;
   dates: PurchaseItemDates;
   quantity_received: number;
-  quantity_billed: number;
+  quantity_billed: number | null;
   quantity_canceled: number;
   quantity_returned: number;
   uid_orders: string[];
+  auto_link: boolean;
 }
 ```
 
 ### `SubrentItemInputType`
 
-A subrent item as an operator orders it.
+A subrent item as an operator orders it. `amount_cents` on a flat line only (gross when discounted).
 
 ```ts
 interface SubrentItemInputType {
   type: "subrent";
   uid_product: string;
   quantity: number;
+  amount_cents?: number | null;
   coa_posting?: COACostType;
-  billing: SubrentBilling;
   dates: PurchaseItemDates;
   uid_orders?: string[];
+  auto_link?: boolean;
 }
 ```
 
@@ -27138,8 +27487,8 @@ facts the writer holds, so they are not refined here.
 
 ⚠️ **A SUBRENT item's price is not frozen by a receipt**, because its receipts
 carry no cost (`subrent_in` is cost-forbidden). So on a subrent the writer lets
-`billing.amount_cents` and `dates.end` move after receipt — a paid hire
-extension — with `quantity` still floored at what is received.
+`amount_cents` and `dates.end` move after receipt — a paid hire extension —
+with `quantity` still floored at what is received.
 
 ```ts
 interface UpdatePurchaseInputType {
@@ -27149,47 +27498,6 @@ interface UpdatePurchaseInputType {
   items?: PurchaseItemInputType[];
   version: number;
 }
-```
-
-### `UsageItem`
-
-A USAGE item — a carrier line on a device CFS OWNS (Verizon): CFS pays a
-party that has no custody of anything. No quantity, no amount and no rate:
-it names its cost entry (`uid_cogs`, `Product.cogs[].uid`), every reader
-takes the rate from that entry, and the billable quantity is derived from the
-units' activation spans (`remainingUsageToBill`, serialized-subrent § 7b).
-A supplier's own device billed only while active is an activation-billed
-{@link SubrentItem}, never a usage item beside a custody item (D9).
-
-```ts
-interface UsageItem {
-  type: "usage";
-  uid_product: string;
-  coa_posting: COACostType;
-  uid_cogs: string;
-  quantity_billed: number;
-}
-```
-
-### `UsageItemInputType`
-
-A usage item as an operator raises it.
-
-```ts
-interface UsageItemInputType {
-  type: "usage";
-  uid_product: string;
-  uid_cogs: string;
-  coa_posting?: COACostType;
-}
-```
-
-### `UsageItemSchema`
-
-Zod schema for UsageItem.
-
-```ts
-const UsageItemSchema: z.ZodType<UsageItem>;
 ```
 
 ### `derivePurchaseStatus(purchase: Pick<Purchase, "items">): PurchaseStatusType`
@@ -27217,40 +27525,49 @@ Derive `query_by_orders` — the distinct union of the subrent items' `uid_order
 ### `deriveQueryByProducts(items: readonly PurchaseItem[]): string[]`
 
 Derive `query_by_products` — the distinct products the items ORDER, in first
-appearance order. A direct item's attribution is not an order and is left
-out. The one author of the mirror, called by every writer.
+appearance order. A charge's attribution is not an order and is left out.
+The one author of the mirror, called by every writer.
+
+### `purchaseItemBasis(item: typeLiteral): PriceFormulaBasis`
+
+The basis of an item's formula; a buy written before `price` existed is flat.
 
 ### `purchaseItemCanceled(item: PurchaseItem): boolean`
 
 Was this item canceled in full — nothing will come and nothing is billed?
-A direct item is canceled when its one unit is. A usage item has no cancel
-bucket, so it is never canceled; a purchase holding one is canceled only once
-that item has gone (an update).
 
 ### `purchaseItemCommittedCents(item: PurchaseItem): number`
 
 The amount an item COMMITS up front — the term of the purchase's
-`total_cents` (owner, 2026-10-30). An activation-billed subrent and a usage
-item commit nothing: their cost is decided as they accrue.
+`total_cents` (owner, 2026-10-30): a flat line's net amount, and 0 for a time
+line, whose cost is decided as it accrues.
 
 ### `purchaseItemProduct(item: PurchaseItem): string | undefined`
 
-The product an item names, or `undefined` — a direct item's `uid_product` is attribution, not an order.
+The product an item ORDERS, or `undefined` — a charge's `uid_product` is attribution, not an order.
 
 ### `purchaseItemResolved(item: PurchaseItem): boolean`
 
 Has this item nothing left to happen?
 
-- **buy** — every unit received or canceled, and billed for exactly what was
-  not canceled.
-- **subrent** — the same, plus every unit received has gone back: a hire with
-  units still in CFS's custody is not finished. An ACTIVATION-billed subrent
-  has no billing axis to close (it bills periods as they accrue), so custody
-  alone resolves it.
-- **usage** — never: a carrier line accrues for as long as it exists.
-- **direct** — billed or canceled.
+- **buy** — every unit received or canceled, and billed for at least what was
+  not canceled (over-billing is flagged, not held open).
+- **subrent** — every unit received or canceled, every unit received gone
+  back (a hire with units still in CFS's custody is not finished), and on a
+  flat line billed in full. A TIME line resolves on custody alone (Q7): it
+  bills windows as they accrue, with no count to close.
+- **charge** — a flat one when billed or canceled in full; a time one only
+  once canceled in full, since a carrier line accrues for as long as it lives.
 
 Payment is the bill's business and holds nothing open.
+
+### `purchaseLineMoneyIssues(item: typeLiteral): typeLiteral[]`
+
+The single-document money rule (ruling 1), shared by every arm and by the
+bill line: a flat line states an amount and no rates, a time line states
+rates and — on a purchase — no amount. A refine rather than a union arm
+because `basis` cuts across all three line types; arms would split each in
+two.
 
 ## `@cfs/core/schemas/purchase-bill`
 
@@ -27350,10 +27667,13 @@ const CreatePurchaseBillInput: z.ZodType<CreatePurchaseBillInputType>;
 Input for billing a purchase — push a new ACCPAY, or link an existing Xero
 bill or card payment.
 
-A PUSHED bill item carries no amount: the writer prices it at the purchase
-item's cumulative share, so a price the purchase does not hold cannot be
-billed, and stamps the purchase item's `name`, `coa_posting` and
-`uid_tracking_category`. A LINKED bill carries `total_cents` as Xero has it.
+A PUSHED bill item carries no amount: the writer defaults it from the
+purchase item (`projectPurchaseLineToBillLine`, `@cfs/core/utils/purchase-documents`) —
+a flat line at the item's cumulative share, a time line priced from its
+units' UNBILLED charge windows — and stamps the purchase item's `name`,
+`price`, `coa_posting` and `uid_tracking_category`. The operator then
+overrides any of them until the bill is settled ({@link UpdatePurchaseBillInput}).
+A LINKED bill carries `total_cents` as Xero has it.
 
 ```ts
 type CreatePurchaseBillInputType = typeLiteral | typeLiteral;
@@ -27375,7 +27695,7 @@ ACCPAYCREDIT, or link one the supplier's credit was entered as in Xero.
 Each `items` entry UN-bills that quantity of its purchase item: it lowers
 `quantity_billed`, and a PUSHED credit prices it at the item's cumulative
 share of the range it un-bills, so a price the purchase does not hold cannot
-be credited. A price correction with no quantity is a `direct_items` entry
+be credited. A price correction with no quantity is a `charge_items` entry
 (push only). A LINKED credit reads its date, reference and total from Xero,
 as a linked bill does.
 
@@ -27503,6 +27823,31 @@ interface PurchaseBillFieldFreezeContract {
 }
 ```
 
+### `PurchaseBillLineEditInputType`
+
+One line of a PUSHED bill as an operator edits it (D5): any shared field may
+be overridden until the bill is settled — exactly the invoice rule. Matched
+to the stored line by `uid`; an absent key KEEPS the stored value.
+
+Money is edited through its INPUTS, never typed over the result on a time
+line: `price.rates`, `price.discount`, `units` and `dates`, from which the
+writer re-meters `counts` and re-prices `amount_cents`. A flat line's
+`amount_cents` is stated directly (gross when a discount is set).
+
+```ts
+interface PurchaseBillLineEditInputType {
+  uid: string;
+  name?: string;
+  quantity?: number;
+  amount_cents?: number;
+  coa_posting?: COACodeType;
+  uid_tracking_category?: string | null;
+  price?: typeLiteral;
+  units?: PurchaseDocumentLineUnit[];
+  dates?: ChargeWindowType | null;
+}
+```
+
 ### `PurchaseBillSchema`
 
 Zod schema for PurchaseBill.
@@ -27618,51 +27963,51 @@ One {@link PURCHASE_CREDIT_STATUSES} member.
 type PurchaseCreditStatusType = indexedAccess;
 ```
 
-### `PurchaseDocumentDirectItem`
+### `PurchaseDocumentChargeItem`
 
-A bill or credit item billing something that is not a purchase product item —
-freight, a fee, or a supplier's loss or damage charge on a subrent. Posts to
-its own account and never touches basis. `name` equals `description`.
+A bill or credit CHARGE line — freight, a fee, a carrier line, or a supplier's
+loss or damage charge on a subrent. Posts to its own account and never
+touches basis.
 
-A **document-only** direct item (no `path_purchase_item`) is the document's
-own row, like an invoice's loss-and-damage line: freight nobody expected, and
-serialized-subrent's historic Vision bills. One that projects a purchase
-`direct` item names it.
+A **document-only** charge (no `path_purchase_item`) is the document's own
+row, like an invoice's loss-and-damage line: freight nobody expected, and
+Vision's historic SPENDs. One that projects a purchase `charge` item names it.
 
 ## Attribution (api-cloudrun#1360, #1364)
 
-- `uid_product` — the RENTAL product the spend is attributed to. The writer
-  emits the product's Xero `ItemCode` beside the stated account; rental items
-  are untracked in Xero, so the code moves no Xero quantity or value.
+- `uid_product` — the product the spend is attributed to. The writer emits
+  the product's Xero `ItemCode` beside the stated account when it has one;
+  rental items are untracked in Xero, so the code moves no Xero quantity or
+  value.
 - `uid_out_of_service` — the record a loss or damage charge is for. A
   `mark_lost` record's id is a `MovementId`, hence `OutOfServiceId`.
 
-Both permanent `.optional()`: freight and fees name nothing. The tracking is
-`uid_tracking_category`, a bare category uid as on every other line; the Xero
-option is resolved when the body is built (line-tracking-uid D1), so the old
-stamped `xero_tracking_option_id` is gone.
+Both permanent `.optional()`: freight and fees name nothing.
 
 ```ts
-interface PurchaseDocumentDirectItem {
-  type: "direct";
+interface PurchaseDocumentChargeItem {
+  type: "charge";
   uid: string;
   path: string[];
   name: string;
-  description: string;
   quantity: number;
   amount_cents: number;
   coa_posting: COACodeType;
   uid_tracking_category: string | null;
+  price: PurchaseDocumentLinePrice;
+  units: PurchaseDocumentLineUnit[];
+  dates: ChargeWindowType | null;
   uid_product?: string;
   uid_out_of_service?: string;
   path_purchase_item?: string[];
 }
 ```
 
-### `PurchaseDocumentDirectItemInputType`
+### `PurchaseDocumentChargeItemInputType`
 
-A document-only direct item as an operator states it on a PUSHED bill or
-credit. The writer mints its `uid`/`path` and sets `name` = `description`.
+A document-only charge item as an operator states it on a PUSHED bill or
+credit (freight nobody expected, a fee). The writer mints its `uid`/`path`,
+stamps a Fixed formula snapshot and `quantity: 1`.
 `uid_tracking_category` follows the order/invoice line rule: absent or `null`
 takes the attributed product's category (none when it names no product); a
 uid sets it and must name a live category.
@@ -27672,8 +28017,8 @@ would let an api that predates a field silently drop it rather than 400, and
 an attribution would vanish with nothing failing (api-cloudrun#1360).
 
 ```ts
-interface PurchaseDocumentDirectItemInputType {
-  description: string;
+interface PurchaseDocumentChargeItemInputType {
+  name: string;
   coa_posting: COACodeType;
   amount_cents: number;
   uid_product?: string;
@@ -27682,12 +28027,12 @@ interface PurchaseDocumentDirectItemInputType {
 }
 ```
 
-### `PurchaseDocumentDirectItemSchema`
+### `PurchaseDocumentChargeItemSchema`
 
-Zod schema for PurchaseDocumentDirectItem.
+Zod schema for PurchaseDocumentChargeItem.
 
 ```ts
-const PurchaseDocumentDirectItemSchema: z.ZodType<PurchaseDocumentDirectItem>;
+const PurchaseDocumentChargeItemSchema: z.ZodType<PurchaseDocumentChargeItem>;
 ```
 
 ### `PurchaseDocumentItem`
@@ -27695,7 +28040,7 @@ const PurchaseDocumentDirectItemSchema: z.ZodType<PurchaseDocumentDirectItem>;
 Union of a bill or credit item's arms, discriminated on `type`.
 
 ```ts
-type PurchaseDocumentItem = PurchaseDocumentProductItem | PurchaseDocumentDirectItem;
+type PurchaseDocumentItem = PurchaseDocumentProductItem | PurchaseDocumentChargeItem;
 ```
 
 ### `PurchaseDocumentItemInput`
@@ -27725,6 +28070,59 @@ Zod schema for any bill or credit item — discriminated on `type`.
 const PurchaseDocumentItemSchema: z.ZodType<PurchaseDocumentItem>;
 ```
 
+### `PurchaseDocumentLinePrice`
+
+How a bill or credit line is priced: the purchase line's {@link PurchaseLinePrice}
+(formula snapshot, rates, discount — each `propagate: true` there, so an
+un-overridden bill line follows its purchase line) plus the line's frozen
+metered `counts` (ruling 8).
+
+- **flat** — `rates: []`, `counts: []`; `amount_cents` is the stated net share.
+- **time** — `rates` ≥ 1, and `counts` are the UNIT-periods the line bills:
+  the engine's tier counts summed over every unit's windows, so the line's
+  money is `priceFromFormula(rates, counts, 1, discount)` — quantity is
+  folded into the counts, because each unit meters its own windows and a
+  per-unit count does not factor out. On a PUSHED document the refine
+  asserts `amount_cents` equals exactly that; a LINKED document's money is
+  Xero's and is diffed, never refused.
+
+```ts
+interface PurchaseDocumentLinePrice {
+  counts: TierCountType[];
+}
+```
+
+### `PurchaseDocumentLinePriceSchema`
+
+Zod schema for {@link PurchaseDocumentLinePrice}.
+
+```ts
+const PurchaseDocumentLinePriceSchema: z.ZodType<PurchaseDocumentLinePrice>;
+```
+
+### `PurchaseDocumentLineUnit`
+
+One unit's charge windows on a time bill line — what the SUPPLIER billed for
+that unit, defaulted at create from the unit's unbilled windows
+(`UnitType.charge_windows`) and owned by the line from then on. The windows
+are core's time-only `ChargeWindow`; `uid_unit` names the unit (`MovementUnit`'s
+spelling). The purchase↔bill diff compares their coverage with the units'.
+
+```ts
+interface PurchaseDocumentLineUnit {
+  uid_unit: string;
+  charge_windows: ChargeWindowType[];
+}
+```
+
+### `PurchaseDocumentLineUnitSchema`
+
+Zod schema for {@link PurchaseDocumentLineUnit}.
+
+```ts
+const PurchaseDocumentLineUnitSchema: z.ZodType<PurchaseDocumentLineUnit>;
+```
+
 ### `PurchaseDocumentOriginEnum`
 
 Zod schema for PurchaseDocumentOriginType.
@@ -27744,17 +28142,17 @@ type PurchaseDocumentOriginType = indexedAccess;
 ### `PurchaseDocumentProductItem`
 
 A bill or credit item that PROJECTS a purchase item — some quantity of one
-buy, subrent or usage item (D5). It names that item by `path_purchase_item`,
-as an invoice line names its order line by `path_order_item`, and carries its
-own copy of the shared fields, each of which it may override: the billed
-`quantity` and `amount_cents` (homonyms of the purchase item's ordered ones),
-`coa_posting` and `uid_tracking_category` (`propagate: true`).
+buy or subrent item (D5). It names that item by `path_purchase_item`, as an
+invoice line names its order line by `path_order_item`, and carries its own
+copy of the shared fields, each of which it may override until the bill is
+settled: the billed `quantity` and `amount_cents` (homonyms of the purchase
+item's ordered ones), `price`, `name`, `coa_posting` and
+`uid_tracking_category` (`propagate: true` on the purchase side).
 
 On a LINKED bill the posting is the Xero document's where it has one; the
 purchase item's is the expected one, so an account divergence is an ordinary
-field difference between projection and source (serialized-subrent § 7b).
-That is why `coa_posting` here is any `COACode`, not the purchase arm's
-subset.
+field difference between projection and source. That is why `coa_posting`
+here is any `COACode`, not the purchase arm's subset.
 
 ```ts
 interface PurchaseDocumentProductItem {
@@ -27796,6 +28194,32 @@ the CREDIT's, as an allocation's is. `uuid_session` keys the reversal.
 interface ReversePurchaseCreditAllocationInputType {
   uuid_session: string;
   version: number;
+}
+```
+
+### `UpdatePurchaseBillInput`
+
+Zod schema for UpdatePurchaseBillInputType.
+
+```ts
+const UpdatePurchaseBillInput: z.ZodType<UpdatePurchaseBillInputType>;
+```
+
+### `UpdatePurchaseBillInputType`
+
+Input for editing a PUSHED, unsettled bill (`PUT /purchase-bills/{uid}`) — a
+PATCH. `items`, when present, names lines to edit by `uid`; lines it omits are
+kept. Refused on a linked bill (Xero is authoritative) and, per field class,
+once the bill is frozen (`PURCHASE_BILL_FIELD_FREEZE`). An accepted edit is
+pushed to Xero through the ACCPAY edit push (D5).
+
+```ts
+interface UpdatePurchaseBillInputType {
+  version: number;
+  date?: string;
+  due_date?: string;
+  reference?: string | null;
+  items?: PurchaseBillLineEditInputType[];
 }
 ```
 
@@ -29805,31 +30229,33 @@ entry, so 5,000 is roughly 600 KB against Firestore's 1 MiB).
 const MAX_UNITS_PER_ROSTER: 5000;
 ```
 
-### `OpenUnitActivationInput`
+### `OpenUnitChargeWindowInput`
 
-Zod schema for {@link OpenUnitActivationInputType}.
+Zod schema for {@link OpenUnitChargeWindowInputType}.
 
 ```ts
-const OpenUnitActivationInput: z.ZodType<OpenUnitActivationInputType>;
+const OpenUnitChargeWindowInput: z.ZodType<OpenUnitChargeWindowInputType>;
 ```
 
-### `OpenUnitActivationInputType`
+### `OpenUnitChargeWindowInputType`
 
-Body of `POST /units/{uid}/activations`: switch a unit's service line ON.
+Body of `POST /units/{uid}/charge-windows`: switch a unit's service line ON.
 
-Opens a span with no `end` — the server refuses a unit that is not `active`
-or that already has an open span, and a `uid_cogs` that names no activation
-entry on the unit's product. `start` is when CFS asked the provider to switch
-the line on, which may be earlier than the request (the call came first). A
-stripping `z.object`, not the stored strict node (`tests/input-strictness.test.ts`).
+Opens a window with no `end` — the server refuses a unit that is not
+`active` or that already has an open window. `start` is when CFS asked the
+provider to switch the line on, which may be earlier than the request (the
+call came first). `line` absent asks the server to resolve the purchase line
+(an active purchase of the unit's provider holding a line for the product);
+`null` states that no supplier line bills it. A stripping `z.object`, not the
+stored strict node (`tests/input-strictness.test.ts`).
 
 ```ts
-interface OpenUnitActivationInputType {
+interface OpenUnitChargeWindowInputType {
   version: number;
   start: string;
   uid_order: string | null;
-  uid_cogs: string;
-  provider_confirmed?: UnitActivationConfirmedType | null;
+  uid_price_formula: string;
+  line?: UnitChargeWindowLineType | null;
   notes: string;
 }
 ```
@@ -29919,53 +30345,60 @@ movements, never set by hand.
 const UNIT_USER_STATUSES: "retired"[];
 ```
 
-### `UnitActivation`
+### `UnitChargeWindow`
 
-Zod schema for {@link UnitActivationType}.
+Zod schema for {@link UnitChargeWindowType}.
 
 ```ts
-const UnitActivation: z.ZodType<UnitActivationType>;
+const UnitChargeWindow: z.ZodType<UnitChargeWindowType>;
 ```
 
-### `UnitActivationConfirmed`
+### `UnitChargeWindowLine`
 
-Zod schema for {@link UnitActivationConfirmedType}.
+Zod schema for {@link UnitChargeWindowLineType}.
 
 ```ts
-const UnitActivationConfirmed: z.ZodType<UnitActivationConfirmedType>;
+const UnitChargeWindowLine: z.ZodType<UnitChargeWindowLineType>;
 ```
 
-### `UnitActivationConfirmedType`
+### `UnitChargeWindowLineType`
 
-The confirmed on/off instants of an activation, as the provider's portal or bill states them.
+The purchase line a charge window bills against — the line's purchase and
+its row identity (`path`), the way a bill line names its purchase line.
 
 ```ts
-interface UnitActivationConfirmedType {
-  start: string;
-  end: string | null;
+interface UnitChargeWindowLineType {
+  uid_purchase: string;
+  path: string[];
 }
 ```
 
-### `UnitActivationType`
+### `UnitChargeWindowType`
 
 One span during which a unit's service line was switched ON — a hotspot's or
-router's data line, billed by its provider through the product's `cogs`
-activation entry that `uid_cogs` names.
+router's data line — billed by its provider under a price formula
+(purchases-as-documents D2; Phase 2 rulings 4 and 8).
+
+The `{ start, end }` of an order pair's `ChargeWindow`, plus what a LIVE
+switch-on needs: `end: null` while the line is on, a `uid` because routes
+edit one window at a time, and the facts a window is billed by. It carries no
+day count: counts are a LINE's (`price.counts`), metered under that line's
+formula when a purchase or bill line is priced from these windows.
 
 RECORDED, never derived from custody: a device can sit on the shelf switched
 on (an idle, still-billed span) or go out switched off. Present on every
 unit, owned or rented, because CFS's own devices carry provider lines too.
-The biller is the named cost entry's `provider`, not a field here, since one
-product can hold units billed by different providers.
+What the provider billed is the BILL line's own windows, diffed against these
+— not a field here.
 
 ```ts
-interface UnitActivationType {
+interface UnitChargeWindowType {
   uid: string;
   start: string;
   end: string | null;
   uid_order: string | null;
-  uid_cogs: string;
-  provider_confirmed: UnitActivationConfirmedType | null;
+  line: UnitChargeWindowLineType | null;
+  uid_price_formula: string;
   notes: string;
   changed_by: ActorRefType;
 }
@@ -30077,7 +30510,7 @@ interface UnitType {
   serial_number: string | null;
   serial_history: UnitSerialHistoryEntryType[];
   status: UnitStatusType;
-  activations: UnitActivationType[];
+  charge_windows: UnitChargeWindowType[];
   uuid_session: string | null;
   version: number;
   created_by: ActorRefType;
@@ -30119,29 +30552,29 @@ One status an operator may ask for.
 type UnitUserStatusType = indexedAccess;
 ```
 
-### `UpdateUnitActivationInput`
+### `UpdateUnitChargeWindowInput`
 
-Zod schema for {@link UpdateUnitActivationInputType}.
+Zod schema for {@link UpdateUnitChargeWindowInputType}.
 
 ```ts
-const UpdateUnitActivationInput: z.ZodType<UpdateUnitActivationInputType>;
+const UpdateUnitChargeWindowInput: z.ZodType<UpdateUnitChargeWindowInputType>;
 ```
 
-### `UpdateUnitActivationInputType`
+### `UpdateUnitChargeWindowInputType`
 
-Body of `PUT /units/{uid}/activations/{activation_uid}`: close a span
-(`end`), record what the provider confirms (`provider_confirmed`), or correct
-any of its fields. An absent key keeps the stored value; `end: null`
-re-opens the LAST span of an `active` unit (a switch-off recorded in error).
+Body of `PUT /units/{uid}/charge-windows/{window_uid}`: close a window
+(`end`) or correct any of its fields. An absent key keeps the stored value;
+`end: null` re-opens the LAST window of an `active` unit (a switch-off
+recorded in error).
 
 ```ts
-interface UpdateUnitActivationInputType {
+interface UpdateUnitChargeWindowInputType {
   version: number;
   start?: string;
   end?: string | null;
   uid_order?: string | null;
-  uid_cogs?: string;
-  provider_confirmed?: UnitActivationConfirmedType | null;
+  uid_price_formula?: string;
+  line?: UnitChargeWindowLineType | null;
   notes?: string;
 }
 ```
@@ -33026,7 +33459,7 @@ type CloudTaskEventMsg = indexedAccess;
 Msg literals this archetype absorbs.
 
 ```ts
-const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "store_destination_no_default" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_invoice_count_high" | "invoice_created" | "invoice_updated" | "organization_check_failed" | "organization_no_xero_id" | "organization_xero_id_shared" | "organization_merged" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "oos_overbilled" | "checkout_shelf_shortfall" | "custody_delta_unmatched" | "substitution_custody_kept" | "invoice_action_unoffered" | "fulfillment_custom_item_qty_override" | "fulfillment_sync_items_skipped_no_bookings" | "fulfillment_sync_frozen_rows" | "recurrence_horizon_failed" | "tax_priced_on_unreviewed_rate" | "invoice_sync_organization_kept" | "destination_pair_unjoined" | "purchase_landed_cost_stranded" | "usage_purchase_ensure_failed"[];
+const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "store_destination_no_default" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_invoice_count_high" | "invoice_created" | "invoice_updated" | "organization_check_failed" | "organization_no_xero_id" | "organization_xero_id_shared" | "organization_merged" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "oos_overbilled" | "checkout_shelf_shortfall" | "custody_delta_unmatched" | "substitution_custody_kept" | "invoice_action_unoffered" | "fulfillment_custom_item_qty_override" | "fulfillment_sync_items_skipped_no_bookings" | "fulfillment_sync_frozen_rows" | "recurrence_horizon_failed" | "tax_priced_on_unreviewed_rate" | "invoice_sync_organization_kept" | "destination_pair_unjoined" | "purchase_landed_cost_stranded"[];
 ```
 
 ### `DmarcAggregateLogRecord`
@@ -33104,8 +33537,6 @@ interface DomainEventLogRecord {
   refusal?: string;
   uid_purchase?: string;
   stranded_cents?: number;
-  uid_cogs?: string;
-  uid_supplier?: string;
 }
 ```
 
@@ -43188,7 +43619,7 @@ its own rows and leaves them out must fail to compile rather than count every
 received unit as still inbound. A stored `PurchaseItem` is assignable as is.
 
 ```ts
-type StockPurchaseItemSource = typeLiteral | typeLiteral | typeLiteral | typeLiteral;
+type StockPurchaseItemSource = typeLiteral | typeLiteral | typeLiteral;
 ```
 
 ### `StockPurchaseSource`
@@ -43452,16 +43883,16 @@ The item's ARM decides the interval:
 |---|---|---|
 | `subrent` | `[dates.start, dates.end]` (`end: null` is +∞), kind `subrent` | `quantity − canceled − returned` |
 | `buy` | `[expected_date, +∞)`, kind `inbound` | `quantity − canceled − received` |
-| `usage`, `direct` | none — neither brings a unit into custody | — |
+| `charge` | none — it brings no unit into custody | — |
 
 Liveness is the reducers' one filter, as for bookings and out-of-service:
 only an `active` purchase supplies anything, and an item supplying nothing is
 dropped rather than stored as a zero.
 
 On a SUBRENT, RECEIPT does not enter — supply counts from the moment the
-purchase exists (owner, 2026-10-24); receipt is custody only. Its billing
-basis does not enter either: an activation-billed unit is supplied exactly
-as a fixed one is. ⚠️ A unit that has not gone back by `dates.end` stops
+purchase exists (owner, 2026-10-24); receipt is custody only. Its price
+basis does not enter either: a time-priced unit is supplied exactly as a
+flat-priced one is. ⚠️ A unit that has not gone back by `dates.end` stops
 counting as supply at `end` while it is still in CFS's custody
 (`quantity_rented_in`). That is the conservative direction — late but valid;
 the return card shows it overdue.
@@ -43473,7 +43904,7 @@ until it is received or short-closed (owner, 2026-10-27) — dropping it would
 need a clock-driven rebuild and hide stock CFS knows is coming. An item with
 no `expected_date` contributes nothing: there is no date to promise from.
 
-An exhaustive switch with a `never` default (D7): a fifth item type is a
+An exhaustive switch with a `never` default (D7): a fourth item type is a
 compile error here, never a silent fall into the buy branch — which is how a
 purchase written before `kind` existed used to be read.
 
@@ -47920,7 +48351,7 @@ interface TierCount {
 A `line`-scoped minimum tops up the line's total on its last window. A line
 with no windows meters nothing — no minimum invents a window.
 
-### `priceFromFormula(rates: readonly RateSnapshot[], tiers: readonly TierCount[], quantity: number, discount: FormulaDiscount | null): typeLiteral`
+### `priceFromFormula(rates: readonly RateSnapshot[], tiers: readonly TierCountLike[], quantity: number, discount: FormulaDiscount | null): typeLiteral`
 
 **Tier counts → money.** Integer cents, each tier `× n ÷ d` rounded once.
 
@@ -48077,8 +48508,8 @@ Derive `query_by_orders` — the distinct union of the subrent items' `uid_order
 ### `deriveQueryByProducts(items: readonly PurchaseItem[]): string[]`
 
 Derive `query_by_products` — the distinct products the items ORDER, in first
-appearance order. A direct item's attribution is not an order and is left
-out. The one author of the mirror, called by every writer.
+appearance order. A charge's attribution is not an order and is left out.
+The one author of the mirror, called by every writer.
 
 ### `expandPurchaseItems(items: readonly PurchaseItemInputType[], products: ReadonlyMap<string, PurchaseExpansionProduct>): PurchaseExpansionResult`
 
@@ -48106,7 +48537,7 @@ quantities and amounts summed, one hire window per product — only because a
 purchase held one line per product. Items carry their own row identity now,
 so a pack item keeps its `uid` and becomes its own item even when the stocked
 product already has one; the ledger averages the cost either way.
-Usage and direct items pass through untouched.
+Charge items pass through untouched.
 
 Returns rather than throws: a refusal is an operator-facing 400, and core
 throws plain `Error`, which a consumer's middleware reads as a 500.
@@ -48159,32 +48590,29 @@ the AR twin skips. Negative results are preserved, never clamped.
 ### `purchaseItemCanceled(item: PurchaseItem): boolean`
 
 Was this item canceled in full — nothing will come and nothing is billed?
-A direct item is canceled when its one unit is. A usage item has no cancel
-bucket, so it is never canceled; a purchase holding one is canceled only once
-that item has gone (an update).
 
 ### `purchaseItemCommittedCents(item: PurchaseItem): number`
 
 The amount an item COMMITS up front — the term of the purchase's
-`total_cents` (owner, 2026-10-30). An activation-billed subrent and a usage
-item commit nothing: their cost is decided as they accrue.
+`total_cents` (owner, 2026-10-30): a flat line's net amount, and 0 for a time
+line, whose cost is decided as it accrues.
 
 ### `purchaseItemProduct(item: PurchaseItem): string | undefined`
 
-The product an item names, or `undefined` — a direct item's `uid_product` is attribution, not an order.
+The product an item ORDERS, or `undefined` — a charge's `uid_product` is attribution, not an order.
 
 ### `purchaseItemResolved(item: PurchaseItem): boolean`
 
 Has this item nothing left to happen?
 
-- **buy** — every unit received or canceled, and billed for exactly what was
-  not canceled.
-- **subrent** — the same, plus every unit received has gone back: a hire with
-  units still in CFS's custody is not finished. An ACTIVATION-billed subrent
-  has no billing axis to close (it bills periods as they accrue), so custody
-  alone resolves it.
-- **usage** — never: a carrier line accrues for as long as it exists.
-- **direct** — billed or canceled.
+- **buy** — every unit received or canceled, and billed for at least what was
+  not canceled (over-billing is flagged, not held open).
+- **subrent** — every unit received or canceled, every unit received gone
+  back (a hire with units still in CFS's custody is not finished), and on a
+  flat line billed in full. A TIME line resolves on custody alone (Q7): it
+  bills windows as they accrue, with no count to close.
+- **charge** — a flat one when billed or canceled in full; a time one only
+  once canceled in full, since a carrier line accrues for as long as it lives.
 
 Payment is the bill's business and holds nothing open.
 
@@ -48224,15 +48652,15 @@ count; no payable type feeds one.
 - `totalCents` — The bill's `totals.total_cents`
 - `settlements` — Every settlement naming the bill, reversals included
 
-### `remainingToBill(item: Pick<BuyItem, "quantity" | "quantity_billed" | "quantity_canceled">): number`
+### `remainingToBill(item: typeLiteral): number`
 
-Units of a buy or FIXED-basis subrent item still to be billed:
-`quantity − canceled − billed`.
+Units of a FLAT item still to be billed: `quantity − canceled − billed`,
+never below 0 — an over-billed line (legal since D5, flagged by the diff) has
+nothing left.
 
-⚠️ **Not for an activation-billed subrent or a usage item**, whose billable
-quantity is PERIODS derived from activation spans — `remainingUsageToBill`
-(serialized-subrent § 7b), a separate util by design, since six callers share
-this one. A direct item bills once: `1 − quantity_billed`.
+⚠️ **Not for a TIME line**, which has no billed count (`quantity_billed:
+null`): what it still owes is its units' unbilled charge windows, read by
+the bill projector, not a number here.
 
 ### `remainingToReceive(item: ReceivableItem): number`
 
@@ -48684,70 +49112,21 @@ a whole document at once. An empty array means the node is well-formed.
 
 ## `@cfs/core/utils/cogs`
 
-The cost model, applied: a product's effective cost rules, and how an
-activation entry cuts a unit's service-line spans into billed periods.
+The cost model, applied: a product's effective cost rules, and its
+provider-billed activation entries.
 
 ```ts
-import { billablePeriods, effectiveCogs, remainingUsageToBill } from "@cfs/core/utils/cogs";
+import { cogsActivationEntry, effectiveCogs } from "@cfs/core/utils/cogs";
 ```
 
-One home for both halves of `api-cloudrun/.claude/plans/serialized-subrent.md`
-§ 7a, so the unit activity report, the usage-bill pre-fill and the manager's
-"already billed through" hint all read the same periods. Pure and
-platform-free.
-
-## Periods, and why any active day bills the whole one
-
-A provider bills a line per PERIOD, not per day: a Vision week costs the same
-whether the hotspot was on for one day of it or seven (owner, 2026-10-27,
-Q11). So a period is billable iff any activation span under the entry
-overlaps it, and the expected cost is `periods × rate_cents` — an integer
-times an integer, closed money with no rounding decision (`cfs-money`).
-
-⚠️ Switching a line off mid-period therefore saves nothing for that period,
-which is what the manager's "already billed through" hint exists to say.
-
-### `BillablePeriod`
-
-One billed period.
-
-```ts
-interface BillablePeriod {
-  start: string;
-  end: string;
-  activation_uids: string[];
-}
-```
-
-### `BillablePeriods`
-
-{@link billablePeriods}' answer.
-
-```ts
-interface BillablePeriods {
-  periods: BillablePeriod[];
-  expectedCents: number;
-}
-```
-
-### `BillableSpan`
-
-The span fields {@link billablePeriods} reads.
-
-```ts
-type BillableSpan = Pick<UnitActivationType, "uid" | "start" | "end" | "uid_cogs" | "provider_confirmed">;
-```
-
-### `CogsRange`
-
-A half-open instant range `[start, end)`; a `null` start is the beginning of time.
-
-```ts
-interface CogsRange {
-  start: string | null;
-  end: string;
-}
-```
+An activation entry is a DEFAULT: the formula (`uid_price_formula`) and dated
+`rates` a supplier line takes when it is raised for the product. What a unit's
+charge windows cost is decided by the line's own snapshot through the formula
+engine (`@cfs/core/utils/price-formulas`), never here — the period cutter
+that lived in this module (`billablePeriods`, `remainingUsageToBill`) retired
+with purchases-as-documents D1/D5, and with it the refusal to bill past a
+period counter: over-billing is now legal and flagged by the purchase↔bill
+diff.
 
 ### `DEFAULT_SALE_COA_COST`
 
@@ -48763,57 +49142,12 @@ and nothing re-pushes.
 const DEFAULT_SALE_COA_COST: 5000;
 ```
 
-### `SpanInstantSource`
+### `cogsActivationEntriesByProvider(product: Pick<Product, "cogs">, uid_supplier: string): CogsActivationEntryType[]`
 
-Which instants a span's period cut used.
-
-```ts
-type SpanInstantSource = "provider" | "cfs";
-```
-
-### `SpanInstants`
-
-A span's resolved on/off instants.
-
-```ts
-interface SpanInstants {
-  start: string;
-  end: string | null;
-  source: SpanInstantSource;
-}
-```
-
-### `UsageBilledItem`
-
-The fields of a usage-billed purchase item {@link remainingUsageToBill} reads —
-structural, so both a carrier's `usage` item and an activation-billed
-`subrent` item take it (the purchase-items plan, chicago-film-supplies/api-cloudrun#1407,
-landed 2026-10-30).
-
-```ts
-interface UsageBilledItem {
-  uid_cogs: string;
-  quantity_billed: number;
-}
-```
-
-### `billablePeriods(spans: readonly BillableSpan[], entry: Pick<CogsActivationEntryType, "uid" | "formula" | "rate_cents">, range: CogsRange): BillablePeriods`
-
-The periods of ONE unit's spans under ONE activation entry that are billable
-and overlap `range`, and their expected cost.
-
-- Only spans whose `uid_cogs` is `entry.uid` count; pass the unit's WHOLE
-  activation list, since a `per_week` cycle is anchored on the unit's FIRST
-  activation day under the entry (owner, 2026-10-28, Q11b), which can lie
-  before `range`.
-- `per_week`: 7 Chicago calendar days from that anchor's start of day, so a
-  re-activation inside a week already billed continues it at no extra cost.
-  Calendar days, never `7 × 86,400,000 ms` (`addChicagoDays`'s DST note).
-- `per_calendar_month`: Chicago calendar months.
-- A period is billable iff some span `[start, end)` overlaps it; a still-open
-  span runs on to `range.end`. A zero-length span bills nothing.
-
-Spans' instants come from {@link spanInstants}.
+The activation entries on a product whose `provider` is `uid_supplier` — the
+half of D5's auto-link predicate that reads the product rather than a
+purchase line: a supplier is auto-linkable for a product when one of its
+entries names it as provider.
 
 ### `cogsActivationEntry(product: Pick<Product, "cogs">, uid_cogs: string): CogsActivationEntryType | undefined`
 
@@ -48828,28 +49162,6 @@ plus the TYPE default — a `sale` product with no stored `sale` entry gets
 The default is derived rather than stored because stamping it would be a
 write to every sale product, and each product write fans out to a Xero item
 sync and a Typesense reindex (`Product.cogs`'s docblock).
-
-### `remainingUsageToBill(item: UsageBilledItem, unitSpans: ReadonlyArray<readonly BillableSpan[]>, entry: Pick<CogsActivationEntryType, "uid" | "formula" | "rate_cents">, range: CogsRange): number`
-
-How many billable periods of `item`'s cost entry remain unbilled through
-`range.end`: `Σ billablePeriods(each unit's spans)` − `quantity_billed`.
-
-A SEPARATE function from `remainingToBill`, which six callers share over
-stored buckets; a usage item's billable quantity is derived from spans the
-caller has read (each unit's whole activation list, from the product's
-roster, point-read inside the bill transaction). It is the guard that a
-unit-period cannot be billed twice.
-
-⚠️ May be NEGATIVE: an over-billed item, which the caller reports rather
-than clamps.
-
-### `spanInstants(span: Pick<UnitActivationType, "start" | "end" | "provider_confirmed">): SpanInstants`
-
-The instants a span is billed over: the provider's confirmed ones where set,
-otherwise CFS's own (§ 8 — the operator reconciles against the provider's
-invoice, so the provider's word wins once it exists). A confirmed on-instant
-with no confirmed off-instant keeps CFS's off-instant, and says `cfs`, since
-the pair is then only half confirmed.
 
 ## `@cfs/core/utils/products`
 

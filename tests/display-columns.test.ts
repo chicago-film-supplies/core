@@ -404,6 +404,11 @@ Deno.test("T14: the discriminated rate columns are the ones that exist", () => {
     "order:items.price.taxes_base.rate",
     "order:totals.taxes.rate",
     "order:totals.transaction_fees.rate",
+    // A supplier discount on purchase and bill lines (purchases-as-documents
+    // Phase 2 ruling 7) is core's `Discount`, so it fans out here too.
+    "purchase-bill:items.price.discount.rate",
+    "purchase-credit:items.price.discount.rate",
+    "purchase:items.price.discount.rate",
     "taxes-rates:rate",
   ]);
 });

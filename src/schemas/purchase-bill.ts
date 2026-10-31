@@ -62,10 +62,18 @@
  * @module
  */
 import { z } from "zod";
-import { FirestoreId, ItemUid, OutOfServiceId, ThreadId } from "./_uid.ts";
-import { chicagoStartOfDay } from "./_datetime.ts";
+import { FirestoreId, ItemUid, OutOfServiceId, ThreadId, UnitId } from "./_uid.ts";
+import { chicagoInstant, chicagoStartOfDay } from "./_datetime.ts";
 import { COACode, type COACodeType } from "./chart-of-accounts.ts";
-import { PURCHASE_PRODUCT_ITEM_TYPES, type PurchaseProductItemTypeType } from "./purchase.ts";
+import {
+  PURCHASE_PRODUCT_ITEM_TYPES,
+  type PurchaseLinePrice,
+  purchaseLineMoneyIssues,
+  type PurchaseProductItemTypeType,
+} from "./purchase.ts";
+import { ChargeWindow, type ChargeWindowType, Discount, DiscountInput, type DiscountInputType } from "./order.ts";
+import { PriceFormulaRefSchema, RateKey, RateSnapshotSchema, TierCountSchema, type TierCountType } from "./price-formula.ts";
+import { formulaMoneyMismatch } from "./_line-money.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -103,28 +111,89 @@ export const PurchaseBillXeroDocumentEnum: z.ZodType<PurchaseBillXeroDocumentTyp
 );
 
 /**
+ * How a bill or credit line is priced: the purchase line's {@link PurchaseLinePrice}
+ * (formula snapshot, rates, discount — each `propagate: true` there, so an
+ * un-overridden bill line follows its purchase line) plus the line's frozen
+ * metered `counts` (ruling 8).
+ *
+ * - **flat** — `rates: []`, `counts: []`; `amount_cents` is the stated net share.
+ * - **time** — `rates` ≥ 1, and `counts` are the UNIT-periods the line bills:
+ *   the engine's tier counts summed over every unit's windows, so the line's
+ *   money is `priceFromFormula(rates, counts, 1, discount)` — quantity is
+ *   folded into the counts, because each unit meters its own windows and a
+ *   per-unit count does not factor out. On a PUSHED document the refine
+ *   asserts `amount_cents` equals exactly that; a LINKED document's money is
+ *   Xero's and is diffed, never refused.
+ */
+export interface PurchaseDocumentLinePrice extends PurchaseLinePrice {
+  counts: TierCountType[];
+}
+
+/** Zod schema for {@link PurchaseDocumentLinePrice}. */
+export const PurchaseDocumentLinePriceSchema: z.ZodType<PurchaseDocumentLinePrice> = z.strictObject({
+  price_formula: PriceFormulaRefSchema,
+  rates: z.array(RateSnapshotSchema).meta({ label: "Rate" }),
+  discount: Discount.nullable().meta({ label: "Discount" }),
+  counts: z.array(TierCountSchema).meta({ derived: true }),
+});
+
+/**
+ * One unit's charge windows on a time bill line — what the SUPPLIER billed for
+ * that unit, defaulted at create from the unit's unbilled windows
+ * (`UnitType.charge_windows`) and owned by the line from then on. The windows
+ * are core's time-only `ChargeWindow`; `uid_unit` names the unit (`MovementUnit`'s
+ * spelling). The purchase↔bill diff compares their coverage with the units'.
+ */
+export interface PurchaseDocumentLineUnit {
+  uid_unit: string;
+  charge_windows: ChargeWindowType[];
+}
+
+/** Zod schema for {@link PurchaseDocumentLineUnit}. */
+export const PurchaseDocumentLineUnitSchema: z.ZodType<PurchaseDocumentLineUnit> = z.strictObject({
+  uid_unit: UnitId,
+  charge_windows: z.array(ChargeWindow).min(1),
+});
+
+/**
+ * The keys every bill or credit line carries beside its arm. `units` and
+ * `dates` are a time line's: the units billed with their windows, and the span
+ * a span-metered formula (Verizon) reads.
+ *
+ * `price`, `units` and `dates` are optional ONLY until the Phase 5 backfill
+ * stamps the 413 stored lines that predate them (absent reads as a legacy flat
+ * line). They are required on the `charge` arm, which has no stored corpus.
+ */
+interface PurchaseDocumentLineTimeKeys {
+  price?: PurchaseDocumentLinePrice;
+  units?: PurchaseDocumentLineUnit[];
+  dates?: ChargeWindowType | null;
+}
+
+/**
  * A bill or credit item that PROJECTS a purchase item — some quantity of one
- * buy, subrent or usage item (D5). It names that item by `path_purchase_item`,
- * as an invoice line names its order line by `path_order_item`, and carries its
- * own copy of the shared fields, each of which it may override: the billed
- * `quantity` and `amount_cents` (homonyms of the purchase item's ordered ones),
- * `coa_posting` and `uid_tracking_category` (`propagate: true`).
+ * buy or subrent item (D5). It names that item by `path_purchase_item`, as an
+ * invoice line names its order line by `path_order_item`, and carries its own
+ * copy of the shared fields, each of which it may override until the bill is
+ * settled: the billed `quantity` and `amount_cents` (homonyms of the purchase
+ * item's ordered ones), `price`, `name`, `coa_posting` and
+ * `uid_tracking_category` (`propagate: true` on the purchase side).
  *
  * On a LINKED bill the posting is the Xero document's where it has one; the
  * purchase item's is the expected one, so an account divergence is an ordinary
- * field difference between projection and source (serialized-subrent § 7b).
- * That is why `coa_posting` here is any `COACode`, not the purchase arm's
- * subset.
+ * field difference between projection and source. That is why `coa_posting`
+ * here is any `COACode`, not the purchase arm's subset.
  */
-export interface PurchaseDocumentProductItem {
+export interface PurchaseDocumentProductItem extends PurchaseDocumentLineTimeKeys {
   type: PurchaseProductItemTypeType;
   uid: string;
   /** `[uid]` — flat, self-inclusive. */
   path: string[];
   name: string;
   uid_product: string;
-  /** Units (or, on a usage or activation-billed subrent item, periods) this item bills or un-bills. */
+  /** Units this item bills or un-bills (on a time line, the units its windows cover). */
   quantity: number;
+  /** Net money, integer cents. */
   amount_cents: number;
   coa_posting: COACodeType;
   uid_tracking_category: string | null;
@@ -133,46 +202,45 @@ export interface PurchaseDocumentProductItem {
 }
 
 /**
- * A bill or credit item billing something that is not a purchase product item —
- * freight, a fee, or a supplier's loss or damage charge on a subrent. Posts to
- * its own account and never touches basis. `name` equals `description`.
+ * A bill or credit CHARGE line — freight, a fee, a carrier line, or a supplier's
+ * loss or damage charge on a subrent. Posts to its own account and never
+ * touches basis.
  *
- * A **document-only** direct item (no `path_purchase_item`) is the document's
- * own row, like an invoice's loss-and-damage line: freight nobody expected, and
- * serialized-subrent's historic Vision bills. One that projects a purchase
- * `direct` item names it.
+ * A **document-only** charge (no `path_purchase_item`) is the document's own
+ * row, like an invoice's loss-and-damage line: freight nobody expected, and
+ * Vision's historic SPENDs. One that projects a purchase `charge` item names it.
  *
  * ## Attribution (api-cloudrun#1360, #1364)
  *
- * - `uid_product` — the RENTAL product the spend is attributed to. The writer
- *   emits the product's Xero `ItemCode` beside the stated account; rental items
- *   are untracked in Xero, so the code moves no Xero quantity or value.
+ * - `uid_product` — the product the spend is attributed to. The writer emits
+ *   the product's Xero `ItemCode` beside the stated account when it has one;
+ *   rental items are untracked in Xero, so the code moves no Xero quantity or
+ *   value.
  * - `uid_out_of_service` — the record a loss or damage charge is for. A
  *   `mark_lost` record's id is a `MovementId`, hence `OutOfServiceId`.
  *
- * Both permanent `.optional()`: freight and fees name nothing. The tracking is
- * `uid_tracking_category`, a bare category uid as on every other line; the Xero
- * option is resolved when the body is built (line-tracking-uid D1), so the old
- * stamped `xero_tracking_option_id` is gone.
+ * Both permanent `.optional()`: freight and fees name nothing.
  */
-export interface PurchaseDocumentDirectItem {
-  type: "direct";
+export interface PurchaseDocumentChargeItem {
+  type: "charge";
   uid: string;
   path: string[];
   name: string;
-  description: string;
   quantity: number;
   amount_cents: number;
   coa_posting: COACodeType;
   uid_tracking_category: string | null;
+  price: PurchaseDocumentLinePrice;
+  units: PurchaseDocumentLineUnit[];
+  dates: ChargeWindowType | null;
   uid_product?: string;
   uid_out_of_service?: string;
-  /** The purchase `direct` item this projects, or absent for a document-only row. */
+  /** The purchase `charge` item this projects, or absent for a document-only row. */
   path_purchase_item?: string[];
 }
 
 /** Union of a bill or credit item's arms, discriminated on `type`. */
-export type PurchaseDocumentItem = PurchaseDocumentProductItem | PurchaseDocumentDirectItem;
+export type PurchaseDocumentItem = PurchaseDocumentProductItem | PurchaseDocumentChargeItem;
 
 const docItemHead = {
   uid: ItemUid,
@@ -188,6 +256,49 @@ const docItemMoney = {
   coa_posting: COACode,
   uid_tracking_category: FirestoreId.nullable(),
 };
+const lineUnits = z.array(PurchaseDocumentLineUnitSchema).meta({ label: "Unit" });
+const lineDates = ChargeWindow.nullable().meta({ label: "Span" });
+
+/**
+ * A line's own shape rules — the purchase line's flat/time rule
+ * (`purchaseLineMoneyIssues`) plus the bill line's: a flat line meters nothing
+ * (no counts, no units), a unit appears once, and on a PUSHED document a time
+ * line's money is exactly what its own snapshot reproduces.
+ */
+function documentLineIssues(
+  item: PurchaseDocumentItem,
+  origin: PurchaseDocumentOriginType,
+): { path: (string | number)[]; message: string }[] {
+  const basis = item.price?.price_formula.basis ?? "flat";
+  // The purchase rule's rates half binds here too; its amount half does not —
+  // a bill's time line carries the money it BILLS, which the purchase line
+  // cannot know, so only the flat half of the amount rule is asked.
+  const issues = purchaseLineMoneyIssues({
+    price: item.price,
+    amount_cents: basis === "time" ? null : item.amount_cents,
+  });
+  const units = item.units ?? [];
+  if (basis === "flat") {
+    if ((item.price?.counts.length ?? 0) > 0) issues.push({ path: ["price", "counts"], message: "a flat line meters no counts" });
+    if (units.length > 0) issues.push({ path: ["units"], message: "a flat line bills no unit windows" });
+  } else if (origin === "pushed" && item.price) {
+    const expected = formulaMoneyMismatch(item.price, 1, item.amount_cents);
+    if (expected !== null) {
+      issues.push({
+        path: ["amount_cents"],
+        message: Number.isNaN(expected)
+          ? "a count names a rate key the line's rates do not carry"
+          : `a pushed time line's amount ${item.amount_cents} must equal its rates × counts: ${expected}`,
+      });
+    }
+  }
+  const seen = new Set<string>();
+  units.forEach((u, k) => {
+    if (seen.has(u.uid_unit)) issues.push({ path: ["units", k, "uid_unit"], message: "a unit appears once per line" });
+    seen.add(u.uid_unit);
+  });
+  return issues;
+}
 
 // Un-annotated so `_zod.propValues` survives for the discriminated union below.
 const PurchaseDocumentProductItemInner = z.strictObject({
@@ -195,16 +306,21 @@ const PurchaseDocumentProductItemInner = z.strictObject({
   ...docItemHead,
   uid_product: FirestoreId,
   ...docItemMoney,
+  price: PurchaseDocumentLinePriceSchema.optional(),
+  units: lineUnits.optional(),
+  dates: lineDates.optional(),
   // As invoice's `path_order_item`, but REQUIRED: a product item bills a
   // purchase item by definition.
   path_purchase_item: z.array(ItemUid).min(1),
 });
 
-const PurchaseDocumentDirectItemInner = z.strictObject({
-  type: z.literal("direct").meta({ column: true, label: "Type" }),
+const PurchaseDocumentChargeItemInner = z.strictObject({
+  type: z.literal("charge").meta({ column: true, label: "Type" }),
   ...docItemHead,
-  description: z.string().min(1).max(4000).meta({ column: true, label: "Description" }),
   ...docItemMoney,
+  price: PurchaseDocumentLinePriceSchema,
+  units: lineUnits,
+  dates: lineDates,
   // Permanent `.optional()`: freight and fees attribute nothing (api-cloudrun#1360).
   uid_product: FirestoreId.optional(),
   uid_out_of_service: OutOfServiceId.optional(),
@@ -216,14 +332,14 @@ const PurchaseDocumentDirectItemInner = z.strictObject({
 /** Zod schema for PurchaseDocumentProductItem. */
 export const PurchaseDocumentProductItemSchema: z.ZodType<PurchaseDocumentProductItem> =
   PurchaseDocumentProductItemInner;
-/** Zod schema for PurchaseDocumentDirectItem. */
-export const PurchaseDocumentDirectItemSchema: z.ZodType<PurchaseDocumentDirectItem> =
-  PurchaseDocumentDirectItemInner;
+/** Zod schema for PurchaseDocumentChargeItem. */
+export const PurchaseDocumentChargeItemSchema: z.ZodType<PurchaseDocumentChargeItem> =
+  PurchaseDocumentChargeItemInner;
 
 /** Zod schema for any bill or credit item — discriminated on `type`. */
 export const PurchaseDocumentItemSchema: z.ZodType<PurchaseDocumentItem> = z.discriminatedUnion("type", [
   PurchaseDocumentProductItemInner,
-  PurchaseDocumentDirectItemInner,
+  PurchaseDocumentChargeItemInner,
 ]);
 
 function documentItemsIssues(
@@ -241,6 +357,9 @@ function documentItemsIssues(
     uids.add(item.uid);
     if (item.path.length !== 1 || item.path[0] !== item.uid) {
       ctx.addIssue({ code: "custom", path: ["items", i, "path"], message: "an item's path is [uid] — flat, self-inclusive" });
+    }
+    for (const issue of documentLineIssues(item, doc.origin)) {
+      ctx.addIssue({ code: "custom", path: ["items", i, ...issue.path], message: issue.message });
     }
     // A purchase item is billed by at most one item of a document — the
     // successor of the old "one line per product", which stopped being true
@@ -325,7 +444,7 @@ export interface PurchaseBill {
   due_date_fs?: FirestoreTimestampType | null;
   /** The supplier's own invoice number. */
   reference: string | null;
-  /** Product projections and direct items, one array (D5). */
+  /** Product projections and charge items, one array (D5). */
   items: PurchaseDocumentItem[];
   totals: PurchaseBillTotals;
   uid_thread?: string;
@@ -382,9 +501,9 @@ export const PurchaseBillSchema: z.ZodType<PurchaseBill> = z.strictObject({
   due_date: chicagoStartOfDay().nullable().meta({ column: true, label: "Due Date", serverSortVia: "due_date_fs" }),
   due_date_fs: FirestoreTimestamp.nullable().optional(),
   reference: z.string().max(255).nullable().meta({ column: true, label: "Reference" }),
-  // `.min(1)`: a bill bills at least one item. With direct items in the same
-  // array that holds without a special case — a historic Vision bill is
-  // document-only direct items (D5).
+  // `.min(1)`: a bill bills at least one item. With charge items in the same
+  // array that holds without a special case — a historic Vision bill is one
+  // document-only or standing-line charge item (D5).
   items: z.array(PurchaseDocumentItemSchema).min(1).meta({ label: "Item" }),
   totals: PurchaseBillTotalsSchema,
   uid_thread: ThreadId.optional(),
@@ -449,7 +568,7 @@ export interface PurchaseBillFieldFreezeContract {
    */
   xero_accepts_on_settled: boolean;
   /** The document and item keys in the class, typed against the stored shapes. */
-  members: readonly (keyof PurchaseBill | keyof PurchaseDocumentProductItem | keyof PurchaseDocumentDirectItem)[];
+  members: readonly (keyof PurchaseBill | keyof PurchaseDocumentProductItem | keyof PurchaseDocumentChargeItem)[];
 }
 
 /**
@@ -466,13 +585,17 @@ export const PURCHASE_BILL_FIELD_FREEZE: Readonly<
 > = {
   supplier: { frozen_when: "frozen", xero_accepts_on_settled: false, members: ["supplier"] },
   date: { frozen_when: "frozen", xero_accepts_on_settled: false, members: ["date"] },
-  line_money: { frozen_when: "frozen", xero_accepts_on_settled: false, members: ["quantity", "amount_cents"] },
+  line_money: {
+    frozen_when: "frozen",
+    xero_accepts_on_settled: false,
+    members: ["quantity", "amount_cents", "price", "units", "dates"],
+  },
   coa_posting: { frozen_when: "frozen", xero_accepts_on_settled: false, members: ["coa_posting"] },
   tracking: { frozen_when: "void", xero_accepts_on_settled: false, members: ["uid_tracking_category"] },
   text: {
     frozen_when: "never",
     xero_accepts_on_settled: false,
-    members: ["reference", "due_date", "name", "description"],
+    members: ["reference", "due_date", "name"],
   },
 };
 
@@ -627,8 +750,9 @@ export const PurchaseDocumentItemInput: z.ZodType<PurchaseDocumentItemInputType>
 });
 
 /**
- * A document-only direct item as an operator states it on a PUSHED bill or
- * credit. The writer mints its `uid`/`path` and sets `name` = `description`.
+ * A document-only charge item as an operator states it on a PUSHED bill or
+ * credit (freight nobody expected, a fee). The writer mints its `uid`/`path`,
+ * stamps a Fixed formula snapshot and `quantity: 1`.
  * `uid_tracking_category` follows the order/invoice line rule: absent or `null`
  * takes the attributed product's category (none when it names no product); a
  * uid sets it and must name a live category.
@@ -637,8 +761,8 @@ export const PurchaseDocumentItemInput: z.ZodType<PurchaseDocumentItemInputType>
  * would let an api that predates a field silently drop it rather than 400, and
  * an attribution would vanish with nothing failing (api-cloudrun#1360).
  */
-export interface PurchaseDocumentDirectItemInputType {
-  description: string;
+export interface PurchaseDocumentChargeItemInputType {
+  name: string;
   coa_posting: COACodeType;
   amount_cents: number;
   uid_product?: string;
@@ -648,8 +772,8 @@ export interface PurchaseDocumentDirectItemInputType {
 
 // Not exported: it is reached only through the two push inputs, and an exported
 // `*Input` would be a strict node of its own in `tests/input-strictness.test.ts`.
-const PurchaseDocumentDirectItemInput: z.ZodType<PurchaseDocumentDirectItemInputType> = z.strictObject({
-  description: z.string().min(1).max(4000),
+const PurchaseDocumentChargeItemInput: z.ZodType<PurchaseDocumentChargeItemInputType> = z.strictObject({
+  name: z.string().min(1).max(4000),
   coa_posting: COACode,
   amount_cents: z.int().min(0),
   uid_product: FirestoreId.optional(),
@@ -672,10 +796,13 @@ function uniqueItemInputs(items: readonly { uid_item: string }[], ctx: z.Refinem
  * Input for billing a purchase — push a new ACCPAY, or link an existing Xero
  * bill or card payment.
  *
- * A PUSHED bill item carries no amount: the writer prices it at the purchase
- * item's cumulative share, so a price the purchase does not hold cannot be
- * billed, and stamps the purchase item's `name`, `coa_posting` and
- * `uid_tracking_category`. A LINKED bill carries `total_cents` as Xero has it.
+ * A PUSHED bill item carries no amount: the writer defaults it from the
+ * purchase item (`projectPurchaseLineToBillLine`, `@cfs/core/utils/purchase-documents`) —
+ * a flat line at the item's cumulative share, a time line priced from its
+ * units' UNBILLED charge windows — and stamps the purchase item's `name`,
+ * `price`, `coa_posting` and `uid_tracking_category`. The operator then
+ * overrides any of them until the bill is settled ({@link UpdatePurchaseBillInput}).
+ * A LINKED bill carries `total_cents` as Xero has it.
  */
 export type CreatePurchaseBillInputType =
   | {
@@ -684,7 +811,7 @@ export type CreatePurchaseBillInputType =
     due_date: string;
     reference?: string | null;
     items: PurchaseDocumentItemInputType[];
-    direct_items?: PurchaseDocumentDirectItemInputType[];
+    charge_items?: PurchaseDocumentChargeItemInputType[];
     uuid_session: string;
     version: number;
   }
@@ -703,7 +830,7 @@ const pushBillInput = z.object({
   due_date: chicagoStartOfDay(),
   reference: z.string().max(255).nullable().optional(),
   items: z.array(PurchaseDocumentItemInput),
-  direct_items: z.array(PurchaseDocumentDirectItemInput).optional(),
+  charge_items: z.array(PurchaseDocumentChargeItemInput).optional(),
   uuid_session: z.uuid(),
   version: z.int().min(0),
 });
@@ -725,8 +852,8 @@ export const CreatePurchaseBillInput: z.ZodType<CreatePurchaseBillInputType> = z
   linkBillInput,
 ]).superRefine((b, ctx) => {
   uniqueItemInputs(b.items, ctx);
-  if (b.mode === "push" && b.items.length + (b.direct_items?.length ?? 0) === 0) {
-    ctx.addIssue({ code: "custom", path: ["items"], message: "a bill names at least one item or direct item" });
+  if (b.mode === "push" && b.items.length + (b.charge_items?.length ?? 0) === 0) {
+    ctx.addIssue({ code: "custom", path: ["items"], message: "a bill names at least one item or charge item" });
   }
 }) as z.ZodType<CreatePurchaseBillInputType>;
 
@@ -737,7 +864,7 @@ export const CreatePurchaseBillInput: z.ZodType<CreatePurchaseBillInputType> = z
  * Each `items` entry UN-bills that quantity of its purchase item: it lowers
  * `quantity_billed`, and a PUSHED credit prices it at the item's cumulative
  * share of the range it un-bills, so a price the purchase does not hold cannot
- * be credited. A price correction with no quantity is a `direct_items` entry
+ * be credited. A price correction with no quantity is a `charge_items` entry
  * (push only). A LINKED credit reads its date, reference and total from Xero,
  * as a linked bill does.
  */
@@ -748,7 +875,7 @@ export type CreatePurchaseCreditInputType =
     date: string;
     reference?: string | null;
     items: PurchaseDocumentItemInputType[];
-    direct_items?: PurchaseDocumentDirectItemInputType[];
+    charge_items?: PurchaseDocumentChargeItemInputType[];
     uuid_session: string;
     version: number;
   }
@@ -767,7 +894,7 @@ const pushCreditInput = z.object({
   date: chicagoStartOfDay(),
   reference: z.string().max(255).nullable().optional(),
   items: z.array(PurchaseDocumentItemInput),
-  direct_items: z.array(PurchaseDocumentDirectItemInput).optional(),
+  charge_items: z.array(PurchaseDocumentChargeItemInput).optional(),
   uuid_session: z.uuid(),
   version: z.int().min(0),
 });
@@ -787,10 +914,80 @@ export const CreatePurchaseCreditInput: z.ZodType<CreatePurchaseCreditInputType>
   linkCreditInput,
 ]).superRefine((c, ctx) => {
   uniqueItemInputs(c.items, ctx);
-  if (c.mode === "push" && c.items.length + (c.direct_items?.length ?? 0) === 0) {
-    ctx.addIssue({ code: "custom", path: ["items"], message: "a pushed credit names at least one item or direct item" });
+  if (c.mode === "push" && c.items.length + (c.charge_items?.length ?? 0) === 0) {
+    ctx.addIssue({ code: "custom", path: ["items"], message: "a pushed credit names at least one item or charge item" });
   }
 }) as z.ZodType<CreatePurchaseCreditInputType>;
+
+/**
+ * One line of a PUSHED bill as an operator edits it (D5): any shared field may
+ * be overridden until the bill is settled — exactly the invoice rule. Matched
+ * to the stored line by `uid`; an absent key KEEPS the stored value.
+ *
+ * Money is edited through its INPUTS, never typed over the result on a time
+ * line: `price.rates`, `price.discount`, `units` and `dates`, from which the
+ * writer re-meters `counts` and re-prices `amount_cents`. A flat line's
+ * `amount_cents` is stated directly (gross when a discount is set).
+ */
+export interface PurchaseBillLineEditInputType {
+  uid: string;
+  name?: string;
+  quantity?: number;
+  amount_cents?: number;
+  coa_posting?: COACodeType;
+  uid_tracking_category?: string | null;
+  price?: { rates?: { rate_key: string; amount_cents: number }[]; discount?: DiscountInputType | null };
+  units?: PurchaseDocumentLineUnit[];
+  dates?: ChargeWindowType | null;
+}
+
+/**
+ * Input for editing a PUSHED, unsettled bill (`PUT /purchase-bills/{uid}`) — a
+ * PATCH. `items`, when present, names lines to edit by `uid`; lines it omits are
+ * kept. Refused on a linked bill (Xero is authoritative) and, per field class,
+ * once the bill is frozen (`PURCHASE_BILL_FIELD_FREEZE`). An accepted edit is
+ * pushed to Xero through the ACCPAY edit push (D5).
+ */
+export interface UpdatePurchaseBillInputType {
+  version: number;
+  date?: string;
+  due_date?: string;
+  reference?: string | null;
+  items?: PurchaseBillLineEditInputType[];
+}
+
+const BillLineUnitInput: z.ZodType<PurchaseDocumentLineUnit> = z.object({
+  uid_unit: UnitId,
+  charge_windows: z.array(z.object({ start: chicagoInstant(), end: chicagoInstant() })).min(1),
+}) as unknown as z.ZodType<PurchaseDocumentLineUnit>;
+
+/** Zod schema for UpdatePurchaseBillInputType. */
+export const UpdatePurchaseBillInput: z.ZodType<UpdatePurchaseBillInputType> = z.object({
+  version: z.int().min(0),
+  date: chicagoStartOfDay().optional(),
+  due_date: chicagoStartOfDay().optional(),
+  reference: z.string().max(255).nullable().optional(),
+  items: z.array(z.object({
+    uid: ItemUid,
+    name: z.string().min(1).max(4000).optional(),
+    quantity: z.int().min(1).optional(),
+    amount_cents: z.int().min(0).optional(),
+    coa_posting: COACode.optional(),
+    uid_tracking_category: FirestoreId.nullable().optional(),
+    price: z.object({
+      rates: z.array(z.object({ rate_key: RateKey, amount_cents: z.int() })).optional(),
+      discount: DiscountInput.nullable().optional(),
+    }).optional(),
+    units: z.array(BillLineUnitInput).optional(),
+    dates: z.object({ start: chicagoInstant(), end: chicagoInstant() }).nullable().optional(),
+  })).optional(),
+}).superRefine((u, ctx) => {
+  const seen = new Set<string>();
+  u.items?.forEach((item, i) => {
+    if (seen.has(item.uid)) ctx.addIssue({ code: "custom", path: ["items", i, "uid"], message: "a line is edited once per write" });
+    seen.add(item.uid);
+  });
+}) as z.ZodType<UpdatePurchaseBillInputType>;
 
 /**
  * Input for allocating some of a supplier credit to one bill of the same

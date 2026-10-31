@@ -219,16 +219,18 @@ export function remainingToReceive(item: ReceivableItem): number {
 }
 
 /**
- * Units of a buy or FIXED-basis subrent item still to be billed:
- * `quantity − canceled − billed`.
+ * Units of a FLAT item still to be billed: `quantity − canceled − billed`,
+ * never below 0 — an over-billed line (legal since D5, flagged by the diff) has
+ * nothing left.
  *
- * ⚠️ **Not for an activation-billed subrent or a usage item**, whose billable
- * quantity is PERIODS derived from activation spans — `remainingUsageToBill`
- * (serialized-subrent § 7b), a separate util by design, since six callers share
- * this one. A direct item bills once: `1 − quantity_billed`.
+ * ⚠️ **Not for a TIME line**, which has no billed count (`quantity_billed:
+ * null`): what it still owes is its units' unbilled charge windows, read by
+ * the bill projector, not a number here.
  */
-export function remainingToBill(item: Pick<BuyItem, "quantity" | "quantity_billed" | "quantity_canceled">): number {
-  return item.quantity - item.quantity_canceled - item.quantity_billed;
+export function remainingToBill(
+  item: { quantity: number; quantity_billed: number; quantity_canceled: number },
+): number {
+  return Math.max(0, item.quantity - item.quantity_canceled - item.quantity_billed);
 }
 
 /**
@@ -296,7 +298,7 @@ export type PurchaseExpansionResult =
  * purchase held one line per product. Items carry their own row identity now,
  * so a pack item keeps its `uid` and becomes its own item even when the stocked
  * product already has one; the ledger averages the cost either way.
- * Usage and direct items pass through untouched.
+ * Charge items pass through untouched.
  *
  * Returns rather than throws: a refusal is an operator-facing 400, and core
  * throws plain `Error`, which a consumer's middleware reads as a 500.
@@ -362,7 +364,6 @@ function expandOnto(
     ...item,
     uid_product: uidProduct,
     quantity,
-    billing: { ...item.billing },
     dates: { ...item.dates },
     ...(item.uid_orders !== undefined ? { uid_orders: [...item.uid_orders] } : {}),
   };

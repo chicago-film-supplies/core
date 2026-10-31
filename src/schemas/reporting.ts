@@ -49,6 +49,8 @@ import {
   type UidNameRefType,
 } from "./common.ts";
 import { type MovementSessionOrderRef, MovementSessionOrderRefSchema } from "./movement-session.ts";
+import { type PriceFormulaRef, PriceFormulaRefSchema } from "./price-formula.ts";
+import { UnitChargeWindowLine, type UnitChargeWindowLineType } from "./unit.ts";
 
 // ── The anchor ──────────────────────────────────────────────────────
 
@@ -621,9 +623,9 @@ export const OrgStatementSchema: z.ZodType<OrgStatement> = z.strictObject({
  * subrent purchase line, or for a charge on that purchase that names no line.
  *
  * `product` is a purchase line: the bill lines for that product net of the
- * credit lines for it, plus every bill direct line attributed to the product
- * (a loss or damage charge, api-cloudrun#1360), net of credit direct lines.
- * `purchase` is a direct line naming no product on the purchase's lines —
+ * credit lines for it, plus every bill charge line attributed to the product
+ * (a loss or damage charge, api-cloudrun#1360), net of credit charge lines.
+ * `purchase` is a charge line naming no product on the purchase's lines —
  * freight or a fee — which serves every order the purchase was raised for.
  */
 export interface SubrentMarginCostLine {
@@ -636,16 +638,18 @@ export interface SubrentMarginCostLine {
   /** The purchase line's product name, or `"Purchase charges"`. */
   name: string;
   /**
-   * The date the line is placed in the window by: the purchase line's hire
-   * start, or on a `purchase` line the earliest hire start on the purchase.
+   * The date the line is placed in the window by: the purchase line's subrent
+   * start, or on a `purchase` line the earliest subrent start on the purchase.
+   * A line with no window folds by its bill's `date` (D8).
    */
-  hire_start: string;
+  subrent_start: string;
   /**
-   * What the subrent item was ordered at — `SubrentItem.billing.amount_cents`
-   * on a fixed basis. INFORMATIONAL and never part of `cost_cents`: a hire not
-   * billed yet costs nothing here, and this is how a reader sees that. `null`
-   * on a `purchase` line and on an activation-billed item, which commits no
-   * amount.
+   * What the line was ordered at — a FLAT subrent line's priced money,
+   * `SubrentItem.amount_cents`. INFORMATIONAL and never part of `cost_cents`: a
+   * hire not billed yet costs nothing here, and this is how a reader sees that.
+   * `null` on a `purchase` line and on a TIME line, which commits no amount
+   * (D8 — the old refine required it on every product line, which a time line
+   * could never satisfy).
    */
   ordered_cents: number | null;
   /** Bills net of supplier credits. May be negative when a credit exceeds its bills. */
@@ -659,15 +663,15 @@ export const SubrentMarginCostLineSchema: z.ZodType<SubrentMarginCostLine> = z.s
   purchase_number: z.int(),
   uid_product: FirestoreId.nullable(),
   name: z.string(),
-  hire_start: z.string(),
+  subrent_start: z.string(),
   ordered_cents: z.int().nullable(),
   cost_cents: z.int(),
 }).superRefine((line, ctx) => {
   if ((line.kind === "product") !== (line.uid_product !== null)) {
     ctx.addIssue({ code: "custom", path: ["uid_product"], message: "a product line names its product, and only a product line does" });
   }
-  if ((line.kind === "product") !== (line.ordered_cents !== null)) {
-    ctx.addIssue({ code: "custom", path: ["ordered_cents"], message: "ordered_cents is stated on a product line, and only there" });
+  if (line.kind === "purchase" && line.ordered_cents !== null) {
+    ctx.addIssue({ code: "custom", path: ["ordered_cents"], message: "a purchase-charges line orders nothing" });
   }
 });
 
@@ -810,19 +814,6 @@ export const SubrentMarginReportSchema: z.ZodType<SubrentMarginReport> = z.stric
 // ── Unit activity (api-cloudrun#1395) ───────────────────────────────
 
 /**
- * Which instants a billed period was cut from: the provider's confirmed ones,
- * CFS's own, or `mixed` when the spans touching it disagree
- * (`@cfs/core/utils/cogs` `spanInstants`).
- */
-export const UNIT_ACTIVITY_INSTANT_SOURCES = ["provider", "cfs", "mixed"] as const;
-/** Zod enum for {@link UNIT_ACTIVITY_INSTANT_SOURCES}. */
-export const UnitActivityInstantSourceEnum: z.ZodEnum<{ provider: "provider"; cfs: "cfs"; mixed: "mixed" }> = z.enum(
-  UNIT_ACTIVITY_INSTANT_SOURCES,
-);
-/** One of {@link UNIT_ACTIVITY_INSTANT_SOURCES}. */
-export type UnitActivityInstantSourceType = z.infer<typeof UnitActivityInstantSourceEnum>;
-
-/**
  * An order a unit's activity names. `number` is `null` when the order no
  * longer exists: the span or booking still names it, and dropping it would
  * turn the period into an idle one.
@@ -839,52 +830,55 @@ export const UnitActivityOrderRefSchema: z.ZodType<UnitActivityOrderRef> = z.str
 });
 
 /**
- * One billed period of one unit's line under one `cogs` activation entry:
- * `@cfs/core/utils/cogs` `billablePeriods`, which bills the WHOLE period for
- * any active day (owner, 2026-10-27, Q11).
+ * One billed period of one unit's charge windows under the purchase line they
+ * bill against. Periods come from the line's FORMULA — its largest segment's
+ * unit (a Vision month block, a Verizon month), cut whether or not the unit
+ * was on (Q9) — and each period's `expected_cents` is the formula money step
+ * over the windows inside it, at the line's snapshotted rates (D8).
  */
 export interface UnitActivityPeriod {
-  /** The product's `cogs` activation entry the spans accrue. */
-  uid_cogs: string;
-  /** The entry's label, so a reader need not hold the product. */
+  /** The purchase line the windows bill against; `null` for a window no supplier line bills. */
+  line: UnitChargeWindowLineType | null;
+  /** The formula the period was cut and priced by. */
+  price_formula: PriceFormulaRef;
+  /** The line's name, so a reader need not hold the purchase. */
   label: string;
   /** The period's first instant. */
   start: string;
   /** The next period's first instant: `[start, end)`. */
   end: string;
   /**
-   * The period starts inside the report's month. A `per_week` period can
-   * straddle two months and appears in both reports; it COUNTS toward the
-   * totals of the month it starts in only, so twelve monthly reports sum to
-   * the year without double-counting a week.
+   * The period starts inside the report's month. A period can straddle two
+   * months and appears in both reports; it COUNTS toward the totals of the
+   * month it starts in only, so twelve monthly reports sum to the year without
+   * double-counting.
    */
   starts_in_month: boolean;
   /**
-   * The orders whose spans touched the period, ascending by number. EMPTY is
+   * The orders whose windows touched the period, ascending by number. EMPTY is
    * an IDLE period: the line was on for no job, and its cost is CFS's
    * overhead (owner, 2026-10-27, Q2). Several orders are listed, never split.
    */
   orders: UnitActivityOrderRef[];
   /**
-   * Chicago days of the period, up to `as_of`, on which some span was on.
-   * Context only — the bill does not depend on it.
+   * Chicago days of the period, up to `as_of`, on which some window was on.
+   * Context only — the money does not depend on it.
    */
   active_days: number;
-  instants: UnitActivityInstantSourceType;
-  /** The entry's `rate_cents`: one period bills one rate. */
+  /** The formula money step over the period's windows at the line's rates. */
   expected_cents: number;
 }
 
 /** Zod schema for {@link UnitActivityPeriod}. */
 export const UnitActivityPeriodSchema: z.ZodType<UnitActivityPeriod> = z.strictObject({
-  uid_cogs: z.uuid(),
+  line: UnitChargeWindowLine.nullable(),
+  price_formula: PriceFormulaRefSchema,
   label: z.string(),
   start: z.string(),
   end: z.string(),
   starts_in_month: z.boolean(),
   orders: z.array(UnitActivityOrderRefSchema),
   active_days: z.int().min(0),
-  instants: UnitActivityInstantSourceEnum,
   expected_cents: z.int().min(0),
 });
 
@@ -970,17 +964,17 @@ export const UnitActivityFindingSchema: z.ZodType<UnitActivityFinding> = z.stric
 });
 
 /**
- * One of the provider's LINKED usage bills dated in the month
- * (serialized-subrent § 7b, § 8).
+ * One of the provider's bills dated in the month, pushed or linked
+ * (purchases-as-documents D8).
  *
- * A usage bill is N:1 — one provider document covers many unit-periods, billed
- * per (product, cost entry) item — so there is no per-PERIOD billed cost to
- * report, and the report does not invent one. It lists the bills beside the
+ * A bill is N:1 — one provider document covers many unit-periods — so there is
+ * no per-PERIOD billed cost to report, and the report does not invent one. It lists the bills beside the
  * periods; the operator reconciles the two.
  *
- * `diverged` is DERIVED, never stored: the bill's Xero total differs from the
- * Σ of its usage items' expected amounts, or an item posts to a different
- * account than the purchase item it projects.
+ * `diverged` is DERIVED, never stored, from the purchase↔bill diff
+ * (`computePurchaseBillDiffs`): the bill's lines differ from what the units'
+ * windows and the purchase lines say they should be — money, windows or
+ * account.
  */
 export interface UnitActivityBill {
   uid_purchase_bill: string;
@@ -988,9 +982,7 @@ export interface UnitActivityBill {
   /** The bill's date, Chicago start of day. */
   date: string;
   xero_document: "invoice" | "bank_transaction";
-  /** Periods its usage items bill. */
-  periods: number;
-  /** Σ periods × rate over its usage items: what CFS expected. */
+  /** What the units' windows price to under the purchase lines this bill bills: what CFS expected. */
   expected_cents: number;
   /** The Xero document's total: what the provider billed. */
   total_cents: number;
@@ -1003,7 +995,6 @@ export const UnitActivityBillSchema: z.ZodType<UnitActivityBill> = z.strictObjec
   number: z.int().min(1),
   date: z.string(),
   xero_document: z.enum(["invoice", "bank_transaction"]),
-  periods: z.int().min(0),
   expected_cents: z.int().min(0),
   total_cents: z.int(),
   diverged: z.boolean(),
@@ -1031,13 +1022,12 @@ export const UnitActivityTotalsSchema: z.ZodType<UnitActivityTotals> = z.strictO
  * The unit activity report (api-cloudrun#1395;
  * `api-cloudrun/.claude/plans/serialized-subrent.md` § 8): for ONE provider
  * and ONE Chicago calendar month, every unit whose line that provider bills,
- * cut into billed periods, with the orders each period served and the days the
- * unit was physically out.
+ * cut into billed periods by each line's formula, with the orders each period
+ * served and the days the unit was physically out.
  *
- * It covers owned and rented units alike — activation is a fact about the
- * device's service, not its owner. It reports EXPECTED cost only; what the
- * provider actually billed arrives with the linked usage bills
- * (api-cloudrun#1396).
+ * It covers owned and rented units alike — a charge window is a fact about the
+ * device's service, not its owner. Periods carry EXPECTED cost; what the
+ * provider actually billed is its bills, listed beside them.
  *
  * 🔴 **The refinement is the control total**: every unit's sums tie to its
  * periods, and the totals tie to the units.

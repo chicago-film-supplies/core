@@ -920,16 +920,13 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "unitOwnership",
     "unitSupplier",
   ],
-  // `utils/cogs.ts` prices CFS's COST of revenue — a product's cost rules and a
-  // unit's billed service periods — for the unit activity report and the usage
-  // bill pre-fill (serialized-subrent § 7a). A customer document never shows
-  // cost, and no render context holds a product or a unit.
+  // `utils/cogs.ts` reads CFS's COST of revenue — a product's cost rules and
+  // its provider-billed activation entries. A customer document never shows
+  // cost, and no render context holds a product.
   cogs: [
-    "billablePeriods",
+    "cogsActivationEntriesByProvider",
     "cogsActivationEntry",
     "effectiveCogs",
-    "remainingUsageToBill",
-    "spanInstants",
   ],
   // `utils/price-formulas.ts` is the engine that WRITES a line's money from its
   // formula, windows and dated rates (purchases-as-documents D1). A template
