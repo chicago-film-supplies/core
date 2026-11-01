@@ -251,6 +251,58 @@ function monthOrigin(
 }
 
 /**
+ * **The periods a formula's LARGEST segment cuts a line's time into**, as
+ * Chicago calendar dates `[start, end)` — the unit activity report's billed
+ * periods (purchases-as-documents Q9: a Vision month block, a Verizon month,
+ * cut whether or not the unit was on). Only periods that overlap `range` AND
+ * some metered time (a window, or the span for `span_less_gaps`) are returned,
+ * ascending and distinct.
+ *
+ * - a `month` segment walks calendar months from its anchor — the window's
+ *   start (`window_start`, restarting at every window, Q1) or a fixed day of
+ *   the month — with the meter's month-end rule (a start on the 31st anchors on
+ *   each month's last day);
+ * - a `week` segment walks 7-day periods from each window's start;
+ * - a `day` segment is each Chicago date;
+ * - a `none` (flat) formula cuts no periods.
+ *
+ * It decides no money: price a period by metering the windows clipped to it.
+ */
+export function formulaPeriods(
+  formula: PriceFormulaRule,
+  input: { windows: readonly MeterRange[]; span?: MeterRange | null },
+  range: MeterRange,
+): { start: string; end: string }[] {
+  assertRule(formula);
+  const seg = formula.segments[0];
+  if (formula.meter.source === "none" || seg.unit === "none") return [];
+  const sources = formula.meter.source === "span_less_gaps" && input.span ? [input.span] : input.windows;
+  const lo = dayNumber(toYmd(range.start));
+  const hi = dayNumber(toYmd(range.end));
+  const seen = new Map<number, number>();
+  for (const src of sources) {
+    const s = dayNumber(toYmd(src.start));
+    const e = Math.max(dayNumber(toYmd(src.end)), s + 1);
+    const push = (ps: number, pe: number) => {
+      if (pe > lo && ps < hi && pe > s && ps < e && !seen.has(ps)) seen.set(ps, pe);
+    };
+    if (seg.unit === "month") {
+      const o = monthOrigin(seg, s, s);
+      for (let k = o.k; ; k++) {
+        const ps = monthDay(o.y, o.m, k, o.want);
+        if (ps >= e || ps >= hi) break;
+        push(ps, monthDay(o.y, o.m, k + 1, o.want));
+      }
+    } else {
+      const step = seg.unit === "week" ? 7 : 1;
+      for (let ps = s; ps < e && ps < hi; ps += step) push(ps, ps + step);
+    }
+  }
+  const ymd = (day: number) => new Date(day * DAY_MS).toISOString().slice(0, 10);
+  return [...seen.entries()].sort((a, b) => a[0] - b[0]).map(([ps, pe]) => ({ start: ymd(ps), end: ymd(pe) }));
+}
+
+/**
  * Run the ladder over ONE window's metered dates. `extra` is the minimum's
  * top-up, in counted days, which only the last (count) segment can absorb.
  */

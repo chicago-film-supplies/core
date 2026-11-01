@@ -431,7 +431,7 @@ export interface SubrentItem extends PurchaseItemBase {
    * direction (`uid_out_of_service`), so offering a line for an uncovered
    * window and creating it writes the purchase alone. A unit's charge window
    * is covered by this line where it overlaps the line's `dates`
-   * (`purchaseLineCoversWindow`). Mirrored on `Purchase.query_by_units`.
+   * (`coversForUnit`). Mirrored on `Purchase.query_by_units`.
    * Not shared with a bill line, which states its own `units` (D5).
    */
   uid_units: string[];
@@ -833,7 +833,7 @@ export interface Purchase {
   /**
    * Mirror of the units the lines cover ({@link deriveQueryByUnits}) — "which
    * purchases cover this unit" as one `array-contains`, the read behind every
-   * coverage question (`purchaseLineCoversWindow`, the uncovered-window offer).
+   * coverage question (`coversForUnit`, the uncovered-window offer).
    * The `Invoice.query_by_out_of_service` twin. Optional only until the Phase 5
    * backfill stamps it; every writer states it.
    */

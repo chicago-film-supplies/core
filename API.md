@@ -14632,7 +14632,7 @@ What the provider billed is the BILL line's own windows, diffed against these
 (`SubrentItem.uid_units` / `ChargeItem.uid_units`), exactly as an invoice
 line names the out-of-service record it bills (`uid_out_of_service`) and the
 record names nothing back. So which line covers a window is DERIVED
-(`purchaseLineCoversWindow`), a window no live line covers is an OFFER
+(`coversForUnit`), a window no live line covers is an OFFER
 (`seedPurchaseLinesForWindows`), and creating the purchase for it writes the
 purchase alone (api-cloudrun purchases-as-documents D10 item 10).
 
@@ -30536,7 +30536,7 @@ What the provider billed is the BILL line's own windows, diffed against these
 (`SubrentItem.uid_units` / `ChargeItem.uid_units`), exactly as an invoice
 line names the out-of-service record it bills (`uid_out_of_service`) and the
 record names nothing back. So which line covers a window is DERIVED
-(`purchaseLineCoversWindow`), a window no live line covers is an OFFER
+(`coversForUnit`), a window no live line covers is an OFFER
 (`seedPurchaseLinesForWindows`), and creating the purchase for it writes the
 purchase alone (api-cloudrun purchases-as-documents D10 item 10).
 
@@ -34650,7 +34650,7 @@ Quota-gate arms (added 2026-07 with the daily-budget gate):
   a dropped write needing a human.
 
 ```ts
-const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_invoice_push_skipped" | "xero_invoice_twin_adopted" | "xero_invoice_twin_refused" | "xero_stock_adjustment_bill" | "xero_bill_pushed" | "xero_bill_push_skipped" | "xero_bill_twin_adopted" | "xero_bill_validation_rejected" | "xero_bill_terminal" | "xero_bill_enqueue_failed" | "purchase_bill_pushed" | "purchase_bill_push_skipped" | "purchase_bill_twin_adopted" | "purchase_bill_push_rejected" | "purchase_bill_enqueue_failed" | "purchase_credit_pushed" | "purchase_credit_push_skipped" | "purchase_credit_twin_adopted" | "purchase_credit_push_rejected" | "purchase_credit_enqueue_failed" | "purchase_credit_allocation_pushed" | "purchase_credit_allocation_failed" | "xero_settlement_synced" | "xero_settlement_reaped" | "xero_settlement_resurrected" | "xero_manual_intervention_required" | "credit_note_counter_raised" | "xero_credit_note_refunds_synced" | "xero_payment_already_synced" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_locked" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_superseded" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_validation_rejected" | "xero_quota_exhausted" | "xero_rate_limit" | "xero_write_deferred" | "xero_defer_escalated" | "xero_tracking_option_create_failed" | "xero_tax_rate_create_failed" | "xero_tracking_option_unresolved" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice" | "xero_untracked_accpay" | "usage_cost_diverged" | "usage_bill_link_skipped" | "usage_bill_link_failed" | "usage_bill_poll_completed"[];
+const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_invoice_push_skipped" | "xero_invoice_twin_adopted" | "xero_invoice_twin_refused" | "xero_stock_adjustment_bill" | "xero_bill_pushed" | "xero_bill_push_skipped" | "xero_bill_twin_adopted" | "xero_bill_validation_rejected" | "xero_bill_terminal" | "xero_bill_enqueue_failed" | "purchase_bill_pushed" | "purchase_bill_push_skipped" | "purchase_bill_twin_adopted" | "purchase_bill_push_rejected" | "purchase_bill_enqueue_failed" | "purchase_credit_pushed" | "purchase_credit_push_skipped" | "purchase_credit_twin_adopted" | "purchase_credit_push_rejected" | "purchase_credit_enqueue_failed" | "purchase_credit_allocation_pushed" | "purchase_credit_allocation_failed" | "xero_settlement_synced" | "xero_settlement_reaped" | "xero_settlement_resurrected" | "xero_manual_intervention_required" | "credit_note_counter_raised" | "xero_credit_note_refunds_synced" | "xero_payment_already_synced" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_locked" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_superseded" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_validation_rejected" | "xero_quota_exhausted" | "xero_rate_limit" | "xero_write_deferred" | "xero_defer_escalated" | "xero_tracking_option_create_failed" | "xero_tax_rate_create_failed" | "xero_tracking_option_unresolved" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice" | "xero_untracked_accpay" | "usage_bill_link_skipped" | "usage_bill_link_failed" | "usage_bill_poll_completed"[];
 ```
 
 ### `XeroEventLogRecord`
@@ -34683,11 +34683,6 @@ interface XeroEventLogRecord {
   uid_purchase?: string;
   uid_supplier?: string;
   xero_bank_transaction_id?: string;
-  divergence?: "amount" | "account";
-  expected_cents?: number;
-  actual_cents?: number;
-  expected_coa?: number;
-  actual_coa?: number;
   window_start?: string;
   transactions_seen?: number;
   bills_linked?: number;
@@ -48555,6 +48550,25 @@ or that is retired (`active: false`): a default never fails a line.
 
 Feed the result to `buildCustomOrderLine` / `retypedLinePrice`; it prices
 nothing itself, so it is not a second price author.
+
+### `formulaPeriods(formula: PriceFormulaRule, input: typeLiteral, range: MeterRange): typeLiteral[]`
+
+**The periods a formula's LARGEST segment cuts a line's time into**, as
+Chicago calendar dates `[start, end)` — the unit activity report's billed
+periods (purchases-as-documents Q9: a Vision month block, a Verizon month,
+cut whether or not the unit was on). Only periods that overlap `range` AND
+some metered time (a window, or the span for `span_less_gaps`) are returned,
+ascending and distinct.
+
+- a `month` segment walks calendar months from its anchor — the window's
+  start (`window_start`, restarting at every window, Q1) or a fixed day of
+  the month — with the meter's month-end rule (a start on the 31st anchors on
+  each month's last day);
+- a `week` segment walks 7-day periods from each window's start;
+- a `day` segment is each Chicago date;
+- a `none` (flat) formula cuts no periods.
+
+It decides no money: price a period by metering the windows clipped to it.
 
 ### `formulaUidsOf(items: readonly typeLiteral[]): string[]`
 

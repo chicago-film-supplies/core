@@ -837,7 +837,7 @@ export const UnitActivityOrderRefSchema: z.ZodType<UnitActivityOrderRef> = z.str
  * over the windows inside it, at the line's snapshotted rates (D8).
  */
 export interface UnitActivityPeriod {
-  /** The live purchase line that covers the windows (`purchaseLineCoversWindow`); `null` for a window no line covers. */
+  /** The live purchase line that covers the windows (`coversForUnit`); `null` for a window no line covers. */
   line: PurchaseLineRef | null;
   /** The formula the period was cut and priced by. */
   price_formula: PriceFormulaRef;

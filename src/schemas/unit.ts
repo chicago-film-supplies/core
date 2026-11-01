@@ -232,7 +232,7 @@ export interface UnitSerialHistoryEntryType {
  * (`SubrentItem.uid_units` / `ChargeItem.uid_units`), exactly as an invoice
  * line names the out-of-service record it bills (`uid_out_of_service`) and the
  * record names nothing back. So which line covers a window is DERIVED
- * (`purchaseLineCoversWindow`), a window no live line covers is an OFFER
+ * (`coversForUnit`), a window no live line covers is an OFFER
  * (`seedPurchaseLinesForWindows`), and creating the purchase for it writes the
  * purchase alone (api-cloudrun purchases-as-documents D10 item 10).
  */

@@ -282,15 +282,9 @@ export const XERO_EVENT_MSGS = [
   // document that already exists (an ACCPAY by webhook, a card SPEND by the
   // daily poll) and records a bill on the provider's usage purchase.
   //
-  // A linked usage bill's actual cost differs from what CFS expected — its
-  // Xero TOTAL from Σ periods × rate (`divergence: "amount"`), or a Xero line's
-  // ACCOUNT from the purchase item's (`divergence: "account"`). Warns, never
-  // refuses (owner, 2026-10-27). Carries `uid_purchase_bill` +
-  // `purchase_bill_number` + `uid_purchase` + `uid_supplier` + `divergence`,
-  // with `expected_cents`/`actual_cents` or `expected_coa`/`actual_coa`.
-  "usage_cost_diverged",
   // A provider's Xero document was not linked, correctly: already linked, no
-  // open usage purchase, or nothing billable. `info`. Carries `reason` +
+  // open purchase with an auto-link line, a CFS-authored number, or nothing
+  // unbilled. `info`. Carries `reason` +
   // `uid_supplier` + `xero_invoice_id` or `xero_bank_transaction_id`.
   "usage_bill_link_skipped",
   // Linking a provider's Xero document failed. `error`, via `logError`; the
@@ -349,14 +343,6 @@ export interface XeroEventLogRecord {
   uid_supplier?: string;
   /** A card SPEND a `usage_*` arm is about — the poll's document. */
   xero_bank_transaction_id?: string;
-  /** `usage_cost_diverged` — which fact diverged. */
-  divergence?: "amount" | "account";
-  /** `usage_cost_diverged` (amount) — what CFS expected and what Xero holds, integer cents. */
-  expected_cents?: number;
-  actual_cents?: number;
-  /** `usage_cost_diverged` (account) — the purchase item's account and the Xero line's. */
-  expected_coa?: number;
-  actual_coa?: number;
   /** `usage_bill_poll_completed` — the poll's `UpdatedDateUTC` lower bound (ISO). */
   window_start?: string;
   /** `usage_bill_poll_completed` — the providers' SPENDs Xero returned. */
@@ -470,11 +456,6 @@ export const XeroEventLogRecordSchema: z.ZodType<XeroEventLogRecord> = z.object(
   uid_purchase: z.string().optional(),
   uid_supplier: z.string().optional(),
   xero_bank_transaction_id: z.string().optional(),
-  divergence: z.enum(["amount", "account"]).optional(),
-  expected_cents: z.int().optional(),
-  actual_cents: z.int().optional(),
-  expected_coa: z.int().optional(),
-  actual_coa: z.int().optional(),
   window_start: z.string().optional(),
   transactions_seen: z.int().optional(),
   bills_linked: z.int().optional(),

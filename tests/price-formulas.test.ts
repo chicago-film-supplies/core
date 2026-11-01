@@ -26,6 +26,7 @@ import { assert, assertEquals, assertThrows } from "@std/assert";
 import { addMonths, differenceInCalendarDays, parseISO } from "date-fns";
 import { tz } from "@date-fns/tz";
 import {
+  formulaPeriods,
   meterUnits,
   priceFromFormula,
   rateInForce,
@@ -1024,4 +1025,37 @@ Deno.test("an input price names its formula by uid_price_formula, and a percent 
   const both = ItemPrice.safeParse({ uid_price_formula: "AAAAAAAAAAAAAAAAAAAA", base_percent: 4 });
   assert(!both.success);
   assertEquals(both.error!.issues[0].path, ["price_formula"]);
+});
+
+// ── formulaPeriods: the report's billed periods (Q9) ─────────────────
+
+Deno.test("formulaPeriods: Vision's month restarts at every window; month-end anchors on the last day", () => {
+  const windows = [
+    { start: "2026-01-31T09:00:00.000-06:00", end: "2026-03-05T09:00:00.000-06:00" },
+    { start: "2026-03-10T09:00:00.000-05:00", end: "2026-03-12T09:00:00.000-05:00" },
+  ];
+  const got = formulaPeriods(VISION, { windows }, { start: "2026-02-01", end: "2026-04-01" });
+  assertEquals(got, [
+    { start: "2026-01-31", end: "2026-02-28" },
+    { start: "2026-02-28", end: "2026-03-31" },
+    { start: "2026-03-10", end: "2026-04-10" },
+  ]);
+  // Companion: one anchor across both windows would put the second window inside [02-28, 03-31).
+  assert(got.some((p) => p.start === "2026-03-10"), "the second window restarts the count");
+});
+
+Deno.test("formulaPeriods: Verizon's months fall on the 2nd across the SPAN, on or off; a flat formula cuts none", () => {
+  const span = { start: "2026-01-15T00:00:00.000-06:00", end: "2026-03-20T00:00:00.000-05:00" };
+  const got = formulaPeriods(VERIZON, { windows: [], span }, { start: "2026-02-01", end: "2026-03-01" });
+  assertEquals(got, [{ start: "2026-01-02", end: "2026-02-02" }, { start: "2026-02-02", end: "2026-03-02" }]);
+  assertEquals(formulaPeriods(FIXED, { windows: [span] }, { start: "2026-01-01", end: "2027-01-01" }), []);
+});
+
+Deno.test("formulaPeriods: a week segment walks 7 days from each window's start, clipped to the range", () => {
+  const windows = [{ start: "2026-01-05T09:00:00.000-06:00", end: "2026-01-20T09:00:00.000-06:00" }];
+  assertEquals(formulaPeriods(FIVE_DAY_WEEK, { windows }, { start: "2026-01-10", end: "2026-02-01" }), [
+    { start: "2026-01-05", end: "2026-01-12" },
+    { start: "2026-01-12", end: "2026-01-19" },
+    { start: "2026-01-19", end: "2026-01-26" },
+  ]);
 });

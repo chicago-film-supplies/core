@@ -976,6 +976,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "combineTierCounts",
     // A manager convenience for a NEW line (settings/pricing); a render prints a stored line.
     "defaultPriceFormulaFor",
+    "formulaPeriods",
     "formulaUidsOf",
     "priceFormulaRefOf",
     "meterUnits",
