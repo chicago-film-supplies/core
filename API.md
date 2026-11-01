@@ -12895,14 +12895,19 @@ const SubrentItemSchema: z.ZodType<SubrentItem>;
 
 ### `SubrentMarginCostLine`
 
-One cost contribution to a margin row: what CFS paid a supplier for one
-subrent purchase line, or for a charge on that purchase that names no line.
+One cost contribution to a margin row: what one subrent purchase line, or the
+charges on its purchase that name no line, put into the PERIOD.
 
 `product` is a purchase line: the bill lines for that product net of the
 credit lines for it, plus every bill charge line attributed to the product
 (a loss or damage charge, api-cloudrun#1360), net of credit charge lines.
 `purchase` is a charge line naming no product on the purchase's lines —
 freight or a fee — which serves every order the purchase was raised for.
+
+⭐ **Two cost columns, never merged** (owner, 2026-11-01, api-cloudrun#1427 —
+NetSuite, Dynamics, Business Central and Sage Intacct all keep actual and
+committed cost apart): `billed_cents` is money that LANDED in the period, and
+`committed_cents` is the unbilled remainder accrued onto it.
 
 ```ts
 interface SubrentMarginCostLine {
@@ -12911,9 +12916,10 @@ interface SubrentMarginCostLine {
   purchase_number: number;
   uid_product: string | null;
   name: string;
-  subrent_start: string;
+  hire_start: string;
   ordered_cents: number | null;
-  cost_cents: number;
+  billed_cents: number;
+  committed_cents: number;
 }
 ```
 
@@ -12927,16 +12933,21 @@ const SubrentMarginCostLineSchema: z.ZodType<SubrentMarginCostLine>;
 
 ### `SubrentMarginReport`
 
-The subrent margin report (api-cloudrun#1364): what the orders that subrented
-equipment billed, against what the subrents cost.
+The subrent margin report (api-cloudrun#1364, re-based by #1427): the money
+the orders that subrented equipment billed in a period, against what their
+subrents cost in it.
 
-**The window places COST, by hire start.** A purchase line is in the report
-when its `dates.start` lies in `[from_date, to_date)`; the orders it names
-then bring their WHOLE invoiced revenue, because an order's revenue has no
-hire start to place it by. Revenue is the pre-tax `subtotal_discounted_cents`
-of every non-void invoice, net of non-void credit notes against those
-invoices. Cost is supplier bills (lines and attributed direct lines) of the
-SUBRENT purchases, net of non-void supplier credits; a voided bill counts 0.
+**A MONEY report places money by its document's date** (owner, 2026-11-01:
+money reports use bill dates, custody reports use custody dates):
+
+- **revenue** — the pre-tax `subtotal_discounted_cents` of every non-void
+  invoice DATED in `[from_date, to_date)`, net of non-void credit notes dated
+  in it, for the orders a live subrent line names (and every order an
+  invoice joins to them);
+- **billed cost** — supplier bill lines by the BILL's date, net of supplier
+  credit lines by the CREDIT's date; a voided bill counts 0;
+- **committed cost** — each open subrent line's unbilled remainder, accrued
+  onto the period linearly over the time it pays for.
 
 🔴 **The refinement is the control total**, as on {@link OrgStatement}: a
 report whose rows do not add to its own totals is unrepresentable, and so is
@@ -12963,26 +12974,32 @@ const SubrentMarginReportSchema: z.ZodType<SubrentMarginReport>;
 
 ### `SubrentMarginRow`
 
-One margin row: a GROUP of orders that share subrent cost or an invoice.
+One margin row: a GROUP of orders that share subrent cost or an invoice in
+the period.
 
 ⭐ **A group is the connected component, never an apportionment.** A purchase
 line naming two orders, or an invoice billing two, merges them into one row;
 nothing is ever split by bookings, days or revenue. Subrented units are
 fungible — they land on a shelf and any booking claims them — so the report
 cannot know which order a hire actually served, and any split would be a
-fabricated number. A row with one order is the common case; whether a row is
-shared is `orders.length > 1`, so no flag is stored beside it.
+fabricated number. Whether a row is shared is `orders.length > 1`.
+
+⚠️ **A row is the period's money, not a hire's margin** (owner, 2026-11-01):
+revenue lands by invoice date and cost by bill date, so one hire's revenue
+and cost may fall in different periods. A row may therefore carry revenue and
+no lines (an order invoiced in the period whose cost landed in another).
 
 ⚠️ **Cost follows the operator's `uid_orders`, not usage.** A line naming
-no order is in {@link SubrentMarginReport.unattributed}; an under-attributed
-hire is fixed by editing the purchase line, not by this report.
+no order is in {@link SubrentMarginReport.unattributed}.
 
 ```ts
 interface SubrentMarginRow {
   orders: MovementSessionOrderRef[];
   revenue_cents: number;
-  cost_cents: number;
-  margin_cents: number;
+  billed_cents: number;
+  committed_cents: number;
+  margin_billed_cents: number;
+  margin_committed_cents: number;
   lines: SubrentMarginCostLine[];
 }
 ```
@@ -13002,8 +13019,10 @@ The report's control totals.
 ```ts
 interface SubrentMarginTotals {
   revenue_cents: number;
-  cost_cents: number;
-  margin_cents: number;
+  billed_cents: number;
+  committed_cents: number;
+  margin_billed_cents: number;
+  margin_committed_cents: number;
 }
 ```
 
@@ -13021,7 +13040,8 @@ Subrent spend that names no order — there is no revenue to set it against.
 
 ```ts
 interface SubrentMarginUnattributed {
-  cost_cents: number;
+  billed_cents: number;
+  committed_cents: number;
   lines: SubrentMarginCostLine[];
 }
 ```

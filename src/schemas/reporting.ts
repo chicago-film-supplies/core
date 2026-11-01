@@ -616,17 +616,22 @@ export const OrgStatementSchema: z.ZodType<OrgStatement> = z.strictObject({
   }
 }).meta({ title: "OrgStatement" }) as z.ZodType<OrgStatement>;
 
-// ── Subrent margin (api-cloudrun#1364) ──────────────────────────────
+// ── Subrent margin (api-cloudrun#1364, #1427) ───────────────────────
 
 /**
- * One cost contribution to a margin row: what CFS paid a supplier for one
- * subrent purchase line, or for a charge on that purchase that names no line.
+ * One cost contribution to a margin row: what one subrent purchase line, or the
+ * charges on its purchase that name no line, put into the PERIOD.
  *
  * `product` is a purchase line: the bill lines for that product net of the
  * credit lines for it, plus every bill charge line attributed to the product
  * (a loss or damage charge, api-cloudrun#1360), net of credit charge lines.
  * `purchase` is a charge line naming no product on the purchase's lines —
  * freight or a fee — which serves every order the purchase was raised for.
+ *
+ * ⭐ **Two cost columns, never merged** (owner, 2026-11-01, api-cloudrun#1427 —
+ * NetSuite, Dynamics, Business Central and Sage Intacct all keep actual and
+ * committed cost apart): `billed_cents` is money that LANDED in the period, and
+ * `committed_cents` is the unbilled remainder accrued onto it.
  */
 export interface SubrentMarginCostLine {
   kind: "product" | "purchase";
@@ -638,22 +643,30 @@ export interface SubrentMarginCostLine {
   /** The purchase line's product name, or `"Purchase charges"`. */
   name: string;
   /**
-   * The date the line is placed in the window by: the purchase line's subrent
-   * start, or on a `purchase` line the earliest subrent start on the purchase.
-   * A line with no window folds by its bill's `date` (D8).
+   * The hire start — the purchase line's `dates.start`, or on a `purchase` line
+   * the earliest subrent start on the purchase. INFORMATIONAL: it places
+   * nothing since api-cloudrun#1427 (cost goes by bill date).
    */
-  subrent_start: string;
+  hire_start: string;
   /**
    * What the line was ordered at — a FLAT subrent line's priced money,
-   * `SubrentItem.amount_cents`. INFORMATIONAL and never part of `cost_cents`: a
-   * hire not billed yet costs nothing here, and this is how a reader sees that.
-   * `null` on a `purchase` line and on a TIME line, which commits no amount
-   * (D8 — the old refine required it on every product line, which a time line
-   * could never satisfy).
+   * `SubrentItem.amount_cents`. INFORMATIONAL and never part of either cost:
+   * `null` on a `purchase` line and on a TIME line, which commits no amount (D8).
    */
   ordered_cents: number | null;
-  /** Bills net of supplier credits. May be negative when a credit exceeds its bills. */
-  cost_cents: number;
+  /**
+   * Bill lines whose BILL is dated in the period, net of supplier-credit lines
+   * whose CREDIT is dated in it. A voided bill and a void credit count 0. May
+   * be negative: a credit in a later month reduces that month.
+   */
+  billed_cents: number;
+  /**
+   * The UNBILLED remainder's share of the period — never the line's full value
+   * (NetSuite's double count). The remainder is what a bill raised now would
+   * default to, and it is spread linearly over the time it pays for (the hire,
+   * or the unbilled charge windows), so it drops as bills arrive.
+   */
+  committed_cents: number;
 }
 
 /** Zod schema for {@link SubrentMarginCostLine}. */
@@ -663,9 +676,10 @@ export const SubrentMarginCostLineSchema: z.ZodType<SubrentMarginCostLine> = z.s
   purchase_number: z.int(),
   uid_product: FirestoreId.nullable(),
   name: z.string(),
-  subrent_start: z.string(),
+  hire_start: z.string(),
   ordered_cents: z.int().nullable(),
-  cost_cents: z.int(),
+  billed_cents: z.int(),
+  committed_cents: z.int(),
 }).superRefine((line, ctx) => {
   if ((line.kind === "product") !== (line.uid_product !== null)) {
     ctx.addIssue({ code: "custom", path: ["uid_product"], message: "a product line names its product, and only a product line does" });
@@ -676,29 +690,37 @@ export const SubrentMarginCostLineSchema: z.ZodType<SubrentMarginCostLine> = z.s
 });
 
 /**
- * One margin row: a GROUP of orders that share subrent cost or an invoice.
+ * One margin row: a GROUP of orders that share subrent cost or an invoice in
+ * the period.
  *
  * ⭐ **A group is the connected component, never an apportionment.** A purchase
  * line naming two orders, or an invoice billing two, merges them into one row;
  * nothing is ever split by bookings, days or revenue. Subrented units are
  * fungible — they land on a shelf and any booking claims them — so the report
  * cannot know which order a hire actually served, and any split would be a
- * fabricated number. A row with one order is the common case; whether a row is
- * shared is `orders.length > 1`, so no flag is stored beside it.
+ * fabricated number. Whether a row is shared is `orders.length > 1`.
+ *
+ * ⚠️ **A row is the period's money, not a hire's margin** (owner, 2026-11-01):
+ * revenue lands by invoice date and cost by bill date, so one hire's revenue
+ * and cost may fall in different periods. A row may therefore carry revenue and
+ * no lines (an order invoiced in the period whose cost landed in another).
  *
  * ⚠️ **Cost follows the operator's `uid_orders`, not usage.** A line naming
- * no order is in {@link SubrentMarginReport.unattributed}; an under-attributed
- * hire is fixed by editing the purchase line, not by this report.
+ * no order is in {@link SubrentMarginReport.unattributed}.
  */
 export interface SubrentMarginRow {
   /** The group's orders, by number. Disjoint across rows. */
   orders: MovementSessionOrderRef[];
-  /** The orders' whole invoiced revenue, pre-tax, net of credit notes. Not windowed. */
+  /** Invoices dated in the period, pre-tax, net of credit notes dated in it. */
   revenue_cents: number;
-  /** `Σ lines[].cost_cents`. */
-  cost_cents: number;
-  /** `revenue_cents − cost_cents`. Unbounded below. */
-  margin_cents: number;
+  /** `Σ lines[].billed_cents`. */
+  billed_cents: number;
+  /** `Σ lines[].committed_cents`. */
+  committed_cents: number;
+  /** `revenue_cents − billed_cents`. Unbounded below. */
+  margin_billed_cents: number;
+  /** `revenue_cents − billed_cents − committed_cents` — the month whose bill has not arrived. */
+  margin_committed_cents: number;
   lines: SubrentMarginCostLine[];
 }
 
@@ -706,21 +728,26 @@ export interface SubrentMarginRow {
 export const SubrentMarginRowSchema: z.ZodType<SubrentMarginRow> = z.strictObject({
   orders: z.array(MovementSessionOrderRefSchema).min(1),
   revenue_cents: z.int(),
-  cost_cents: z.int(),
-  margin_cents: z.int(),
-  lines: z.array(SubrentMarginCostLineSchema).min(1),
+  billed_cents: z.int(),
+  committed_cents: z.int(),
+  margin_billed_cents: z.int(),
+  margin_committed_cents: z.int(),
+  lines: z.array(SubrentMarginCostLineSchema),
 });
 
 /** Subrent spend that names no order — there is no revenue to set it against. */
 export interface SubrentMarginUnattributed {
-  /** `Σ lines[].cost_cents`. */
-  cost_cents: number;
+  /** `Σ lines[].billed_cents`. */
+  billed_cents: number;
+  /** `Σ lines[].committed_cents`. */
+  committed_cents: number;
   lines: SubrentMarginCostLine[];
 }
 
 /** Zod schema for {@link SubrentMarginUnattributed}. */
 export const SubrentMarginUnattributedSchema: z.ZodType<SubrentMarginUnattributed> = z.strictObject({
-  cost_cents: z.int(),
+  billed_cents: z.int(),
+  committed_cents: z.int(),
   lines: z.array(SubrentMarginCostLineSchema),
 });
 
@@ -728,30 +755,41 @@ export const SubrentMarginUnattributedSchema: z.ZodType<SubrentMarginUnattribute
 export interface SubrentMarginTotals {
   /** `Σ rows[].revenue_cents`. */
   revenue_cents: number;
-  /** `Σ rows[].cost_cents + unattributed.cost_cents` — every subrent dollar in the window. */
-  cost_cents: number;
-  /** `revenue_cents − cost_cents`. */
-  margin_cents: number;
+  /** `Σ rows[].billed_cents + unattributed.billed_cents` — every subrent dollar billed in the period. */
+  billed_cents: number;
+  /** `Σ rows[].committed_cents + unattributed.committed_cents`. */
+  committed_cents: number;
+  /** `revenue_cents − billed_cents`. */
+  margin_billed_cents: number;
+  /** `revenue_cents − billed_cents − committed_cents`. */
+  margin_committed_cents: number;
 }
 
 /** Zod schema for {@link SubrentMarginTotals}. */
 export const SubrentMarginTotalsSchema: z.ZodType<SubrentMarginTotals> = z.strictObject({
   revenue_cents: z.int(),
-  cost_cents: z.int(),
-  margin_cents: z.int(),
+  billed_cents: z.int(),
+  committed_cents: z.int(),
+  margin_billed_cents: z.int(),
+  margin_committed_cents: z.int(),
 });
 
 /**
- * The subrent margin report (api-cloudrun#1364): what the orders that subrented
- * equipment billed, against what the subrents cost.
+ * The subrent margin report (api-cloudrun#1364, re-based by #1427): the money
+ * the orders that subrented equipment billed in a period, against what their
+ * subrents cost in it.
  *
- * **The window places COST, by hire start.** A purchase line is in the report
- * when its `dates.start` lies in `[from_date, to_date)`; the orders it names
- * then bring their WHOLE invoiced revenue, because an order's revenue has no
- * hire start to place it by. Revenue is the pre-tax `subtotal_discounted_cents`
- * of every non-void invoice, net of non-void credit notes against those
- * invoices. Cost is supplier bills (lines and attributed direct lines) of the
- * SUBRENT purchases, net of non-void supplier credits; a voided bill counts 0.
+ * **A MONEY report places money by its document's date** (owner, 2026-11-01:
+ * money reports use bill dates, custody reports use custody dates):
+ *
+ * - **revenue** — the pre-tax `subtotal_discounted_cents` of every non-void
+ *   invoice DATED in `[from_date, to_date)`, net of non-void credit notes dated
+ *   in it, for the orders a live subrent line names (and every order an
+ *   invoice joins to them);
+ * - **billed cost** — supplier bill lines by the BILL's date, net of supplier
+ *   credit lines by the CREDIT's date; a voided bill counts 0;
+ * - **committed cost** — each open subrent line's unbilled remainder, accrued
+ *   onto the period linearly over the time it pays for.
  *
  * 🔴 **The refinement is the control total**, as on {@link OrgStatement}: a
  * report whose rows do not add to its own totals is unrepresentable, and so is
@@ -776,16 +814,23 @@ export const SubrentMarginReportSchema: z.ZodType<SubrentMarginReport> = z.stric
   unattributed: SubrentMarginUnattributedSchema,
   totals: SubrentMarginTotalsSchema,
 }).superRefine((doc, ctx) => {
-  const sum = (lines: SubrentMarginCostLine[]) => lines.reduce((s, l) => s + l.cost_cents, 0);
+  const sum = (lines: SubrentMarginCostLine[], key: "billed_cents" | "committed_cents") =>
+    lines.reduce((s, l) => s + l[key], 0);
   const seen = new Set<string>();
   let revenue = 0;
-  let cost = 0;
+  let billed = 0;
+  let committed = 0;
   doc.rows.forEach((row, i) => {
-    if (row.cost_cents !== sum(row.lines)) {
-      ctx.addIssue({ code: "custom", path: ["rows", i, "cost_cents"], message: `cost_cents (${row.cost_cents}) must equal the sum of its lines (${sum(row.lines)})` });
+    for (const key of ["billed_cents", "committed_cents"] as const) {
+      if (row[key] !== sum(row.lines, key)) {
+        ctx.addIssue({ code: "custom", path: ["rows", i, key], message: `${key} (${row[key]}) must equal the sum of its lines (${sum(row.lines, key)})` });
+      }
     }
-    if (row.margin_cents !== row.revenue_cents - row.cost_cents) {
-      ctx.addIssue({ code: "custom", path: ["rows", i, "margin_cents"], message: "margin_cents must equal revenue_cents − cost_cents" });
+    if (row.margin_billed_cents !== row.revenue_cents - row.billed_cents) {
+      ctx.addIssue({ code: "custom", path: ["rows", i, "margin_billed_cents"], message: "margin_billed_cents must equal revenue_cents − billed_cents" });
+    }
+    if (row.margin_committed_cents !== row.revenue_cents - row.billed_cents - row.committed_cents) {
+      ctx.addIssue({ code: "custom", path: ["rows", i, "margin_committed_cents"], message: "margin_committed_cents must equal revenue_cents − billed_cents − committed_cents" });
     }
     row.orders.forEach((o, j) => {
       if (seen.has(o.uid)) {
@@ -794,20 +839,30 @@ export const SubrentMarginReportSchema: z.ZodType<SubrentMarginReport> = z.stric
       seen.add(o.uid);
     });
     revenue += row.revenue_cents;
-    cost += row.cost_cents;
+    billed += row.billed_cents;
+    committed += row.committed_cents;
   });
-  if (doc.unattributed.cost_cents !== sum(doc.unattributed.lines)) {
-    ctx.addIssue({ code: "custom", path: ["unattributed", "cost_cents"], message: "unattributed.cost_cents must equal the sum of its lines" });
+  for (const key of ["billed_cents", "committed_cents"] as const) {
+    if (doc.unattributed[key] !== sum(doc.unattributed.lines, key)) {
+      ctx.addIssue({ code: "custom", path: ["unattributed", key], message: `unattributed.${key} must equal the sum of its lines` });
+    }
   }
-  cost += doc.unattributed.cost_cents;
+  billed += doc.unattributed.billed_cents;
+  committed += doc.unattributed.committed_cents;
   if (doc.totals.revenue_cents !== revenue) {
     ctx.addIssue({ code: "custom", path: ["totals", "revenue_cents"], message: `totals.revenue_cents (${doc.totals.revenue_cents}) must equal the sum of the rows (${revenue})` });
   }
-  if (doc.totals.cost_cents !== cost) {
-    ctx.addIssue({ code: "custom", path: ["totals", "cost_cents"], message: `totals.cost_cents (${doc.totals.cost_cents}) must equal the rows plus unattributed (${cost})` });
+  if (doc.totals.billed_cents !== billed) {
+    ctx.addIssue({ code: "custom", path: ["totals", "billed_cents"], message: `totals.billed_cents (${doc.totals.billed_cents}) must equal the rows plus unattributed (${billed})` });
   }
-  if (doc.totals.margin_cents !== doc.totals.revenue_cents - doc.totals.cost_cents) {
-    ctx.addIssue({ code: "custom", path: ["totals", "margin_cents"], message: "totals.margin_cents must equal revenue_cents − cost_cents" });
+  if (doc.totals.committed_cents !== committed) {
+    ctx.addIssue({ code: "custom", path: ["totals", "committed_cents"], message: `totals.committed_cents (${doc.totals.committed_cents}) must equal the rows plus unattributed (${committed})` });
+  }
+  if (doc.totals.margin_billed_cents !== doc.totals.revenue_cents - doc.totals.billed_cents) {
+    ctx.addIssue({ code: "custom", path: ["totals", "margin_billed_cents"], message: "totals.margin_billed_cents must equal revenue_cents − billed_cents" });
+  }
+  if (doc.totals.margin_committed_cents !== doc.totals.revenue_cents - doc.totals.billed_cents - doc.totals.committed_cents) {
+    ctx.addIssue({ code: "custom", path: ["totals", "margin_committed_cents"], message: "totals.margin_committed_cents must equal revenue_cents − billed_cents − committed_cents" });
   }
 }).meta({ title: "SubrentMarginReport" }) as z.ZodType<SubrentMarginReport>;
 

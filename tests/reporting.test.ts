@@ -359,57 +359,114 @@ const ORDER_A = { uid: "o".repeat(20), number: 4101 };
 const ORDER_B = { uid: "q".repeat(20), number: 4102 };
 const COST_LINE = {
   kind: "product" as const, uid_purchase: PO, purchase_number: 12, uid_product: "r".repeat(20),
-  name: "Arri Skypanel S60", subrent_start: "2026-10-01T08:00:00.000-05:00", ordered_cents: 50_000, cost_cents: 50_000,
+  name: "Arri Skypanel S60", hire_start: "2026-10-01T08:00:00.000-05:00", ordered_cents: 50_000,
+  billed_cents: 40_000, committed_cents: 10_000,
 };
 const CHARGE_LINE = {
-  ...COST_LINE, kind: "purchase" as const, uid_product: null, name: "Purchase charges", ordered_cents: null, cost_cents: 7_500,
+  ...COST_LINE, kind: "purchase" as const, uid_product: null, name: "Purchase charges", ordered_cents: null,
+  billed_cents: 7_500, committed_cents: 0,
 };
 const MARGIN = {
   from_date: "2026-10-01T00:00:00.000-05:00",
   to_date: "2026-11-01T00:00:00.000-05:00",
-  rows: [{ orders: [ORDER_A, ORDER_B], revenue_cents: 120_000, cost_cents: 57_500, margin_cents: 62_500, lines: [COST_LINE, CHARGE_LINE] }],
-  unattributed: { cost_cents: 2_000, lines: [{ ...COST_LINE, uid_purchase: "s".repeat(20), ordered_cents: 2_000, cost_cents: 2_000 }] },
-  totals: { revenue_cents: 120_000, cost_cents: 59_500, margin_cents: 60_500 },
+  rows: [{
+    orders: [ORDER_A, ORDER_B], revenue_cents: 120_000, billed_cents: 47_500, committed_cents: 10_000,
+    margin_billed_cents: 72_500, margin_committed_cents: 62_500, lines: [COST_LINE, CHARGE_LINE],
+  }],
+  unattributed: {
+    billed_cents: 2_000, committed_cents: 500,
+    lines: [{ ...COST_LINE, uid_purchase: "s".repeat(20), ordered_cents: 2_500, billed_cents: 2_000, committed_cents: 500 }],
+  },
+  totals: {
+    revenue_cents: 120_000, billed_cents: 49_500, committed_cents: 10_500,
+    margin_billed_cents: 70_500, margin_committed_cents: 60_000,
+  },
 };
 
 Deno.test("SubrentMarginReportSchema accepts a report that ties", () => {
-  assertEquals(SubrentMarginReportSchema.parse(MARGIN).totals.margin_cents, 60_500);
+  assertEquals(SubrentMarginReportSchema.parse(MARGIN).totals.margin_committed_cents, 60_000);
 });
 
-Deno.test("a margin row may be negative, and an empty report ties at zero", () => {
-  const loss = { ...MARGIN.rows[0], revenue_cents: 10_000, margin_cents: -47_500 };
-  SubrentMarginReportSchema.parse({ ...MARGIN, rows: [loss], totals: { revenue_cents: 10_000, cost_cents: 59_500, margin_cents: -49_500 } });
+Deno.test("a margin row may be negative, may carry revenue and no lines, and an empty report ties at zero", () => {
+  const loss = { ...MARGIN.rows[0], revenue_cents: 10_000, margin_billed_cents: -37_500, margin_committed_cents: -47_500 };
   SubrentMarginReportSchema.parse({
-    ...MARGIN, rows: [], unattributed: { cost_cents: 0, lines: [] }, totals: { revenue_cents: 0, cost_cents: 0, margin_cents: 0 },
+    ...MARGIN, rows: [loss],
+    totals: { ...MARGIN.totals, revenue_cents: 10_000, margin_billed_cents: -39_500, margin_committed_cents: -50_000 },
+  });
+  // Invoiced in the period, its cost landed in another (#1427: a row is the period's money).
+  const revenueOnly = {
+    orders: [ORDER_A], revenue_cents: 9_000, billed_cents: 0, committed_cents: 0,
+    margin_billed_cents: 9_000, margin_committed_cents: 9_000, lines: [],
+  };
+  SubrentMarginReportSchema.parse({
+    ...MARGIN, rows: [revenueOnly], unattributed: { billed_cents: 0, committed_cents: 0, lines: [] },
+    totals: { revenue_cents: 9_000, billed_cents: 0, committed_cents: 0, margin_billed_cents: 9_000, margin_committed_cents: 9_000 },
+  });
+  SubrentMarginReportSchema.parse({
+    ...MARGIN, rows: [], unattributed: { billed_cents: 0, committed_cents: 0, lines: [] },
+    totals: { revenue_cents: 0, billed_cents: 0, committed_cents: 0, margin_billed_cents: 0, margin_committed_cents: 0 },
   });
 });
 
-Deno.test("🔴 a row whose cost is not the sum of its lines is refused", () => {
-  assertThrows(() => SubrentMarginReportSchema.parse({ ...MARGIN, rows: [{ ...MARGIN.rows[0], cost_cents: 57_501, margin_cents: 62_499 }], totals: { ...MARGIN.totals, cost_cents: 59_501, margin_cents: 60_499 } }));
+Deno.test("🔴 a row whose billed or committed cost is not the sum of its lines is refused — each column separately", () => {
+  const row = MARGIN.rows[0];
+  assertThrows(
+    () => SubrentMarginReportSchema.parse({
+      ...MARGIN,
+      rows: [{ ...row, billed_cents: 47_501, margin_billed_cents: 72_499, margin_committed_cents: 62_499 }],
+      totals: { ...MARGIN.totals, billed_cents: 49_501, margin_billed_cents: 70_499, margin_committed_cents: 59_999 },
+    }),
+    Error,
+    "billed_cents (47501) must equal the sum of its lines",
+  );
+  assertThrows(
+    () => SubrentMarginReportSchema.parse({
+      ...MARGIN,
+      rows: [{ ...row, committed_cents: 10_001, margin_committed_cents: 62_499 }],
+      totals: { ...MARGIN.totals, committed_cents: 10_501, margin_committed_cents: 59_999 },
+    }),
+    Error,
+    "committed_cents (10001) must equal the sum of its lines",
+  );
 });
 
-Deno.test("🔴 a row whose margin is not revenue − cost is refused", () => {
-  assertThrows(() => SubrentMarginReportSchema.parse({ ...MARGIN, rows: [{ ...MARGIN.rows[0], margin_cents: 62_501 }] }));
+Deno.test("🔴 a row whose margins do not follow from revenue and the two costs is refused", () => {
+  const row = MARGIN.rows[0];
+  assertThrows(() => SubrentMarginReportSchema.parse({ ...MARGIN, rows: [{ ...row, margin_billed_cents: 72_501 }] }), Error, "margin_billed_cents must equal");
+  // The committed margin takes the committed cost OFF — a margin on billed alone is the false 100% it exists to remove.
+  assertThrows(
+    () => SubrentMarginReportSchema.parse({ ...MARGIN, rows: [{ ...row, margin_committed_cents: row.margin_billed_cents }] }),
+    Error,
+    "margin_committed_cents must equal",
+  );
 });
 
 Deno.test("🔴 an order in two rows is refused — its revenue would count twice", () => {
   const second = { ...MARGIN.rows[0], orders: [ORDER_B] };
-  assertThrows(() => SubrentMarginReportSchema.parse({
-    ...MARGIN, rows: [MARGIN.rows[0], second],
-    totals: { revenue_cents: 240_000, cost_cents: 117_000, margin_cents: 123_000 },
-  }));
+  assertThrows(
+    () => SubrentMarginReportSchema.parse({
+      ...MARGIN, rows: [MARGIN.rows[0], second],
+      totals: { revenue_cents: 240_000, billed_cents: 97_000, committed_cents: 20_500, margin_billed_cents: 143_000, margin_committed_cents: 122_500 },
+    }),
+    Error,
+    "more than one row",
+  );
 });
 
-Deno.test("🔴 unattributed cost that is not the sum of its lines is refused", () => {
-  assertThrows(() => SubrentMarginReportSchema.parse({ ...MARGIN, unattributed: { ...MARGIN.unattributed, cost_cents: 2_001 } }));
+Deno.test("🔴 unattributed cost that is not the sum of its lines is refused — each column separately", () => {
+  assertThrows(() => SubrentMarginReportSchema.parse({ ...MARGIN, unattributed: { ...MARGIN.unattributed, billed_cents: 2_001 } }), Error, "unattributed.billed_cents");
+  assertThrows(() => SubrentMarginReportSchema.parse({ ...MARGIN, unattributed: { ...MARGIN.unattributed, committed_cents: 501 } }), Error, "unattributed.committed_cents");
 });
 
 Deno.test("🔴 totals that leave out the unattributed spend are refused", () => {
   // The unattributed row exists so the totals never hide spend; a total over
   // the rows alone is exactly the number it is there to prevent.
-  assertThrows(() => SubrentMarginReportSchema.parse({ ...MARGIN, totals: { revenue_cents: 120_000, cost_cents: 57_500, margin_cents: 62_500 } }));
-  assertThrows(() => SubrentMarginReportSchema.parse({ ...MARGIN, totals: { ...MARGIN.totals, revenue_cents: 120_001, margin_cents: 60_501 } }));
-  assertThrows(() => SubrentMarginReportSchema.parse({ ...MARGIN, totals: { ...MARGIN.totals, margin_cents: 60_501 } }));
+  const t = MARGIN.totals;
+  assertThrows(() => SubrentMarginReportSchema.parse({ ...MARGIN, totals: { ...t, billed_cents: 47_500, margin_billed_cents: 72_500, margin_committed_cents: 62_000 } }), Error, "totals.billed_cents");
+  assertThrows(() => SubrentMarginReportSchema.parse({ ...MARGIN, totals: { ...t, committed_cents: 10_000, margin_committed_cents: 60_500 } }), Error, "totals.committed_cents");
+  assertThrows(() => SubrentMarginReportSchema.parse({ ...MARGIN, totals: { ...t, revenue_cents: 120_001, margin_billed_cents: 70_501, margin_committed_cents: 60_001 } }), Error, "totals.revenue_cents");
+  assertThrows(() => SubrentMarginReportSchema.parse({ ...MARGIN, totals: { ...t, margin_billed_cents: 70_501 } }), Error, "totals.margin_billed_cents");
+  assertThrows(() => SubrentMarginReportSchema.parse({ ...MARGIN, totals: { ...t, margin_committed_cents: 60_001 } }), Error, "totals.margin_committed_cents");
 });
 
 Deno.test("🔴 a cost line's kind must agree with its product and ordered amount", () => {
@@ -419,7 +476,7 @@ Deno.test("🔴 a cost line's kind must agree with its product and ordered amoun
   // null` (D8 — the old refine refused it, which no time line could satisfy).
   SubrentMarginReportSchema.parse(bad({ ...COST_LINE, ordered_cents: null }));
   assertThrows(() => SubrentMarginReportSchema.parse(bad({ ...CHARGE_LINE, ordered_cents: 1 })), Error, "orders nothing");
-  assertThrows(() => SubrentMarginReportSchema.parse(bad({ ...CHARGE_LINE, cost_cents: 50_000, uid_product: "r".repeat(20) })));
+  assertThrows(() => SubrentMarginReportSchema.parse(bad({ ...CHARGE_LINE, uid_product: "r".repeat(20) })), Error, "names its product");
 });
 
 // ── Unit activity (api-cloudrun#1395) ───────────────────────────────

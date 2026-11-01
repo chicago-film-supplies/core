@@ -5739,8 +5739,8 @@
         {
           "kind": "interface",
           "name": "SubrentMarginCostLine",
-          "declaration": "interface SubrentMarginCostLine {\n  kind: \"product\" | \"purchase\";\n  uid_purchase: string;\n  purchase_number: number;\n  uid_product: string | null;\n  name: string;\n  subrent_start: string;\n  ordered_cents: number | null;\n  cost_cents: number;\n}",
-          "doc": "One cost contribution to a margin row: what CFS paid a supplier for one\nsubrent purchase line, or for a charge on that purchase that names no line.\n\n`product` is a purchase line: the bill lines for that product net of the\ncredit lines for it, plus every bill charge line attributed to the product\n(a loss or damage charge, api-cloudrun#1360), net of credit charge lines.\n`purchase` is a charge line naming no product on the purchase's lines —\nfreight or a fee — which serves every order the purchase was raised for."
+          "declaration": "interface SubrentMarginCostLine {\n  kind: \"product\" | \"purchase\";\n  uid_purchase: string;\n  purchase_number: number;\n  uid_product: string | null;\n  name: string;\n  hire_start: string;\n  ordered_cents: number | null;\n  billed_cents: number;\n  committed_cents: number;\n}",
+          "doc": "One cost contribution to a margin row: what one subrent purchase line, or the\ncharges on its purchase that name no line, put into the PERIOD.\n\n`product` is a purchase line: the bill lines for that product net of the\ncredit lines for it, plus every bill charge line attributed to the product\n(a loss or damage charge, api-cloudrun#1360), net of credit charge lines.\n`purchase` is a charge line naming no product on the purchase's lines —\nfreight or a fee — which serves every order the purchase was raised for.\n\n⭐ **Two cost columns, never merged** (owner, 2026-11-01, api-cloudrun#1427 —\nNetSuite, Dynamics, Business Central and Sage Intacct all keep actual and\ncommitted cost apart): `billed_cents` is money that LANDED in the period, and\n`committed_cents` is the unbilled remainder accrued onto it."
         },
         {
           "kind": "variable",
@@ -5752,7 +5752,7 @@
           "kind": "interface",
           "name": "SubrentMarginReport",
           "declaration": "interface SubrentMarginReport {\n  from_date: string;\n  to_date: string;\n  rows: SubrentMarginRow[];\n  unattributed: SubrentMarginUnattributed;\n  totals: SubrentMarginTotals;\n}",
-          "doc": "The subrent margin report (api-cloudrun#1364): what the orders that subrented\nequipment billed, against what the subrents cost.\n\n**The window places COST, by hire start.** A purchase line is in the report\nwhen its `dates.start` lies in `[from_date, to_date)`; the orders it names\nthen bring their WHOLE invoiced revenue, because an order's revenue has no\nhire start to place it by. Revenue is the pre-tax `subtotal_discounted_cents`\nof every non-void invoice, net of non-void credit notes against those\ninvoices. Cost is supplier bills (lines and attributed direct lines) of the\nSUBRENT purchases, net of non-void supplier credits; a voided bill counts 0.\n\n🔴 **The refinement is the control total**, as on {@link OrgStatement}: a\nreport whose rows do not add to its own totals is unrepresentable, and so is\nan order filed in two rows — the one way a group fold can double-count\nrevenue."
+          "doc": "The subrent margin report (api-cloudrun#1364, re-based by #1427): the money\nthe orders that subrented equipment billed in a period, against what their\nsubrents cost in it.\n\n**A MONEY report places money by its document's date** (owner, 2026-11-01:\nmoney reports use bill dates, custody reports use custody dates):\n\n- **revenue** — the pre-tax `subtotal_discounted_cents` of every non-void\n  invoice DATED in `[from_date, to_date)`, net of non-void credit notes dated\n  in it, for the orders a live subrent line names (and every order an\n  invoice joins to them);\n- **billed cost** — supplier bill lines by the BILL's date, net of supplier\n  credit lines by the CREDIT's date; a voided bill counts 0;\n- **committed cost** — each open subrent line's unbilled remainder, accrued\n  onto the period linearly over the time it pays for.\n\n🔴 **The refinement is the control total**, as on {@link OrgStatement}: a\nreport whose rows do not add to its own totals is unrepresentable, and so is\nan order filed in two rows — the one way a group fold can double-count\nrevenue."
         },
         {
           "kind": "variable",
@@ -5763,8 +5763,8 @@
         {
           "kind": "interface",
           "name": "SubrentMarginRow",
-          "declaration": "interface SubrentMarginRow {\n  orders: MovementSessionOrderRef[];\n  revenue_cents: number;\n  cost_cents: number;\n  margin_cents: number;\n  lines: SubrentMarginCostLine[];\n}",
-          "doc": "One margin row: a GROUP of orders that share subrent cost or an invoice.\n\n⭐ **A group is the connected component, never an apportionment.** A purchase\nline naming two orders, or an invoice billing two, merges them into one row;\nnothing is ever split by bookings, days or revenue. Subrented units are\nfungible — they land on a shelf and any booking claims them — so the report\ncannot know which order a hire actually served, and any split would be a\nfabricated number. A row with one order is the common case; whether a row is\nshared is `orders.length > 1`, so no flag is stored beside it.\n\n⚠️ **Cost follows the operator's `uid_orders`, not usage.** A line naming\nno order is in {@link SubrentMarginReport.unattributed}; an under-attributed\nhire is fixed by editing the purchase line, not by this report."
+          "declaration": "interface SubrentMarginRow {\n  orders: MovementSessionOrderRef[];\n  revenue_cents: number;\n  billed_cents: number;\n  committed_cents: number;\n  margin_billed_cents: number;\n  margin_committed_cents: number;\n  lines: SubrentMarginCostLine[];\n}",
+          "doc": "One margin row: a GROUP of orders that share subrent cost or an invoice in\nthe period.\n\n⭐ **A group is the connected component, never an apportionment.** A purchase\nline naming two orders, or an invoice billing two, merges them into one row;\nnothing is ever split by bookings, days or revenue. Subrented units are\nfungible — they land on a shelf and any booking claims them — so the report\ncannot know which order a hire actually served, and any split would be a\nfabricated number. Whether a row is shared is `orders.length > 1`.\n\n⚠️ **A row is the period's money, not a hire's margin** (owner, 2026-11-01):\nrevenue lands by invoice date and cost by bill date, so one hire's revenue\nand cost may fall in different periods. A row may therefore carry revenue and\nno lines (an order invoiced in the period whose cost landed in another).\n\n⚠️ **Cost follows the operator's `uid_orders`, not usage.** A line naming\nno order is in {@link SubrentMarginReport.unattributed}."
         },
         {
           "kind": "variable",
@@ -5775,7 +5775,7 @@
         {
           "kind": "interface",
           "name": "SubrentMarginTotals",
-          "declaration": "interface SubrentMarginTotals {\n  revenue_cents: number;\n  cost_cents: number;\n  margin_cents: number;\n}",
+          "declaration": "interface SubrentMarginTotals {\n  revenue_cents: number;\n  billed_cents: number;\n  committed_cents: number;\n  margin_billed_cents: number;\n  margin_committed_cents: number;\n}",
           "doc": "The report's control totals."
         },
         {
@@ -5787,7 +5787,7 @@
         {
           "kind": "interface",
           "name": "SubrentMarginUnattributed",
-          "declaration": "interface SubrentMarginUnattributed {\n  cost_cents: number;\n  lines: SubrentMarginCostLine[];\n}",
+          "declaration": "interface SubrentMarginUnattributed {\n  billed_cents: number;\n  committed_cents: number;\n  lines: SubrentMarginCostLine[];\n}",
           "doc": "Subrent spend that names no order — there is no revenue to set it against."
         },
         {
