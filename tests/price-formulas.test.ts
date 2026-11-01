@@ -901,7 +901,11 @@ function verizonOracle(
 ): { num: number; den: number }[] {
   const s = parseISO(start, { in: CHICAGO });
   const e = parseISO(end, { in: CHICAGO });
-  let p = new Date(s);
+  // A Chicago TZDate, not `new Date(s)`: a plain Date does its calendar
+  // arithmetic in the MACHINE's zone, so the anchors moved with TZ and the
+  // oracle disagreed with the (zone-independent) engine on 1,038 of 5k spans
+  // under CI's UTC while agreeing on all of them in Chicago.
+  let p = parseISO(start, { in: CHICAGO });
   p.setDate(2);
   if (s.getDate() < 2) p = addMonths(p, -1);
   const out: { num: number; den: number }[] = [];
