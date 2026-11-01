@@ -530,6 +530,7 @@ export function combineTierCounts(a: readonly TierCount[], b: readonly TierCount
 // — can call the one implementation (Phase 2 ruling 8). Re-exported here.
 export { type FormulaDiscount, priceFromFormula, type RateSnapshot } from "../schemas/_line-money.ts";
 import type { RateSnapshot } from "../schemas/_line-money.ts";
+import type { DocLineItemTypeType } from "../schemas/common.ts";
 
 // ── Dated rates ──────────────────────────────────────────────────────
 
@@ -643,4 +644,25 @@ export function catalogRateSnapshot(
     const row = dated ?? rows.find((r) => r.applied_to == null) ?? rows[rows.length - 1];
     return { rate_key: key, amount_cents: row.amount_cents };
   });
+}
+
+/**
+ * **The formula a new custom line, or a line retyped to `type`, starts on**
+ * (`settings/pricing`, api-cloudrun purchases-as-documents D10 item 11) — or
+ * `null` for none, when the operator must choose. `null` too when the settings
+ * are absent, name no formula for the type, or name one the caller did not load
+ * or that is retired (`active: false`): a default never fails a line.
+ *
+ * Feed the result to `buildCustomOrderLine` / `retypedLinePrice`; it prices
+ * nothing itself, so it is not a second price author.
+ */
+export function defaultPriceFormulaFor<F extends PricingFormula & { active?: boolean }>(
+  settings: { price_formula_defaults: { readonly [T in DocLineItemTypeType]: string | null } } | null,
+  formulas: ReadonlyMap<string, F>,
+  type: DocLineItemTypeType,
+): F | null {
+  const uid = settings?.price_formula_defaults[type] ?? null;
+  if (uid === null) return null;
+  const formula = formulas.get(uid);
+  return formula === undefined || formula.active === false ? null : formula;
 }

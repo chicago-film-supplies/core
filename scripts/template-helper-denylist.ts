@@ -710,6 +710,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "deriveQueryByItemTypes",
     "deriveQueryByOrders",
     "deriveQueryByProducts",
+    "deriveQueryByUnits",
     "derivePurchaseStatus",
     "expandPurchaseItems",
     // Writes a flat line's net and discount record (ruling 7) — a writer's step.
@@ -729,15 +730,20 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   "purchase-documents": [
     "billedSpanEnd",
     "billedUnitCoverage",
+    "coversForUnit",
     "meterBillLine",
+    "overcoveredUnitWindows",
     "pricePurchaseDocument",
     "projectPurchaseLineForBill",
     "projectPurchaseLineToBillLine",
     "purchaseBillIsLive",
+    "purchaseLineCovers",
     "purchaseBillSharedLineFields",
+    "seedPurchaseLinesForWindows",
     "subtractChargeWindows",
     "syncPurchaseToBills",
     "unbilledUnitWindows",
+    "uncoveredUnitWindows",
     "unitWindowsForLine",
   ],
   // The purchase ↔ bill diff (D6) is a review surface for the manager, computed
@@ -968,6 +974,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // write, and a render prints what the line stored.
     "catalogRateSnapshot",
     "combineTierCounts",
+    // A manager convenience for a NEW line (settings/pricing); a render prints a stored line.
+    "defaultPriceFormulaFor",
     "formulaUidsOf",
     "priceFormulaRefOf",
     "meterUnits",

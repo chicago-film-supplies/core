@@ -249,7 +249,9 @@ function coverageEntries(
   const bills = liveBills.filter((b) =>
     b.items.some((l) => l.path_purchase_item !== undefined && key(l.path_purchase_item) === key(item.path))
   );
-  const recorded = unitWindowsForLine(sources.units, { uid_purchase: sources.purchase.uid, path: item.path }, sources.through);
+  const recorded = item.type === "buy"
+    ? new Map<string, ChargeWindowType[]>()
+    : unitWindowsForLine(sources.units, item, sources.through);
   const billed = billedUnitCoverage({ bills: sources.bills, credits: sources.credits }, item.path);
   const units = [...new Set([...recorded.keys(), ...billed.keys()])].sort();
   const out: PurchaseCoverageEntry[] = [];

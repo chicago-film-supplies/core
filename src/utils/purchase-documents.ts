@@ -67,12 +67,18 @@ import {
   type PurchaseDocumentItem,
   type PurchaseDocumentLinePrice,
   type PurchaseDocumentLineUnit,
+  type CogsActivationEntryType,
+  type COACostType,
+  type Product,
   type PurchaseItem,
   purchaseItemBasis,
+  purchaseItemCanceled,
   PurchaseSchema,
+  type UidNameRefType,
   type UnitType,
 } from "../schemas/mod.ts";
 import {
+  catalogRateSnapshot,
   combineTierCounts,
   type MeterRate,
   meterUnits,
@@ -201,31 +207,305 @@ function linesFor(items: readonly PurchaseDocumentItem[], path: readonly string[
   return items.filter((l) => l.path_purchase_item !== undefined && samePath(l.path_purchase_item, path));
 }
 
+/** The coverage-bearing half of a subrent or charge line: the units it names and the span it covers. */
+export interface PurchaseLineCoverage {
+  uid_units: readonly string[];
+  /** `null` covers all time (a charge line with no span). */
+  dates: { start: string; end: string | null } | null;
+}
+
+/** A buy covers no unit's windows — it is custody, not a service line. */
+function coverageOf(item: PurchaseItem): PurchaseLineCoverage | null {
+  return item.type === "buy" ? null : { uid_units: item.uid_units, dates: item.dates };
+}
+
+/** `w` clipped to the line's span and to `through`, or `null` when nothing of it is left. */
+function clipToLine(
+  w: { start: string; end: string | null },
+  dates: PurchaseLineCoverage["dates"],
+  through: string,
+): ChargeWindowType | null {
+  let s = Date.parse(w.start);
+  let start = w.start;
+  let e = w.end === null ? Date.parse(through) : Math.min(Date.parse(w.end), Date.parse(through));
+  let end = w.end === null || Date.parse(w.end) > Date.parse(through) ? through : w.end;
+  if (dates !== null) {
+    if (Date.parse(dates.start) > s) {
+      s = Date.parse(dates.start);
+      start = dates.start;
+    }
+    if (dates.end !== null && Date.parse(dates.end) < e) {
+      e = Date.parse(dates.end);
+      end = dates.end;
+    }
+  }
+  return e > s ? { start, end } : null;
+}
+
 /**
- * **The windows each unit recorded against one purchase line**, closed at
- * `through`. A window that opened after `through` is not yet billable; an open
- * window (`end: null`, the line still on) bills up to `through`.
+ * **The windows a purchase line covers, per unit**, closed at `through`: the
+ * charge windows of every unit the line names (`uid_units`), clipped to the
+ * line's `dates`. A window that opened after `through` is not yet billable; an
+ * open window (`end: null`, the line still on) bills up to `through`.
+ *
+ * The LINE names the unit, so this reads the line and the units — nothing on a
+ * unit says which line bills it (D10 item 10, the invoice ↔ out-of-service
+ * direction).
  *
  * Keyed by unit, each list ascending — the unit's own order (the unit refine).
  */
 export function unitWindowsForLine(
   units: readonly Pick<UnitType, "uid" | "charge_windows">[],
-  line: { uid_purchase: string; path: readonly string[] },
+  line: PurchaseLineCoverage,
   through: string,
 ): Map<string, ChargeWindowType[]> {
-  const at = Date.parse(through);
+  const named = new Set(line.uid_units);
   const out = new Map<string, ChargeWindowType[]>();
   for (const unit of units) {
+    if (!named.has(unit.uid)) continue;
     const windows: ChargeWindowType[] = [];
     for (const w of unit.charge_windows) {
-      if (w.line === null || w.line.uid_purchase !== line.uid_purchase || !samePath(w.line.path, line.path)) continue;
-      if (Date.parse(w.start) >= at) continue;
-      const end = w.end === null || Date.parse(w.end) > at ? through : w.end;
-      if (Date.parse(end) > Date.parse(w.start)) windows.push({ start: w.start, end });
+      const clipped = clipToLine(w, line.dates, through);
+      if (clipped !== null) windows.push(clipped);
     }
     if (windows.length > 0) out.set(unit.uid, windows);
   }
   return out;
+}
+
+// ── Coverage: which line covers a unit's window, and the offer for the rest ──
+
+/**
+ * Does this purchase line COUNT for coverage? Its purchase was not canceled and
+ * the line was not canceled in full with nothing billed (`purchaseItemCanceled`
+ * — it never happened). A closed or completed line still covered the time it
+ * covered.
+ */
+export function purchaseLineCovers(purchase: Pick<Purchase, "status">, item: PurchaseItem): boolean {
+  return purchase.status !== "canceled" && item.type !== "buy" && !purchaseItemCanceled(item);
+}
+
+/** One live line covering one unit — the covering line and its span. */
+export interface UnitCover {
+  uid_purchase: string;
+  path: string[];
+  dates: PurchaseLineCoverage["dates"];
+}
+
+/** Every live line naming `uid_unit` across `purchases` — what `query_by_units` array-contains returns. */
+export function coversForUnit(
+  uid_unit: string,
+  purchases: readonly Pick<Purchase, "uid" | "status" | "items">[],
+): UnitCover[] {
+  const out: UnitCover[] = [];
+  for (const p of purchases) {
+    for (const item of p.items) {
+      const c = coverageOf(item);
+      if (c === null || !c.uid_units.includes(uid_unit) || !purchaseLineCovers(p, item)) continue;
+      out.push({ uid_purchase: p.uid, path: [...item.path], dates: c.dates });
+    }
+  }
+  return out;
+}
+
+const ALL_TIME: Interval = { s: -8.64e15, e: 8.64e15, start: "", end: "" };
+
+function coverInterval(c: UnitCover): Interval {
+  if (c.dates === null) return ALL_TIME;
+  return {
+    s: Date.parse(c.dates.start),
+    e: c.dates.end === null ? ALL_TIME.e : Date.parse(c.dates.end),
+    start: c.dates.start,
+    end: c.dates.end ?? "",
+  };
+}
+
+/** A unit's windows closed at `through` (an open window bills up to `through`). */
+function closedWindows(unit: Pick<UnitType, "charge_windows">, through: string): Interval[] {
+  return unit.charge_windows.flatMap((w) => {
+    const c = clipToLine(w, null, through);
+    return c === null ? [] : [toInterval(c)];
+  });
+}
+
+/** An interval back to window strings — an `ALL_TIME` bound never survives an intersection with a window. */
+function fromCut(i: Interval): ChargeWindowType {
+  return { start: i.start, end: i.end };
+}
+
+/**
+ * **The pieces of each unit's windows that NO live purchase line covers**,
+ * closed at `through` — the supplier side's "not yet billed" offer source
+ * (`seedReplacementLines`' twin). Keyed by unit; a fully covered unit is absent.
+ */
+export function uncoveredUnitWindows(
+  units: readonly Pick<UnitType, "uid" | "charge_windows">[],
+  purchases: readonly Pick<Purchase, "uid" | "status" | "items">[],
+  through: string,
+): Map<string, ChargeWindowType[]> {
+  const out = new Map<string, ChargeWindowType[]>();
+  for (const unit of units) {
+    const covers = coversForUnit(unit.uid, purchases).map(coverInterval);
+    const rest = subtractIntervals(closedWindows(unit, through), covers).map(fromCut);
+    if (rest.length > 0) out.set(unit.uid, rest);
+  }
+  return out;
+}
+
+/**
+ * **Window time covered by TWO OR MORE live lines** — one unit's time billed
+ * twice over. ADVISORY, never a refusal (D5: what is billed is flagged), the
+ * `overbilled_out_of_service` twin. Keyed by unit; each entry names the lines
+ * that overlap there.
+ */
+export function overcoveredUnitWindows(
+  units: readonly Pick<UnitType, "uid" | "charge_windows">[],
+  purchases: readonly Pick<Purchase, "uid" | "status" | "items">[],
+  through: string,
+): Map<string, { windows: ChargeWindowType[]; lines: UnitCover[] }> {
+  const out = new Map<string, { windows: ChargeWindowType[]; lines: UnitCover[] }>();
+  for (const unit of units) {
+    const covers = coversForUnit(unit.uid, purchases);
+    if (covers.length < 2) continue;
+    const windows = closedWindows(unit, through);
+    const doubled: Interval[] = [];
+    const lines = new Set<number>();
+    for (let a = 0; a < covers.length; a++) {
+      for (let b = a + 1; b < covers.length; b++) {
+        const ia = coverInterval(covers[a]);
+        const ib = coverInterval(covers[b]);
+        const lo = ia.s >= ib.s ? ia : ib;
+        const hi = ia.e <= ib.e ? ia : ib;
+        const both: Interval = { s: lo.s, e: hi.e, start: lo.start, end: hi.end };
+        if (both.e <= both.s) continue;
+        for (const w of windows) {
+          const pieces = intersectWindow([w], both);
+          if (pieces.length === 0) continue;
+          doubled.push(...pieces);
+          lines.add(a).add(b);
+        }
+      }
+    }
+    if (doubled.length === 0) continue;
+    out.set(unit.uid, {
+      windows: unionIntervals(doubled).map(fromCut),
+      lines: [...lines].sort((x, y) => x - y).map((k) => covers[k]),
+    });
+  }
+  return out;
+}
+
+/** What {@link seedPurchaseLinesForWindows} needs of a unit. */
+export type SeedSourceUnit = Pick<UnitType, "uid" | "number" | "uid_product" | "charge_windows">;
+/** What {@link seedPurchaseLinesForWindows} needs of a product. */
+export type SeedSourceProduct = Pick<Product, "uid" | "name" | "cogs">;
+
+/**
+ * One offered purchase line for uncovered windows — the supplier twin of a
+ * `ReplacementLineSeed`. Always a TIME `charge` line: a window is a service
+ * line, not custody, and a supplier-owned unit's subrent line already names it
+ * from its receipt.
+ */
+export interface PurchaseLineSeed {
+  type: "charge";
+  uid_product: string;
+  /** The product's name — the line's default `name`. */
+  name: string;
+  /** Ascending by unit number. */
+  uid_units: string[];
+  /** The formula the windows are metered under (`UnitChargeWindow.uid_price_formula`). */
+  uid_price_formula: string;
+  /**
+   * Who bills it — the product's activation cost entry on that formula, or
+   * `null` when the product names none (the operator picks the supplier).
+   */
+  provider: UidNameRefType | null;
+  /** The entry's rates in force at `dates.start`, or `[]` with no entry. */
+  rates: { rate_key: string; amount_cents: number }[];
+  /** The entry's Direct Costs account, or `null` with no entry. */
+  coa_posting: COACostType | null;
+  /** From the earliest uncovered instant, open-ended: a carrier line accrues for as long as it lives. */
+  dates: { start: string; end: null };
+  /** The uncovered windows, per unit — what the offer is FOR, for display. */
+  windows: { uid_unit: string; number: number; windows: ChargeWindowType[] }[];
+  /** Why the seed is not plain (no cost entry, two entries on the formula), or `null`. */
+  warning: string | null;
+}
+
+/**
+ * **Offer a purchase line for every window no live line covers** — the
+ * supplier side of the lost-and-damaged offer (`seedReplacementLines`): core
+ * decides WHAT to offer, the manager shows it, and accepting it is an ordinary
+ * `POST /purchases` (or an amend) whose lines name the units. Nothing on a unit
+ * is written, because a window names no line.
+ *
+ * Grouped by (product, formula): one seed per group, naming every unit in it.
+ * The provider and rates come from the product's activation entry on that
+ * formula; `null` / `[]` when the product has none, with a warning.
+ */
+export function seedPurchaseLinesForWindows(
+  units: readonly SeedSourceUnit[],
+  purchases: readonly Pick<Purchase, "uid" | "status" | "items">[],
+  products: ReadonlyMap<string, SeedSourceProduct>,
+  through: string,
+): PurchaseLineSeed[] {
+  const uncovered = uncoveredUnitWindows(units, purchases, through);
+  const groups = new Map<string, { product: string; formula: string; units: SeedSourceUnit[] }>();
+  for (const unit of units) {
+    const pieces = uncovered.get(unit.uid);
+    if (!pieces) continue;
+    // A unit's pieces fall under the formula of the window they came from.
+    const formulas = new Set(
+      unit.charge_windows.filter((w) => pieces.some((p) => clipToLine(w, { start: p.start, end: p.end }, through) !== null))
+        .map((w) => w.uid_price_formula),
+    );
+    for (const formula of formulas) {
+      const key = `${unit.uid_product}|${formula}`;
+      const g = groups.get(key) ?? { product: unit.uid_product, formula, units: [] };
+      g.units.push(unit);
+      groups.set(key, g);
+    }
+  }
+
+  const seeds: PurchaseLineSeed[] = [];
+  for (const g of groups.values()) {
+    const product = products.get(g.product);
+    const entries = (product?.cogs ?? []).filter((e): e is CogsActivationEntryType =>
+      e.trigger === "activation" && e.uid_price_formula === g.formula
+    );
+    const entry = entries[0];
+    const sorted = [...g.units].sort((a, b) => a.number - b.number);
+    const windows = sorted.map((u) => ({
+      uid_unit: u.uid,
+      number: u.number,
+      windows: (uncovered.get(u.uid) ?? []).filter((p) =>
+        u.charge_windows.some((w) => w.uid_price_formula === g.formula && clipToLine(w, { start: p.start, end: p.end }, through) !== null)
+      ),
+    })).filter((u) => u.windows.length > 0);
+    if (windows.length === 0) continue;
+    const start = windows.flatMap((u) => u.windows).reduce(
+      (min, w) => (Date.parse(w.start) < Date.parse(min) ? w.start : min),
+      windows[0].windows[0].start,
+    );
+    seeds.push({
+      type: "charge",
+      uid_product: g.product,
+      name: product?.name ?? g.product,
+      uid_units: windows.map((u) => u.uid_unit),
+      uid_price_formula: g.formula,
+      provider: entry?.provider ?? null,
+      rates: entry ? catalogRateSnapshot(entry.rates, start) : [],
+      coa_posting: entry?.coa_cost ?? null,
+      dates: { start, end: null },
+      windows,
+      warning: entry === undefined
+        ? "The product has no activation cost entry on this formula; choose the supplier and rates"
+        : entries.length > 1
+        ? `The product has ${entries.length} activation cost entries on this formula; the first (${entry.label}) was used`
+        : null,
+    });
+  }
+  return seeds.sort((a, b) => a.name.localeCompare(b.name) || a.uid_product.localeCompare(b.uid_product));
 }
 
 /**
@@ -601,7 +881,7 @@ export function projectPurchaseLineToBillLine(
   // A time line: item.price is required on subrent and charge.
   const itemPrice = item.price!;
   const formula = formulaFor(itemPrice, ctx);
-  const recorded = unitWindowsForLine(opts.units, { uid_purchase: opts.uid_purchase, path: item.path }, opts.through);
+  const recorded = unitWindowsForLine(opts.units, coverageOf(item) ?? { uid_units: [], dates: null }, opts.through);
   const billed = billedUnitCoverage(opts.billed, item.path);
   const itemSpan = item.type === "buy" ? null : item.dates;
   const source: BillLineMeterSource = {

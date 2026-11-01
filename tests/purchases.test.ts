@@ -17,6 +17,7 @@ import {
   CreatePurchaseCreditInput,
   CreatePurchaseInput,
   type ChargeItem,
+  ChargeItemSchema,
   derivePurchaseStatus,
   PURCHASE_BILL_FIELD_CLASSES,
   PURCHASE_BILL_FIELD_FREEZE,
@@ -30,6 +31,7 @@ import {
   ReceivePurchaseInput,
   ReturnPurchaseInput,
   type SubrentItem,
+  SubrentItemSchema,
   UpdatePurchaseInput,
 } from "../src/schemas/mod.ts";
 import { buildFirestoreColumns } from "../src/schemas/display-columns.ts";
@@ -50,6 +52,7 @@ import {
   type PurchaseExpansionProduct,
   deriveQueryByOrders,
   deriveQueryByProducts,
+  deriveQueryByUnits,
   purchaseItemCanceled,
   purchaseItemCommittedCents,
   purchaseItemResolved,
@@ -236,6 +239,7 @@ const hireLine = (over: Partial<SubrentItem> = {}): SubrentItem => {
     quantity_returned: 0,
     uid_orders: [ORDER_1074],
     auto_link: false,
+    uid_units: [],
     ...over,
   };
 };
@@ -261,6 +265,7 @@ const carrierLine = (over: Partial<ChargeItem> = {}): ChargeItem => {
     quantity_billed: null,
     quantity_canceled: 0,
     auto_link: true,
+    uid_units: [],
     uid_product: PRODUCT,
     ...over,
   };
@@ -283,6 +288,7 @@ const freight = (over: Partial<ChargeItem> = {}): ChargeItem => {
     quantity_billed: 0,
     quantity_canceled: 0,
     auto_link: false,
+    uid_units: [],
     ...over,
   };
 };
@@ -550,6 +556,20 @@ Deno.test("PurchaseSchema: all three mirrors are required, and each must be exac
   assertEquals(issuePaths(PurchaseSchema, purchase({ query_by_item_types: ["subrent"] })), ["query_by_item_types"]);
   // The retired document kind is refused outright.
   assertEquals(issuePaths(PurchaseSchema, purchase({ kind: "buy" })), [""]);
+});
+
+Deno.test("uid_units: each unit once per line; query_by_units mirrors the subrent and charge lines, optional until the backfill", () => {
+  assertEquals(issuePaths(ChargeItemSchema, carrierLine({ uid_units: ["unit-7"] })), []);
+  assertEquals(issuePaths(ChargeItemSchema, carrierLine({ uid_units: ["unit-7", "unit-7"] })), ["uid_units"]);
+  assertEquals(issuePaths(SubrentItemSchema, timeHire({ uid_units: ["unit-3", "unit-3"] })), ["uid_units"]);
+  const { uid_units: _, ...bare } = carrierLine();
+  assertEquals(issuePaths(ChargeItemSchema, bare), ["uid_units"], "required on the stored line (hard cutover, ruling 5)");
+
+  const items: PurchaseItem[] = [line(), timeHire({ uid_units: ["unit-9", "unit-3"] }), carrierLine({ uid_units: ["unit-3", "unit-12"] })];
+  assertEquals(deriveQueryByUnits(items), ["unit-12", "unit-3", "unit-9"], "distinct, sorted; a buy names none");
+  assertEquals(issuePaths(PurchaseSchema, withItems(items)), [], "absent until the backfill stamps it");
+  assertEquals(issuePaths(PurchaseSchema, withItems(items, { query_by_units: deriveQueryByUnits(items) })), []);
+  assertEquals(issuePaths(PurchaseSchema, withItems(items, { query_by_units: ["unit-3"] })), ["query_by_units"]);
 });
 
 Deno.test("deriveQueryByProducts leaves a charge's attribution out; deriveQueryByOrders reads subrent items only", () => {

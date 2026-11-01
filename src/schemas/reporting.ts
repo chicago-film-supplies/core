@@ -50,7 +50,7 @@ import {
 } from "./common.ts";
 import { type MovementSessionOrderRef, MovementSessionOrderRefSchema } from "./movement-session.ts";
 import { type PriceFormulaRef, PriceFormulaRefSchema } from "./price-formula.ts";
-import { UnitChargeWindowLine, type UnitChargeWindowLineType } from "./unit.ts";
+import { type PurchaseLineRef, PurchaseLineRefSchema } from "./purchase.ts";
 
 // ── The anchor ──────────────────────────────────────────────────────
 
@@ -837,8 +837,8 @@ export const UnitActivityOrderRefSchema: z.ZodType<UnitActivityOrderRef> = z.str
  * over the windows inside it, at the line's snapshotted rates (D8).
  */
 export interface UnitActivityPeriod {
-  /** The purchase line the windows bill against; `null` for a window no supplier line bills. */
-  line: UnitChargeWindowLineType | null;
+  /** The live purchase line that covers the windows (`purchaseLineCoversWindow`); `null` for a window no line covers. */
+  line: PurchaseLineRef | null;
   /** The formula the period was cut and priced by. */
   price_formula: PriceFormulaRef;
   /** The line's name, so a reader need not hold the purchase. */
@@ -871,7 +871,7 @@ export interface UnitActivityPeriod {
 
 /** Zod schema for {@link UnitActivityPeriod}. */
 export const UnitActivityPeriodSchema: z.ZodType<UnitActivityPeriod> = z.strictObject({
-  line: UnitChargeWindowLine.nullable(),
+  line: PurchaseLineRefSchema.nullable(),
   price_formula: PriceFormulaRefSchema,
   label: z.string(),
   start: z.string(),

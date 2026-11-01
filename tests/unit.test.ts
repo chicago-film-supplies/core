@@ -128,7 +128,6 @@ function span(start: string, end: string | null, over: Record<string, unknown> =
     start,
     end,
     uid_order: null,
-    line: null,
     uid_price_formula: FORMULA_UID,
     notes: "",
     changed_by: ACTOR,
@@ -170,7 +169,6 @@ Deno.test("Unit: charge windows are required, and an empty list parses", () => {
     span("2026-10-01T09:00:00.000-05:00", "2026-10-05T09:00:00.000-05:00"),
     span("2026-10-05T09:00:00.000-05:00", null, {
       uid_order: fid("order1"),
-      line: { uid_purchase: fid("purch1"), path: [UUID] },
     }),
   ];
   assertEquals(issues(UnitSchema.safeParse({ ...activeUnit(), charge_windows: spans })), [], "back-to-back is not an overlap");
@@ -222,7 +220,11 @@ Deno.test("UnitChargeWindow: ends at or after it starts; names a formula and, wh
   );
   const open = span("2026-10-01T09:00:00.000-05:00", null);
   assert(!UnitSchema.safeParse({ ...activeUnit(), charge_windows: [{ ...open, uid_price_formula: "short" }] }).success);
-  assert(!UnitSchema.safeParse({ ...activeUnit(), charge_windows: [{ ...open, line: { uid_purchase: fid("p"), path: [] } }] }).success);
+  assert(
+    !UnitSchema.safeParse({ ...activeUnit(), charge_windows: [{ ...open, line: { uid_purchase: fid("p"), path: [UUID] } }] }).success,
+    "a window names no purchase line — the line names the unit (D10 item 10)",
+  );
+  assert(!UnitSchema.safeParse({ ...activeUnit(), query_by_purchases: [] }).success, "query_by_purchases retired with the window's line");
   assert(!UnitSchema.safeParse({ ...activeUnit(), charge_windows: [{ ...open, provider_confirmed: null }] }).success, "provider_confirmed retired");
 });
 
@@ -460,10 +462,9 @@ Deno.test("OpenUnitChargeWindowInput: strips unknown keys, canonicalizes start, 
       start: "2026-10-29T15:00:00.000Z",
       uid_order: null,
       uid_price_formula: FORMULA_UID,
-      line: null,
       notes: "",
     }).success,
-    "null states no supplier line bills it",
+    "a window opens naming no purchase line",
   );
 });
 
@@ -471,5 +472,5 @@ Deno.test("UpdateUnitChargeWindowInput: needs a field beyond version; end may be
   assertRefused(UpdateUnitChargeWindowInput.safeParse({ version: 1 }), "at least one charge window field");
   assert(UpdateUnitChargeWindowInput.safeParse({ version: 1, end: null }).success);
   assert(UpdateUnitChargeWindowInput.safeParse({ version: 1, end: "2026-10-30T15:00:00.000Z" }).success);
-  assert(UpdateUnitChargeWindowInput.safeParse({ version: 1, line: null }).success);
+  assertRefused(UpdateUnitChargeWindowInput.safeParse({ version: 1, line: null }), "at least one charge window field");
 });

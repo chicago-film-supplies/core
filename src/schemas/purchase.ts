@@ -102,7 +102,7 @@
  * @module
  */
 import { z } from "zod";
-import { FirestoreId, ItemUid, OutOfServiceId, ThreadId } from "./_uid.ts";
+import { FirestoreId, ItemUid, OutOfServiceId, ThreadId, UnitId } from "./_uid.ts";
 import { chicagoInstant, chicagoStartOfDay } from "./_datetime.ts";
 import { COACode, type COACodeType } from "./chart-of-accounts.ts";
 import {
@@ -425,6 +425,16 @@ export interface SubrentItem extends PurchaseItemBase {
    * automatically (the poll and the ACCPAY webhook)? D5's auto-link predicate.
    */
   auto_link: boolean;
+  /**
+   * The units this line covers (`units/{uid}`), each named once. The LINE names
+   * the unit and the unit names nothing back — the invoice ↔ out-of-service
+   * direction (`uid_out_of_service`), so offering a line for an uncovered
+   * window and creating it writes the purchase alone. A unit's charge window
+   * is covered by this line where it overlaps the line's `dates`
+   * (`purchaseLineCoversWindow`). Mirrored on `Purchase.query_by_units`.
+   * Not shared with a bill line, which states its own `units` (D5).
+   */
+  uid_units: string[];
 }
 
 /**
@@ -451,6 +461,8 @@ export interface ChargeItem extends PurchaseItemBase {
   /** Units a close or cancel stopped. A time line resolves only once all are. */
   quantity_canceled: number;
   auto_link: boolean;
+  /** See {@link SubrentItem.uid_units} — a Verizon line names its device. `[]` for freight. */
+  uid_units: string[];
   uid_product?: string;
   uid_out_of_service?: string;
 }
@@ -477,6 +489,13 @@ const billedKey = z.int().min(0).meta({ column: true, label: "Billed" });
 const canceledKey = z.int().min(0).meta({ column: true, label: "Canceled" });
 const productKey = FirestoreId.meta({ propagate: true });
 const autoLinkKey = z.boolean().meta({ column: true, label: "Auto-link" });
+const unitsKey = z.array(UnitId);
+
+function uniqueUnitsIssue(units: readonly string[], ctx: z.RefinementCtx): void {
+  if (new Set(units).size !== units.length) {
+    ctx.addIssue({ code: "custom", path: ["uid_units"], message: "a line names each unit once" });
+  }
+}
 
 function bucketIssues(
   item: { quantity: number; quantity_received?: number; quantity_canceled: number },
@@ -559,8 +578,10 @@ const SubrentItemInner = z.strictObject({
   quantity_returned: z.int().min(0).meta({ column: true, label: "Returned" }),
   uid_orders: z.array(FirestoreId),
   auto_link: autoLinkKey,
+  uid_units: unitsKey,
 }).superRefine((item, ctx) => {
   bucketIssues(item, ctx);
+  uniqueUnitsIssue(item.uid_units, ctx);
   addIssues(purchaseLineMoneyIssues(item), ctx);
   // A unit can only go back to the supplier once it has come in.
   if (item.quantity_returned > item.quantity_received) {
@@ -587,12 +608,14 @@ const ChargeItemInner = z.strictObject({
   quantity_billed: billedKey.nullable(),
   quantity_canceled: canceledKey,
   auto_link: autoLinkKey,
+  uid_units: unitsKey,
   // Permanent `.optional()`: freight and fees attribute nothing (api-cloudrun#1360).
   uid_product: FirestoreId.optional().meta({ propagate: true }),
   // A `mark_lost` record's id is a MovementId, so the union, not FirestoreId.
   uid_out_of_service: OutOfServiceId.optional().meta({ propagate: true }),
 }).superRefine((item, ctx) => {
   bucketIssues(item, ctx);
+  uniqueUnitsIssue(item.uid_units, ctx);
   addIssues(purchaseLineMoneyIssues(item), ctx);
   if (item.dates !== null && item.dates.end !== null && Date.parse(item.dates.end) < Date.parse(item.dates.start)) {
     ctx.addIssue({ code: "custom", path: ["dates", "end"], message: "a span ends at or after it starts" });
@@ -734,10 +757,31 @@ export function deriveQueryByOrders(items: readonly PurchaseItem[]): string[] {
   return [...new Set(items.flatMap((i) => (i.type === "subrent" ? i.uid_orders : [])))];
 }
 
+/** Derive `query_by_units` — the distinct units the subrent and charge lines cover, sorted. */
+export function deriveQueryByUnits(items: readonly PurchaseItem[]): string[] {
+  return [...new Set(items.flatMap((i) => (i.type === "buy" ? [] : i.uid_units)))].sort();
+}
+
 /** Derive `query_by_item_types` — the distinct item types, in first-seen order. */
 export function deriveQueryByItemTypes(items: readonly Pick<PurchaseItem, "type">[]): PurchaseItemTypeType[] {
   return [...new Set(items.map((i) => i.type))];
 }
+
+/**
+ * A purchase line named from elsewhere — its purchase and its row identity
+ * (`path`), the way a bill line names its purchase line. A report row states
+ * which line covered a unit's window with it; nothing STORES it on a unit.
+ */
+export interface PurchaseLineRef {
+  uid_purchase: string;
+  path: string[];
+}
+
+/** Zod schema for {@link PurchaseLineRef}. */
+export const PurchaseLineRefSchema: z.ZodType<PurchaseLineRef> = z.strictObject({
+  uid_purchase: FirestoreId,
+  path: z.array(ItemUid).min(1),
+});
 
 // ── Document ─────────────────────────────────────────────────────
 
@@ -786,6 +830,14 @@ export interface Purchase {
    * until the Phase 5 backfill stamps it.
    */
   query_by_bills?: string[];
+  /**
+   * Mirror of the units the lines cover ({@link deriveQueryByUnits}) — "which
+   * purchases cover this unit" as one `array-contains`, the read behind every
+   * coverage question (`purchaseLineCoversWindow`, the uncovered-window offer).
+   * The `Invoice.query_by_out_of_service` twin. Optional only until the Phase 5
+   * backfill stamps it; every writer states it.
+   */
+  query_by_units?: string[];
   uid_thread?: string;
   version: number;
   created_by: ActorRefType;
@@ -828,6 +880,9 @@ function checkPurchase(p: Purchase, ctx: z.RefinementCtx): void {
     if (!sameMembers(mirror, derived)) {
       ctx.addIssue({ code: "custom", path: [key], message: `${key} must list exactly ${what}` });
     }
+  }
+  if (p.query_by_units !== undefined && !sameMembers(p.query_by_units, deriveQueryByUnits(p.items))) {
+    ctx.addIssue({ code: "custom", path: ["query_by_units"], message: "query_by_units must list exactly the units the lines cover" });
   }
 
   const total = p.items.reduce((sum, item) => sum + purchaseItemCommittedCents(item), 0);
@@ -872,6 +927,7 @@ export const PurchaseSchema: z.ZodType<Purchase> = z.strictObject({
   query_by_orders: z.array(FirestoreId).meta({ derived: true }),
   query_by_item_types: z.array(PurchaseItemTypeEnum).meta({ derived: true }),
   query_by_bills: z.array(FirestoreId).optional(),
+  query_by_units: z.array(UnitId).optional(),
   uid_thread: ThreadId.optional().meta(homonym),
   version: z.int().min(0).default(0).meta(homonym),
   created_by: ActorRef.meta({ column: true, label: "Created By", ...homonym }),
@@ -991,6 +1047,8 @@ export interface SubrentItemInputType extends PurchaseItemInputBase {
   uid_orders?: string[];
   /** Absent: `true` for a time line, `false` for a flat one. */
   auto_link?: boolean;
+  /** The units the line covers. Absent keeps the stored list on an amend, `[]` on a create. */
+  uid_units?: string[];
 }
 
 /** A charge item as an operator raises it. Its account is the operator's — there is no default. */
@@ -1002,6 +1060,8 @@ export interface ChargeItemInputType extends PurchaseItemInputBase {
   coa_posting: COACodeType;
   dates?: PurchaseItemDates | null;
   auto_link?: boolean;
+  /** See {@link SubrentItemInputType.uid_units}. */
+  uid_units?: string[];
   uid_product?: string;
   uid_out_of_service?: string;
 }
@@ -1058,7 +1118,11 @@ export const PurchaseItemInput: z.ZodType<PurchaseItemInputType> = z.discriminat
     dates: inputDates,
     uid_orders: z.array(FirestoreId).optional(),
     auto_link: z.boolean().optional(),
-  }).superRefine((item, ctx) => datesOrderIssue(item.dates, ctx)),
+    uid_units: unitsKey.optional(),
+  }).superRefine((item, ctx) => {
+    datesOrderIssue(item.dates, ctx);
+    if (item.uid_units) uniqueUnitsIssue(item.uid_units, ctx);
+  }),
   z.object({
     type: z.literal("charge"),
     ...inputHead,
@@ -1068,9 +1132,13 @@ export const PurchaseItemInput: z.ZodType<PurchaseItemInputType> = z.discriminat
     coa_posting: COACode,
     dates: inputDates.nullable().optional(),
     auto_link: z.boolean().optional(),
+    uid_units: unitsKey.optional(),
     uid_product: FirestoreId.optional(),
     uid_out_of_service: OutOfServiceId.optional(),
-  }).superRefine((item, ctx) => datesOrderIssue(item.dates, ctx)),
+  }).superRefine((item, ctx) => {
+    datesOrderIssue(item.dates, ctx);
+    if (item.uid_units) uniqueUnitsIssue(item.uid_units, ctx);
+  }),
 ]);
 
 /** A stored item named twice in one write is ambiguous: which row is kept? */

@@ -11,7 +11,11 @@
 import { assert, assertEquals, assertNotEquals, assertThrows } from "@std/assert";
 import {
   billedUnitCoverage,
+  coversForUnit,
   meterBillLine,
+  overcoveredUnitWindows,
+  seedPurchaseLinesForWindows,
+  uncoveredUnitWindows,
   type PurchaseBilledDocuments,
   type PurchaseDocumentContext,
   pricePurchaseDocument,
@@ -75,6 +79,7 @@ function visionLine(over: Partial<SubrentItem> = {}): SubrentItem {
     quantity_returned: 0,
     uid_orders: [],
     auto_link: true,
+    uid_units: ["unit-1", "unit-2"],
     ...over,
   };
 }
@@ -119,12 +124,13 @@ function verizonLine(over: Partial<ChargeItem> = {}): ChargeItem {
     quantity_billed: null,
     quantity_canceled: 0,
     auto_link: true,
+    uid_units: ["unit-1"],
     ...over,
   };
 }
 
 /** A unit with charge windows on `line`. */
-function unit(n: number, windows: { start: string; end: string | null }[], path: string[] = [iuid(1)]) {
+function unit(n: number, windows: { start: string; end: string | null }[], formula: string = VISION.uid) {
   return {
     uid: `unit-${n}`,
     charge_windows: windows.map((w, k) => ({
@@ -132,8 +138,7 @@ function unit(n: number, windows: { start: string; end: string | null }[], path:
       start: w.start,
       end: w.end,
       uid_order: null,
-      line: { uid_purchase: PURCHASE, path },
-      uid_price_formula: VISION.uid,
+      uid_price_formula: formula,
       notes: "",
       changed_by: actor,
     })),
@@ -208,15 +213,98 @@ Deno.test("projector: a flat line's discount is recorded as its share; amount_ce
 
 // ── Time lines: the unbilled windows and the telescoping meter ─────
 
-Deno.test("unitWindowsForLine: only windows naming the line, closed at `through`; a window not yet open is left out", () => {
+Deno.test("unitWindowsForLine: only the units the LINE names, clipped to its dates and closed at `through`", () => {
   const units = [
     unit(1, [{ start: jan(1), end: jan(5) }, { start: jan(10), end: null }]),
-    unit(2, [{ start: jan(20), end: null }]),
-    unit(3, [{ start: jan(1), end: jan(3) }], [iuid(9)]),
+    unit(2, [{ start: jan(1), end: null }]),
+    unit(3, [{ start: jan(1), end: jan(3) }, { start: jan(20), end: null }]),
   ];
-  const got = unitWindowsForLine(units, { uid_purchase: PURCHASE, path: [iuid(1)] }, jan(15));
-  assertEquals([...got.keys()], ["unit-1"]);
-  assertEquals(got.get("unit-1"), [{ start: jan(1), end: jan(5) }, { start: jan(10), end: jan(15) }]);
+  const got = unitWindowsForLine(units, { uid_units: ["unit-1", "unit-3"], dates: { start: jan(2), end: null } }, jan(15));
+  assertEquals([...got.keys()], ["unit-1", "unit-3"]);
+  assertEquals(got.get("unit-1"), [{ start: jan(2), end: jan(5) }, { start: jan(10), end: jan(15) }]);
+  assertEquals(got.get("unit-3"), [{ start: jan(2), end: jan(3) }], "the window opened after `through` is left out");
+  // Companion: a unit the line does not name contributes nothing, whatever its windows.
+  assertEquals(unitWindowsForLine(units, { uid_units: [], dates: null }, jan(15)).size, 0);
+});
+
+// ── Coverage: the line names the unit (D10 item 10) ──────────────
+
+const purchaseOf = (uid: string, items: PurchaseItem[], status: "active" | "complete" | "canceled" = "active") => ({ uid, status, items });
+
+Deno.test("coverage: a window is covered where a live line naming its unit overlaps it; the rest is uncovered", () => {
+  const units = [
+    unit(1, [{ start: jan(1), end: jan(20) }]),
+    unit(2, [{ start: jan(5), end: null }]),
+  ];
+  const purchases = [purchaseOf(PURCHASE, [verizonLine({ uid_units: ["unit-1"], dates: { start: jan(10), end: null } })])];
+  assertEquals(coversForUnit("unit-1", purchases), [{ uid_purchase: PURCHASE, path: [iuid(3)], dates: { start: jan(10), end: null } }]);
+  assertEquals(coversForUnit("unit-2", purchases), []);
+  const got = uncoveredUnitWindows(units, purchases, jan(25));
+  assertEquals(got.get("unit-1"), [{ start: jan(1), end: jan(10) }], "before the line's span");
+  assertEquals(got.get("unit-2"), [{ start: jan(5), end: jan(25) }], "no line names it; open windows close at `through`");
+});
+
+Deno.test("coverage: a canceled purchase, or a line canceled in full with nothing billed, covers nothing; a closed line still does", () => {
+  const units = [unit(1, [{ start: jan(1), end: jan(5) }])];
+  const named = verizonLine({ uid_units: ["unit-1"], dates: null });
+  assertEquals(uncoveredUnitWindows(units, [purchaseOf(PURCHASE, [named])], jan(10)).size, 0);
+  assertEquals(uncoveredUnitWindows(units, [purchaseOf(PURCHASE, [named], "canceled")], jan(10)).size, 1);
+  assertEquals(uncoveredUnitWindows(units, [purchaseOf(PURCHASE, [{ ...named, quantity_canceled: 1 }])], jan(10)).size, 1);
+  assertEquals(uncoveredUnitWindows(units, [purchaseOf(PURCHASE, [named], "complete")], jan(10)).size, 0);
+  // Companion: a buy never covers, even naming the product.
+  assertEquals(uncoveredUnitWindows(units, [purchaseOf(PURCHASE, [buyLine()])], jan(10)).size, 1);
+});
+
+Deno.test("overcoverage: time two live lines both cover is ADVISED, with the lines named", () => {
+  const units = [unit(1, [{ start: jan(1), end: jan(20) }])];
+  const a = verizonLine({ uid: iuid(3), path: [iuid(3)], uid_units: ["unit-1"], dates: { start: jan(1), end: jan(12) } });
+  const b = verizonLine({ uid: iuid(4), path: [iuid(4)], uid_units: ["unit-1"], dates: { start: jan(8), end: null } });
+  const got = overcoveredUnitWindows(units, [purchaseOf(PURCHASE, [a, b])], jan(25));
+  assertEquals(got.get("unit-1")?.windows, [{ start: jan(8), end: jan(12) }]);
+  assertEquals(got.get("unit-1")?.lines.map((l) => l.path[0]), [iuid(3), iuid(4)]);
+  // Companion: back-to-back lines do not overlap.
+  const c = verizonLine({ uid: iuid(4), path: [iuid(4)], uid_units: ["unit-1"], dates: { start: jan(12), end: null } });
+  assertEquals(overcoveredUnitWindows(units, [purchaseOf(PURCHASE, [a, c])], jan(25)).size, 0);
+});
+
+Deno.test("seedPurchaseLinesForWindows: one time charge per (product, formula), naming the uncovered units, priced off the cost entry", () => {
+  const provider = { uid: "testsupp200000000000", name: "Verizon" };
+  const products = new Map([[PRODUCT, {
+    uid: PRODUCT,
+    name: "Hotspot",
+    cogs: [{
+      trigger: "activation" as const,
+      uid: "00000000-0000-4000-8000-0000000000c1",
+      label: "Verizon line",
+      coa_cost: 5150 as const,
+      provider,
+      ownership: "cfs" as const,
+      uid_price_formula: VERIZON.uid,
+      rates: [
+        { uid: "00000000-0000-4000-8000-0000000000r1", rate_key: "month", amount_cents: 7000, applied_from: jan(1), applied_to: jan(15) },
+        { uid: "00000000-0000-4000-8000-0000000000r2", rate_key: "month", amount_cents: 8000, applied_from: jan(15), applied_to: null },
+      ],
+    }],
+  }]]);
+  const seedUnit = (n: number, windows: { start: string; end: string | null }[]) => ({ ...unit(n, windows, VERIZON.uid), number: n, uid_product: PRODUCT });
+  const units = [seedUnit(2, [{ start: jan(20), end: null }]), seedUnit(1, [{ start: jan(3), end: jan(9) }]), seedUnit(3, [{ start: jan(2), end: null }])];
+  const covered = purchaseOf(PURCHASE, [verizonLine({ uid_units: ["unit-3"], dates: null })]);
+  const seeds = seedPurchaseLinesForWindows(units, [covered], products as never, jan(25));
+  assertEquals(seeds.length, 1);
+  const [seed] = seeds;
+  assertEquals(seed.uid_units, ["unit-1", "unit-2"], "ascending by number; the covered unit is left out");
+  assertEquals(seed.provider, provider);
+  assertEquals(seed.dates, { start: jan(3), end: null });
+  assertEquals(seed.rates, [{ rate_key: "month", amount_cents: 7000 }], "the rate in force at the earliest uncovered instant");
+  assertEquals(seed.coa_posting, 5150);
+  assertEquals(seed.warning, null);
+  // Companion: with no cost entry the seed still offers, and says why it is not plain.
+  const bare = seedPurchaseLinesForWindows(units, [], new Map([[PRODUCT, { uid: PRODUCT, name: "Hotspot", cogs: [] }]]) as never, jan(25));
+  assertEquals(bare[0].provider, null);
+  assertEquals(bare[0].uid_units, ["unit-1", "unit-2", "unit-3"]);
+  assert(bare[0].warning !== null);
+  // Fully covered → no offer at all.
+  assertEquals(seedPurchaseLinesForWindows(units, [purchaseOf(PURCHASE, [verizonLine({ uid_units: ["unit-1", "unit-2", "unit-3"], dates: null })])], products as never, jan(25)), []);
 });
 
 Deno.test("projector: a Vision window billed in TWO halves bills a month and two weeks in all — the counts telescope", () => {

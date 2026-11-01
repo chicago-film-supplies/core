@@ -951,13 +951,13 @@
         {
           "kind": "interface",
           "name": "ChargeItem",
-          "declaration": "interface ChargeItem {\n  type: \"charge\";\n  quantity: number;\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  dates: PurchaseItemDates | null;\n  quantity_billed: number | null;\n  quantity_canceled: number;\n  auto_link: boolean;\n  uid_product?: string;\n  uid_out_of_service?: string;\n}",
+          "declaration": "interface ChargeItem {\n  type: \"charge\";\n  quantity: number;\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  dates: PurchaseItemDates | null;\n  quantity_billed: number | null;\n  quantity_canceled: number;\n  auto_link: boolean;\n  uid_units: string[];\n  uid_product?: string;\n  uid_out_of_service?: string;\n}",
           "doc": "A CHARGE item — something CFS pays for with no custody: a carrier line on a\ndevice CFS owns (Verizon), freight, a fee, Vision's standing history line.\nFlat (freight: one amount) or time (a carrier line, priced from the device's\ncharge windows).\n\nAttribution, as on a bill's charge item (api-cloudrun#1360, #1364):\n`uid_product` is the product the spend is for, `uid_out_of_service` the\nrecord a loss or damage charge is for. Both permanently optional — freight\nattributes nothing."
         },
         {
           "kind": "interface",
           "name": "ChargeItemInputType",
-          "declaration": "interface ChargeItemInputType {\n  type: \"charge\";\n  name: string;\n  quantity?: number;\n  amount_cents?: number | null;\n  coa_posting: COACodeType;\n  dates?: PurchaseItemDates | null;\n  auto_link?: boolean;\n  uid_product?: string;\n  uid_out_of_service?: string;\n}",
+          "declaration": "interface ChargeItemInputType {\n  type: \"charge\";\n  name: string;\n  quantity?: number;\n  amount_cents?: number | null;\n  coa_posting: COACodeType;\n  dates?: PurchaseItemDates | null;\n  auto_link?: boolean;\n  uid_units?: string[];\n  uid_product?: string;\n  uid_out_of_service?: string;\n}",
           "doc": "A charge item as an operator raises it. Its account is the operator's — there is no default."
         },
         {
@@ -1119,7 +1119,7 @@
         {
           "kind": "interface",
           "name": "CollectionDocs",
-          "declaration": "interface CollectionDocs {\n  activity: Activity;\n  activities: Activity;\n  booking: Booking;\n  bookings: Booking;\n  card: Card;\n  cards: Card;\n  counter: Counter;\n  counters: Counter;\n  cache-geocodes: CacheGeocodes;\n  chart-of-accounts: ChartOfAccounts;\n  comment: Comment;\n  comments: Comment;\n  contact: Contact;\n  contacts: Contact;\n  destination: Destination;\n  destinations: Destination;\n  email-verification: EmailVerification;\n  email-verifications: EmailVerification;\n  holiday-dates: HolidayDates;\n  dates: HolidayDates;\n  holiday-definition: HolidayDefinition;\n  holiday-definitions: HolidayDefinition;\n  holiday-snapshot: HolidaySnapshot;\n  settings: BillingSettings;\n  inventory-ledger: InventoryLedger;\n  inventory-ledgers: InventoryLedger;\n  invite: Invite;\n  invites: Invite;\n  invoice: Invoice;\n  invoices: Invoice;\n  list: List;\n  lists: List;\n  location: Location;\n  locations: Location;\n  location-type: LocationType;\n  location-types: LocationType;\n  department-type: DepartmentType;\n  department-types: DepartmentType;\n  order: Order;\n  orders: Order;\n  fulfillment: Fulfillment;\n  fulfillments: Fulfillment;\n  organization: Organization;\n  organizations: Organization;\n  out-of-service: OutOfService;\n  password-reset: PasswordReset;\n  password-resets: PasswordReset;\n  product: Product;\n  products: Product;\n  quote: Quote;\n  quotes: Quote;\n  statement-documents: StatementDocument;\n  template: Template;\n  templates: Template;\n  templates-versions: TemplateVersion;\n  template-components: TemplateComponent;\n  rate-limit: RateLimit;\n  rate-limits: RateLimit;\n  recurrence: Recurrence;\n  recurrences: Recurrence;\n  role: Role;\n  roles: Role;\n  session: Session;\n  sessions: Session;\n  credit-note: CreditNote;\n  credit-notes: CreditNote;\n  settlement: Settlement;\n  settlements: Settlement;\n  supplier: Supplier;\n  suppliers: Supplier;\n  purchase: Purchase;\n  purchases: Purchase;\n  purchase-bill: PurchaseBill;\n  purchase-bills: PurchaseBill;\n  purchase-credit: PurchaseCredit;\n  purchase-credits: PurchaseCredit;\n  stock: Stock;\n  stock-lock: StockLock;\n  stock-locks: StockLock;\n  store: Store;\n  stores: Store;\n  tag: Tag;\n  tags: Tag;\n  taxes-codes: TaxCode;\n  taxes-rates: TaxRate;\n  taxes-classes: TaxClass;\n  price-formula: PriceFormula;\n  price-formulas: PriceFormula;\n  thread: Thread;\n  threads: Thread;\n  tracking-category: TrackingCategory;\n  tracking-categories: TrackingCategory;\n  transaction: Movement;\n  transactions: Movement;\n  unit: UnitType;\n  units: UnitType;\n  unit-roster: UnitRoster;\n  unit-rosters: UnitRoster;\n  user: User;\n  users: User;\n  webhook-event: WebhookEvent;\n  webhook-events: WebhookEvent;\n  events: WebhookEvent;\n  webshop-product: WebshopProduct;\n  webshop-products: WebshopProduct;\n  typesense-config: TypesenseConfig;\n  typesense: TypesenseConfig;\n  uploadcare-sweep: UploadcareSweepRun;\n  uploadcare-worklist: UploadcareWorkListEntry;\n  xero-budget: XeroBudget;\n  xero-sync: XeroSyncState;\n  documents: OrderDocument;\n  template_previews: PreviewRecord;\n  mcp-oauth-clients: McpOAuthClient;\n  mcp-oauth-authorize-requests: McpOAuthAuthorizeRequest;\n  mcp-oauth-codes: McpOAuthCode;\n  mcp-oauth-tokens: McpOAuthToken;\n}",
+          "declaration": "interface CollectionDocs {\n  activity: Activity;\n  activities: Activity;\n  booking: Booking;\n  bookings: Booking;\n  card: Card;\n  cards: Card;\n  counter: Counter;\n  counters: Counter;\n  cache-geocodes: CacheGeocodes;\n  chart-of-accounts: ChartOfAccounts;\n  comment: Comment;\n  comments: Comment;\n  contact: Contact;\n  contacts: Contact;\n  destination: Destination;\n  destinations: Destination;\n  email-verification: EmailVerification;\n  email-verifications: EmailVerification;\n  holiday-dates: HolidayDates;\n  dates: HolidayDates;\n  holiday-definition: HolidayDefinition;\n  holiday-definitions: HolidayDefinition;\n  holiday-snapshot: HolidaySnapshot;\n  settings: SettingsDocument;\n  inventory-ledger: InventoryLedger;\n  inventory-ledgers: InventoryLedger;\n  invite: Invite;\n  invites: Invite;\n  invoice: Invoice;\n  invoices: Invoice;\n  list: List;\n  lists: List;\n  location: Location;\n  locations: Location;\n  location-type: LocationType;\n  location-types: LocationType;\n  department-type: DepartmentType;\n  department-types: DepartmentType;\n  order: Order;\n  orders: Order;\n  fulfillment: Fulfillment;\n  fulfillments: Fulfillment;\n  organization: Organization;\n  organizations: Organization;\n  out-of-service: OutOfService;\n  password-reset: PasswordReset;\n  password-resets: PasswordReset;\n  product: Product;\n  products: Product;\n  quote: Quote;\n  quotes: Quote;\n  statement-documents: StatementDocument;\n  template: Template;\n  templates: Template;\n  templates-versions: TemplateVersion;\n  template-components: TemplateComponent;\n  rate-limit: RateLimit;\n  rate-limits: RateLimit;\n  recurrence: Recurrence;\n  recurrences: Recurrence;\n  role: Role;\n  roles: Role;\n  session: Session;\n  sessions: Session;\n  credit-note: CreditNote;\n  credit-notes: CreditNote;\n  settlement: Settlement;\n  settlements: Settlement;\n  supplier: Supplier;\n  suppliers: Supplier;\n  purchase: Purchase;\n  purchases: Purchase;\n  purchase-bill: PurchaseBill;\n  purchase-bills: PurchaseBill;\n  purchase-credit: PurchaseCredit;\n  purchase-credits: PurchaseCredit;\n  stock: Stock;\n  stock-lock: StockLock;\n  stock-locks: StockLock;\n  store: Store;\n  stores: Store;\n  tag: Tag;\n  tags: Tag;\n  taxes-codes: TaxCode;\n  taxes-rates: TaxRate;\n  taxes-classes: TaxClass;\n  price-formula: PriceFormula;\n  price-formulas: PriceFormula;\n  thread: Thread;\n  threads: Thread;\n  tracking-category: TrackingCategory;\n  tracking-categories: TrackingCategory;\n  transaction: Movement;\n  transactions: Movement;\n  unit: UnitType;\n  units: UnitType;\n  unit-roster: UnitRoster;\n  unit-rosters: UnitRoster;\n  user: User;\n  users: User;\n  webhook-event: WebhookEvent;\n  webhook-events: WebhookEvent;\n  events: WebhookEvent;\n  webshop-product: WebshopProduct;\n  webshop-products: WebshopProduct;\n  typesense-config: TypesenseConfig;\n  typesense: TypesenseConfig;\n  uploadcare-sweep: UploadcareSweepRun;\n  uploadcare-worklist: UploadcareWorkListEntry;\n  xero-budget: XeroBudget;\n  xero-sync: XeroSyncState;\n  documents: OrderDocument;\n  template_previews: PreviewRecord;\n  mcp-oauth-clients: McpOAuthClient;\n  mcp-oauth-authorize-requests: McpOAuthAuthorizeRequest;\n  mcp-oauth-codes: McpOAuthCode;\n  mcp-oauth-tokens: McpOAuthToken;\n}",
           "doc": "The ONE place a collection name is bound to its document type.\n\n`schemas` below is annotated by a mapped type over this interface, so the two\ncannot drift: a key here with no entry there is an error at the object\nliteral, and an entry there with no key here is an excess property. That is\nthe compiler enforcing the parity — not a test that can go stale, and not the\n\"parity assertion between two hand-maintained lists\" the workspace rules warn\nabout. It fails at `deno task check`.\n\n⚠️ **Both halves are written out explicitly, and that is deliberate.** JSR's\nnpm declaration emit is SYNTACTIC — it writes declarations without running\ninference — so a type it has to COMPUTE from an initializer can publish\nwrongly to npm consumers while Deno consumers, this suite, `deno task check`\nand `deno publish --dry-run` all agree with the source. That is core#43: nine\n`as const` members emitted as one, and 57 phantom type errors on manager's\nnext pin bump. An interface and a written mapped-type annotation are text the\nemitter copies verbatim, so neither needs expanding.\n\n⚠️ Measured 2026-08-14, because the obvious reasoning is wrong: the\ninference-requiring form (`= {…} satisfies Record<string, z.ZodType>` plus\n`keyof typeof`) **also passes** `deno publish --dry-run`'s slow-types check.\nPassing that check is NOT evidence the emit is right. The explicit form is\nchosen because it needs no expansion at all, which is a reasoned preference\nrather than a measured one.\n\n⚠️ The line above used to add *\"core#44 closed as 'no post-publish declaration\ngate', so nothing here can see a wrong published declaration.\"* **That is no\nlonger true**: core#44 reopened on a second divergence and\n`deno task check:declarations` now runs `isolatedDeclarations` over all of\n`src/`. It is still not a check of JSR's *emitter* — it is a conservative\nover-approximation of it — so \"passing does not prove the emit is right\"\nsurvives; what does not survive is \"nothing can see it\".\n\nSingular and plural both appear because the registry has always carried both.\n⚠️ The singular half may be vestigial — there are zero literal `schemas[\"order\"]`\n-style lookups across api-cloudrun, manager and templates, and every call site\nfound passes a plural or the literal `\"events\"`. Removing them would halve this\nfile's hand-written surface, but it is a breaking change to a published API and\nwants the dynamic callers' domain established first. Not folded in here."
         },
         {
@@ -3627,8 +3627,8 @@
         {
           "kind": "interface",
           "name": "OpenUnitChargeWindowInputType",
-          "declaration": "interface OpenUnitChargeWindowInputType {\n  version: number;\n  start: string;\n  uid_order: string | null;\n  uid_price_formula: string;\n  line?: UnitChargeWindowLineType | null;\n  notes: string;\n}",
-          "doc": "Body of `POST /units/{uid}/charge-windows`: switch a unit's service line ON.\n\nOpens a window with no `end` — the server refuses a unit that is not\n`active` or that already has an open window. `start` is when CFS asked the\nprovider to switch the line on, which may be earlier than the request (the\ncall came first). `line` absent asks the server to resolve the purchase line\n(an active purchase of the unit's provider holding a line for the product);\n`null` states that no supplier line bills it. A stripping `z.object`, not the\nstored strict node (`tests/input-strictness.test.ts`)."
+          "declaration": "interface OpenUnitChargeWindowInputType {\n  version: number;\n  start: string;\n  uid_order: string | null;\n  uid_price_formula: string;\n  notes: string;\n}",
+          "doc": "Body of `POST /units/{uid}/charge-windows`: switch a unit's service line ON.\n\nOpens a window with no `end` — the server refuses a unit that is not\n`active` or that already has an open window. `start` is when CFS asked the\nprovider to switch the line on, which may be earlier than the request (the\ncall came first). It names no purchase line: a line names its units. A\nstripping `z.object`, not the\nstored strict node (`tests/input-strictness.test.ts`)."
         },
         {
           "kind": "interface",
@@ -4267,6 +4267,18 @@
           "doc": "Zod schema for {@link PriceFormulaBasis}."
         },
         {
+          "kind": "typeAlias",
+          "name": "PriceFormulaDefaults",
+          "declaration": "type PriceFormulaDefaults = mapped;",
+          "doc": "Per line type, the formula a new or retyped line starts on, or `null` for none."
+        },
+        {
+          "kind": "variable",
+          "name": "PriceFormulaDefaultsSchema",
+          "declaration": "const PriceFormulaDefaultsSchema: z.ZodType<PriceFormulaDefaults>;",
+          "doc": "Zod schema for {@link PriceFormulaDefaults}. Every line type is spelled as a\nkey, so a seventh `DOC_LINE_ITEM_TYPES` member is a type error here rather\nthan a silently missing default (`tests/pricing-settings.test.ts` pins the\nkey set to the enum)."
+        },
+        {
           "kind": "interface",
           "name": "PriceFormulaGapAllowance",
           "declaration": "interface PriceFormulaGapAllowance {\n  free_days: number;\n  per_months: number;\n}",
@@ -4436,6 +4448,18 @@
         },
         {
           "kind": "interface",
+          "name": "PricingSettings",
+          "declaration": "interface PricingSettings {\n  uid: \"pricing\";\n  price_formula_defaults: PriceFormulaDefaults;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "The pricing settings singleton (`settings/pricing`)."
+        },
+        {
+          "kind": "variable",
+          "name": "PricingSettingsSchema",
+          "declaration": "const PricingSettingsSchema: z.ZodType<PricingSettings>;",
+          "doc": "Zod schema for {@link PricingSettings}."
+        },
+        {
+          "kind": "interface",
           "name": "Product",
           "declaration": "interface Product {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  crms_id: number | null;\n  crms_rate_id?: number | null;\n  crms_stock_level_ids?: Record<string, number>;\n  crms_linked_rental_id?: number | null;\n  crms_linked_replacement_id?: number | null;\n  crms_linked_replacement_rate_id?: number | null;\n  description: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: ProductPrice;\n  shipping?: ProductShipping;\n  alternates: ProductAlternate[];\n  components: AuthoredProductComponent[];\n  component_of: ProductComponent[];\n  tags: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  tracking_category_name?: string;\n  uid_linked_rental?: string;\n  uid_linked_replacement?: string;\n  cogs?: CogsEntryType[];\n  uid_superseded_by?: string;\n  uid_tracking_category?: string | null;\n  uid_tax_class?: string | null;\n  tax_class_name?: string | null;\n  webshop: ProductWebshop;\n  images?: ProductImage[];\n  query_by_images?: string[];\n  xero_id: string | null;\n  xero_code?: string | null;\n  xero_tracking_option_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A product document in the products Firestore collection."
@@ -4557,7 +4581,7 @@
         {
           "kind": "interface",
           "name": "Purchase",
-          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  store: UidNameRefType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseItem[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  store: UidNameRefType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseItem[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills?: string[];\n  query_by_units?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A purchase order placed with a supplier."
         },
         {
@@ -4835,6 +4859,18 @@
           "name": "PurchaseLinePriceSchema",
           "declaration": "const PurchaseLinePriceSchema: z.ZodType<PurchaseLinePrice>;",
           "doc": "Zod schema for {@link PurchaseLinePrice}."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseLineRef",
+          "declaration": "interface PurchaseLineRef {\n  uid_purchase: string;\n  path: string[];\n}",
+          "doc": "A purchase line named from elsewhere — its purchase and its row identity\n(`path`), the way a bill line names its purchase line. A report row states\nwhich line covered a unit's window with it; nothing STORES it on a unit."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseLineRefSchema",
+          "declaration": "const PurchaseLineRefSchema: z.ZodType<PurchaseLineRef>;",
+          "doc": "Zod schema for {@link PurchaseLineRef}."
         },
         {
           "kind": "typeAlias",
@@ -5407,6 +5443,18 @@
           "doc": "Set or clear ONE product's default-storage flag at ONE location\n(`locations/{uid}.products[uid_product].default`) — the only writer of that\nfact outside a rebuild script (api-cloudrun#1302 §2).\n\n**A set MOVES the flag**: a product has exactly one default storage location\nper store (ruling 11, corrected 2026-10-13), so setting it here clears it on\nthe product's other locations at that store in the same write. A clear\ntouches this location only. The API refuses a set on a location whose role\nis not `storage`, or on an inactive one. The ledger's per-product copy is\nrefreshed by a post-commit cascade."
         },
         {
+          "kind": "typeAlias",
+          "name": "SettingsDocument",
+          "declaration": "type SettingsDocument = BillingSettings | PricingSettings;",
+          "doc": "Any `settings/{uid}` document. Narrow on `uid`."
+        },
+        {
+          "kind": "variable",
+          "name": "SettingsSchema",
+          "declaration": "const SettingsSchema: z.ZodType<SettingsDocument>;",
+          "doc": "Zod schema for {@link SettingsDocument}. A plain `z.union`: each member is a\nstrict object pinned by its literal `uid`, so exactly one member can parse a\ndocument, and a type-erased member (`z.ZodType<…>`, the export form JSR's\n`no-slow-types` needs) is not a `ZodObject` a `discriminatedUnion` accepts."
+        },
+        {
           "kind": "interface",
           "name": "Settlement",
           "declaration": "interface Settlement {\n  uid: string;\n  uid_invoice: string | null;\n  uid_organization: string | null;\n  uid_purchase_bill: string | null;\n  uid_purchase_credit: string | null;\n  uid_supplier: string | null;\n  type: SettlementTypeType;\n  reason: SettlementReasonType;\n  amount_cents: number;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  uuid_session: string;\n  reverses: string | null;\n  uid_credit_note: string | null;\n  number_credit_note: string | null;\n  xero_payment_id: string | null;\n  xero_credit_note_id: string | null;\n  synced_at: FirestoreTimestampType | null;\n  legacy_payment_uid: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
@@ -5661,13 +5709,13 @@
         {
           "kind": "interface",
           "name": "SubrentItem",
-          "declaration": "interface SubrentItem {\n  type: \"subrent\";\n  uid_product: string;\n  quantity: number;\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  coa_posting: COACostType;\n  dates: PurchaseItemDates;\n  quantity_received: number;\n  quantity_billed: number | null;\n  quantity_canceled: number;\n  quantity_returned: number;\n  uid_orders: string[];\n  auto_link: boolean;\n}",
+          "declaration": "interface SubrentItem {\n  type: \"subrent\";\n  uid_product: string;\n  quantity: number;\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  coa_posting: COACostType;\n  dates: PurchaseItemDates;\n  quantity_received: number;\n  quantity_billed: number | null;\n  quantity_canceled: number;\n  quantity_returned: number;\n  uid_orders: string[];\n  auto_link: boolean;\n  uid_units: string[];\n}",
           "doc": "A SUBRENT item — `quantity` units borrowed for a hire window and given back. Flat or time."
         },
         {
           "kind": "interface",
           "name": "SubrentItemInputType",
-          "declaration": "interface SubrentItemInputType {\n  type: \"subrent\";\n  uid_product: string;\n  quantity: number;\n  amount_cents?: number | null;\n  coa_posting?: COACostType;\n  dates: PurchaseItemDates;\n  uid_orders?: string[];\n  auto_link?: boolean;\n}",
+          "declaration": "interface SubrentItemInputType {\n  type: \"subrent\";\n  uid_product: string;\n  quantity: number;\n  amount_cents?: number | null;\n  coa_posting?: COACostType;\n  dates: PurchaseItemDates;\n  uid_orders?: string[];\n  auto_link?: boolean;\n  uid_units?: string[];\n}",
           "doc": "A subrent item as an operator orders it. `amount_cents` on a flat line only (gross when discounted)."
         },
         {
@@ -6399,7 +6447,7 @@
         {
           "kind": "interface",
           "name": "UnitActivityPeriod",
-          "declaration": "interface UnitActivityPeriod {\n  line: UnitChargeWindowLineType | null;\n  price_formula: PriceFormulaRef;\n  label: string;\n  start: string;\n  end: string;\n  starts_in_month: boolean;\n  orders: UnitActivityOrderRef[];\n  active_days: number;\n  expected_cents: number;\n}",
+          "declaration": "interface UnitActivityPeriod {\n  line: PurchaseLineRef | null;\n  price_formula: PriceFormulaRef;\n  label: string;\n  start: string;\n  end: string;\n  starts_in_month: boolean;\n  orders: UnitActivityOrderRef[];\n  active_days: number;\n  expected_cents: number;\n}",
           "doc": "One billed period of one unit's charge windows under the purchase line they\nbill against. Periods come from the line's FORMULA — its largest segment's\nunit (a Vision month block, a Verizon month), cut whether or not the unit\nwas on (Q9) — and each period's `expected_cents` is the formula money step\nover the windows inside it, at the line's snapshotted rates (D8)."
         },
         {
@@ -6451,22 +6499,10 @@
           "doc": "Zod schema for {@link UnitChargeWindowType}."
         },
         {
-          "kind": "variable",
-          "name": "UnitChargeWindowLine",
-          "declaration": "const UnitChargeWindowLine: z.ZodType<UnitChargeWindowLineType>;",
-          "doc": "Zod schema for {@link UnitChargeWindowLineType}."
-        },
-        {
-          "kind": "interface",
-          "name": "UnitChargeWindowLineType",
-          "declaration": "interface UnitChargeWindowLineType {\n  uid_purchase: string;\n  path: string[];\n}",
-          "doc": "The purchase line a charge window bills against — the line's purchase and\nits row identity (`path`), the way a bill line names its purchase line."
-        },
-        {
           "kind": "interface",
           "name": "UnitChargeWindowType",
-          "declaration": "interface UnitChargeWindowType {\n  uid: string;\n  start: string;\n  end: string | null;\n  uid_order: string | null;\n  line: UnitChargeWindowLineType | null;\n  uid_price_formula: string;\n  notes: string;\n  changed_by: ActorRefType;\n}",
-          "doc": "One span during which a unit's service line was switched ON — a hotspot's or\nrouter's data line — billed by its provider under a price formula\n(purchases-as-documents D2; Phase 2 rulings 4 and 8).\n\nThe `{ start, end }` of an order pair's `ChargeWindow`, plus what a LIVE\nswitch-on needs: `end: null` while the line is on, a `uid` because routes\nedit one window at a time, and the facts a window is billed by. It carries no\nday count: counts are a LINE's (`price.counts`), metered under that line's\nformula when a purchase or bill line is priced from these windows.\n\nRECORDED, never derived from custody: a device can sit on the shelf switched\non (an idle, still-billed span) or go out switched off. Present on every\nunit, owned or rented, because CFS's own devices carry provider lines too.\nWhat the provider billed is the BILL line's own windows, diffed against these\n— not a field here."
+          "declaration": "interface UnitChargeWindowType {\n  uid: string;\n  start: string;\n  end: string | null;\n  uid_order: string | null;\n  uid_price_formula: string;\n  notes: string;\n  changed_by: ActorRefType;\n}",
+          "doc": "One span during which a unit's service line was switched ON — a hotspot's or\nrouter's data line — billed by its provider under a price formula\n(purchases-as-documents D2; Phase 2 rulings 4 and 8).\n\nThe `{ start, end }` of an order pair's `ChargeWindow`, plus what a LIVE\nswitch-on needs: `end: null` while the line is on, a `uid` because routes\nedit one window at a time, and the facts a window is billed by. It carries no\nday count: counts are a LINE's (`price.counts`), metered under that line's\nformula when a purchase or bill line is priced from these windows.\n\nRECORDED, never derived from custody: a device can sit on the shelf switched\non (an idle, still-billed span) or go out switched off. Present on every\nunit, owned or rented, because CFS's own devices carry provider lines too.\nWhat the provider billed is the BILL line's own windows, diffed against these\n— not a field here.\n\n⭐ **A window names no purchase line.** The line names the UNIT\n(`SubrentItem.uid_units` / `ChargeItem.uid_units`), exactly as an invoice\nline names the out-of-service record it bills (`uid_out_of_service`) and the\nrecord names nothing back. So which line covers a window is DERIVED\n(`purchaseLineCoversWindow`), a window no live line covers is an OFFER\n(`seedPurchaseLinesForWindows`), and creating the purchase for it writes the\npurchase alone (api-cloudrun purchases-as-documents D10 item 10)."
         },
         {
           "kind": "variable",
@@ -6561,7 +6597,7 @@
         {
           "kind": "interface",
           "name": "UnitType",
-          "declaration": "interface UnitType {\n  uid: string;\n  uid_product: string;\n  number: number;\n  serial_number: string | null;\n  serial_history: UnitSerialHistoryEntryType[];\n  status: UnitStatusType;\n  charge_windows: UnitChargeWindowType[];\n  query_by_purchases?: string[];\n  uuid_session: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface UnitType {\n  uid: string;\n  uid_product: string;\n  number: number;\n  serial_number: string | null;\n  serial_history: UnitSerialHistoryEntryType[];\n  status: UnitStatusType;\n  charge_windows: UnitChargeWindowType[];\n  uuid_session: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A unit number, its current serial and its history."
         },
         {
@@ -6805,6 +6841,18 @@
           "doc": "Input for updating a price formula.\n\n⚠️ **Only labels and retirement.** The rule (`meter`, `segments`, `minimum`)\nis not on this input at all: a formula any line has priced with is\nimmutable, and core cannot see references — so the safe shape is the one\nthat cannot express the edit. A changed rule is a new formula, and this one\npoints at it with `uid_superseded_by`."
         },
         {
+          "kind": "interface",
+          "name": "UpdatePricingSettingsInput",
+          "declaration": "interface UpdatePricingSettingsInput {\n  price_formula_defaults: PriceFormulaDefaults;\n  version: number;\n}",
+          "doc": "Body of `PUT /settings/pricing`. `version` is the optimistic-lock check (`0` creates the singleton)."
+        },
+        {
+          "kind": "variable",
+          "name": "UpdatePricingSettingsInputSchema",
+          "declaration": "const UpdatePricingSettingsInputSchema: z.ZodType<UpdatePricingSettingsInput>;",
+          "doc": "Zod schema for {@link UpdatePricingSettingsInput}."
+        },
+        {
           "kind": "variable",
           "name": "UpdateProductInput",
           "declaration": "const UpdateProductInput: z.ZodType<UpdateProductInputType>;",
@@ -6981,7 +7029,7 @@
         {
           "kind": "interface",
           "name": "UpdateUnitChargeWindowInputType",
-          "declaration": "interface UpdateUnitChargeWindowInputType {\n  version: number;\n  start?: string;\n  end?: string | null;\n  uid_order?: string | null;\n  uid_price_formula?: string;\n  line?: UnitChargeWindowLineType | null;\n  notes?: string;\n}",
+          "declaration": "interface UpdateUnitChargeWindowInputType {\n  version: number;\n  start?: string;\n  end?: string | null;\n  uid_order?: string | null;\n  uid_price_formula?: string;\n  notes?: string;\n}",
           "doc": "Body of `PUT /units/{uid}/charge-windows/{window_uid}`: close a window\n(`end`) or correct any of its fields. An absent key keeps the stored value;\n`end: null` re-opens the LAST window of an `active` unit (a switch-off\nrecorded in error)."
         },
         {
@@ -7463,9 +7511,9 @@
         },
         {
           "kind": "function",
-          "name": "deriveUnitQueryByPurchases",
-          "signature": "deriveUnitQueryByPurchases(windows: readonly Pick<UnitChargeWindowType, \"line\">[]): string[]",
-          "doc": "The purchases a unit's windows bill against — distinct, sorted. The one author of `query_by_purchases`.",
+          "name": "deriveQueryByUnits",
+          "signature": "deriveQueryByUnits(items: readonly PurchaseItem[]): string[]",
+          "doc": "Derive `query_by_units` — the distinct units the subrent and charge lines cover, sorted.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -12424,13 +12472,13 @@
         {
           "kind": "interface",
           "name": "ChargeItem",
-          "declaration": "interface ChargeItem {\n  type: \"charge\";\n  quantity: number;\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  dates: PurchaseItemDates | null;\n  quantity_billed: number | null;\n  quantity_canceled: number;\n  auto_link: boolean;\n  uid_product?: string;\n  uid_out_of_service?: string;\n}",
+          "declaration": "interface ChargeItem {\n  type: \"charge\";\n  quantity: number;\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  dates: PurchaseItemDates | null;\n  quantity_billed: number | null;\n  quantity_canceled: number;\n  auto_link: boolean;\n  uid_units: string[];\n  uid_product?: string;\n  uid_out_of_service?: string;\n}",
           "doc": "A CHARGE item — something CFS pays for with no custody: a carrier line on a\ndevice CFS owns (Verizon), freight, a fee, Vision's standing history line.\nFlat (freight: one amount) or time (a carrier line, priced from the device's\ncharge windows).\n\nAttribution, as on a bill's charge item (api-cloudrun#1360, #1364):\n`uid_product` is the product the spend is for, `uid_out_of_service` the\nrecord a loss or damage charge is for. Both permanently optional — freight\nattributes nothing."
         },
         {
           "kind": "interface",
           "name": "ChargeItemInputType",
-          "declaration": "interface ChargeItemInputType {\n  type: \"charge\";\n  name: string;\n  quantity?: number;\n  amount_cents?: number | null;\n  coa_posting: COACodeType;\n  dates?: PurchaseItemDates | null;\n  auto_link?: boolean;\n  uid_product?: string;\n  uid_out_of_service?: string;\n}",
+          "declaration": "interface ChargeItemInputType {\n  type: \"charge\";\n  name: string;\n  quantity?: number;\n  amount_cents?: number | null;\n  coa_posting: COACodeType;\n  dates?: PurchaseItemDates | null;\n  auto_link?: boolean;\n  uid_units?: string[];\n  uid_product?: string;\n  uid_out_of_service?: string;\n}",
           "doc": "A charge item as an operator raises it. Its account is the operator's — there is no default."
         },
         {
@@ -12484,7 +12532,7 @@
         {
           "kind": "interface",
           "name": "Purchase",
-          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  store: UidNameRefType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseItem[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  store: UidNameRefType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseItem[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills?: string[];\n  query_by_units?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A purchase order placed with a supplier."
         },
         {
@@ -12576,6 +12624,18 @@
           "name": "PurchaseLinePriceSchema",
           "declaration": "const PurchaseLinePriceSchema: z.ZodType<PurchaseLinePrice>;",
           "doc": "Zod schema for {@link PurchaseLinePrice}."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseLineRef",
+          "declaration": "interface PurchaseLineRef {\n  uid_purchase: string;\n  path: string[];\n}",
+          "doc": "A purchase line named from elsewhere — its purchase and its row identity\n(`path`), the way a bill line names its purchase line. A report row states\nwhich line covered a unit's window with it; nothing STORES it on a unit."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseLineRefSchema",
+          "declaration": "const PurchaseLineRefSchema: z.ZodType<PurchaseLineRef>;",
+          "doc": "Zod schema for {@link PurchaseLineRef}."
         },
         {
           "kind": "typeAlias",
@@ -12676,13 +12736,13 @@
         {
           "kind": "interface",
           "name": "SubrentItem",
-          "declaration": "interface SubrentItem {\n  type: \"subrent\";\n  uid_product: string;\n  quantity: number;\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  coa_posting: COACostType;\n  dates: PurchaseItemDates;\n  quantity_received: number;\n  quantity_billed: number | null;\n  quantity_canceled: number;\n  quantity_returned: number;\n  uid_orders: string[];\n  auto_link: boolean;\n}",
+          "declaration": "interface SubrentItem {\n  type: \"subrent\";\n  uid_product: string;\n  quantity: number;\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  coa_posting: COACostType;\n  dates: PurchaseItemDates;\n  quantity_received: number;\n  quantity_billed: number | null;\n  quantity_canceled: number;\n  quantity_returned: number;\n  uid_orders: string[];\n  auto_link: boolean;\n  uid_units: string[];\n}",
           "doc": "A SUBRENT item — `quantity` units borrowed for a hire window and given back. Flat or time."
         },
         {
           "kind": "interface",
           "name": "SubrentItemInputType",
-          "declaration": "interface SubrentItemInputType {\n  type: \"subrent\";\n  uid_product: string;\n  quantity: number;\n  amount_cents?: number | null;\n  coa_posting?: COACostType;\n  dates: PurchaseItemDates;\n  uid_orders?: string[];\n  auto_link?: boolean;\n}",
+          "declaration": "interface SubrentItemInputType {\n  type: \"subrent\";\n  uid_product: string;\n  quantity: number;\n  amount_cents?: number | null;\n  coa_posting?: COACostType;\n  dates: PurchaseItemDates;\n  uid_orders?: string[];\n  auto_link?: boolean;\n  uid_units?: string[];\n}",
           "doc": "A subrent item as an operator orders it. `amount_cents` on a flat line only (gross when discounted)."
         },
         {
@@ -12732,6 +12792,14 @@
           "name": "deriveQueryByProducts",
           "signature": "deriveQueryByProducts(items: readonly PurchaseItem[]): string[]",
           "doc": "Derive `query_by_products` — the distinct products the items ORDER, in first\nappearance order. A charge's attribution is not an order and is left out.\nThe one author of the mirror, called by every writer.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "deriveQueryByUnits",
+          "signature": "deriveQueryByUnits(items: readonly PurchaseItem[]): string[]",
+          "doc": "Derive `query_by_units` — the distinct units the subrent and charge lines cover, sorted.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -13952,8 +14020,8 @@
         {
           "kind": "interface",
           "name": "OpenUnitChargeWindowInputType",
-          "declaration": "interface OpenUnitChargeWindowInputType {\n  version: number;\n  start: string;\n  uid_order: string | null;\n  uid_price_formula: string;\n  line?: UnitChargeWindowLineType | null;\n  notes: string;\n}",
-          "doc": "Body of `POST /units/{uid}/charge-windows`: switch a unit's service line ON.\n\nOpens a window with no `end` — the server refuses a unit that is not\n`active` or that already has an open window. `start` is when CFS asked the\nprovider to switch the line on, which may be earlier than the request (the\ncall came first). `line` absent asks the server to resolve the purchase line\n(an active purchase of the unit's provider holding a line for the product);\n`null` states that no supplier line bills it. A stripping `z.object`, not the\nstored strict node (`tests/input-strictness.test.ts`)."
+          "declaration": "interface OpenUnitChargeWindowInputType {\n  version: number;\n  start: string;\n  uid_order: string | null;\n  uid_price_formula: string;\n  notes: string;\n}",
+          "doc": "Body of `POST /units/{uid}/charge-windows`: switch a unit's service line ON.\n\nOpens a window with no `end` — the server refuses a unit that is not\n`active` or that already has an open window. `start` is when CFS asked the\nprovider to switch the line on, which may be earlier than the request (the\ncall came first). It names no purchase line: a line names its units. A\nstripping `z.object`, not the\nstored strict node (`tests/input-strictness.test.ts`)."
         },
         {
           "kind": "variable",
@@ -14004,22 +14072,10 @@
           "doc": "Zod schema for {@link UnitChargeWindowType}."
         },
         {
-          "kind": "variable",
-          "name": "UnitChargeWindowLine",
-          "declaration": "const UnitChargeWindowLine: z.ZodType<UnitChargeWindowLineType>;",
-          "doc": "Zod schema for {@link UnitChargeWindowLineType}."
-        },
-        {
-          "kind": "interface",
-          "name": "UnitChargeWindowLineType",
-          "declaration": "interface UnitChargeWindowLineType {\n  uid_purchase: string;\n  path: string[];\n}",
-          "doc": "The purchase line a charge window bills against — the line's purchase and\nits row identity (`path`), the way a bill line names its purchase line."
-        },
-        {
           "kind": "interface",
           "name": "UnitChargeWindowType",
-          "declaration": "interface UnitChargeWindowType {\n  uid: string;\n  start: string;\n  end: string | null;\n  uid_order: string | null;\n  line: UnitChargeWindowLineType | null;\n  uid_price_formula: string;\n  notes: string;\n  changed_by: ActorRefType;\n}",
-          "doc": "One span during which a unit's service line was switched ON — a hotspot's or\nrouter's data line — billed by its provider under a price formula\n(purchases-as-documents D2; Phase 2 rulings 4 and 8).\n\nThe `{ start, end }` of an order pair's `ChargeWindow`, plus what a LIVE\nswitch-on needs: `end: null` while the line is on, a `uid` because routes\nedit one window at a time, and the facts a window is billed by. It carries no\nday count: counts are a LINE's (`price.counts`), metered under that line's\nformula when a purchase or bill line is priced from these windows.\n\nRECORDED, never derived from custody: a device can sit on the shelf switched\non (an idle, still-billed span) or go out switched off. Present on every\nunit, owned or rented, because CFS's own devices carry provider lines too.\nWhat the provider billed is the BILL line's own windows, diffed against these\n— not a field here."
+          "declaration": "interface UnitChargeWindowType {\n  uid: string;\n  start: string;\n  end: string | null;\n  uid_order: string | null;\n  uid_price_formula: string;\n  notes: string;\n  changed_by: ActorRefType;\n}",
+          "doc": "One span during which a unit's service line was switched ON — a hotspot's or\nrouter's data line — billed by its provider under a price formula\n(purchases-as-documents D2; Phase 2 rulings 4 and 8).\n\nThe `{ start, end }` of an order pair's `ChargeWindow`, plus what a LIVE\nswitch-on needs: `end: null` while the line is on, a `uid` because routes\nedit one window at a time, and the facts a window is billed by. It carries no\nday count: counts are a LINE's (`price.counts`), metered under that line's\nformula when a purchase or bill line is priced from these windows.\n\nRECORDED, never derived from custody: a device can sit on the shelf switched\non (an idle, still-billed span) or go out switched off. Present on every\nunit, owned or rented, because CFS's own devices carry provider lines too.\nWhat the provider billed is the BILL line's own windows, diffed against these\n— not a field here.\n\n⭐ **A window names no purchase line.** The line names the UNIT\n(`SubrentItem.uid_units` / `ChargeItem.uid_units`), exactly as an invoice\nline names the out-of-service record it bills (`uid_out_of_service`) and the\nrecord names nothing back. So which line covers a window is DERIVED\n(`purchaseLineCoversWindow`), a window no live line covers is an OFFER\n(`seedPurchaseLinesForWindows`), and creating the purchase for it writes the\npurchase alone (api-cloudrun purchases-as-documents D10 item 10)."
         },
         {
           "kind": "variable",
@@ -14072,7 +14128,7 @@
         {
           "kind": "interface",
           "name": "UnitType",
-          "declaration": "interface UnitType {\n  uid: string;\n  uid_product: string;\n  number: number;\n  serial_number: string | null;\n  serial_history: UnitSerialHistoryEntryType[];\n  status: UnitStatusType;\n  charge_windows: UnitChargeWindowType[];\n  query_by_purchases?: string[];\n  uuid_session: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface UnitType {\n  uid: string;\n  uid_product: string;\n  number: number;\n  serial_number: string | null;\n  serial_history: UnitSerialHistoryEntryType[];\n  status: UnitStatusType;\n  charge_windows: UnitChargeWindowType[];\n  uuid_session: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A unit number, its current serial and its history."
         },
         {
@@ -14108,7 +14164,7 @@
         {
           "kind": "interface",
           "name": "UpdateUnitChargeWindowInputType",
-          "declaration": "interface UpdateUnitChargeWindowInputType {\n  version: number;\n  start?: string;\n  end?: string | null;\n  uid_order?: string | null;\n  uid_price_formula?: string;\n  line?: UnitChargeWindowLineType | null;\n  notes?: string;\n}",
+          "declaration": "interface UpdateUnitChargeWindowInputType {\n  version: number;\n  start?: string;\n  end?: string | null;\n  uid_order?: string | null;\n  uid_price_formula?: string;\n  notes?: string;\n}",
           "doc": "Body of `PUT /units/{uid}/charge-windows/{window_uid}`: close a window\n(`end`) or correct any of its fields. An absent key keeps the stored value;\n`end: null` re-opens the LAST window of an `active` unit (a switch-off\nrecorded in error)."
         },
         {
@@ -14122,14 +14178,6 @@
           "name": "UpdateUnitInputType",
           "declaration": "interface UpdateUnitInputType {\n  version: number;\n  serial?: UnitSerialChangeInputType;\n  status?: UnitUserStatusType;\n}",
           "doc": "Body of `PUT /units/{uid}`: change the serial, retire the number, or both.\n\nA serial remap does NOT cascade into past movements — `MovementUnit` keeps\nthe serial as a snapshot of the moment it moved."
-        },
-        {
-          "kind": "function",
-          "name": "deriveUnitQueryByPurchases",
-          "signature": "deriveUnitQueryByPurchases(windows: readonly Pick<UnitChargeWindowType, \"line\">[]): string[]",
-          "doc": "The purchases a unit's windows bill against — distinct, sorted. The one author of `query_by_purchases`.",
-          "paramTags": [],
-          "returnsTag": null
         }
       ]
     },
@@ -22827,6 +22875,14 @@
         },
         {
           "kind": "function",
+          "name": "defaultPriceFormulaFor",
+          "signature": "defaultPriceFormulaFor(settings: typeLiteral | null, formulas: ReadonlyMap<string, F>, type: DocLineItemTypeType): F | null",
+          "doc": "**The formula a new custom line, or a line retyped to `type`, starts on**\n(`settings/pricing`, api-cloudrun purchases-as-documents D10 item 11) — or\n`null` for none, when the operator must choose. `null` too when the settings\nare absent, name no formula for the type, or name one the caller did not load\nor that is retired (`active: false`): a default never fails a line.\n\nFeed the result to `buildCustomOrderLine` / `retypedLinePrice`; it prices\nnothing itself, so it is not a second price author.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "formulaUidsOf",
           "signature": "formulaUidsOf(items: readonly typeLiteral[]): string[]",
           "doc": "The formula uids a set of lines name — what a caller must load into {@link PricingFormulas}.",
@@ -22931,9 +22987,39 @@
         },
         {
           "kind": "interface",
+          "name": "PurchaseLineCoverage",
+          "declaration": "interface PurchaseLineCoverage {\n  uid_units: readonly string[];\n  dates: typeLiteral | null;\n}",
+          "doc": "The coverage-bearing half of a subrent or charge line: the units it names and the span it covers."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseLineSeed",
+          "declaration": "interface PurchaseLineSeed {\n  type: \"charge\";\n  uid_product: string;\n  name: string;\n  uid_units: string[];\n  uid_price_formula: string;\n  provider: UidNameRefType | null;\n  rates: typeLiteral[];\n  coa_posting: COACostType | null;\n  dates: typeLiteral;\n  windows: typeLiteral[];\n  warning: string | null;\n}",
+          "doc": "One offered purchase line for uncovered windows — the supplier twin of a\n`ReplacementLineSeed`. Always a TIME `charge` line: a window is a service\nline, not custody, and a supplier-owned unit's subrent line already names it\nfrom its receipt."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "SeedSourceProduct",
+          "declaration": "type SeedSourceProduct = Pick<Product, \"uid\" | \"name\" | \"cogs\">;",
+          "doc": "What {@link seedPurchaseLinesForWindows} needs of a product."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "SeedSourceUnit",
+          "declaration": "type SeedSourceUnit = Pick<UnitType, \"uid\" | \"number\" | \"uid_product\" | \"charge_windows\">;",
+          "doc": "What {@link seedPurchaseLinesForWindows} needs of a unit."
+        },
+        {
+          "kind": "interface",
           "name": "SyncPurchaseToBillsArgs",
           "declaration": "interface SyncPurchaseToBillsArgs {\n  prev: Purchase;\n  next: Purchase;\n  bills: readonly PurchaseBill[];\n  credits: readonly Pick<PurchaseCredit, \"status\" | \"items\">[];\n}",
           "doc": "{@link syncPurchaseToBills}' inputs."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitCover",
+          "declaration": "interface UnitCover {\n  uid_purchase: string;\n  path: string[];\n  dates: indexedAccess;\n}",
+          "doc": "One live line covering one unit — the covering line and its span."
         },
         {
           "kind": "function",
@@ -22953,9 +23039,25 @@
         },
         {
           "kind": "function",
+          "name": "coversForUnit",
+          "signature": "coversForUnit(uid_unit: string, purchases: readonly Pick<Purchase, \"uid\" | \"status\" | \"items\">[]): UnitCover[]",
+          "doc": "Every live line naming `uid_unit` across `purchases` — what `query_by_units` array-contains returns.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "meterBillLine",
           "signature": "meterBillLine(line: BillLineMeterInput, source: BillLineMeterSource, ctx: PurchaseDocumentContext): TierCount[]",
           "doc": "**A time bill line's frozen counts** — the unit-periods it bills, summed over\nits units (ruling 8). Windows formulas meter each unit's delta (module\ndocblock); a span formula (`span_less_gaps`) meters each unit's span from the\npurchase line's start to the bill's `dates.end`, less the same to where\nearlier bills left it, with the unit's windows as the \"on\" time. A span line\nwith no units meters the span with no gaps, times `quantity`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "overcoveredUnitWindows",
+          "signature": "overcoveredUnitWindows(units: readonly Pick<UnitType, \"uid\" | \"charge_windows\">[], purchases: readonly Pick<Purchase, \"uid\" | \"status\" | \"items\">[], through: string): Map<string, typeLiteral>",
+          "doc": "**Window time covered by TWO OR MORE live lines** — one unit's time billed\ntwice over. ADVISORY, never a refusal (D5: what is billed is flagged), the\n`overbilled_out_of_service` twin. Keyed by unit; each entry names the lines\nthat overlap there.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -23001,6 +23103,22 @@
         },
         {
           "kind": "function",
+          "name": "purchaseLineCovers",
+          "signature": "purchaseLineCovers(purchase: Pick<Purchase, \"status\">, item: PurchaseItem): boolean",
+          "doc": "Does this purchase line COUNT for coverage? Its purchase was not canceled and\nthe line was not canceled in full with nothing billed (`purchaseItemCanceled`\n— it never happened). A closed or completed line still covered the time it\ncovered.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "seedPurchaseLinesForWindows",
+          "signature": "seedPurchaseLinesForWindows(units: readonly SeedSourceUnit[], purchases: readonly Pick<Purchase, \"uid\" | \"status\" | \"items\">[], products: ReadonlyMap<string, SeedSourceProduct>, through: string): PurchaseLineSeed[]",
+          "doc": "**Offer a purchase line for every window no live line covers** — the\nsupplier side of the lost-and-damaged offer (`seedReplacementLines`): core\ndecides WHAT to offer, the manager shows it, and accepting it is an ordinary\n`POST /purchases` (or an amend) whose lines name the units. Nothing on a unit\nis written, because a window names no line.\n\nGrouped by (product, formula): one seed per group, naming every unit in it.\nThe provider and rates come from the product's activation entry on that\nformula; `null` / `[]` when the product has none, with a warning.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "subtractChargeWindows",
           "signature": "subtractChargeWindows(a: readonly ChargeWindowType[], b: readonly ChargeWindowType[]): ChargeWindowType[]",
           "doc": "**`a − b` over charge windows** — the time `a` covers that `b` does not,\nascending and merged. Endpoints are the inputs' own strings.",
@@ -23025,9 +23143,17 @@
         },
         {
           "kind": "function",
+          "name": "uncoveredUnitWindows",
+          "signature": "uncoveredUnitWindows(units: readonly Pick<UnitType, \"uid\" | \"charge_windows\">[], purchases: readonly Pick<Purchase, \"uid\" | \"status\" | \"items\">[], through: string): Map<string, ChargeWindowType[]>",
+          "doc": "**The pieces of each unit's windows that NO live purchase line covers**,\nclosed at `through` — the supplier side's \"not yet billed\" offer source\n(`seedReplacementLines`' twin). Keyed by unit; a fully covered unit is absent.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "unitWindowsForLine",
-          "signature": "unitWindowsForLine(units: readonly Pick<UnitType, \"uid\" | \"charge_windows\">[], line: typeLiteral, through: string): Map<string, ChargeWindowType[]>",
-          "doc": "**The windows each unit recorded against one purchase line**, closed at\n`through`. A window that opened after `through` is not yet billable; an open\nwindow (`end: null`, the line still on) bills up to `through`.\n\nKeyed by unit, each list ascending — the unit's own order (the unit refine).",
+          "signature": "unitWindowsForLine(units: readonly Pick<UnitType, \"uid\" | \"charge_windows\">[], line: PurchaseLineCoverage, through: string): Map<string, ChargeWindowType[]>",
+          "doc": "**The windows a purchase line covers, per unit**, closed at `through`: the\ncharge windows of every unit the line names (`uid_units`), clipped to the\nline's `dates`. A window that opened after `through` is not yet billable; an\nopen window (`end: null`, the line still on) bills up to `through`.\n\nThe LINE names the unit, so this reads the line and the units — nothing on a\nunit says which line bills it (D10 item 10, the invoice ↔ out-of-service\ndirection).\n\nKeyed by unit, each list ascending — the unit's own order (the unit refine).",
           "paramTags": [],
           "returnsTag": null
         }
@@ -23191,6 +23317,14 @@
           "name": "deriveQueryByProducts",
           "signature": "deriveQueryByProducts(items: readonly PurchaseItem[]): string[]",
           "doc": "Derive `query_by_products` — the distinct products the items ORDER, in first\nappearance order. A charge's attribution is not an order and is left out.\nThe one author of the mirror, called by every writer.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "deriveQueryByUnits",
+          "signature": "deriveQueryByUnits(items: readonly PurchaseItem[]): string[]",
+          "doc": "Derive `query_by_units` — the distinct units the subrent and charge lines cover, sorted.",
           "paramTags": [],
           "returnsTag": null
         },

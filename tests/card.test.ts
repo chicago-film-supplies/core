@@ -492,6 +492,7 @@ const pline = (over: Partial<SubrentItem> = {}): SubrentItem => {
     dates: { start: "2026-10-18T09:00:00.000-05:00", end: "2026-10-25T17:00:00.000-05:00" },
     quantity_returned: 0,
     uid_orders: [],
+    uid_units: [],
     ...over,
   };
 };

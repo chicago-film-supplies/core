@@ -2146,6 +2146,7 @@ interface ChargeItem {
   quantity_billed: number | null;
   quantity_canceled: number;
   auto_link: boolean;
+  uid_units: string[];
   uid_product?: string;
   uid_out_of_service?: string;
 }
@@ -2164,6 +2165,7 @@ interface ChargeItemInputType {
   coa_posting: COACodeType;
   dates?: PurchaseItemDates | null;
   auto_link?: boolean;
+  uid_units?: string[];
   uid_product?: string;
   uid_out_of_service?: string;
 }
@@ -2531,7 +2533,7 @@ interface CollectionDocs {
   holiday-definition: HolidayDefinition;
   holiday-definitions: HolidayDefinition;
   holiday-snapshot: HolidaySnapshot;
-  settings: BillingSettings;
+  settings: SettingsDocument;
   inventory-ledger: InventoryLedger;
   inventory-ledgers: InventoryLedger;
   invite: Invite;
@@ -8169,9 +8171,8 @@ Body of `POST /units/{uid}/charge-windows`: switch a unit's service line ON.
 Opens a window with no `end` — the server refuses a unit that is not
 `active` or that already has an open window. `start` is when CFS asked the
 provider to switch the line on, which may be earlier than the request (the
-call came first). `line` absent asks the server to resolve the purchase line
-(an active purchase of the unit's provider holding a line for the product);
-`null` states that no supplier line bills it. A stripping `z.object`, not the
+call came first). It names no purchase line: a line names its units. A
+stripping `z.object`, not the
 stored strict node (`tests/input-strictness.test.ts`).
 
 ```ts
@@ -8180,7 +8181,6 @@ interface OpenUnitChargeWindowInputType {
   start: string;
   uid_order: string | null;
   uid_price_formula: string;
-  line?: UnitChargeWindowLineType | null;
   notes: string;
 }
 ```
@@ -9725,6 +9725,25 @@ Zod schema for {@link PriceFormulaBasis}.
 const PriceFormulaBasisEnum: z.ZodType<PriceFormulaBasis>;
 ```
 
+### `PriceFormulaDefaults`
+
+Per line type, the formula a new or retyped line starts on, or `null` for none.
+
+```ts
+type PriceFormulaDefaults = mapped;
+```
+
+### `PriceFormulaDefaultsSchema`
+
+Zod schema for {@link PriceFormulaDefaults}. Every line type is spelled as a
+key, so a seventh `DOC_LINE_ITEM_TYPES` member is a type error here rather
+than a silently missing default (`tests/pricing-settings.test.ts` pins the
+key set to the enum).
+
+```ts
+const PriceFormulaDefaultsSchema: z.ZodType<PriceFormulaDefaults>;
+```
+
 ### `PriceFormulaGapAllowance`
 
 Free suspension time per line, over a ROLLING window: a gap day is free while
@@ -10007,6 +10026,30 @@ interface PriceModifierType {
   type: RateType;
   amount_cents: number;
 }
+```
+
+### `PricingSettings`
+
+The pricing settings singleton (`settings/pricing`).
+
+```ts
+interface PricingSettings {
+  uid: "pricing";
+  price_formula_defaults: PriceFormulaDefaults;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `PricingSettingsSchema`
+
+Zod schema for {@link PricingSettings}.
+
+```ts
+const PricingSettingsSchema: z.ZodType<PricingSettings>;
 ```
 
 ### `Product`
@@ -10378,6 +10421,7 @@ interface Purchase {
   query_by_orders: string[];
   query_by_item_types: PurchaseItemTypeType[];
   query_by_bills?: string[];
+  query_by_units?: string[];
   uid_thread?: string;
   version: number;
   created_by: ActorRefType;
@@ -11007,6 +11051,27 @@ Zod schema for {@link PurchaseLinePrice}.
 
 ```ts
 const PurchaseLinePriceSchema: z.ZodType<PurchaseLinePrice>;
+```
+
+### `PurchaseLineRef`
+
+A purchase line named from elsewhere — its purchase and its row identity
+(`path`), the way a bill line names its purchase line. A report row states
+which line covered a unit's window with it; nothing STORES it on a unit.
+
+```ts
+interface PurchaseLineRef {
+  uid_purchase: string;
+  path: string[];
+}
+```
+
+### `PurchaseLineRefSchema`
+
+Zod schema for {@link PurchaseLineRef}.
+
+```ts
+const PurchaseLineRefSchema: z.ZodType<PurchaseLineRef>;
 ```
 
 ### `PurchaseProductItemTypeType`
@@ -12136,6 +12201,25 @@ interface SetLocationProductDefaultInputType {
 }
 ```
 
+### `SettingsDocument`
+
+Any `settings/{uid}` document. Narrow on `uid`.
+
+```ts
+type SettingsDocument = BillingSettings | PricingSettings;
+```
+
+### `SettingsSchema`
+
+Zod schema for {@link SettingsDocument}. A plain `z.union`: each member is a
+strict object pinned by its literal `uid`, so exactly one member can parse a
+document, and a type-erased member (`z.ZodType<…>`, the export form JSR's
+`no-slow-types` needs) is not a `ZodObject` a `discriminatedUnion` accepts.
+
+```ts
+const SettingsSchema: z.ZodType<SettingsDocument>;
+```
+
 ### `Settlement`
 
 One settlement event against an invoice, a customer credit note, a supplier
@@ -12748,6 +12832,7 @@ interface SubrentItem {
   quantity_returned: number;
   uid_orders: string[];
   auto_link: boolean;
+  uid_units: string[];
 }
 ```
 
@@ -12765,6 +12850,7 @@ interface SubrentItemInputType {
   dates: PurchaseItemDates;
   uid_orders?: string[];
   auto_link?: boolean;
+  uid_units?: string[];
 }
 ```
 
@@ -14410,7 +14496,7 @@ over the windows inside it, at the line's snapshotted rates (D8).
 
 ```ts
 interface UnitActivityPeriod {
-  line: UnitChargeWindowLineType | null;
+  line: PurchaseLineRef | null;
   price_formula: PriceFormulaRef;
   label: string;
   start: string;
@@ -14524,26 +14610,6 @@ Zod schema for {@link UnitChargeWindowType}.
 const UnitChargeWindow: z.ZodType<UnitChargeWindowType>;
 ```
 
-### `UnitChargeWindowLine`
-
-Zod schema for {@link UnitChargeWindowLineType}.
-
-```ts
-const UnitChargeWindowLine: z.ZodType<UnitChargeWindowLineType>;
-```
-
-### `UnitChargeWindowLineType`
-
-The purchase line a charge window bills against — the line's purchase and
-its row identity (`path`), the way a bill line names its purchase line.
-
-```ts
-interface UnitChargeWindowLineType {
-  uid_purchase: string;
-  path: string[];
-}
-```
-
 ### `UnitChargeWindowType`
 
 One span during which a unit's service line was switched ON — a hotspot's or
@@ -14562,13 +14628,20 @@ unit, owned or rented, because CFS's own devices carry provider lines too.
 What the provider billed is the BILL line's own windows, diffed against these
 — not a field here.
 
+⭐ **A window names no purchase line.** The line names the UNIT
+(`SubrentItem.uid_units` / `ChargeItem.uid_units`), exactly as an invoice
+line names the out-of-service record it bills (`uid_out_of_service`) and the
+record names nothing back. So which line covers a window is DERIVED
+(`purchaseLineCoversWindow`), a window no live line covers is an OFFER
+(`seedPurchaseLinesForWindows`), and creating the purchase for it writes the
+purchase alone (api-cloudrun purchases-as-documents D10 item 10).
+
 ```ts
 interface UnitChargeWindowType {
   uid: string;
   start: string;
   end: string | null;
   uid_order: string | null;
-  line: UnitChargeWindowLineType | null;
   uid_price_formula: string;
   notes: string;
   changed_by: ActorRefType;
@@ -14776,7 +14849,6 @@ interface UnitType {
   serial_history: UnitSerialHistoryEntryType[];
   status: UnitStatusType;
   charge_windows: UnitChargeWindowType[];
-  query_by_purchases?: string[];
   uuid_session: string | null;
   version: number;
   created_by: ActorRefType;
@@ -15322,6 +15394,25 @@ interface UpdatePriceFormulaInputType {
 }
 ```
 
+### `UpdatePricingSettingsInput`
+
+Body of `PUT /settings/pricing`. `version` is the optimistic-lock check (`0` creates the singleton).
+
+```ts
+interface UpdatePricingSettingsInput {
+  price_formula_defaults: PriceFormulaDefaults;
+  version: number;
+}
+```
+
+### `UpdatePricingSettingsInputSchema`
+
+Zod schema for {@link UpdatePricingSettingsInput}.
+
+```ts
+const UpdatePricingSettingsInputSchema: z.ZodType<UpdatePricingSettingsInput>;
+```
+
 ### `UpdateProductInput`
 
 Input schema for updating a product.
@@ -15705,7 +15796,6 @@ interface UpdateUnitChargeWindowInputType {
   end?: string | null;
   uid_order?: string | null;
   uid_price_formula?: string;
-  line?: UnitChargeWindowLineType | null;
   notes?: string;
 }
 ```
@@ -16692,9 +16782,9 @@ Derive `query_by_products` — the distinct products the items ORDER, in first
 appearance order. A charge's attribution is not an order and is left out.
 The one author of the mirror, called by every writer.
 
-### `deriveUnitQueryByPurchases(windows: readonly Pick<UnitChargeWindowType, "line">[]): string[]`
+### `deriveQueryByUnits(items: readonly PurchaseItem[]): string[]`
 
-The purchases a unit's windows bill against — distinct, sorted. The one author of `query_by_purchases`.
+Derive `query_by_units` — the distinct units the subrent and charge lines cover, sorted.
 
 ### `destinationJoinViolations(items: ReadonlyArray<unknown>, destinations: ReadonlyArray<unknown>): DestinationJoinViolation[]`
 
@@ -26917,6 +27007,7 @@ interface ChargeItem {
   quantity_billed: number | null;
   quantity_canceled: number;
   auto_link: boolean;
+  uid_units: string[];
   uid_product?: string;
   uid_out_of_service?: string;
 }
@@ -26935,6 +27026,7 @@ interface ChargeItemInputType {
   coa_posting: COACodeType;
   dates?: PurchaseItemDates | null;
   auto_link?: boolean;
+  uid_units?: string[];
   uid_product?: string;
   uid_out_of_service?: string;
 }
@@ -27066,6 +27158,7 @@ interface Purchase {
   query_by_orders: string[];
   query_by_item_types: PurchaseItemTypeType[];
   query_by_bills?: string[];
+  query_by_units?: string[];
   uid_thread?: string;
   version: number;
   created_by: ActorRefType;
@@ -27286,6 +27379,27 @@ Zod schema for {@link PurchaseLinePrice}.
 const PurchaseLinePriceSchema: z.ZodType<PurchaseLinePrice>;
 ```
 
+### `PurchaseLineRef`
+
+A purchase line named from elsewhere — its purchase and its row identity
+(`path`), the way a bill line names its purchase line. A report row states
+which line covered a unit's window with it; nothing STORES it on a unit.
+
+```ts
+interface PurchaseLineRef {
+  uid_purchase: string;
+  path: string[];
+}
+```
+
+### `PurchaseLineRefSchema`
+
+Zod schema for {@link PurchaseLineRef}.
+
+```ts
+const PurchaseLineRefSchema: z.ZodType<PurchaseLineRef>;
+```
+
 ### `PurchaseProductItemTypeType`
 
 One {@link PURCHASE_PRODUCT_ITEM_TYPES} member.
@@ -27479,6 +27593,7 @@ interface SubrentItem {
   quantity_returned: number;
   uid_orders: string[];
   auto_link: boolean;
+  uid_units: string[];
 }
 ```
 
@@ -27496,6 +27611,7 @@ interface SubrentItemInputType {
   dates: PurchaseItemDates;
   uid_orders?: string[];
   auto_link?: boolean;
+  uid_units?: string[];
 }
 ```
 
@@ -27570,6 +27686,10 @@ Derive `query_by_orders` — the distinct union of the subrent items' `uid_order
 Derive `query_by_products` — the distinct products the items ORDER, in first
 appearance order. A charge's attribution is not an order and is left out.
 The one author of the mirror, called by every writer.
+
+### `deriveQueryByUnits(items: readonly PurchaseItem[]): string[]`
+
+Derive `query_by_units` — the distinct units the subrent and charge lines cover, sorted.
 
 ### `purchaseItemBasis(item: typeLiteral): PriceFormulaBasis`
 
@@ -30287,9 +30407,8 @@ Body of `POST /units/{uid}/charge-windows`: switch a unit's service line ON.
 Opens a window with no `end` — the server refuses a unit that is not
 `active` or that already has an open window. `start` is when CFS asked the
 provider to switch the line on, which may be earlier than the request (the
-call came first). `line` absent asks the server to resolve the purchase line
-(an active purchase of the unit's provider holding a line for the product);
-`null` states that no supplier line bills it. A stripping `z.object`, not the
+call came first). It names no purchase line: a line names its units. A
+stripping `z.object`, not the
 stored strict node (`tests/input-strictness.test.ts`).
 
 ```ts
@@ -30298,7 +30417,6 @@ interface OpenUnitChargeWindowInputType {
   start: string;
   uid_order: string | null;
   uid_price_formula: string;
-  line?: UnitChargeWindowLineType | null;
   notes: string;
 }
 ```
@@ -30396,26 +30514,6 @@ Zod schema for {@link UnitChargeWindowType}.
 const UnitChargeWindow: z.ZodType<UnitChargeWindowType>;
 ```
 
-### `UnitChargeWindowLine`
-
-Zod schema for {@link UnitChargeWindowLineType}.
-
-```ts
-const UnitChargeWindowLine: z.ZodType<UnitChargeWindowLineType>;
-```
-
-### `UnitChargeWindowLineType`
-
-The purchase line a charge window bills against — the line's purchase and
-its row identity (`path`), the way a bill line names its purchase line.
-
-```ts
-interface UnitChargeWindowLineType {
-  uid_purchase: string;
-  path: string[];
-}
-```
-
 ### `UnitChargeWindowType`
 
 One span during which a unit's service line was switched ON — a hotspot's or
@@ -30434,13 +30532,20 @@ unit, owned or rented, because CFS's own devices carry provider lines too.
 What the provider billed is the BILL line's own windows, diffed against these
 — not a field here.
 
+⭐ **A window names no purchase line.** The line names the UNIT
+(`SubrentItem.uid_units` / `ChargeItem.uid_units`), exactly as an invoice
+line names the out-of-service record it bills (`uid_out_of_service`) and the
+record names nothing back. So which line covers a window is DERIVED
+(`purchaseLineCoversWindow`), a window no live line covers is an OFFER
+(`seedPurchaseLinesForWindows`), and creating the purchase for it writes the
+purchase alone (api-cloudrun purchases-as-documents D10 item 10).
+
 ```ts
 interface UnitChargeWindowType {
   uid: string;
   start: string;
   end: string | null;
   uid_order: string | null;
-  line: UnitChargeWindowLineType | null;
   uid_price_formula: string;
   notes: string;
   changed_by: ActorRefType;
@@ -30554,7 +30659,6 @@ interface UnitType {
   serial_history: UnitSerialHistoryEntryType[];
   status: UnitStatusType;
   charge_windows: UnitChargeWindowType[];
-  query_by_purchases?: string[];
   uuid_session: string | null;
   version: number;
   created_by: ActorRefType;
@@ -30618,7 +30722,6 @@ interface UpdateUnitChargeWindowInputType {
   end?: string | null;
   uid_order?: string | null;
   uid_price_formula?: string;
-  line?: UnitChargeWindowLineType | null;
   notes?: string;
 }
 ```
@@ -30645,10 +30748,6 @@ interface UpdateUnitInputType {
   status?: UnitUserStatusType;
 }
 ```
-
-### `deriveUnitQueryByPurchases(windows: readonly Pick<UnitChargeWindowType, "line">[]): string[]`
-
-The purchases a unit's windows bill against — distinct, sorted. The one author of `query_by_purchases`.
 
 ## `@cfs/core/schemas/unit-roster`
 
@@ -48446,6 +48545,17 @@ The arithmetic of count DELTAS: an extension is `meter(order) − meter(billed)`
 `meter(billed ∪ new) − meter(billed)` (`@cfs/core/utils/purchase-documents`),
 which is what keeps a window split across two bills on one anchor.
 
+### `defaultPriceFormulaFor(settings: typeLiteral | null, formulas: ReadonlyMap<string, F>, type: DocLineItemTypeType): F | null`
+
+**The formula a new custom line, or a line retyped to `type`, starts on**
+(`settings/pricing`, api-cloudrun purchases-as-documents D10 item 11) — or
+`null` for none, when the operator must choose. `null` too when the settings
+are absent, name no formula for the type, or name one the caller did not load
+or that is retired (`active: false`): a default never fails a line.
+
+Feed the result to `buildCustomOrderLine` / `retypedLinePrice`; it prices
+nothing itself, so it is not a second price author.
+
 ### `formulaUidsOf(items: readonly typeLiteral[]): string[]`
 
 The formula uids a set of lines name — what a caller must load into {@link PricingFormulas}.
@@ -48654,6 +48764,56 @@ interface PurchaseDocumentContext {
 }
 ```
 
+### `PurchaseLineCoverage`
+
+The coverage-bearing half of a subrent or charge line: the units it names and the span it covers.
+
+```ts
+interface PurchaseLineCoverage {
+  uid_units: readonly string[];
+  dates: typeLiteral | null;
+}
+```
+
+### `PurchaseLineSeed`
+
+One offered purchase line for uncovered windows — the supplier twin of a
+`ReplacementLineSeed`. Always a TIME `charge` line: a window is a service
+line, not custody, and a supplier-owned unit's subrent line already names it
+from its receipt.
+
+```ts
+interface PurchaseLineSeed {
+  type: "charge";
+  uid_product: string;
+  name: string;
+  uid_units: string[];
+  uid_price_formula: string;
+  provider: UidNameRefType | null;
+  rates: typeLiteral[];
+  coa_posting: COACostType | null;
+  dates: typeLiteral;
+  windows: typeLiteral[];
+  warning: string | null;
+}
+```
+
+### `SeedSourceProduct`
+
+What {@link seedPurchaseLinesForWindows} needs of a product.
+
+```ts
+type SeedSourceProduct = Pick<Product, "uid" | "name" | "cogs">;
+```
+
+### `SeedSourceUnit`
+
+What {@link seedPurchaseLinesForWindows} needs of a unit.
+
+```ts
+type SeedSourceUnit = Pick<UnitType, "uid" | "number" | "uid_product" | "charge_windows">;
+```
+
 ### `SyncPurchaseToBillsArgs`
 
 {@link syncPurchaseToBills}' inputs.
@@ -48664,6 +48824,18 @@ interface SyncPurchaseToBillsArgs {
   next: Purchase;
   bills: readonly PurchaseBill[];
   credits: readonly Pick<PurchaseCredit, "status" | "items">[];
+}
+```
+
+### `UnitCover`
+
+One live line covering one unit — the covering line and its span.
+
+```ts
+interface UnitCover {
+  uid_purchase: string;
+  path: string[];
+  dates: indexedAccess;
 }
 ```
 
@@ -48685,6 +48857,10 @@ time, so what it names is owed again.
 which bill it un-bills is not stored. On a re-meter of an older bill this can
 read a credited span as unbilled; it only affects that default.
 
+### `coversForUnit(uid_unit: string, purchases: readonly Pick<Purchase, "uid" | "status" | "items">[]): UnitCover[]`
+
+Every live line naming `uid_unit` across `purchases` — what `query_by_units` array-contains returns.
+
 ### `meterBillLine(line: BillLineMeterInput, source: BillLineMeterSource, ctx: PurchaseDocumentContext): TierCount[]`
 
 **A time bill line's frozen counts** — the unit-periods it bills, summed over
@@ -48693,6 +48869,13 @@ docblock); a span formula (`span_less_gaps`) meters each unit's span from the
 purchase line's start to the bill's `dates.end`, less the same to where
 earlier bills left it, with the unit's windows as the "on" time. A span line
 with no units meters the span with no gaps, times `quantity`.
+
+### `overcoveredUnitWindows(units: readonly Pick<UnitType, "uid" | "charge_windows">[], purchases: readonly Pick<Purchase, "uid" | "status" | "items">[], through: string): Map<string, typeLiteral>`
+
+**Window time covered by TWO OR MORE live lines** — one unit's time billed
+twice over. ADVISORY, never a refusal (D5: what is billed is flagged), the
+`overbilled_out_of_service` twin. Keyed by unit; each entry names the lines
+that overlap there.
 
 ### `pricePurchaseDocument(doc: typeLiteral): PricedPurchaseDocument`
 
@@ -48741,6 +48924,25 @@ Is this bill live — not voided? Every "already billed" reader asks it.
 The line fields the purchase → bill merge follows, read off the two schemas
 (fail-closed: an undeclared shared key throws, as on the order side).
 
+### `purchaseLineCovers(purchase: Pick<Purchase, "status">, item: PurchaseItem): boolean`
+
+Does this purchase line COUNT for coverage? Its purchase was not canceled and
+the line was not canceled in full with nothing billed (`purchaseItemCanceled`
+— it never happened). A closed or completed line still covered the time it
+covered.
+
+### `seedPurchaseLinesForWindows(units: readonly SeedSourceUnit[], purchases: readonly Pick<Purchase, "uid" | "status" | "items">[], products: ReadonlyMap<string, SeedSourceProduct>, through: string): PurchaseLineSeed[]`
+
+**Offer a purchase line for every window no live line covers** — the
+supplier side of the lost-and-damaged offer (`seedReplacementLines`): core
+decides WHAT to offer, the manager shows it, and accepting it is an ordinary
+`POST /purchases` (or an amend) whose lines name the units. Nothing on a unit
+is written, because a window names no line.
+
+Grouped by (product, formula): one seed per group, naming every unit in it.
+The provider and rates come from the product's activation entry on that
+formula; `null` / `[]` when the product has none, with a warning.
+
 ### `subtractChargeWindows(a: readonly ChargeWindowType[], b: readonly ChargeWindowType[]): ChargeWindowType[]`
 
 **`a − b` over charge windows** — the time `a` covers that `b` does not,
@@ -48775,11 +48977,22 @@ what a new bill defaults to (D5, the `buildRemainingInvoice` rule). Per unit,
 its recorded windows (closed at `through`) less its billed coverage. A unit
 with nothing left is left out.
 
-### `unitWindowsForLine(units: readonly Pick<UnitType, "uid" | "charge_windows">[], line: typeLiteral, through: string): Map<string, ChargeWindowType[]>`
+### `uncoveredUnitWindows(units: readonly Pick<UnitType, "uid" | "charge_windows">[], purchases: readonly Pick<Purchase, "uid" | "status" | "items">[], through: string): Map<string, ChargeWindowType[]>`
 
-**The windows each unit recorded against one purchase line**, closed at
-`through`. A window that opened after `through` is not yet billable; an open
-window (`end: null`, the line still on) bills up to `through`.
+**The pieces of each unit's windows that NO live purchase line covers**,
+closed at `through` — the supplier side's "not yet billed" offer source
+(`seedReplacementLines`' twin). Keyed by unit; a fully covered unit is absent.
+
+### `unitWindowsForLine(units: readonly Pick<UnitType, "uid" | "charge_windows">[], line: PurchaseLineCoverage, through: string): Map<string, ChargeWindowType[]>`
+
+**The windows a purchase line covers, per unit**, closed at `through`: the
+charge windows of every unit the line names (`uid_units`), clipped to the
+line's `dates`. A window that opened after `through` is not yet billable; an
+open window (`end: null`, the line still on) bills up to `through`.
+
+The LINE names the unit, so this reads the line and the units — nothing on a
+unit says which line bills it (D10 item 10, the invoice ↔ out-of-service
+direction).
 
 Keyed by unit, each list ascending — the unit's own order (the unit refine).
 
@@ -49076,6 +49289,10 @@ Derive `query_by_orders` — the distinct union of the subrent items' `uid_order
 Derive `query_by_products` — the distinct products the items ORDER, in first
 appearance order. A charge's attribution is not an order and is left out.
 The one author of the mirror, called by every writer.
+
+### `deriveQueryByUnits(items: readonly PurchaseItem[]): string[]`
+
+Derive `query_by_units` — the distinct units the subrent and charge lines cover, sorted.
 
 ### `expandPurchaseItems(items: readonly PurchaseItemInputType[], products: ReadonlyMap<string, PurchaseExpansionProduct>): PurchaseExpansionResult`
 
