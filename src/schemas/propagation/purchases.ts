@@ -822,7 +822,7 @@ const CREDIT_VOIDED_FROM_CFS: EnforcementRef = {
   ref:
     "api-cloudrun/tests/integration/purchases/purchaseCreditSettlements.test.ts::void from CFS — a credit nothing draws on voids in Xero and re-bills; one with a live allocation is refused",
   clause:
-    "voiding a supplier credit from CFS voids the posted Xero credit note, then marks the credit void and raises each credit line's purchase line quantity_billed back by its quantity in one commit; a credit with any live allocation or refund is refused before Xero is called, as is a void that would re-bill units the purchase has since canceled",
+    "voiding a supplier credit from CFS voids the posted Xero credit note, then marks the credit void and raises each credit line's purchase line quantity_billed back by its quantity in one commit; a credit with any live allocation or refund is refused before Xero is called; a void that re-bills units the purchase has since canceled is legal and over-bills the line (D5)",
   gates: true,
 };
 
@@ -949,7 +949,7 @@ const voidPurchaseCreditFromXeroRules: CollectionRule[] = [
     "void-purchase-credit-from-xero:credit-to-purchase",
     "void-purchase-credit-from-xero",
     CREDIT_VOIDED_FROM_XERO,
-    "Xero is the authority, so a void that would re-bill units the purchase has since CANCELED (a short close's credit, voided in Xero) is not refused: the line re-bills only up to `quantity − quantity_canceled`, and the excess is reported (`purchase_credit_void_overbilled`) — Xero then bills units CFS will never receive, which a person must re-credit.",
+    "Xero is the authority, so a void is never refused: each credited unit is billed again on its purchase item, uncapped — a void that re-bills units the purchase has since CANCELED (a short close's credit, voided in Xero) over-bills the line, which is legal and flagged by the purchase ↔ bill diff (D5), never trimmed.",
   ),
 ];
 
