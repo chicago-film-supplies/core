@@ -1059,3 +1059,17 @@ Deno.test("formulaPeriods: a week segment walks 7 days from each window's start,
     { start: "2026-01-19", end: "2026-01-26" },
   ]);
 });
+
+Deno.test("formulaPeriods: a range ending MID-DAY keeps that day's periods; a midnight end excludes its day", () => {
+  // Switched on at 22:52 and reported at 22:53 the same evening — the report's `as_of`.
+  const windows = [{ start: "2026-10-31T22:52:30.000-05:00", end: "2026-10-31T22:53:30.000-05:00" }];
+  assertEquals(
+    formulaPeriods(VISION, { windows }, { start: "2026-10-01T00:00:00.000-05:00", end: "2026-10-31T22:53:30.000-05:00" }),
+    [{ start: "2026-10-31", end: "2026-11-30" }],
+  );
+  // Companion: a range that ends at that day's Chicago midnight does not reach it.
+  assertEquals(
+    formulaPeriods(VISION, { windows }, { start: "2026-10-01T00:00:00.000-05:00", end: "2026-10-31T00:00:00.000-05:00" }),
+    [],
+  );
+});

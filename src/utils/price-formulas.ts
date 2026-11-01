@@ -40,7 +40,7 @@ import type {
   PriceFormulaSegment,
 } from "../schemas/price-formula.ts";
 import { priceFormulaBasis, priceFormulaRuleIssues } from "../schemas/price-formula.ts";
-import { toChicagoYmd } from "./dates.ts";
+import { toChicagoStartOfDay, toChicagoYmd } from "./dates.ts";
 
 // ── Calendar days as integers ────────────────────────────────────────
 
@@ -266,6 +266,11 @@ function monthOrigin(
  * - a `day` segment is each Chicago date;
  * - a `none` (flat) formula cuts no periods.
  *
+ * `range.end` is exclusive at the INSTANT, not the date: an end mid-day (the
+ * report's `as_of`, now) keeps that day's periods, so a unit switched on today
+ * is reported today rather than tomorrow. Only a date, or a Chicago midnight,
+ * excludes its day.
+ *
  * It decides no money: price a period by metering the windows clipped to it.
  */
 export function formulaPeriods(
@@ -278,7 +283,8 @@ export function formulaPeriods(
   if (formula.meter.source === "none" || seg.unit === "none") return [];
   const sources = formula.meter.source === "span_less_gaps" && input.span ? [input.span] : input.windows;
   const lo = dayNumber(toYmd(range.start));
-  const hi = dayNumber(toYmd(range.end));
+  const endsAtMidnight = YMD.test(range.end) || Date.parse(toChicagoStartOfDay(range.end)) === Date.parse(range.end);
+  const hi = dayNumber(toYmd(range.end)) + (endsAtMidnight ? 0 : 1);
   const seen = new Map<number, number>();
   for (const src of sources) {
     const s = dayNumber(toYmd(src.start));

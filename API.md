@@ -48630,6 +48630,11 @@ ascending and distinct.
 - a `day` segment is each Chicago date;
 - a `none` (flat) formula cuts no periods.
 
+`range.end` is exclusive at the INSTANT, not the date: an end mid-day (the
+report's `as_of`, now) keeps that day's periods, so a unit switched on today
+is reported today rather than tomorrow. Only a date, or a Chicago midnight,
+excludes its day.
+
 It decides no money: price a period by metering the windows clipped to it.
 
 ### `formulaUidsOf(items: readonly typeLiteral[]): string[]`
