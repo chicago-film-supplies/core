@@ -279,7 +279,11 @@ function addIssues(issues: { path: (string | number)[]; message: string }[], ctx
   for (const issue of issues) ctx.addIssue({ code: "custom", path: issue.path, message: issue.message });
 }
 
-/** The basis of an item's formula; a buy written before `price` existed is flat. */
+/**
+ * The basis of an item's formula. Every STORED item carries `price` (beta B);
+ * the parameter stays loose for a client's draft line, which reads as flat
+ * until it names a formula.
+ */
 export function purchaseItemBasis(item: { price?: PurchaseLinePrice }): PriceFormulaBasis {
   return item.price?.price_formula.basis ?? "flat";
 }
@@ -361,11 +365,11 @@ export interface BuyItem extends PurchaseItemBase {
   /** What the whole item costs, net, integer cents. */
   amount_cents: number;
   /**
-   * The formula snapshot (always a flat one). Optional only until the Phase 5
-   * backfill stamps it on the buys written before it existed; absent reads as
-   * flat.
+   * The formula snapshot (always a flat one). Required since beta B: the Phase 5
+   * backfill stamped it on every stored buy (2026-11-01 census, key present on
+   * 415 of 415 buy lines in prod, 415 of 415 dev, 405 of 405 `test`).
    */
-  price?: PurchaseLinePrice;
+  price: PurchaseLinePrice;
   /** An inventory asset account: 1400 for a `sale` product, 1999 for a `rental`. */
   coa_posting: COAAssetType;
   /**
@@ -523,8 +527,7 @@ const BuyItemInner = z.strictObject({
   uid_product: productKey,
   quantity: quantityKey,
   amount_cents: amountKey,
-  // Optional until the Phase 5 backfill: 413 stored buys predate it.
-  price: PurchaseLinePriceSchema.optional(),
+  price: PurchaseLinePriceSchema,
   coa_posting: COAAssetEnum.meta({ propagate: true }),
   uid_tracking_category: trackingKey,
   expected_date: chicagoStartOfDay().nullable().meta({ column: true, label: "Expected" }),
@@ -826,10 +829,11 @@ export interface Purchase {
   /**
    * The bills raised against this purchase, co-written by every bill create
    * and void (D5), so the purchase → bill sync can point-get them inside the
-   * purchase writer's transaction rather than range-read them. Optional only
-   * until the Phase 5 backfill stamps it.
+   * purchase writer's transaction rather than range-read them. Required since
+   * beta B (2026-11-01 census, 308 of 308 prod, 300 of 300 `test`; dev's one
+   * dev-native seed purchase repaired): a create states `[]`.
    */
-  query_by_bills?: string[];
+  query_by_bills: string[];
   /**
    * Mirror of the units the lines cover ({@link deriveQueryByUnits}) — "which
    * purchases cover this unit" as one `array-contains`, the read behind every
@@ -926,7 +930,7 @@ export const PurchaseSchema: z.ZodType<Purchase> = z.strictObject({
   query_by_products: z.array(FirestoreId).meta({ derived: true }),
   query_by_orders: z.array(FirestoreId).meta({ derived: true }),
   query_by_item_types: z.array(PurchaseItemTypeEnum).meta({ derived: true }),
-  query_by_bills: z.array(FirestoreId).optional(),
+  query_by_bills: z.array(FirestoreId),
   query_by_units: z.array(UnitId).optional(),
   uid_thread: ThreadId.optional().meta(homonym),
   version: z.int().min(0).default(0).meta(homonym),

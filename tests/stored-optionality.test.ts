@@ -96,8 +96,9 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   // ── mid-expand — purchases-as-documents beta A (D9). A bill or credit PRODUCT
   //    line's `dates` (the span a span-metered formula reads): absent = a line
   //    written before the Phase 5 backfill, null = no span, a value = the span.
-  //    The backfill states it on every line; beta B tightens it, using
-  //    `audit:reparse` rather than `orderBy`, since it sits inside `items[]`.
+  //    ⚠️ The backfill did NOT state it: `audit:reparse --positions` on
+  //    2026-11-01 found it on 0 of 415 stored bill lines (prod and dev), so beta
+  //    B tightened only `price`. It needs a writer audit and a backfill first.
   ["purchase-bills.items[].dates", "mid-expand"],
   ["purchase-credits.items[].dates", "mid-expand"],
   // ── pending-census — measurable with `orderBy`, awaiting the both-environment

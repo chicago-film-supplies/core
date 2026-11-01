@@ -129,7 +129,7 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
   // cross-field equalities over the items; `query_by_orders` stays `[]`, which a
   // buy item derives. Since api-cloudrun#1407 the ITEM also carries one — its
   // `path` is `[uid]` — and arrays are replaced wholesale, so the whole minimal
-  // buy item is stated. Still one entry.
+  // buy item is stated (with its `price`, required since beta B). Still one entry.
   purchase: {
     query_by_products: ["AAAAAAAAAAAAAAAAAAAA"],
     query_by_item_types: ["buy"],
@@ -141,6 +141,7 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
       uid_product: "AAAAAAAAAAAAAAAAAAAA",
       quantity: 1,
       amount_cents: 0,
+      price: { price_formula: { uid: "AAAAAAAAAAAAAAAAAAAA", name: "A", basis: "flat" }, rates: [], discount: null },
       coa_posting: 1999,
       uid_tracking_category: null,
       expected_date: null,
@@ -163,6 +164,7 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
       uid_product: "AAAAAAAAAAAAAAAAAAAA",
       quantity: 1,
       amount_cents: 0,
+      price: { price_formula: { uid: "AAAAAAAAAAAAAAAAAAAA", name: "A", basis: "flat" }, rates: [], discount: null, counts: [] },
       coa_posting: 1999,
       uid_tracking_category: null,
       path_purchase_item: ["AAAAAAAAAAAAAAAAAAAA"],

@@ -1244,7 +1244,7 @@ interface BuyItem {
   uid_product: string;
   quantity: number;
   amount_cents: number;
-  price?: PurchaseLinePrice;
+  price: PurchaseLinePrice;
   coa_posting: COAAssetType;
   expected_date: string | null;
   quantity_received: number;
@@ -10420,7 +10420,7 @@ interface Purchase {
   query_by_products: string[];
   query_by_orders: string[];
   query_by_item_types: PurchaseItemTypeType[];
-  query_by_bills?: string[];
+  query_by_bills: string[];
   query_by_units?: string[];
   uid_thread?: string;
   version: number;
@@ -17566,7 +17566,9 @@ Returns `{ path, message }[]`; empty means the rule is well-formed.
 
 ### `purchaseItemBasis(item: typeLiteral): PriceFormulaBasis`
 
-The basis of an item's formula; a buy written before `price` existed is flat.
+The basis of an item's formula. Every STORED item carries `price` (beta B);
+the parameter stays loose for a client's draft line, which reads as flat
+until it names a formula.
 
 ### `purchaseItemCanceled(item: PurchaseItem): boolean`
 
@@ -26982,7 +26984,7 @@ interface BuyItem {
   uid_product: string;
   quantity: number;
   amount_cents: number;
-  price?: PurchaseLinePrice;
+  price: PurchaseLinePrice;
   coa_posting: COAAssetType;
   expected_date: string | null;
   quantity_received: number;
@@ -27188,7 +27190,7 @@ interface Purchase {
   query_by_products: string[];
   query_by_orders: string[];
   query_by_item_types: PurchaseItemTypeType[];
-  query_by_bills?: string[];
+  query_by_bills: string[];
   query_by_units?: string[];
   uid_thread?: string;
   version: number;
@@ -27724,7 +27726,9 @@ Derive `query_by_units` — the distinct units the subrent and charge lines cove
 
 ### `purchaseItemBasis(item: typeLiteral): PriceFormulaBasis`
 
-The basis of an item's formula; a buy written before `price` existed is flat.
+The basis of an item's formula. Every STORED item carries `price` (beta B);
+the parameter stays loose for a client's draft line, which reads as flat
+until it names a formula.
 
 ### `purchaseItemCanceled(item: PurchaseItem): boolean`
 

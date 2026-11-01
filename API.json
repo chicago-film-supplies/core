@@ -537,7 +537,7 @@
         {
           "kind": "interface",
           "name": "BuyItem",
-          "declaration": "interface BuyItem {\n  type: \"buy\";\n  uid_product: string;\n  quantity: number;\n  amount_cents: number;\n  price?: PurchaseLinePrice;\n  coa_posting: COAAssetType;\n  expected_date: string | null;\n  quantity_received: number;\n  quantity_billed: number;\n  quantity_canceled: number;\n  landed_costs: PurchaseLandedCost[];\n}",
+          "declaration": "interface BuyItem {\n  type: \"buy\";\n  uid_product: string;\n  quantity: number;\n  amount_cents: number;\n  price: PurchaseLinePrice;\n  coa_posting: COAAssetType;\n  expected_date: string | null;\n  quantity_received: number;\n  quantity_billed: number;\n  quantity_canceled: number;\n  landed_costs: PurchaseLandedCost[];\n}",
           "doc": "A BUY item — ownership of `quantity` units of one product. Always flat."
         },
         {
@@ -4581,7 +4581,7 @@
         {
           "kind": "interface",
           "name": "Purchase",
-          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  store: UidNameRefType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseItem[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills?: string[];\n  query_by_units?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  store: UidNameRefType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseItem[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  query_by_units?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A purchase order placed with a supplier."
         },
         {
@@ -8048,7 +8048,7 @@
           "kind": "function",
           "name": "purchaseItemBasis",
           "signature": "purchaseItemBasis(item: typeLiteral): PriceFormulaBasis",
-          "doc": "The basis of an item's formula; a buy written before `price` existed is flat.",
+          "doc": "The basis of an item's formula. Every STORED item carries `price` (beta B);\nthe parameter stays loose for a client's draft line, which reads as flat\nuntil it names a formula.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -12466,7 +12466,7 @@
         {
           "kind": "interface",
           "name": "BuyItem",
-          "declaration": "interface BuyItem {\n  type: \"buy\";\n  uid_product: string;\n  quantity: number;\n  amount_cents: number;\n  price?: PurchaseLinePrice;\n  coa_posting: COAAssetType;\n  expected_date: string | null;\n  quantity_received: number;\n  quantity_billed: number;\n  quantity_canceled: number;\n  landed_costs: PurchaseLandedCost[];\n}",
+          "declaration": "interface BuyItem {\n  type: \"buy\";\n  uid_product: string;\n  quantity: number;\n  amount_cents: number;\n  price: PurchaseLinePrice;\n  coa_posting: COAAssetType;\n  expected_date: string | null;\n  quantity_received: number;\n  quantity_billed: number;\n  quantity_canceled: number;\n  landed_costs: PurchaseLandedCost[];\n}",
           "doc": "A BUY item — ownership of `quantity` units of one product. Always flat."
         },
         {
@@ -12544,7 +12544,7 @@
         {
           "kind": "interface",
           "name": "Purchase",
-          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  store: UidNameRefType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseItem[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills?: string[];\n  query_by_units?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  store: UidNameRefType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseItem[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  query_by_units?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A purchase order placed with a supplier."
         },
         {
@@ -12819,7 +12819,7 @@
           "kind": "function",
           "name": "purchaseItemBasis",
           "signature": "purchaseItemBasis(item: typeLiteral): PriceFormulaBasis",
-          "doc": "The basis of an item's formula; a buy written before `price` existed is flat.",
+          "doc": "The basis of an item's formula. Every STORED item carries `price` (beta B);\nthe parameter stays loose for a client's draft line, which reads as flat\nuntil it names a formula.",
           "paramTags": [],
           "returnsTag": null
         },

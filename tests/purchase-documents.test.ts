@@ -461,6 +461,7 @@ function purchaseDoc(items: PurchaseItem[]): Purchase {
     query_by_products: [PRODUCT],
     query_by_orders: [],
     query_by_item_types: ["subrent"],
+    query_by_bills: [],
     version: 0,
     created_by: actor,
     updated_by: actor,

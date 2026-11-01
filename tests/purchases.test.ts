@@ -193,6 +193,7 @@ const line = (over: Partial<BuyItem> = {}): BuyItem => {
     uid_product: PRODUCT,
     quantity: 3,
     amount_cents: 140985,
+    price: flatPrice,
     coa_posting: 1999,
     uid_tracking_category: null,
     expected_date: null,
@@ -372,6 +373,7 @@ function purchase(over: Record<string, unknown> = {}) {
     query_by_products: deriveQueryByProducts(items),
     query_by_orders: deriveQueryByOrders(items),
     query_by_item_types: deriveQueryByItemTypes(items),
+    query_by_bills: [],
     version: 0,
     created_by: actor,
     updated_by: actor,
@@ -509,11 +511,10 @@ Deno.test("PurchaseSchema: a flat line states an amount and no rates; a time lin
   assertEquals(issuePaths(PurchaseSchema, withItems([line({ price: weeklyPrice })])).includes("items.0.price.price_formula.basis"), true);
 });
 
-Deno.test("PurchaseSchema: a buy without `price` is a legacy flat line until the backfill (D9)", () => {
-  const legacy = line();
-  assertEquals("price" in legacy, false);
-  assertEquals(issuePaths(PurchaseSchema, withItems([legacy])), []);
-  assertEquals(issuePaths(PurchaseSchema, withItems([line({ price: flatPrice })])), []);
+Deno.test("PurchaseSchema: a buy states its `price` — required since beta B, after the Phase 5 backfill", () => {
+  assertEquals(issuePaths(PurchaseSchema, withItems([line()])), []);
+  const { price: _p, ...bare } = line();
+  assertEquals(issuePaths(PurchaseSchema, withItems([line()], { items: [bare] })), ["items.0.price"]);
 });
 
 Deno.test("PurchaseSchema: a supplier discount sits beside the NET amount (ruling 7)", () => {
@@ -542,9 +543,9 @@ Deno.test("the price snapshot is reached by the column walker", () => {
   assertEquals(columns.get("items.type"), "Item Type");
 });
 
-Deno.test("PurchaseSchema: all three mirrors are required, and each must be exact", () => {
+Deno.test("PurchaseSchema: all three mirrors and `query_by_bills` are required, and each mirror must be exact", () => {
   assertEquals(issuePaths(PurchaseSchema, purchase()), []);
-  for (const key of ["query_by_products", "query_by_orders", "query_by_item_types"]) {
+  for (const key of ["query_by_products", "query_by_orders", "query_by_item_types", "query_by_bills"]) {
     const doc = purchase() as Record<string, unknown>;
     delete doc[key];
     assertEquals(issuePaths(PurchaseSchema, doc), [key]);
@@ -732,6 +733,7 @@ const billItem = (over: Record<string, unknown> = {}) => {
     uid_product: PRODUCT,
     quantity: 3,
     amount_cents: 140985,
+    price: { ...flatPrice, counts: [] },
     coa_posting: 1999,
     uid_tracking_category: null,
     path_purchase_item: [iuid(1)],
@@ -987,8 +989,10 @@ Deno.test("PurchaseBillSchema: a flat line meters nothing; a unit appears once p
   ]);
 });
 
-Deno.test("PurchaseBillSchema: a bill line without price, units or dates is a legacy flat line until the backfill (D9)", () => {
+Deno.test("PurchaseBillSchema: a product line states `price` (beta B); `units`/`dates` may still be absent; a charge line states all three", () => {
   assertEquals(issuePaths(PurchaseBillSchema, bill()), []);
+  const { price: _bp, ...unpriced } = billItem();
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [unpriced] })), ["items.0.price"]);
   const { price: _p, units: _u, dates: _d, ...bare } = billDirect();
   assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [billItem(), bare], totals: T_WITH_FREIGHT })).sort(), [
     "items.1.dates",

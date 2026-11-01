@@ -160,12 +160,17 @@ export const PurchaseDocumentLineUnitSchema: z.ZodType<PurchaseDocumentLineUnit>
  * `dates` are a time line's: the units billed with their windows, and the span
  * a span-metered formula (Verizon) reads.
  *
- * `price`, `units` and `dates` are optional ONLY until the Phase 5 backfill
- * stamps the 413 stored lines that predate them (absent reads as a legacy flat
- * line). They are required on the `charge` arm, which has no stored corpus.
+ * `price` is required since beta B: the Phase 5 backfill stamped it on every
+ * stored product line (2026-11-01 census, 415 of 415 bill lines in prod and
+ * dev, 403 of 403 `test`; no credit line exists in any of the three).
+ *
+ * ⚠️ `units` and `dates` stay optional on a product line: the same census found
+ * them on 0 of 415 stored bill lines, so the backfill did not state them and
+ * absent still means "a flat line written before beta A". They are required on
+ * the `charge` arm, which has no stored corpus.
  */
 interface PurchaseDocumentLineTimeKeys {
-  price?: PurchaseDocumentLinePrice;
+  price: PurchaseDocumentLinePrice;
   units?: PurchaseDocumentLineUnit[];
   dates?: ChargeWindowType | null;
 }
@@ -306,7 +311,7 @@ const PurchaseDocumentProductItemInner = z.strictObject({
   ...docItemHead,
   uid_product: FirestoreId,
   ...docItemMoney,
-  price: PurchaseDocumentLinePriceSchema.optional(),
+  price: PurchaseDocumentLinePriceSchema,
   units: lineUnits.optional(),
   dates: lineDates.optional(),
   // As invoice's `path_order_item`, but REQUIRED: a product item bills a

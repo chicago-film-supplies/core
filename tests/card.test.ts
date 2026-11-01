@@ -506,6 +506,7 @@ const bline: BuyItem = {
   name: "Gaff tape",
   quantity: 5,
   amount_cents: 1_000,
+  price: { price_formula: { uid: "FixedFormula00000000", name: "Fixed", basis: "flat" }, rates: [], discount: null },
   coa_posting: 1400,
   uid_tracking_category: null,
   expected_date: null,
