@@ -933,6 +933,129 @@ export function projectPurchaseLineToBillLine(
   } as PurchaseDocumentItem;
 }
 
+/** {@link projectPurchaseLineToCreditLine}'s inputs beside the purchase line. */
+export interface ProjectCreditLineOptions {
+  /** The new credit line's row identity, minted by the writer. */
+  uid: string;
+  /** The units it credits, each with the windows it un-bills. */
+  units: readonly PurchaseDocumentLineUnit[];
+  /** The span it un-bills, on a span-metered line. */
+  dates: ChargeWindowType | null;
+  /** The units credited on a unit-less span line; otherwise the count of `units`. */
+  quantity: number;
+  /** The purchase's existing bills and credits. */
+  billed: PurchaseBilledDocuments;
+}
+
+/**
+ * **A TIME credit line** — what un-billing some of a time line's billed time is
+ * worth (`PurchaseCreditItemInput`'s docblock).
+ *
+ * Every credited piece must sit inside what is billed and not yet credited
+ * (`billedUnitCoverage`; for a span line, between the line's start and where
+ * its bills left it), or this throws: a credit cannot un-bill time nobody billed.
+ * The counts are the meter's delta — the credited windows metered on top of what
+ * stays billed — so a credit of a whole bill reverses it exactly, and a credit of
+ * a window's tail inside a capped month credits the weeks the month still covers
+ * (Q14), never the month. The money is the one money step at the purchase line's
+ * snapshotted rates and discount; the account, category and attribution are the
+ * purchase line's.
+ *
+ * @throws on a flat line, an unknown formula, or a piece outside the billed time.
+ */
+export function projectPurchaseLineToCreditLine(
+  item: PurchaseItem,
+  opts: ProjectCreditLineOptions,
+  ctx: PurchaseDocumentContext,
+): PurchaseDocumentItem {
+  if (purchaseItemBasis(item) !== "time" || item.type === "buy") {
+    throw new Error(`${item.name} is billed by quantity; credit it in units`);
+  }
+  const itemPrice = item.price!;
+  const formula = formulaFor(itemPrice, ctx);
+  const coverage = billedUnitCoverage(opts.billed, item.path);
+  const remainder = new Map<string, ChargeWindowType[]>();
+  for (const [uid, windows] of coverage) remainder.set(uid, windows);
+  const units = opts.units.map((u) => ({
+    uid_unit: u.uid_unit,
+    charge_windows: unionIntervals(u.charge_windows.map(toInterval)).map(fromInterval),
+  }));
+  for (const u of units) {
+    const covered = (coverage.get(u.uid_unit) ?? []).map(toInterval);
+    const outside = subtractIntervals(u.charge_windows.map(toInterval), covered);
+    if (outside.length > 0) {
+      throw new Error(`Unit ${u.uid_unit} is not billed for ${outside.map(fromInterval).map((w) => `${w.start}–${w.end}`).join(", ")}`);
+    }
+    const left = subtractIntervals(covered, u.charge_windows.map(toInterval)).map(fromInterval);
+    if (left.length > 0) remainder.set(u.uid_unit, left);
+    else remainder.delete(u.uid_unit);
+  }
+
+  let dates: ChargeWindowType | null = null;
+  let billedSpanEndAt: string | null = null;
+  if (formula.meter.source === "span_less_gaps") {
+    if (opts.dates === null || item.dates === null) {
+      throw new Error(`A "${formula.name}" line credits a span, and this credit states none`);
+    }
+    const billedTo = billedSpanEnd(opts.billed, item.path);
+    const from = Date.parse(opts.dates.start);
+    const to = Date.parse(opts.dates.end);
+    if (billedTo === null || from < Date.parse(item.dates.start) || to > Date.parse(billedTo) || to <= from) {
+      throw new Error(`The credited span ${opts.dates.start}–${opts.dates.end} is not inside the span billed`);
+    }
+    // A span credit names no unit windows, so coverage cannot net it: refuse a
+    // span an earlier live credit already un-billed.
+    for (const credit of opts.billed.credits) {
+      if (credit.status === "void") continue;
+      for (const line of linesFor(credit.items, item.path)) {
+        if (line.dates && Date.parse(line.dates.start) < to && Date.parse(line.dates.end) > from) {
+          throw new Error(`The span ${opts.dates.start}–${opts.dates.end} overlaps one already credited`);
+        }
+      }
+    }
+    dates = { start: opts.dates.start, end: opts.dates.end };
+    billedSpanEndAt = opts.dates.start;
+  } else if (units.length === 0) {
+    throw new Error(`A credit of ${item.name} names the units and windows it un-bills`);
+  }
+
+  const quantity = units.length > 0 ? units.length : opts.quantity;
+  const counts = meterBillLine(
+    { price: itemPrice, units, dates, quantity },
+    { span: item.dates, recorded: coverage, billed: remainder, billedSpanEnd: billedSpanEndAt },
+    ctx,
+  );
+  const price: PurchaseDocumentLinePrice = {
+    price_formula: { ...itemPrice.price_formula },
+    rates: itemPrice.rates.map((r) => ({ ...r })),
+    discount: itemPrice.discount ? { ...itemPrice.discount } : null,
+    counts,
+  };
+  const { amount_cents, discount_cents } = timeLineMoney(price);
+  if (price.discount) price.discount.amount_cents = discount_cents;
+  const attribution = item.type === "charge"
+    ? {
+      ...(item.uid_product !== undefined ? { uid_product: item.uid_product } : {}),
+      ...(item.uid_out_of_service !== undefined ? { uid_out_of_service: item.uid_out_of_service } : {}),
+    }
+    : { uid_product: item.uid_product };
+  return {
+    type: item.type,
+    uid: opts.uid,
+    path: [opts.uid],
+    name: item.name,
+    coa_posting: item.coa_posting,
+    uid_tracking_category: item.uid_tracking_category,
+    path_purchase_item: [...item.path],
+    ...attribution,
+    quantity,
+    amount_cents,
+    price,
+    units,
+    dates,
+  } as PurchaseDocumentItem;
+}
+
 // ── The purchase → bill sync ───────────────────────────────────
 
 let billFields: readonly SharedField[] | null = null;

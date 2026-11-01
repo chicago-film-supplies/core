@@ -736,6 +736,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "pricePurchaseDocument",
     "projectPurchaseLineForBill",
     "projectPurchaseLineToBillLine",
+    "projectPurchaseLineToCreditLine",
     "purchaseBillIsLive",
     "purchaseLineCovers",
     "purchaseBillSharedLineFields",

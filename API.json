@@ -4652,6 +4652,18 @@
         },
         {
           "kind": "variable",
+          "name": "PurchaseCreditItemInput",
+          "declaration": "const PurchaseCreditItemInput: z.ZodType<PurchaseCreditItemInputType>;",
+          "doc": "Zod schema for PurchaseCreditItemInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseCreditItemInputType",
+          "declaration": "interface PurchaseCreditItemInputType {\n  units?: PurchaseDocumentLineUnit[];\n  dates?: ChargeWindowType | null;\n}",
+          "doc": "One line of a supplier CREDIT as an operator states it: a purchase item and\nwhat it un-bills.\n\n- **flat** — `quantity` units, priced at the item's cumulative share of the\n  range they un-bill (`cumulativeShareCents`). `units` and `dates` are refused.\n- **time** — the TIME it un-bills, never units of an amount: `units` names each\n  unit's credited windows, `dates` the credited span of a span-metered line\n  (Verizon). Every credited piece must already be billed and not credited\n  (`billedUnitCoverage`), and the line is priced as what those windows\n  contributed: `meter(coverage) − meter(coverage − credited)`, at the purchase\n  line's snapshotted rates (`projectPurchaseLineToCreditLine`,\n  `@cfs/core/utils/purchase-documents`). `quantity` is the count of units\n  credited, or of the span's units on a unit-less span line."
+        },
+        {
+          "kind": "variable",
           "name": "PurchaseCreditReasonEnum",
           "declaration": "const PurchaseCreditReasonEnum: z.ZodType<PurchaseCreditReasonType>;",
           "doc": "Zod schema for PurchaseCreditReasonType."
@@ -12988,6 +13000,18 @@
           "name": "PurchaseCredit",
           "declaration": "interface PurchaseCredit {\n  uid: string;\n  number: number;\n  uid_purchase: string;\n  supplier: UidNameRefType;\n  origin: PurchaseDocumentOriginType;\n  reason: PurchaseCreditReasonType;\n  status: PurchaseCreditStatusType;\n  xero_id: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  items: PurchaseDocumentItem[];\n  total_cents: number;\n  remaining_credit_cents: number;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A supplier credit (ACCPAYCREDIT) against one purchase."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseCreditItemInput",
+          "declaration": "const PurchaseCreditItemInput: z.ZodType<PurchaseCreditItemInputType>;",
+          "doc": "Zod schema for PurchaseCreditItemInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseCreditItemInputType",
+          "declaration": "interface PurchaseCreditItemInputType {\n  units?: PurchaseDocumentLineUnit[];\n  dates?: ChargeWindowType | null;\n}",
+          "doc": "One line of a supplier CREDIT as an operator states it: a purchase item and\nwhat it un-bills.\n\n- **flat** — `quantity` units, priced at the item's cumulative share of the\n  range they un-bill (`cumulativeShareCents`). `units` and `dates` are refused.\n- **time** — the TIME it un-bills, never units of an amount: `units` names each\n  unit's credited windows, `dates` the credited span of a span-metered line\n  (Verizon). Every credited piece must already be billed and not credited\n  (`billedUnitCoverage`), and the line is priced as what those windows\n  contributed: `meter(coverage) − meter(coverage − credited)`, at the purchase\n  line's snapshotted rates (`projectPurchaseLineToCreditLine`,\n  `@cfs/core/utils/purchase-documents`). `quantity` is the count of units\n  credited, or of the span's units on a unit-less span line."
         },
         {
           "kind": "variable",
@@ -22977,6 +23001,12 @@
         },
         {
           "kind": "interface",
+          "name": "ProjectCreditLineOptions",
+          "declaration": "interface ProjectCreditLineOptions {\n  uid: string;\n  units: readonly PurchaseDocumentLineUnit[];\n  dates: ChargeWindowType | null;\n  quantity: number;\n  billed: PurchaseBilledDocuments;\n}",
+          "doc": "{@link projectPurchaseLineToCreditLine}'s inputs beside the purchase line."
+        },
+        {
+          "kind": "interface",
           "name": "PurchaseBillSync",
           "declaration": "interface PurchaseBillSync {\n  uid: string;\n  bill: PurchaseBill;\n  overridden: string[];\n  changed: boolean;\n}",
           "doc": "One bill's outcome from {@link syncPurchaseToBills}."
@@ -23090,6 +23120,14 @@
           "name": "projectPurchaseLineToBillLine",
           "signature": "projectPurchaseLineToBillLine(item: PurchaseItem, opts: ProjectBillLineOptions, ctx: PurchaseDocumentContext): PurchaseDocumentItem | null",
           "doc": "**Default a bill line from its purchase line** (D5). Name, formula, rates,\ndiscount terms, posting and attribution are the purchase line's (each then\noverridable on the bill until it settles); the money depends on the basis:\n\n- **flat** — `quantity` units at the line's cumulative share from where its\n  `quantity_billed` stands (`cumulativeShareCents`, extended past the\n  ordered count because over-billing is legal), so the bills of a line sum to\n  its `amount_cents`.\n- **time** — the units' UNBILLED windows up to `through`\n  ({@link unbilledUnitWindows}), metered as deltas ({@link meterBillLine})\n  and priced by the one money step. A span line (Verizon) bills from where\n  its earlier bills left off to `through` (or the line's end, if sooner).\n\nReturns `null` when a time line has nothing to bill — no unbilled windows, or\na span already billed through `through` (the poll's `nothing_to_bill`). A\nflat line always projects: what to bill is the operator's call.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "projectPurchaseLineToCreditLine",
+          "signature": "projectPurchaseLineToCreditLine(item: PurchaseItem, opts: ProjectCreditLineOptions, ctx: PurchaseDocumentContext): PurchaseDocumentItem",
+          "doc": "**A TIME credit line** — what un-billing some of a time line's billed time is\nworth (`PurchaseCreditItemInput`'s docblock).\n\nEvery credited piece must sit inside what is billed and not yet credited\n(`billedUnitCoverage`; for a span line, between the line's start and where\nits bills left it), or this throws: a credit cannot un-bill time nobody billed.\nThe counts are the meter's delta — the credited windows metered on top of what\nstays billed — so a credit of a whole bill reverses it exactly, and a credit of\na window's tail inside a capped month credits the weeks the month still covers\n(Q14), never the month. The money is the one money step at the purchase line's\nsnapshotted rates and discount; the account, category and attribution are the\npurchase line's.",
           "paramTags": [],
           "returnsTag": null
         },

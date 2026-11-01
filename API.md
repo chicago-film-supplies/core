@@ -10588,6 +10588,37 @@ interface PurchaseCredit {
 }
 ```
 
+### `PurchaseCreditItemInput`
+
+Zod schema for PurchaseCreditItemInputType.
+
+```ts
+const PurchaseCreditItemInput: z.ZodType<PurchaseCreditItemInputType>;
+```
+
+### `PurchaseCreditItemInputType`
+
+One line of a supplier CREDIT as an operator states it: a purchase item and
+what it un-bills.
+
+- **flat** — `quantity` units, priced at the item's cumulative share of the
+  range they un-bill (`cumulativeShareCents`). `units` and `dates` are refused.
+- **time** — the TIME it un-bills, never units of an amount: `units` names each
+  unit's credited windows, `dates` the credited span of a span-metered line
+  (Verizon). Every credited piece must already be billed and not credited
+  (`billedUnitCoverage`), and the line is priced as what those windows
+  contributed: `meter(coverage) − meter(coverage − credited)`, at the purchase
+  line's snapshotted rates (`projectPurchaseLineToCreditLine`,
+  `@cfs/core/utils/purchase-documents`). `quantity` is the count of units
+  credited, or of the span's units on a unit-less span line.
+
+```ts
+interface PurchaseCreditItemInputType {
+  units?: PurchaseDocumentLineUnit[];
+  dates?: ChargeWindowType | null;
+}
+```
+
 ### `PurchaseCreditReasonEnum`
 
 Zod schema for PurchaseCreditReasonType.
@@ -28083,6 +28114,37 @@ interface PurchaseCredit {
   updated_by: ActorRefType;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
+}
+```
+
+### `PurchaseCreditItemInput`
+
+Zod schema for PurchaseCreditItemInputType.
+
+```ts
+const PurchaseCreditItemInput: z.ZodType<PurchaseCreditItemInputType>;
+```
+
+### `PurchaseCreditItemInputType`
+
+One line of a supplier CREDIT as an operator states it: a purchase item and
+what it un-bills.
+
+- **flat** — `quantity` units, priced at the item's cumulative share of the
+  range they un-bill (`cumulativeShareCents`). `units` and `dates` are refused.
+- **time** — the TIME it un-bills, never units of an amount: `units` names each
+  unit's credited windows, `dates` the credited span of a span-metered line
+  (Verizon). Every credited piece must already be billed and not credited
+  (`billedUnitCoverage`), and the line is priced as what those windows
+  contributed: `meter(coverage) − meter(coverage − credited)`, at the purchase
+  line's snapshotted rates (`projectPurchaseLineToCreditLine`,
+  `@cfs/core/utils/purchase-documents`). `quantity` is the count of units
+  credited, or of the span's units on a unit-less span line.
+
+```ts
+interface PurchaseCreditItemInputType {
+  units?: PurchaseDocumentLineUnit[];
+  dates?: ChargeWindowType | null;
 }
 ```
 
@@ -48738,6 +48800,20 @@ interface ProjectBillLineOptions {
 }
 ```
 
+### `ProjectCreditLineOptions`
+
+{@link projectPurchaseLineToCreditLine}'s inputs beside the purchase line.
+
+```ts
+interface ProjectCreditLineOptions {
+  uid: string;
+  units: readonly PurchaseDocumentLineUnit[];
+  dates: ChargeWindowType | null;
+  quantity: number;
+  billed: PurchaseBilledDocuments;
+}
+```
+
 ### `PurchaseBillSync`
 
 One bill's outcome from {@link syncPurchaseToBills}.
@@ -48928,6 +49004,21 @@ overridable on the bill until it settles); the money depends on the basis:
 Returns `null` when a time line has nothing to bill — no unbilled windows, or
 a span already billed through `through` (the poll's `nothing_to_bill`). A
 flat line always projects: what to bill is the operator's call.
+
+### `projectPurchaseLineToCreditLine(item: PurchaseItem, opts: ProjectCreditLineOptions, ctx: PurchaseDocumentContext): PurchaseDocumentItem`
+
+**A TIME credit line** — what un-billing some of a time line's billed time is
+worth (`PurchaseCreditItemInput`'s docblock).
+
+Every credited piece must sit inside what is billed and not yet credited
+(`billedUnitCoverage`; for a span line, between the line's start and where
+its bills left it), or this throws: a credit cannot un-bill time nobody billed.
+The counts are the meter's delta — the credited windows metered on top of what
+stays billed — so a credit of a whole bill reverses it exactly, and a credit of
+a window's tail inside a capped month credits the weeks the month still covers
+(Q14), never the month. The money is the one money step at the purchase line's
+snapshotted rates and discount; the account, category and attribution are the
+purchase line's.
 
 ### `purchaseBillIsLive(bill: Pick<PurchaseBill, "totals">): boolean`
 

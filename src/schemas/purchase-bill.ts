@@ -750,6 +750,39 @@ export const PurchaseDocumentItemInput: z.ZodType<PurchaseDocumentItemInputType>
 });
 
 /**
+ * One line of a supplier CREDIT as an operator states it: a purchase item and
+ * what it un-bills.
+ *
+ * - **flat** — `quantity` units, priced at the item's cumulative share of the
+ *   range they un-bill (`cumulativeShareCents`). `units` and `dates` are refused.
+ * - **time** — the TIME it un-bills, never units of an amount: `units` names each
+ *   unit's credited windows, `dates` the credited span of a span-metered line
+ *   (Verizon). Every credited piece must already be billed and not credited
+ *   (`billedUnitCoverage`), and the line is priced as what those windows
+ *   contributed: `meter(coverage) − meter(coverage − credited)`, at the purchase
+ *   line's snapshotted rates (`projectPurchaseLineToCreditLine`,
+ *   `@cfs/core/utils/purchase-documents`). `quantity` is the count of units
+ *   credited, or of the span's units on a unit-less span line.
+ */
+export interface PurchaseCreditItemInputType extends PurchaseDocumentItemInputType {
+  units?: PurchaseDocumentLineUnit[];
+  dates?: ChargeWindowType | null;
+}
+
+const CreditLineUnitInput: z.ZodType<PurchaseDocumentLineUnit> = z.object({
+  uid_unit: UnitId,
+  charge_windows: z.array(z.object({ start: chicagoInstant(), end: chicagoInstant() })).min(1),
+});
+
+/** Zod schema for PurchaseCreditItemInputType. */
+export const PurchaseCreditItemInput: z.ZodType<PurchaseCreditItemInputType> = z.object({
+  uid_item: ItemUid,
+  quantity: z.int().min(1),
+  units: z.array(CreditLineUnitInput).optional(),
+  dates: z.object({ start: chicagoInstant(), end: chicagoInstant() }).nullable().optional(),
+});
+
+/**
  * A document-only charge item as an operator states it on a PUSHED bill or
  * credit (freight nobody expected, a fee). The writer mints its `uid`/`path`,
  * stamps a Fixed formula snapshot and `quantity: 1`.
@@ -874,7 +907,7 @@ export type CreatePurchaseCreditInputType =
     reason: PurchaseCreditReasonType;
     date: string;
     reference?: string | null;
-    items: PurchaseDocumentItemInputType[];
+    items: PurchaseCreditItemInputType[];
     charge_items?: PurchaseDocumentChargeItemInputType[];
     uuid_session: string;
     version: number;
@@ -883,7 +916,7 @@ export type CreatePurchaseCreditInputType =
     mode: "link";
     reason: PurchaseCreditReasonType;
     xero_id: string;
-    items: PurchaseDocumentItemInputType[];
+    items: PurchaseCreditItemInputType[];
     uuid_session: string;
     version: number;
   };
@@ -893,7 +926,7 @@ const pushCreditInput = z.object({
   reason: PurchaseCreditReasonEnum,
   date: chicagoStartOfDay(),
   reference: z.string().max(255).nullable().optional(),
-  items: z.array(PurchaseDocumentItemInput),
+  items: z.array(PurchaseCreditItemInput),
   charge_items: z.array(PurchaseDocumentChargeItemInput).optional(),
   uuid_session: z.uuid(),
   version: z.int().min(0),
@@ -903,7 +936,7 @@ const linkCreditInput = z.object({
   mode: z.literal("link"),
   reason: PurchaseCreditReasonEnum,
   xero_id: z.uuid(),
-  items: z.array(PurchaseDocumentItemInput),
+  items: z.array(PurchaseCreditItemInput),
   uuid_session: z.uuid(),
   version: z.int().min(0),
 });

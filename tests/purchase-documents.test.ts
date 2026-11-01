@@ -20,6 +20,7 @@ import {
   type PurchaseDocumentContext,
   pricePurchaseDocument,
   projectPurchaseLineToBillLine,
+  projectPurchaseLineToCreditLine,
   purchaseBillSharedLineFields,
   syncPurchaseToBills,
   unbilledUnitWindows,
@@ -645,4 +646,89 @@ Deno.test("diff: a LINKED time line's Xero money is compared with its own rates 
   const got = computePurchaseBillDiffs({ kind: "bill", uid: linked.uid }, { purchase: purchaseDoc([item]), bills: [linked], credits: [] });
   const [entry] = got.lines.get(line.path.join("/"))!;
   assertEquals((entry as { fields: unknown }).fields, [{ field: "amount_cents", here: 12000, there: 13500 }]);
+});
+
+// ── Time credits: un-billing windows ──────────────────────────────
+
+const creditOf = (items: PurchaseDocumentItem[]) => ({ status: "issued" as const, items });
+
+Deno.test("time credit: crediting everything a bill billed reverses it exactly, and leaves nothing billed", () => {
+  const item = visionLine();
+  const units = [unit(1, [{ start: jan(1), end: jan(15) }]), unit(2, [{ start: jan(3), end: jan(10) }])];
+  const billLine = project(item, jan(20), units)!;
+  const billed: PurchaseBilledDocuments = { bills: [billDoc(1, [billLine])], credits: [] };
+  const credit = projectPurchaseLineToCreditLine(
+    item,
+    { uid: iuid(40), units: billLine.units!, dates: null, quantity: 2, billed },
+    CTX,
+  );
+  assertEquals(credit.amount_cents, billLine.amount_cents);
+  assertEquals(credit.price?.counts, billLine.price?.counts);
+  assertEquals(credit.quantity, 2);
+  const after: PurchaseBilledDocuments = { bills: billed.bills, credits: [creditOf([credit])] };
+  assertEquals(billedUnitCoverage(after, item.path).size, 0, "the credit un-bills all of it");
+  // Companion: the same windows cannot be credited twice.
+  assertThrows(() =>
+    projectPurchaseLineToCreditLine(item, { uid: iuid(41), units: billLine.units!, dates: null, quantity: 2, billed: after }, CTX)
+  );
+});
+
+Deno.test("time credit: a window nobody billed cannot be credited", () => {
+  const item = visionLine();
+  const units = [unit(1, [{ start: jan(1), end: jan(8) }])];
+  const billed: PurchaseBilledDocuments = { bills: [billDoc(1, [project(item, jan(20), units)!])], credits: [] };
+  const inside = [{ uid_unit: "unit-1", charge_windows: [{ start: jan(2), end: jan(4) }] }];
+  const outside = [{ uid_unit: "unit-1", charge_windows: [{ start: jan(6), end: jan(12) }] }];
+  projectPurchaseLineToCreditLine(item, { uid: iuid(40), units: inside, dates: null, quantity: 1, billed }, CTX);
+  assertThrows(
+    () => projectPurchaseLineToCreditLine(item, { uid: iuid(40), units: outside, dates: null, quantity: 1, billed }, CTX),
+    Error,
+    "not billed",
+  );
+  assertThrows(
+    () => projectPurchaseLineToCreditLine(buyLine(), { uid: iuid(40), units: inside, dates: null, quantity: 1, billed }, CTX),
+    Error,
+    "credit it in units",
+  );
+});
+
+Deno.test("time credit: a tail credited out of a CAPPED month credits the delta, not the tail's weeks (Q14)", () => {
+  const item = visionLine({ quantity: 1, uid_units: ["unit-1"] });
+  // 27 nights: four started weeks ($180) cap at the month ($157.50).
+  const units = [unit(1, [{ start: jan(1), end: jan(28) }])];
+  const billLine = project(item, jan(28), units)!;
+  assertEquals(billLine.amount_cents, 15750);
+  const billed: PurchaseBilledDocuments = { bills: [billDoc(1, [billLine])], credits: [] };
+  // Credit the last 6 nights: 21 nights stay billed — three weeks ($135), under the cap.
+  const tail = [{ uid_unit: "unit-1", charge_windows: [{ start: jan(22), end: jan(28) }] }];
+  const credit = projectPurchaseLineToCreditLine(item, { uid: iuid(40), units: tail, dates: null, quantity: 1, billed }, CTX);
+  assertEquals(credit.amount_cents, 15750 - 3 * 4500);
+  // Companion: metering only the credited piece reads one week ($45) — the naive form disagrees.
+  const naive = money(meterUnits(VISION, { windows: tail[0].charge_windows, span: null, holidays: [], rates: VISION_RATES }).tiers);
+  assertEquals(naive, 4500);
+  assertNotEquals(naive, credit.amount_cents);
+});
+
+Deno.test("time credit: a SPAN credit must lie inside the billed span and not overlap an earlier span credit", () => {
+  const item = verizonLine({ uid_units: [] });
+  const billLine = project(item, feb(2), [])!;
+  assert(billLine.dates !== null);
+  const billed: PurchaseBilledDocuments = { bills: [billDoc(1, [billLine])], credits: [] };
+  const credit = projectPurchaseLineToCreditLine(
+    item,
+    { uid: iuid(40), units: [], dates: { start: jan(2), end: feb(2) }, quantity: 1, billed },
+    CTX,
+  );
+  assertEquals(credit.amount_cents, billLine.amount_cents, "a credit of the whole billed span reverses it");
+  assertThrows(
+    () => projectPurchaseLineToCreditLine(item, { uid: iuid(41), units: [], dates: { start: jan(2), end: feb(10) }, quantity: 1, billed }, CTX),
+    Error,
+    "not inside",
+  );
+  const after: PurchaseBilledDocuments = { bills: billed.bills, credits: [creditOf([credit])] };
+  assertThrows(
+    () => projectPurchaseLineToCreditLine(item, { uid: iuid(42), units: [], dates: { start: jan(10), end: jan(20) }, quantity: 1, billed: after }, CTX),
+    Error,
+    "already credited",
+  );
 });
