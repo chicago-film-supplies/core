@@ -1046,7 +1046,7 @@ export function buildInvoiceDestinationDivider(
  *
  * ⭐ **`zero_priced` is projected UNCONDITIONALLY (`?? null`), and the corpus was
  * backfilled first** — stage two of `manager#421`, landed 2026-09-10 by
- * `api-cloudrun/scripts/backfill-zero-priced-projections.ts`.
+ * api-cloudrun/scripts/backfill-zero-priced-projections.ts (a done one-shot, deleted 2026-11-01; in api-cloudrun's git history).
  *
  * ⚠️ **The order of those two was forced, and the reason is
  * `invoiceItemDifferences` comparing top-level KEY SETS.** `buildOrderLine`

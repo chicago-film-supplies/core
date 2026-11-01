@@ -1424,7 +1424,7 @@ export function zeroPricedFlaggedNonComponents(
  * components are asked.
  *
  * ⭐ **The corpus was emptied before this could land**, exactly as invariant (2)
- * was: `api-cloudrun/scripts/backfill-zero-priced-projections.ts` took all three
+ * was: api-cloudrun/scripts/backfill-zero-priced-projections.ts (a done one-shot, deleted 2026-11-01; in api-cloudrun's git history) took all three
  * grains to 0 unstated component rows in both projects on 2026-09-10, from 9,213.
  * Ordering a contract behind its corpus is the whole of that pattern.
  */
