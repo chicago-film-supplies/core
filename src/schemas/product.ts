@@ -626,7 +626,9 @@ function isAtComponentQuantityScale(n: number): boolean {
  * always names a formula and at least one rate.
  */
 const componentPriceShape = {
-  uid_price_formula: FirestoreId,
+  // Labelled so a component's formula change reaches the activity feed (the
+  // api's element diff compares labelled leaves only).
+  uid_price_formula: FirestoreId.meta({ label: "Price Formula" }),
   // Declared only so a product price COPIED in by spread is not refused by the
   // strictObject; a component is never a percent fee, so it is null or absent.
   base_percent: z.null().optional(),
@@ -865,7 +867,9 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
   eligible_shipping_ground: z.boolean().meta({ column: true, label: "Ground Eligible" }),
   eligible_shipping_air: z.boolean().meta({ column: true, label: "Air Eligible" }),
   price: z.strictObject({
-    uid_price_formula: FirestoreId.nullable(),
+    // Labelled so a formula change produces an activity row: the api's feed
+    // admits labelled paths only, and this one carried none.
+    uid_price_formula: FirestoreId.nullable().meta({ label: "Price Formula" }),
     rates: z.array(DatedRateSchema).meta({ label: "Price" }),
     // 🔴 **No `.meta({ column: true })`, deliberately** — and this is the one
     // field here where the reflex to add it is wrong. Every sibling in this
