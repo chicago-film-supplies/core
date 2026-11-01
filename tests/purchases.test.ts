@@ -734,6 +734,8 @@ const billItem = (over: Record<string, unknown> = {}) => {
     quantity: 3,
     amount_cents: 140985,
     price: { ...flatPrice, counts: [] },
+    units: [],
+    dates: null,
     coa_posting: 1999,
     uid_tracking_category: null,
     path_purchase_item: [iuid(1)],
@@ -989,16 +991,21 @@ Deno.test("PurchaseBillSchema: a flat line meters nothing; a unit appears once p
   ]);
 });
 
-Deno.test("PurchaseBillSchema: a product line states `price` (beta B); `units`/`dates` may still be absent; a charge line states all three", () => {
+Deno.test("PurchaseBillSchema: every line states `price`, `units` and `dates` (beta B; api-cloudrun#1425)", () => {
   assertEquals(issuePaths(PurchaseBillSchema, bill()), []);
   const { price: _bp, ...unpriced } = billItem();
   assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [unpriced] })), ["items.0.price"]);
+  const { units: _bu, dates: _bd, ...unstated } = billItem();
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [unstated] })).sort(), [
+    "items.0.dates",
+    "items.0.units",
+  ], "a flat product line states units: [] and dates: null");
   const { price: _p, units: _u, dates: _d, ...bare } = billDirect();
   assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [billItem(), bare], totals: T_WITH_FREIGHT })).sort(), [
     "items.1.dates",
     "items.1.price",
     "items.1.units",
-  ], "a charge line has no stored corpus, so it states all three");
+  ], "a charge line states all three");
 });
 
 // ── bill freeze (D10) ────────────────────────────────────────────────

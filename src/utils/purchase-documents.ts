@@ -873,7 +873,9 @@ export function projectPurchaseLineToBillLine(
       quantity: opts.quantity,
       amount_cents,
       ...(price ? { price } : {}),
-      ...(item.type === "charge" ? { price: price!, units: [], dates: null } : {}),
+      // A flat line meters nothing: no units, no span (api-cloudrun#1425).
+      units: [],
+      dates: null,
     };
     return line as PurchaseDocumentItem;
   }

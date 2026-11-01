@@ -165,6 +165,8 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
       quantity: 1,
       amount_cents: 0,
       price: { price_formula: { uid: "AAAAAAAAAAAAAAAAAAAA", name: "A", basis: "flat" }, rates: [], discount: null, counts: [] },
+      units: [],
+      dates: null,
       coa_posting: 1999,
       uid_tracking_category: null,
       path_purchase_item: ["AAAAAAAAAAAAAAAAAAAA"],

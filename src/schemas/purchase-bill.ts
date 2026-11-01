@@ -164,15 +164,15 @@ export const PurchaseDocumentLineUnitSchema: z.ZodType<PurchaseDocumentLineUnit>
  * stored product line (2026-11-01 census, 415 of 415 bill lines in prod and
  * dev, 403 of 403 `test`; no credit line exists in any of the three).
  *
- * ⚠️ `units` and `dates` stay optional on a product line: the same census found
- * them on 0 of 415 stored bill lines, so the backfill did not state them and
- * absent still means "a flat line written before beta A". They are required on
- * the `charge` arm, which has no stored corpus.
+ * `units` and `dates` are required on every arm since api-cloudrun#1425: a
+ * flat line states `units: []` and `dates: null` (it meters nothing), and the
+ * product lines written before beta A were backfilled to that (prod, dev and
+ * `test` censused by `audit:reparse --positions` before this commit).
  */
 interface PurchaseDocumentLineTimeKeys {
   price: PurchaseDocumentLinePrice;
-  units?: PurchaseDocumentLineUnit[];
-  dates?: ChargeWindowType | null;
+  units: PurchaseDocumentLineUnit[];
+  dates: ChargeWindowType | null;
 }
 
 /**
@@ -312,8 +312,8 @@ const PurchaseDocumentProductItemInner = z.strictObject({
   uid_product: FirestoreId,
   ...docItemMoney,
   price: PurchaseDocumentLinePriceSchema,
-  units: lineUnits.optional(),
-  dates: lineDates.optional(),
+  units: lineUnits,
+  dates: lineDates,
   // As invoice's `path_order_item`, but REQUIRED: a product item bills a
   // purchase item by definition.
   path_purchase_item: z.array(ItemUid).min(1),
