@@ -162,11 +162,24 @@ function getShape(node: z.ZodType): Record<string, z.ZodType> | null {
  *  - `z.record(keyType, valueType)` → the record's VALUE schema, consuming the
  *    segment as a dynamic key (so `reactions.<emoji>.<uid>.name` resolves
  *    through `z.record(z.record(ActorRef))` to the `name` field);
+ *  - a union (plain or discriminated) → the segment on the FIRST arm that has
+ *    it. A document schema that is a union of shapes (`settings`: billing |
+ *    pricing) shares its envelope fields across the arms — `created_by`,
+ *    `version` — and a path into them must resolve, or a cascade patching
+ *    `settings.created_by.name` throws on every rename. A field only some arms
+ *    declare resolves to the first declarer;
  *  - anything else (array, scalar, …) → `null`.
  */
 function descendSegment(node: z.ZodType, seg: string): z.ZodType | null {
   const def = getDef(unwrapZod(node));
   if (def.type === "record") return def.valueType ?? null;
+  if (def.type === "union") {
+    for (const option of def.options ?? []) {
+      const hit = descendSegment(option, seg);
+      if (hit) return hit;
+    }
+    return null;
+  }
   return def.shape?.[seg] ?? null;
 }
 

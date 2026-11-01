@@ -110,6 +110,34 @@ Deno.test("getNodeMeta on a chicagoInstant().meta(...) node returns the meta", (
   assertEquals(getNodeMeta(resolved!)?.serverSortVia, "foo_fs");
 });
 
+// ── Union traversal ──────────────────────────────────────────────────
+//
+// A document schema can be a union of shapes (`settings`: billing | pricing).
+// A path into a field the arms share must resolve, or a patch validator throws
+// on it — the user-rename cascade patches `settings.created_by.name`.
+
+Deno.test("resolveZodField walks a union to the first arm declaring the segment", () => {
+  const Actor = z.strictObject({ uid: z.string(), name: z.string() });
+  const schema = z.union([
+    z.strictObject({ kind: z.literal("a"), created_by: Actor, a_only: z.number() }),
+    z.strictObject({ kind: z.literal("b"), created_by: Actor, b_only: z.boolean() }),
+  ]);
+  assertEquals(resolveZodField(schema, "created_by.name")?.safeParse("Alex").success, true);
+  assertEquals(resolveZodField(schema, "b_only")?.safeParse(true).success, true, "a field only a later arm declares");
+  // Companion: a segment no arm declares is still unresolvable.
+  assertEquals(resolveZodField(schema, "created_by.email"), null);
+  assertEquals(resolveZodField(schema, "nowhere"), null);
+});
+
+Deno.test("resolveZodField walks a discriminated union the same way", () => {
+  const schema = z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("a"), version: z.int() }),
+    z.object({ kind: z.literal("b"), version: z.int() }),
+  ]);
+  assertEquals(resolveZodField(schema, "version")?.safeParse(3).success, true);
+  assertEquals(resolveZodField(schema, "version")?.safeParse("3").success, false);
+});
+
 // ── Record (dynamic-key map) traversal ───────────────────────────────
 //
 // `resolveZodField` walks `z.record(keyType, valueType)`: a path segment over a

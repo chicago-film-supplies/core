@@ -62,9 +62,9 @@ const HOLIDAY_SNAPSHOT_WRITER: EnforcementRef = {
 const HOLIDAY_DRAFT_RECOMPUTE: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/holidays/draftRecompute.test.ts::recomputes a draft order's charge days + item prices",
+    "api-cloudrun/tests/integration/holidays/draftRecompute.test.ts::recomputes a draft order's line counts + item prices",
   clause:
-    "the ORDER side and its frozen complement — a draft order's charge days and item prices are recomputed, and a non-draft order comes back byte-unchanged. The invoice-sync half of the same cascade is NOT exercised: the fixture deliberately strips `query_by_invoices`.",
+    "the ORDER side and its frozen complement — a draft order's line counts and item prices are recomputed, and a non-draft order comes back byte-unchanged. The invoice-sync half of the same cascade is NOT exercised: the fixture deliberately strips `query_by_invoices`.",
   gates: true,
 };
 
