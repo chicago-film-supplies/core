@@ -28,14 +28,19 @@ import { tz } from "@date-fns/tz";
 import {
   formulaPeriods,
   meterUnits,
+  openRateAmount,
   priceFromFormula,
   rateInForce,
+  ratesForFormula,
   snapshotRates,
   statedUnits,
   type TierCount,
+  withOpenRateAmount,
 } from "../src/utils/price-formulas.ts";
 import {
   CreatePriceFormulaInput,
+  type DatedRate,
+  datedRatesIssues,
   type PriceFormula,
   type PriceFormulaRule,
   priceFormulaRuleIssues,
@@ -1076,4 +1081,88 @@ Deno.test("formulaPeriods: a range ending MID-DAY keeps that day's periods; a mi
     formulaPeriods(VISION, { windows }, { start: "2026-10-01T00:00:00.000-05:00", end: "2026-10-31T00:00:00.000-05:00" }),
     [],
   );
+});
+
+// ── The catalog rate edit (D4, core#146) ─────────────────────────────
+
+const JAN1 = "2026-01-01T00:00:00.000-06:00";
+const OCT5 = "2026-10-05T00:00:00.000-05:00";
+const weekRow = (over: Partial<DatedRate> = {}): DatedRate => ({
+  uid: "row-1",
+  rate_key: "week",
+  amount_cents: 1000,
+  applied_from: JAN1,
+  applied_to: null,
+  ...over,
+});
+const mint = (...uids: string[]) => () => uids.shift() ?? "row-x";
+
+Deno.test("withOpenRateAmount: a change closes the open row on the Chicago day and opens a new one; the result is a legal dated array", () => {
+  const out = withOpenRateAmount([weekRow()], "week", 1200, "2026-10-05T15:00:00.000Z", mint("row-2"));
+  assertEquals(out, [
+    weekRow({ applied_to: OCT5 }),
+    { uid: "row-2", rate_key: "week", amount_cents: 1200, applied_from: OCT5, applied_to: null },
+  ]);
+  assertEquals(datedRatesIssues(out), []);
+});
+
+Deno.test("withOpenRateAmount: the day is CHICAGO's — 02:00 UTC on Oct 5 is still Oct 4 there", () => {
+  const out = withOpenRateAmount([weekRow()], "week", 1200, "2026-10-05T02:00:00.000Z", mint("row-2"));
+  assertEquals(out[1].applied_from, "2026-10-04T00:00:00.000-05:00");
+  assertEquals(out[0].applied_to, "2026-10-04T00:00:00.000-05:00");
+});
+
+Deno.test("withOpenRateAmount: a second change the SAME day overwrites that day's row — no zero-length row", () => {
+  const once = withOpenRateAmount([weekRow()], "week", 1200, "2026-10-05T15:00:00.000Z", mint("row-2"));
+  const twice = withOpenRateAmount(once, "week", 1300, "2026-10-05T20:00:00.000Z", mint("row-3"));
+  assertEquals(twice.length, 2);
+  assertEquals(twice[1], { uid: "row-2", rate_key: "week", amount_cents: 1300, applied_from: OCT5, applied_to: null });
+  assertEquals(datedRatesIssues(twice), []);
+  // Companion: the close-and-open form on the same day IS what the refine refuses.
+  const stacked: DatedRate[] = [...once.slice(0, 1), { ...once[1], applied_to: OCT5 }, { ...once[1], uid: "row-3", amount_cents: 1300 }];
+  assert(datedRatesIssues(stacked).length > 0);
+});
+
+Deno.test("withOpenRateAmount: an unchanged amount moves nothing; a key with no open row gains one; other keys are untouched", () => {
+  const rows = [weekRow(), { ...weekRow(), uid: "row-m", rate_key: "month", amount_cents: 4000 }];
+  assertEquals(withOpenRateAmount(rows, "week", 1000, "2026-10-05T15:00:00.000Z"), rows);
+  assertEquals(withOpenRateAmount([], "week", 500, "2026-10-05T15:00:00.000Z", mint("row-2")), [
+    { uid: "row-2", rate_key: "week", amount_cents: 500, applied_from: OCT5, applied_to: null },
+  ]);
+  const moved = withOpenRateAmount(rows, "week", 1200, "2026-10-05T15:00:00.000Z", mint("row-2"));
+  assertEquals(moved[1], rows[1]);
+});
+
+Deno.test("withOpenRateAmount: every row of the result is a fresh object and the input is not mutated (a store may hold it)", () => {
+  const rows = [weekRow({ applied_to: "2026-06-01T00:00:00.000-05:00" }), weekRow({ uid: "row-2", applied_from: "2026-06-01T00:00:00.000-05:00" })];
+  const before = structuredClone(rows);
+  for (const amount of [1000, 1200]) {
+    const out = withOpenRateAmount(rows, "week", amount, "2026-10-05T15:00:00.000Z");
+    for (const r of rows) assert(!out.includes(r), `amount ${amount}: an input row is aliased into the result`);
+  }
+  assertEquals(rows, before);
+  assert(withOpenRateAmount(rows, "week", 1000, "2026-10-05T15:00:00.000Z") !== rows);
+});
+
+Deno.test("openRateAmount: the open row's amount, else null — a closed-only key and a missing array are null", () => {
+  assertEquals(openRateAmount([weekRow({ applied_to: OCT5 }), weekRow({ uid: "row-2", applied_from: OCT5, amount_cents: 1200 })], "week"), 1200);
+  assertEquals(openRateAmount([weekRow({ applied_to: OCT5 })], "week"), null);
+  assertEquals(openRateAmount([weekRow()], "month"), null);
+  assertEquals(openRateAmount(undefined, "week"), null);
+  assertEquals(openRateAmount(null, "week"), null);
+});
+
+Deno.test("ratesForFormula: a shared key keeps its whole history, a new key opens at the first open amount, a dropped key's rows go", () => {
+  const history = [weekRow({ applied_to: OCT5 }), weekRow({ uid: "row-2", applied_from: OCT5, amount_cents: 1200 })];
+  const onVision = ratesForFormula(history, VISION, "2026-10-20T15:00:00.000Z", mint("row-m"));
+  assertEquals(onVision.filter((r) => r.rate_key === "week"), history);
+  assertEquals(onVision.filter((r) => r.rate_key === "month"), [
+    { uid: "row-m", rate_key: "month", amount_cents: 1200, applied_from: "2026-10-20T00:00:00.000-05:00", applied_to: null },
+  ]);
+  assertEquals(datedRatesIssues(onVision), []);
+  const onFixed = ratesForFormula(onVision, FIXED, "2026-10-21T15:00:00.000Z", mint("row-f"));
+  assertEquals(onFixed, [
+    { uid: "row-f", rate_key: "flat", amount_cents: 1200, applied_from: "2026-10-21T00:00:00.000-05:00", applied_to: null },
+  ]);
+  assertEquals(ratesForFormula([], FIXED, "2026-10-21T15:00:00.000Z", mint("row-f"))[0].amount_cents, 0);
 });

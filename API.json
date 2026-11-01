@@ -22931,6 +22931,14 @@
         },
         {
           "kind": "function",
+          "name": "openRateAmount",
+          "signature": "openRateAmount(rates: readonly DatedRateLike[] | null | undefined, rateKey: string): number | null",
+          "doc": "The amount of `rateKey`'s OPEN row (`applied_to: null`), or `null` when the key has none.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "priceFormulaRefOf",
           "signature": "priceFormulaRefOf(formula: PricingFormula): PriceFormulaRef",
           "doc": "The snapshot a line stores for `formula` — `{ uid, name, basis }`.",
@@ -22955,6 +22963,14 @@
         },
         {
           "kind": "function",
+          "name": "ratesForFormula",
+          "signature": "ratesForFormula(rates: readonly DatedRate[], formula: PriceFormulaRule, changedAt: string, _: unknown): DatedRate[]",
+          "doc": "The rates after a product moves onto `formula`: every key the new formula\nnames keeps its rows when the old rates had it, and a NEW key opens on\n`changedAt`'s day at the first open amount (so a one-key product keeps its\nprice). Rows for keys the new formula does not name are dropped: a product's\nrate history is its current formula's, and every line already priced keeps\nits own snapshot.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "snapshotRates",
           "signature": "snapshotRates(formula: PriceFormulaRule, rates: readonly DatedRateLike[], asOf: string): RateSnapshot[]",
           "doc": "The snapshot a line takes at its pricing date: one {@link RateSnapshot} per\nsegment's `rate_key`, from the rows in force at `asOf`.",
@@ -22967,6 +22983,23 @@
           "signature": "statedUnits(formula: PriceFormulaRule, count: number, opts: typeLiteral): TierCount[]",
           "doc": "**A STATED count → tier counts**, for a line whose count wins over the meter:\nan operator-edited `chargeable_days`, an extension section's added days, a\ncarried line. Only a single-segment count formula (`week`/`day`) or a flat\none can take a stated count — a ladder has no single number to state.\n\n`minimum: false` skips the floor (an extension section: its minimum was\ncharged on the invoice being extended), and the count may then be zero or\nnegative.",
           "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "withOpenRateAmount",
+          "signature": "withOpenRateAmount(rates: readonly DatedRate[], rateKey: string, amountCents: number, changedAt: string, _: unknown): DatedRate[]",
+          "doc": "**A catalog rate edit** (purchases-as-documents D4), the one writer rule for\nit: `rates` with `rateKey`'s open row at `amountCents` from `changedAt`'s\nChicago calendar day on.\n\n- The open row is CLOSED at that day and a new open row starts there, so a\n  line priced before the change keeps the rate it snapshotted and a\n  back-dated document still resolves the row in force at its date.\n- A second change on the SAME day (the open row starts on or after `day`)\n  overwrites that row instead, because `datedRatesIssues` refuses a closed row\n  of zero length.\n- An unchanged amount returns the rows unchanged; a key with no open row gains one.\n\nEvery row of the result is a fresh object, never one of the input's, so a\ncaller holding the input in a reactive store can write the result back\nwithout aliasing. It was written twice (api-cloudrun's replacement-twin\nmirror, manager's rate editors) before core#146 moved it here.",
+          "paramTags": [
+            {
+              "name": "changedAt",
+              "doc": "an ISO instant; snapped to its Chicago calendar day."
+            },
+            {
+              "name": "mintUid",
+              "doc": "the new row's uid; injectable so a test can pin it."
+            }
+          ],
           "returnsTag": null
         }
       ]

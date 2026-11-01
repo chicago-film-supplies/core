@@ -48663,6 +48663,10 @@ A `cap` segment decides each period on money, so a capped formula needs
 counts: {@link priceFromFormula} is unchanged, and a delta of two meterings
 (an extension, a bill line) may carry `+1` month and `−3` weeks.
 
+### `openRateAmount(rates: readonly DatedRateLike[] | null | undefined, rateKey: string): number | null`
+
+The amount of `rateKey`'s OPEN row (`applied_to: null`), or `null` when the key has none.
+
 ### `priceFormulaRefOf(formula: PricingFormula): PriceFormulaRef`
 
 The snapshot a line stores for `formula` — `{ uid, name, basis }`.
@@ -48683,6 +48687,15 @@ The row of `rate_key` in force at `asOf`: `applied_from ≤ asOf < applied_to`,
 compared as instants with `Date.parse`, never lexically (a `-05:00` and a
 `-06:00` string do not sort as their instants do).
 
+### `ratesForFormula(rates: readonly DatedRate[], formula: PriceFormulaRule, changedAt: string, _: unknown): DatedRate[]`
+
+The rates after a product moves onto `formula`: every key the new formula
+names keeps its rows when the old rates had it, and a NEW key opens on
+`changedAt`'s day at the first open amount (so a one-key product keeps its
+price). Rows for keys the new formula does not name are dropped: a product's
+rate history is its current formula's, and every line already priced keeps
+its own snapshot.
+
 ### `snapshotRates(formula: PriceFormulaRule, rates: readonly DatedRateLike[], asOf: string): RateSnapshot[]`
 
 The snapshot a line takes at its pricing date: one {@link RateSnapshot} per
@@ -48698,6 +48711,30 @@ one can take a stated count — a ladder has no single number to state.
 `minimum: false` skips the floor (an extension section: its minimum was
 charged on the invoice being extended), and the count may then be zero or
 negative.
+
+### `withOpenRateAmount(rates: readonly DatedRate[], rateKey: string, amountCents: number, changedAt: string, _: unknown): DatedRate[]`
+
+**A catalog rate edit** (purchases-as-documents D4), the one writer rule for
+it: `rates` with `rateKey`'s open row at `amountCents` from `changedAt`'s
+Chicago calendar day on.
+
+- The open row is CLOSED at that day and a new open row starts there, so a
+  line priced before the change keeps the rate it snapshotted and a
+  back-dated document still resolves the row in force at its date.
+- A second change on the SAME day (the open row starts on or after `day`)
+  overwrites that row instead, because `datedRatesIssues` refuses a closed row
+  of zero length.
+- An unchanged amount returns the rows unchanged; a key with no open row gains one.
+
+Every row of the result is a fresh object, never one of the input's, so a
+caller holding the input in a reactive store can write the result back
+without aliasing. It was written twice (api-cloudrun's replacement-twin
+mirror, manager's rate editors) before core#146 moved it here.
+
+**Parameters**
+
+- `changedAt` — an ISO instant; snapped to its Chicago calendar day.
+- `mintUid` — the new row's uid; injectable so a test can pin it.
 
 ## `@cfs/core/utils/purchase-documents`
 

@@ -35,6 +35,7 @@
  * @module
  */
 import type {
+  DatedRate,
   PriceFormulaRef,
   PriceFormulaRule,
   PriceFormulaSegment,
@@ -637,6 +638,76 @@ export function snapshotRates(
     }
     return { rate_key: s.rate_key, amount_cents: row.amount_cents };
   });
+}
+
+/** The amount of `rateKey`'s OPEN row (`applied_to: null`), or `null` when the key has none. */
+export function openRateAmount(
+  rates: readonly DatedRateLike[] | null | undefined,
+  rateKey: string,
+): number | null {
+  return rates?.find((r) => r.rate_key === rateKey && r.applied_to === null)?.amount_cents ?? null;
+}
+
+/**
+ * **A catalog rate edit** (purchases-as-documents D4), the one writer rule for
+ * it: `rates` with `rateKey`'s open row at `amountCents` from `changedAt`'s
+ * Chicago calendar day on.
+ *
+ * - The open row is CLOSED at that day and a new open row starts there, so a
+ *   line priced before the change keeps the rate it snapshotted and a
+ *   back-dated document still resolves the row in force at its date.
+ * - A second change on the SAME day (the open row starts on or after `day`)
+ *   overwrites that row instead, because `datedRatesIssues` refuses a closed row
+ *   of zero length.
+ * - An unchanged amount returns the rows unchanged; a key with no open row gains one.
+ *
+ * Every row of the result is a fresh object, never one of the input's, so a
+ * caller holding the input in a reactive store can write the result back
+ * without aliasing. It was written twice (api-cloudrun's replacement-twin
+ * mirror, manager's rate editors) before core#146 moved it here.
+ *
+ * @param changedAt an ISO instant; snapped to its Chicago calendar day.
+ * @param mintUid the new row's uid; injectable so a test can pin it.
+ */
+export function withOpenRateAmount(
+  rates: readonly DatedRate[],
+  rateKey: string,
+  amountCents: number,
+  changedAt: string,
+  mintUid: () => string = () => crypto.randomUUID(),
+): DatedRate[] {
+  const day = toChicagoStartOfDay(changedAt);
+  const open = rates.find((r) => r.rate_key === rateKey && r.applied_to === null);
+  if (open?.amount_cents === amountCents) return rates.map((r) => ({ ...r }));
+  const fresh: DatedRate = { uid: mintUid(), rate_key: rateKey, amount_cents: amountCents, applied_from: day, applied_to: null };
+  if (!open) return [...rates.map((r) => ({ ...r })), fresh];
+  if (Date.parse(open.applied_from) >= Date.parse(day)) {
+    return rates.map((r) => (r === open ? { ...r, amount_cents: amountCents } : { ...r }));
+  }
+  return [...rates.map((r) => (r === open ? { ...r, applied_to: day } : { ...r })), fresh];
+}
+
+/**
+ * The rates after a product moves onto `formula`: every key the new formula
+ * names keeps its rows when the old rates had it, and a NEW key opens on
+ * `changedAt`'s day at the first open amount (so a one-key product keeps its
+ * price). Rows for keys the new formula does not name are dropped: a product's
+ * rate history is its current formula's, and every line already priced keeps
+ * its own snapshot.
+ */
+export function ratesForFormula(
+  rates: readonly DatedRate[],
+  formula: PriceFormulaRule,
+  changedAt: string,
+  mintUid: () => string = () => crypto.randomUUID(),
+): DatedRate[] {
+  const keys = formula.segments.map((s) => s.rate_key);
+  const firstOpen = rates.find((r) => r.applied_to === null)?.amount_cents ?? 0;
+  let next: DatedRate[] = rates.filter((r) => keys.includes(r.rate_key)).map((r) => ({ ...r }));
+  for (const key of keys) {
+    if (!next.some((r) => r.rate_key === key)) next = withOpenRateAmount(next, key, firstOpen, changedAt, mintUid);
+  }
+  return next;
 }
 
 // ── Formula identity and catalog snapshots ──────────────────────────

@@ -985,5 +985,10 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "rateInForce",
     "snapshotRates",
     "statedUnits",
+    // The catalog rate EDIT (D4, core#146): a product editor's and the twin
+    // mirror's writer rule. A render context holds no product.
+    "openRateAmount",
+    "ratesForFormula",
+    "withOpenRateAmount",
   ],
 };
