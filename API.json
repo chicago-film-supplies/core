@@ -6561,7 +6561,7 @@
         {
           "kind": "interface",
           "name": "UnitType",
-          "declaration": "interface UnitType {\n  uid: string;\n  uid_product: string;\n  number: number;\n  serial_number: string | null;\n  serial_history: UnitSerialHistoryEntryType[];\n  status: UnitStatusType;\n  charge_windows: UnitChargeWindowType[];\n  uuid_session: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface UnitType {\n  uid: string;\n  uid_product: string;\n  number: number;\n  serial_number: string | null;\n  serial_history: UnitSerialHistoryEntryType[];\n  status: UnitStatusType;\n  charge_windows: UnitChargeWindowType[];\n  query_by_purchases?: string[];\n  uuid_session: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A unit number, its current serial and its history."
         },
         {
@@ -7328,8 +7328,8 @@
         {
           "kind": "function",
           "name": "checkLinePriceInput",
-          "signature": "checkLinePriceInput(price: indexedAccess, ctx: z.RefinementCtx): void",
-          "doc": "{@link checkLinePrice} on an INPUT price, where the writer resolves the formula.",
+          "signature": "checkLinePriceInput(price: parenthesized | null | undefined, ctx: z.RefinementCtx): void",
+          "doc": "{@link checkLinePrice} on an INPUT price, where the writer resolves the\nformula. An input names its formula by `uid_price_formula`, so that is what\nthe percent-xor-formula rule reads — reading only `price_formula`, which no\ninput carries, let a percent fee that also named a formula through.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -7458,6 +7458,14 @@
           "name": "deriveQueryByProducts",
           "signature": "deriveQueryByProducts(items: readonly PurchaseItem[]): string[]",
           "doc": "Derive `query_by_products` — the distinct products the items ORDER, in first\nappearance order. A charge's attribution is not an order and is left out.\nThe one author of the mirror, called by every writer.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "deriveUnitQueryByPurchases",
+          "signature": "deriveUnitQueryByPurchases(windows: readonly Pick<UnitChargeWindowType, \"line\">[]): string[]",
+          "doc": "The purchases a unit's windows bill against — distinct, sorted. The one author of `query_by_purchases`.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -9123,8 +9131,8 @@
         {
           "kind": "function",
           "name": "checkLinePriceInput",
-          "signature": "checkLinePriceInput(price: indexedAccess, ctx: z.RefinementCtx): void",
-          "doc": "{@link checkLinePrice} on an INPUT price, where the writer resolves the formula.",
+          "signature": "checkLinePriceInput(price: parenthesized | null | undefined, ctx: z.RefinementCtx): void",
+          "doc": "{@link checkLinePrice} on an INPUT price, where the writer resolves the\nformula. An input names its formula by `uid_price_formula`, so that is what\nthe percent-xor-formula rule reads — reading only `price_formula`, which no\ninput carries, let a percent fee that also named a formula through.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -14064,7 +14072,7 @@
         {
           "kind": "interface",
           "name": "UnitType",
-          "declaration": "interface UnitType {\n  uid: string;\n  uid_product: string;\n  number: number;\n  serial_number: string | null;\n  serial_history: UnitSerialHistoryEntryType[];\n  status: UnitStatusType;\n  charge_windows: UnitChargeWindowType[];\n  uuid_session: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface UnitType {\n  uid: string;\n  uid_product: string;\n  number: number;\n  serial_number: string | null;\n  serial_history: UnitSerialHistoryEntryType[];\n  status: UnitStatusType;\n  charge_windows: UnitChargeWindowType[];\n  query_by_purchases?: string[];\n  uuid_session: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A unit number, its current serial and its history."
         },
         {
@@ -14114,6 +14122,14 @@
           "name": "UpdateUnitInputType",
           "declaration": "interface UpdateUnitInputType {\n  version: number;\n  serial?: UnitSerialChangeInputType;\n  status?: UnitUserStatusType;\n}",
           "doc": "Body of `PUT /units/{uid}`: change the serial, retire the number, or both.\n\nA serial remap does NOT cascade into past movements — `MovementUnit` keeps\nthe serial as a snapshot of the moment it moved."
+        },
+        {
+          "kind": "function",
+          "name": "deriveUnitQueryByPurchases",
+          "signature": "deriveUnitQueryByPurchases(windows: readonly Pick<UnitChargeWindowType, \"line\">[]): string[]",
+          "doc": "The purchases a unit's windows bill against — distinct, sorted. The one author of `query_by_purchases`.",
+          "paramTags": [],
+          "returnsTag": null
         }
       ]
     },
@@ -23185,6 +23201,14 @@
           "doc": "Replace every pack on a buy or subrent item with the stocked product it is a\npack of, so a stored purchase only ever names a product that can be RECEIVED.\n\nA pack is a `stock_method: \"none\"` product with `components` — the same\nrelation a sale already draws through (`118 Hot Hands (40 Pairs)` →\n`410 (1 Pair) × 40`). Sales keep the pack as a priced parent over $0\ncomponent lines; a purchase deliberately does NOT (owner, 2026-10-22): the\nitem's money is the stocked product's cost, so it must sit on the item the\nreceipt lands on. `118 × 12 @ $360` becomes `410 × 480 @ $360`, the ratio\napplied once, here, through {@link componentQuantities} — the one quantity\nrule the order expander uses.\n\nThe receivable FRONTIER of a pack is every component that counts stock and\nhas no counted ancestor in the walk: `353 (240 Pairs)` reaches `410` through\nthe uncounted `118`, and a pallet stops at its counted case rather than the\nuncounted bottle under it. Exactly one frontier node expands; none is a\nrefusal (buying it would receive nothing), and several is a refusal too —\none amount has no rule for splitting across two products' cost.\n\n⚠️ **Expanded items no longer MERGE** (api-cloudrun#1407 D2). They merged —\nquantities and amounts summed, one hire window per product — only because a\npurchase held one line per product. Items carry their own row identity now,\nso a pack item keeps its `uid` and becomes its own item even when the stocked\nproduct already has one; the ledger averages the cost either way.\nCharge items pass through untouched.\n\nReturns rather than throws: a refusal is an operator-facing 400, and core\nthrows plain `Error`, which a consumer's middleware reads as a 500.",
           "paramTags": [],
           "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "flatPurchaseLineMoney",
+          "signature": "flatPurchaseLineMoney(grossCents: number, quantity: number, discount: FormulaDiscount | null): typeLiteral",
+          "doc": "**A flat purchase line's NET cost and its discount record** (Phase 2 ruling 7):\nthe operator states the GROSS and a supplier discount, and the line stores the\nnet as `amount_cents` — what receipts, basis, bills and credits slice.\n\nComposed from the money steps every priced line already uses, so no new\nrounding exists here:\n\n- **percent** — `priceFromFormula` on one period at the gross: the discounted\n  amount rounds ONCE, half away from zero, exactly as a customer line's does.\n- **flat** — `rate` is 4dp dollars PER UNIT (`cfs-money`: a rate is not an\n  amount), taken to cents as `priceFromFormula` takes it, then multiplied by\n  the integer quantity: closed, nothing to round.\n\nA discount larger than the gross yields a negative net, which the stored\nschema refuses — the caller's 400 to make, not this function's to clamp.",
+          "paramTags": [],
+          "returnsTag": "`discount` is `null` when none was stated; otherwise its\n`amount_cents` is `gross − net`."
         },
         {
           "kind": "function",

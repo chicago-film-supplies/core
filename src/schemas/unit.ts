@@ -278,6 +278,19 @@ export interface UnitType {
    */
   charge_windows: UnitChargeWindowType[];
   /**
+   * The purchases this unit's windows bill against — the distinct
+   * `charge_windows[].line.uid_purchase`, sorted. A DERIVED mirror
+   * ({@link deriveUnitQueryByPurchases}, refined equal to it), and the reverse
+   * index a bill writer queries for "every unit whose windows name this
+   * purchase" (`array-contains`) outside its transaction, then point-gets
+   * inside — a product can hold thousands of units, so reading them all
+   * inside the bill transaction is not an option.
+   *
+   * `.optional()` until the purchases-as-documents backfill stamps it; every
+   * writer of `charge_windows` states it.
+   */
+  query_by_purchases?: string[];
+  /**
    * The `POST /products/{uid}/units` request that minted this number — its
    * `uuid_session`, the create's idempotency key. A retried count-mode create
    * finds the numbers its first attempt minted by this field and replays them
@@ -383,8 +396,24 @@ function checkUnit(doc: UnitType, ctx: z.RefinementCtx): void {
   checkChargeWindows(doc, ctx);
 }
 
+/** The purchases a unit's windows bill against — distinct, sorted. The one author of `query_by_purchases`. */
+export function deriveUnitQueryByPurchases(windows: readonly Pick<UnitChargeWindowType, "line">[]): string[] {
+  return [...new Set(windows.flatMap((w) => (w.line === null ? [] : [w.line.uid_purchase])))].sort();
+}
+
 function checkChargeWindows(doc: UnitType, ctx: z.RefinementCtx): void {
   const spans = doc.charge_windows;
+  if (doc.query_by_purchases !== undefined) {
+    const want = deriveUnitQueryByPurchases(spans);
+    const got = doc.query_by_purchases;
+    if (want.length !== got.length || want.some((u, i) => got[i] !== u)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["query_by_purchases"],
+        message: "query_by_purchases mirrors the purchases the charge windows name; re-derive it",
+      });
+    }
+  }
   for (let i = 1; i < spans.length; i++) {
     const prev = spans[i - 1];
     if (Date.parse(spans[i].start) < Date.parse(prev.start)) {
@@ -426,6 +455,7 @@ export const UnitSchema: z.ZodType<UnitType> = z.strictObject({
   serial_history: z.array(UnitSerialHistoryEntry).meta({ label: "Serial History" }),
   status: UnitStatusEnum.meta({ column: true, label: "Status" }),
   charge_windows: z.array(UnitChargeWindow).meta({ label: "Charge Windows" }),
+  query_by_purchases: z.array(FirestoreId).optional(),
   uuid_session: z.uuid().nullable(),
   // Plain, not `.default(0)`: every writer states it, and a stored default is
   // inert (`tests/stored-defaults.test.ts`).

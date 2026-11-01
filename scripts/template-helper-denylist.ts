@@ -712,6 +712,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "deriveQueryByProducts",
     "derivePurchaseStatus",
     "expandPurchaseItems",
+    // Writes a flat line's net and discount record (ruling 7) — a writer's step.
+    "flatPurchaseLineMoney",
     "purchaseItemCanceled",
     "purchaseItemCommittedCents",
     "purchaseItemProduct",

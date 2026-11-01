@@ -1016,3 +1016,12 @@ Deno.test("rateInForce compares instants, not strings; snapshotRates names a mis
     `No "month" rate`,
   );
 });
+
+Deno.test("an input price names its formula by uid_price_formula, and a percent fee naming one is refused", async () => {
+  const { ItemPrice } = await import("../src/schemas/order.ts");
+  assert(ItemPrice.safeParse({ uid_price_formula: "AAAAAAAAAAAAAAAAAAAA", rates: [] }).success);
+  assert(ItemPrice.safeParse({ base_percent: 4 }).success);
+  const both = ItemPrice.safeParse({ uid_price_formula: "AAAAAAAAAAAAAAAAAAAA", base_percent: 4 });
+  assert(!both.success);
+  assertEquals(both.error!.issues[0].path, ["price_formula"]);
+});

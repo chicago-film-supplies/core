@@ -24,7 +24,8 @@ import {
   type SubrentItem,
   type SubrentItemInputType,
 } from "../schemas/mod.ts";
-import { apportionCents, roundDivHalfUp } from "./money.ts";
+import { apportionCents, roundDivHalfUp, toCentsBig } from "./money.ts";
+import { type FormulaDiscount, priceFromFormula } from "../schemas/_line-money.ts";
 import { componentQuantities, type ComponentRowForWalk } from "./order-lines.ts";
 import { productCountsStock } from "./products.ts";
 import { derivePurchaseCreditStatus, purchaseCreditRemainingFromJournal, recomputePurchaseBillTotals } from "./invoices.ts";
@@ -216,6 +217,42 @@ export function allocateLandedCostCents(
 /** Units of a buy or subrent item still to be received: `quantity − canceled − received`. */
 export function remainingToReceive(item: ReceivableItem): number {
   return item.quantity - item.quantity_canceled - item.quantity_received;
+}
+
+/**
+ * **A flat purchase line's NET cost and its discount record** (Phase 2 ruling 7):
+ * the operator states the GROSS and a supplier discount, and the line stores the
+ * net as `amount_cents` — what receipts, basis, bills and credits slice.
+ *
+ * Composed from the money steps every priced line already uses, so no new
+ * rounding exists here:
+ *
+ * - **percent** — `priceFromFormula` on one period at the gross: the discounted
+ *   amount rounds ONCE, half away from zero, exactly as a customer line's does.
+ * - **flat** — `rate` is 4dp dollars PER UNIT (`cfs-money`: a rate is not an
+ *   amount), taken to cents as `priceFromFormula` takes it, then multiplied by
+ *   the integer quantity: closed, nothing to round.
+ *
+ * A discount larger than the gross yields a negative net, which the stored
+ * schema refuses — the caller's 400 to make, not this function's to clamp.
+ *
+ * @returns `discount` is `null` when none was stated; otherwise its
+ *   `amount_cents` is `gross − net`.
+ */
+export function flatPurchaseLineMoney(
+  grossCents: number,
+  quantity: number,
+  discount: FormulaDiscount | null,
+): { amount_cents: number; discount: { rate: number; type: FormulaDiscount["type"]; amount_cents: number } | null } {
+  if (!Number.isInteger(grossCents) || !Number.isInteger(quantity)) {
+    throw new Error(`A flat purchase line's gross and quantity are integers, got ${grossCents} × ${quantity}`);
+  }
+  if (discount === null) return { amount_cents: grossCents, discount: null };
+  const net = discount.type === "percent"
+    ? priceFromFormula([{ rate_key: "flat", amount_cents: grossCents }], [{ rate_key: "flat", num: 1, den: 1 }], 1, discount)
+      .subtotal_discounted_cents
+    : grossCents - Number(toCentsBig(discount.rate)) * quantity;
+  return { amount_cents: net, discount: { rate: discount.rate, type: discount.type, amount_cents: grossCents - net } };
 }
 
 /**

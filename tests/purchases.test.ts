@@ -58,6 +58,7 @@ import {
   remainingToReturn,
 } from "../src/utils/purchases.ts";
 import { apportionCents } from "../src/utils/money.ts";
+import { flatPurchaseLineMoney } from "../src/utils/purchases.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 // ── the cumulative share ─────────────────────────────────────────────
@@ -1472,4 +1473,57 @@ Deno.test("landed cost inputs: a subrent item cannot carry them; a buy item inpu
   });
   assert(!twice.success);
   assertEquals(twice.error.issues.map((i) => i.path.join(".")), ["landed_costs.1.uid"]);
+});
+
+// ── flatPurchaseLineMoney (Phase 2 ruling 7) ─────────────────────────
+
+
+/** Seeded LCG — corpora are reproducible, never `Math.random()`. */
+function flatMoneyLcg(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => (s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 2 ** 32;
+}
+
+/** Exact oracle: round(gross × (100 − rate) ÷ 100) half away from zero, by floor-and-compare, on 4dp rates. */
+function exactPercentNet(gross: number, rate4dp: number): number {
+  const num = BigInt(gross) * (1_000_000n - BigInt(rate4dp));
+  const den = 1_000_000n;
+  const q = num / den;
+  const r = num - q * den;
+  return Number(2n * r >= den ? q + 1n : q);
+}
+
+Deno.test("flatPurchaseLineMoney: percent net matches an exact oracle over 100k lines; the quantized ratio disagrees", () => {
+  const rand = flatMoneyLcg(77);
+  let wrong = 0;
+  let companionWrong = 0;
+  let discounted = 0;
+  for (let i = 0; i < 100_000; i++) {
+    const gross = 1 + Math.floor(rand() * 5_000_000);
+    const rate4dp = Math.floor(rand() * 1_000_000); // 0.0000 … 99.9999 %
+    const rate = rate4dp / 10_000;
+    const got = flatPurchaseLineMoney(gross, 1 + Math.floor(rand() * 50), { rate, type: "percent" });
+    const want = exactPercentNet(gross, rate4dp);
+    if (got.amount_cents !== want) wrong++;
+    if (got.discount!.amount_cents !== gross - got.amount_cents) wrong++;
+    if (want !== gross) discounted++;
+    // Companion: the ratio quantized to 2dp, then applied (cfs-money form B).
+    const factor = Math.round((100 - rate) / 100 * 100) / 100;
+    if (Math.round(gross * factor) !== want) companionWrong++;
+  }
+  assertEquals(wrong, 0);
+  assert(discounted > 90_000, `the discount arm barely ran: ${discounted}`);
+  assert(companionWrong > 50_000, `quantized-ratio companion stopped discriminating: ${companionWrong}`);
+});
+
+Deno.test("flatPurchaseLineMoney: a flat discount is cents per unit × quantity; none is the gross", () => {
+  assertEquals(flatPurchaseLineMoney(61_718, 288, null), { amount_cents: 61_718, discount: null });
+  // $0.10 off each of 288 units = $28.80.
+  assertEquals(flatPurchaseLineMoney(61_718, 288, { rate: 0.1, type: "flat" }), {
+    amount_cents: 61_718 - 2_880,
+    discount: { rate: 0.1, type: "flat", amount_cents: 2_880 },
+  });
+  // 10% of $617.18 = $61.718 → $61.72 off, half away from zero.
+  assertEquals(flatPurchaseLineMoney(61_718, 288, { rate: 10, type: "percent" }).amount_cents, 55_546);
+  assertThrows(() => flatPurchaseLineMoney(100.5, 1, null));
 });

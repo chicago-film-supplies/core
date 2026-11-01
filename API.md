@@ -14776,6 +14776,7 @@ interface UnitType {
   serial_history: UnitSerialHistoryEntryType[];
   status: UnitStatusType;
   charge_windows: UnitChargeWindowType[];
+  query_by_purchases?: string[];
   uuid_session: string | null;
   version: number;
   created_by: ActorRefType;
@@ -16431,9 +16432,12 @@ fee as $2.90. The unit lives in the NAME, and a percentage is never a rate row.
 (non-null exactly when `base_percent` is null). An input price may omit it —
 the writer resolves it from the product.
 
-### `checkLinePriceInput(price: indexedAccess, ctx: z.RefinementCtx): void`
+### `checkLinePriceInput(price: parenthesized | null | undefined, ctx: z.RefinementCtx): void`
 
-{@link checkLinePrice} on an INPUT price, where the writer resolves the formula.
+{@link checkLinePrice} on an INPUT price, where the writer resolves the
+formula. An input names its formula by `uid_price_formula`, so that is what
+the percent-xor-formula rule reads — reading only `price_formula`, which no
+input carries, let a percent fee that also named a formula through.
 
 ### `checkMixedBookingGrains(items: ReadonlyArray<unknown>, ctx: z.RefinementCtx): void`
 
@@ -16687,6 +16691,10 @@ Derive `query_by_orders` — the distinct union of the subrent items' `uid_order
 Derive `query_by_products` — the distinct products the items ORDER, in first
 appearance order. A charge's attribution is not an order and is left out.
 The one author of the mirror, called by every writer.
+
+### `deriveUnitQueryByPurchases(windows: readonly Pick<UnitChargeWindowType, "line">[]): string[]`
+
+The purchases a unit's windows bill against — distinct, sorted. The one author of `query_by_purchases`.
 
 ### `destinationJoinViolations(items: ReadonlyArray<unknown>, destinations: ReadonlyArray<unknown>): DestinationJoinViolation[]`
 
@@ -19917,9 +19925,12 @@ fee as $2.90. The unit lives in the NAME, and a percentage is never a rate row.
 (non-null exactly when `base_percent` is null). An input price may omit it —
 the writer resolves it from the product.
 
-### `checkLinePriceInput(price: indexedAccess, ctx: z.RefinementCtx): void`
+### `checkLinePriceInput(price: parenthesized | null | undefined, ctx: z.RefinementCtx): void`
 
-{@link checkLinePrice} on an INPUT price, where the writer resolves the formula.
+{@link checkLinePrice} on an INPUT price, where the writer resolves the
+formula. An input names its formula by `uid_price_formula`, so that is what
+the percent-xor-formula rule reads — reading only `price_formula`, which no
+input carries, let a percent fee that also named a formula through.
 
 ### `checkZeroPricedAmount(item: typeLiteral, ctx: z.RefinementCtx): void`
 
@@ -30543,6 +30554,7 @@ interface UnitType {
   serial_history: UnitSerialHistoryEntryType[];
   status: UnitStatusType;
   charge_windows: UnitChargeWindowType[];
+  query_by_purchases?: string[];
   uuid_session: string | null;
   version: number;
   created_by: ActorRefType;
@@ -30633,6 +30645,10 @@ interface UpdateUnitInputType {
   status?: UnitUserStatusType;
 }
 ```
+
+### `deriveUnitQueryByPurchases(windows: readonly Pick<UnitChargeWindowType, "line">[]): string[]`
+
+The purchases a unit's windows bill against — distinct, sorted. The one author of `query_by_purchases`.
 
 ## `@cfs/core/schemas/unit-roster`
 
@@ -49091,6 +49107,27 @@ Charge items pass through untouched.
 
 Returns rather than throws: a refusal is an operator-facing 400, and core
 throws plain `Error`, which a consumer's middleware reads as a 500.
+
+### `flatPurchaseLineMoney(grossCents: number, quantity: number, discount: FormulaDiscount | null): typeLiteral`
+
+**A flat purchase line's NET cost and its discount record** (Phase 2 ruling 7):
+the operator states the GROSS and a supplier discount, and the line stores the
+net as `amount_cents` — what receipts, basis, bills and credits slice.
+
+Composed from the money steps every priced line already uses, so no new
+rounding exists here:
+
+- **percent** — `priceFromFormula` on one period at the gross: the discounted
+  amount rounds ONCE, half away from zero, exactly as a customer line's does.
+- **flat** — `rate` is 4dp dollars PER UNIT (`cfs-money`: a rate is not an
+  amount), taken to cents as `priceFromFormula` takes it, then multiplied by
+  the integer quantity: closed, nothing to round.
+
+A discount larger than the gross yields a negative net, which the stored
+schema refuses — the caller's 400 to make, not this function's to clamp.
+
+**Returns** — `discount` is `null` when none was stated; otherwise its
+`amount_cents` is `gross − net`.
 
 ### `isLandedCostFrozen(entry: Pick<PurchaseLandedCost, "received_at_entry">, line: Pick<BuyItem, "quantity_received">): boolean`
 

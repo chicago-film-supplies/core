@@ -1358,6 +1358,7 @@ export {
   type OpenUnitChargeWindowInputType,
   UpdateUnitChargeWindowInput,
   type UpdateUnitChargeWindowInputType,
+  deriveUnitQueryByPurchases,
 } from "./unit.ts";
 export {
   UNIT_ROSTER_STATES,

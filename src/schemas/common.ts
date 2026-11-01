@@ -1599,12 +1599,19 @@ export function checkLinePrice(
   }
 }
 
-/** {@link checkLinePrice} on an INPUT price, where the writer resolves the formula. */
+/**
+ * {@link checkLinePrice} on an INPUT price, where the writer resolves the
+ * formula. An input names its formula by `uid_price_formula`, so that is what
+ * the percent-xor-formula rule reads — reading only `price_formula`, which no
+ * input carries, let a percent fee that also named a formula through.
+ */
 export function checkLinePriceInput(
-  price: Parameters<typeof checkLinePrice>[0],
+  price: (NonNullable<Parameters<typeof checkLinePrice>[0]> & { uid_price_formula?: string | null }) | null | undefined,
   ctx: z.RefinementCtx,
 ): void {
-  checkLinePrice(price, ctx, false);
+  if (price == null) return;
+  const named = price.uid_price_formula != null ? { uid: price.uid_price_formula } : price.price_formula;
+  checkLinePrice({ ...price, price_formula: named }, ctx, false);
 }
 
 // `ITEM_CONTRACTS`' totality over `ITEM_TYPES` is enforced by the
