@@ -1508,3 +1508,42 @@ Deno.test("totals.closure_count: legal only on a $0 invoice, and never negative 
   assertEquals(negative.success, false);
   assertEquals(negative.error!.issues.map((i) => i.path.join(".")), ["totals.closure_count"]);
 });
+
+// ── line money: checked while the invoice may still be repriced ─────────────
+//
+// purchases-as-documents Phase 5: the backfill found PAID, CRMS-authored invoices
+// whose stored line money no `rates × counts` reproduces (and the old pricer
+// never did either). A frozen invoice keeps its money; only a repriceable one is
+// held to the formula. The two arms below are each other's companion.
+
+/** `validInvoice` with its rental line's week rate moved off the stored money (50000 → 40000). */
+function withUnreproducibleLine(overrides: Record<string, unknown> = {}) {
+  const line = { ...validLine, price: { ...validLine.price, rates: [{ rate_key: "week", amount_cents: 40000 }] } };
+  return { ...validInvoice, items: [ORDER_DIVIDER, line], ...overrides };
+}
+
+Deno.test("InvoiceSchema: an unfrozen invoice whose line money its rates × counts do not reproduce is refused", () => {
+  const draft = InvoiceSchema.safeParse(withUnreproducibleLine());
+  assertEquals(draft.success, false);
+  assertEquals(
+    draft.error!.issues.map((i) => i.path.join(".")).sort(),
+    ["items.1.price.subtotal_cents", "items.1.price.subtotal_discounted_cents"],
+  );
+  // `issued` with nothing settled is still repriceable.
+  assertEquals(InvoiceSchema.safeParse(withUnreproducibleLine({ status: "issued" })).success, false);
+});
+
+Deno.test("InvoiceSchema: a FROZEN invoice keeps line money its counts do not reproduce", () => {
+  const paid = withUnreproducibleLine({
+    status: "paid",
+    totals: { ...validInvoice.totals, amount_paid_cents: 50000, amount_due_cents: 0 },
+  });
+  assertEquals(InvoiceSchema.safeParse(paid).success, true, "paid");
+  // Frozen by the SETTLEMENT, not the status column: a part payment freezes too.
+  const partPaid = withUnreproducibleLine({
+    status: "part_paid",
+    totals: { ...validInvoice.totals, amount_paid_cents: 10000, amount_due_cents: 40000 },
+  });
+  assertEquals(InvoiceSchema.safeParse(partPaid).success, true, "part_paid");
+  assertEquals(InvoiceSchema.safeParse(withUnreproducibleLine({ status: "void" })).success, true, "void");
+});

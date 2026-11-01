@@ -230,3 +230,29 @@ Deno.test("date is a calendar date, not an instant", () => {
   assertEquals(parsed.success, true);
   assertEquals((parsed.data as { date: string }).date, "2026-03-01T00:00:00.000-06:00");
 });
+
+// ── line money: checked until the credit note's money has moved ─────────────
+//
+// A credit note is priced once, at creation; the backfill (purchases-as-documents
+// Phase 5) found an APPLIED one whose stored money no `rates × counts` reproduces.
+// Applied or void keeps it; issued is still held to the formula.
+
+const unreproducible = (status: string, remaining: number) => {
+  const cn = makeCreditNote({ status, remaining_credit_cents: remaining });
+  const [line] = cn.items;
+  return { ...cn, items: [{ ...line, price: { ...line.price, rates: [{ rate_key: "flat", amount_cents: 219000 }] } }] };
+};
+
+Deno.test("CreditNoteSchema: an ISSUED credit note whose line money its rates × counts do not reproduce is refused", () => {
+  const issued = CreditNoteSchema.safeParse(unreproducible("issued", 219600));
+  assertEquals(issued.success, false);
+  assertEquals(
+    issued.error!.issues.map((i) => i.path.join(".")).sort(),
+    ["items.0.price.subtotal_cents", "items.0.price.subtotal_discounted_cents"],
+  );
+});
+
+Deno.test("CreditNoteSchema: an APPLIED or VOID credit note keeps line money its counts do not reproduce", () => {
+  assertEquals(CreditNoteSchema.safeParse(unreproducible("applied", 0)).success, true, "applied");
+  assertEquals(CreditNoteSchema.safeParse(unreproducible("void", 0)).success, true, "void");
+});

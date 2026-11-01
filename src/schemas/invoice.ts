@@ -44,7 +44,8 @@ import {
   TierCountSchema,
   type TierCountType,
 } from "./price-formula.ts";
-import { checkFormulaLineMoney } from "./_line-money.ts";
+import { checkItemsLineMoney } from "./_line-money.ts";
+import { invoiceIsFrozen } from "./_invoice-freeze.ts";
 import {
   checkLeadingDivider,
   checkStoredEndpoints,
@@ -671,7 +672,7 @@ const InvoiceDocLineItemInner = z.strictObject({
   // `seed: false`: `[]` fails `.min(1)`, so the form seed must omit the key.
   path_order_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
 }).superRefine(checkItemPriceFormula).superRefine(checkZeroPricedAmount)
-  .superRefine(checkOutOfServiceLineType).superRefine(checkFormulaLineMoney);
+  .superRefine(checkOutOfServiceLineType);
 
 // 🔴 `checkZeroPricedAmount` moved onto the **Inner** const on 2026-09-09, and
 // until then it never ran when an invoice document parsed. It was attached here,
@@ -1314,7 +1315,12 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
-}).superRefine(checkStoredEndpoints).superRefine(checkLeadingDivider("invoice")).refine(
+}).superRefine(checkStoredEndpoints).superRefine(checkLeadingDivider("invoice"))
+  // Line money is checked only while the invoice may still be repriced — see
+  // `checkItemsLineMoney` for why a frozen invoice keeps money no counts reproduce.
+  .superRefine((inv, ctx) => {
+    if (!invoiceIsFrozen(inv)) checkItemsLineMoney(inv.items, ctx);
+  }).refine(
   // The mirror must be EXACTLY the set its lines carry — a mirror is a claim
   // about the lines, and one a writer forgot to refresh would hide a billed
   // record from the double-bill check. Absent reads as `[]`, so an invoice with

@@ -163,3 +163,29 @@ export function checkFormulaLineMoney(
     }
   }
 }
+
+/**
+ * {@link checkFormulaLineMoney} over a document's `items`, each issue pathed
+ * under `["items", i]` — the DOCUMENT-level form, for a schema that runs the
+ * money check only while the document may still be repriced.
+ *
+ * 🔴 **Why the invoice and the credit note scope it and the order does not**
+ * (purchases-as-documents Phase 5, the D10 "risk to measure"): the backfill found
+ * PAID invoices — CRMS-authored, Xero's money — and an APPLIED credit note whose
+ * stored line money no `rates × counts` reproduces, and never had: the old
+ * pricer disagreed with them too. Their money is settled fact, and inventing a
+ * fractional count to make it agree would make `counts` lie about time to every
+ * reader that budgets from them (credits, remainders, the diff). So a frozen
+ * document keeps its money and its honest counts, and the check guards what can
+ * still be repriced.
+ */
+export function checkItemsLineMoney(
+  items: readonly unknown[],
+  ctx: { addIssue: (issue: { code: "custom"; path: (string | number)[]; message: string }) => void },
+): void {
+  items.forEach((item, i) =>
+    checkFormulaLineMoney(item as FormulaPricedLineLike, {
+      addIssue: (issue) => ctx.addIssue({ ...issue, path: ["items", i, ...issue.path] }),
+    })
+  );
+}

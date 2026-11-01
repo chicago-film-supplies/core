@@ -60,7 +60,7 @@ import {
   TierCountSchema,
   type TierCountType,
 } from "./price-formula.ts";
-import { checkFormulaLineMoney } from "./_line-money.ts";
+import { checkItemsLineMoney } from "./_line-money.ts";
 import {
   Discount,
   type DiscountType,
@@ -378,7 +378,7 @@ const CreditNoteDocLineItemInner = z.strictObject({
   // `seed: false`: `[]` fails `.min(1)`, so the form seed must omit the key (core#125).
   path_invoice_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
   reverses_billing: z.boolean(),
-}).superRefine(checkItemPriceFormula).superRefine(checkFormulaLineMoney);
+}).superRefine(checkItemPriceFormula);
 
 /** Zod schema for a credit-note line item. */
 export const CreditNoteDocLineItem: z.ZodType<CreditNoteDocLineItem> = CreditNoteDocLineItemInner;
@@ -565,7 +565,13 @@ export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
-}).superRefine(checkCreditNote).meta({
+}).superRefine(checkCreditNote)
+  // A credit note is priced once, at creation (`priceCreditNote`). Once it is
+  // applied or void its money has moved, and it keeps what it stored — see
+  // `checkItemsLineMoney`.
+  .superRefine((cn, ctx) => {
+    if (cn.status !== "applied" && cn.status !== "void") checkItemsLineMoney(cn.items, ctx);
+  }).meta({
   title: "Credit Note",
   collection: "credit-notes",
   displayDefaults: {
