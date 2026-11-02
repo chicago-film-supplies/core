@@ -2823,7 +2823,7 @@
         {
           "kind": "interface",
           "name": "ItemPriceType",
-          "declaration": "interface ItemPriceType {\n  uid_price_formula?: string;\n  rates?: RateSnapshotType[];\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  subtotal_cents?: number;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n  total_cents?: number;\n}",
+          "declaration": "interface ItemPriceType {\n  uid_price_formula?: string;\n  price_formula?: PriceFormulaRef | null;\n  rates?: RateSnapshotType[];\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  subtotal_cents?: number;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n  total_cents?: number;\n}",
           "doc": "Price breakdown for an order item (input — client sends partial data, server computes the rest)."
         },
         {
@@ -4367,6 +4367,12 @@
           "name": "PriceFormulaRef",
           "declaration": "interface PriceFormulaRef {\n  uid: string;\n  name: string;\n  basis: PriceFormulaBasis;\n}",
           "doc": "A line's snapshot of the formula it is priced by — `{ uid, name }` like\n`PriceModifier` and `TaxRef` (`schemas/order.ts`), plus the derived\n{@link PriceFormulaBasis}. A point-in-time copy: a formula is immutable once\nreferenced, and a renamed one is a superseding formula, so the snapshot never\nneeds re-pointing."
+        },
+        {
+          "kind": "variable",
+          "name": "PriceFormulaRefInput",
+          "declaration": "const PriceFormulaRefInput: z.ZodType<PriceFormulaRef>;",
+          "doc": "{@link PriceFormulaRefSchema} for an INPUT schema — unknown keys are\nstripped, not refused (§ *Document vs input schemas*). Same leaf instances,\nso every `.meta()` survives. A client echoing a stored line sends this\nsnapshot back; the writer reads only its `uid` and re-derives `name` and\n`basis` from the formula itself."
         },
         {
           "kind": "variable",
@@ -7389,7 +7395,7 @@
           "kind": "function",
           "name": "checkLinePriceInput",
           "signature": "checkLinePriceInput(price: parenthesized | null | undefined, ctx: z.RefinementCtx): void",
-          "doc": "{@link checkLinePrice} on an INPUT price, where the writer resolves the\nformula. An input names its formula by `uid_price_formula`, so that is what\nthe percent-xor-formula rule reads — reading only `price_formula`, which no\ninput carries, let a percent fee that also named a formula through.",
+          "doc": "{@link checkLinePrice} on an INPUT price, where the writer resolves the\nformula. An input names its formula by `uid_price_formula` or — echoing a\nstored line — by the `price_formula` snapshot, so the percent-xor-formula\nrule reads whichever is present. Both present and naming different formulas\nis refused: one of them is a client bug, and preferring either hides it.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -9192,7 +9198,7 @@
           "kind": "function",
           "name": "checkLinePriceInput",
           "signature": "checkLinePriceInput(price: parenthesized | null | undefined, ctx: z.RefinementCtx): void",
-          "doc": "{@link checkLinePrice} on an INPUT price, where the writer resolves the\nformula. An input names its formula by `uid_price_formula`, so that is what\nthe percent-xor-formula rule reads — reading only `price_formula`, which no\ninput carries, let a percent fee that also named a formula through.",
+          "doc": "{@link checkLinePrice} on an INPUT price, where the writer resolves the\nformula. An input names its formula by `uid_price_formula` or — echoing a\nstored line — by the `price_formula` snapshot, so the percent-xor-formula\nrule reads whichever is present. Both present and naming different formulas\nis refused: one of them is a client bug, and preferring either hides it.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -10559,7 +10565,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputPriceType",
-          "declaration": "interface InvoiceItemInputPriceType {\n  uid_price_formula?: string;\n  rates?: RateSnapshotType[];\n  base_percent?: number | null;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n}",
+          "declaration": "interface InvoiceItemInputPriceType {\n  uid_price_formula?: string;\n  price_formula?: PriceFormulaRef | null;\n  rates?: RateSnapshotType[];\n  base_percent?: number | null;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n}",
           "doc": "Item price input — partial, server computes the rest."
         },
         {
@@ -11061,7 +11067,7 @@
         {
           "kind": "interface",
           "name": "ItemPriceType",
-          "declaration": "interface ItemPriceType {\n  uid_price_formula?: string;\n  rates?: RateSnapshotType[];\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  subtotal_cents?: number;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n  total_cents?: number;\n}",
+          "declaration": "interface ItemPriceType {\n  uid_price_formula?: string;\n  price_formula?: PriceFormulaRef | null;\n  rates?: RateSnapshotType[];\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  subtotal_cents?: number;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n  total_cents?: number;\n}",
           "doc": "Price breakdown for an order item (input — client sends partial data, server computes the rest)."
         },
         {
@@ -12106,6 +12112,12 @@
           "name": "PriceFormulaRef",
           "declaration": "interface PriceFormulaRef {\n  uid: string;\n  name: string;\n  basis: PriceFormulaBasis;\n}",
           "doc": "A line's snapshot of the formula it is priced by — `{ uid, name }` like\n`PriceModifier` and `TaxRef` (`schemas/order.ts`), plus the derived\n{@link PriceFormulaBasis}. A point-in-time copy: a formula is immutable once\nreferenced, and a renamed one is a superseding formula, so the snapshot never\nneeds re-pointing."
+        },
+        {
+          "kind": "variable",
+          "name": "PriceFormulaRefInput",
+          "declaration": "const PriceFormulaRefInput: z.ZodType<PriceFormulaRef>;",
+          "doc": "{@link PriceFormulaRefSchema} for an INPUT schema — unknown keys are\nstripped, not refused (§ *Document vs input schemas*). Same leaf instances,\nso every `.meta()` survives. A client echoing a stored line sends this\nsnapshot back; the writer reads only its `uid` and re-derives `name` and\n`basis` from the formula itself."
         },
         {
           "kind": "variable",

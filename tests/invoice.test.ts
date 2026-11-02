@@ -1547,3 +1547,21 @@ Deno.test("InvoiceSchema: a FROZEN invoice keeps line money its counts do not re
   assertEquals(InvoiceSchema.safeParse(partPaid).success, true, "part_paid");
   assertEquals(InvoiceSchema.safeParse(withUnreproducibleLine({ status: "void" })).success, true, "void");
 });
+
+// The invoice input price takes the stored-form echo too — see the order twin in
+// `tests/order.test.ts` ("a stored-form echo keeps price_formula").
+Deno.test("InvoiceItemInputLine: a stored-form price echo keeps price_formula", () => {
+  const formula = { uid: "FiveDayWeekPriceForm", name: "Five-day week", basis: "time" as const };
+  const r = InvoiceItemInputLine.safeParse({
+    uid: "custom-ca5a8b1c-eb0c-46fa-9db3-c3f9ff64ced6",
+    type: "rental",
+    name: "Desk Lamp",
+    quantity: 26,
+    path: ["custom-ca5a8b1c-eb0c-46fa-9db3-c3f9ff64ced6"],
+    price: { price_formula: formula, rates: [{ rate_key: "week", amount_cents: 3500 }], counts: [{ rate_key: "week", num: 7, den: 5 }] },
+  });
+  assertEquals(r.success, true, JSON.stringify(r.error?.issues));
+  const price = (r.data as { price?: Record<string, unknown> }).price!;
+  assertEquals(price.price_formula, formula);
+  assertEquals("counts" in price, false);
+});

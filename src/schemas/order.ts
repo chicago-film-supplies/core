@@ -56,6 +56,7 @@ import {
 } from "./common.ts";
 import {
   type PriceFormulaRef,
+  PriceFormulaRefInput,
   PriceFormulaRefSchema,
   RateKey,
   RateSnapshotSchema,
@@ -1774,6 +1775,16 @@ export interface ItemPriceType {
    */
   uid_price_formula?: string;
   /**
+   * The formula as a STORED line carries it — accepted so a client echoing a
+   * stored line names its formula without converting it (api-cloudrun order
+   * 1083, 2026-11-02: the manager PUTs `items` in stored form, and stripping
+   * this key left every custom line unpriced). Only `uid` is read; the writer
+   * re-derives `name` and `basis`. Disagreeing with `uid_price_formula` is
+   * refused ({@link checkLinePriceInput}). See
+   * {@link OrderDocItemPriceType.price_formula}.
+   */
+  price_formula?: PriceFormulaRef | null;
+  /**
    * The rates to price with, per `rate_key` — the operator's override. Omitted,
    * the writer snapshots the product's rates in force on the line's pricing
    * date (or keeps the stored line's).
@@ -1790,6 +1801,7 @@ export interface ItemPriceType {
 /** Zod schema for item price breakdown (input). */
 export const ItemPrice: z.ZodType<ItemPriceType> = z.object({
   uid_price_formula: FirestoreId.optional(),
+  price_formula: PriceFormulaRefInput.nullable().optional(),
   rates: z.array(z.object({ rate_key: RateKey, amount_cents: z.int() })).optional(),
   base_percent: z.number().nullable().optional(),
   replacement_cents: z.int().nullable().optional(),

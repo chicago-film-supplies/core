@@ -1098,6 +1098,7 @@ export {
   PriceFormulaBasisEnum,
   priceFormulaBasis,
   PriceFormulaRefSchema,
+  PriceFormulaRefInput,
   RateSnapshotSchema,
   TierCountSchema,
   type TierCountType,

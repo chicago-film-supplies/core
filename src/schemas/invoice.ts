@@ -37,6 +37,7 @@ import {
 } from "./common.ts";
 import {
   type PriceFormulaRef,
+  PriceFormulaRefInput,
   PriceFormulaRefSchema,
   RateKey,
   RateSnapshotSchema,
@@ -1395,6 +1396,8 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
 export interface InvoiceItemInputPriceType {
   /** See {@link ItemPriceType.uid_price_formula}. */
   uid_price_formula?: string;
+  /** See {@link ItemPriceType.price_formula}. */
+  price_formula?: PriceFormulaRef | null;
   /** See {@link ItemPriceType.rates}. */
   rates?: RateSnapshotType[];
   base_percent?: number | null;
@@ -1404,6 +1407,7 @@ export interface InvoiceItemInputPriceType {
 
 const InvoiceItemInputPrice: z.ZodType<InvoiceItemInputPriceType> = z.object({
   uid_price_formula: FirestoreId.optional(),
+  price_formula: PriceFormulaRefInput.nullable().optional(),
   rates: z.array(z.object({ rate_key: RateKey, amount_cents: z.int() })).optional(),
   base_percent: z.number().nullable().optional(),
   // No `counts`: metered from the pair's charge windows by `priceDocument`

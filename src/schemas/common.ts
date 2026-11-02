@@ -1601,15 +1601,23 @@ export function checkLinePrice(
 
 /**
  * {@link checkLinePrice} on an INPUT price, where the writer resolves the
- * formula. An input names its formula by `uid_price_formula`, so that is what
- * the percent-xor-formula rule reads — reading only `price_formula`, which no
- * input carries, let a percent fee that also named a formula through.
+ * formula. An input names its formula by `uid_price_formula` or — echoing a
+ * stored line — by the `price_formula` snapshot, so the percent-xor-formula
+ * rule reads whichever is present. Both present and naming different formulas
+ * is refused: one of them is a client bug, and preferring either hides it.
  */
 export function checkLinePriceInput(
   price: (NonNullable<Parameters<typeof checkLinePrice>[0]> & { uid_price_formula?: string | null }) | null | undefined,
   ctx: z.RefinementCtx,
 ): void {
   if (price == null) return;
+  if (price.uid_price_formula != null && price.price_formula != null && price.price_formula.uid !== price.uid_price_formula) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["price_formula", "uid"],
+      message: `price.price_formula.uid (${price.price_formula.uid}) must match price.uid_price_formula (${price.uid_price_formula})`,
+    });
+  }
   const named = price.uid_price_formula != null ? { uid: price.uid_price_formula } : price.price_formula;
   checkLinePrice({ ...price, price_formula: named }, ctx, false);
 }

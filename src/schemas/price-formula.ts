@@ -466,12 +466,23 @@ export interface PriceFormulaRef {
   basis: PriceFormulaBasis;
 }
 
-/** Zod schema for {@link PriceFormulaRef}. */
-export const PriceFormulaRefSchema: z.ZodType<PriceFormulaRef> = z.strictObject({
+const PriceFormulaRefObject = z.strictObject({
   uid: FirestoreId,
   name: z.string().min(1).max(100).meta({ pii: "none", column: true, label: "Formula" }),
   basis: PriceFormulaBasisEnum,
 });
+
+/** Zod schema for {@link PriceFormulaRef}. */
+export const PriceFormulaRefSchema: z.ZodType<PriceFormulaRef> = PriceFormulaRefObject;
+
+/**
+ * {@link PriceFormulaRefSchema} for an INPUT schema — unknown keys are
+ * stripped, not refused (§ *Document vs input schemas*). Same leaf instances,
+ * so every `.meta()` survives. A client echoing a stored line sends this
+ * snapshot back; the writer reads only its `uid` and re-derives `name` and
+ * `basis` from the formula itself.
+ */
+export const PriceFormulaRefInput: z.ZodType<PriceFormulaRef> = PriceFormulaRefObject.strip();
 
 /**
  * One rate a line PRICED with — the snapshot it owns (Q13), taken for the

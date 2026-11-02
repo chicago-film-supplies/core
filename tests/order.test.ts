@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { fdwPrice, fixedPrice } from "./helpers/formulas.ts";
 import { getInitialValues } from "../src/schemas/initial.ts";
-import { CreateOrderInput, Discount, DiscountInput, DocDestination, EXCHANGE_DISPOSITIONS, isLineItem, OrderDocDates, OrderDocItem, type OrderDocItemType, OrderDocItemPrice, OrderItem, OrderSchema, UpdateOrderInput } from "../src/schemas/order.ts";
+import { CreateOrderInput, Discount, DiscountInput, DocDestination, EXCHANGE_DISPOSITIONS, isLineItem, ItemPrice, OrderDocDates, OrderDocItem, type OrderDocItemType, OrderDocItemPrice, OrderItem, OrderSchema, UpdateOrderInput } from "../src/schemas/order.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 // `uid_thread` is a branded `ThreadId`; the schema walk seeds string leaves as
@@ -1598,4 +1598,45 @@ Deno.test("S8c-5: OrderItem (input) STRIPS an old-named `exchanged_for` — it i
   const parsed = OrderItem.safeParse({ uid: Y_LINE, type: "rental", path: [EXCHANGE_PAIR, Y_LINE], replaces: EXCHANGE_ENTRY });
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
   assertEquals("replaces" in (parsed.success ? parsed.data : {}), false);
+});
+
+// ── A client echoing a STORED line price keeps its formula (api-cloudrun order 1083) ──
+//
+// The manager PUTs `items` in stored form: `price.price_formula`, never
+// `price.uid_price_formula`. Before 2026-11-02 the input stripped the snapshot,
+// so a custom line arrived with no formula and the writer refused it on every
+// save. The snapshot is now an input spelling; the echoed computed keys are
+// still stripped, and so is any extra key inside the snapshot (stripping twin).
+const STORED_LINE_PRICE = {
+  base_percent: null,
+  replacement_cents: 0,
+  subtotal_cents: 127400,
+  subtotal_discounted_cents: 127400,
+  discount: null,
+  taxes: [{ uid: "VEW4Ivy7VNqgxFA5eJw6", name: "Chicago Rental Tax", rate: 15, type: "percent", amount_cents: 19110 }],
+  total_cents: 146510,
+  taxes_base: [{ uid: "VEW4Ivy7VNqgxFA5eJw6", name: "Chicago Rental Tax", rate: 15, type: "percent" }],
+  price_formula: { uid: "FiveDayWeekPriceForm", name: "Five-day week", basis: "time" },
+  rates: [{ rate_key: "week", amount_cents: 3500 }],
+  counts: [{ rate_key: "week", num: 7, den: 5 }],
+};
+
+Deno.test("ItemPrice: a stored-form echo keeps price_formula and strips the computed keys", () => {
+  const r = ItemPrice.safeParse(STORED_LINE_PRICE);
+  assertEquals(r.success, true);
+  const out = r.data as Record<string, unknown>;
+  assertEquals(out.price_formula, STORED_LINE_PRICE.price_formula);
+  for (const k of ["counts", "subtotal_discounted_cents", "taxes_base"]) assertEquals(k in out, false, k);
+});
+
+Deno.test("ItemPrice: an extra key inside the echoed snapshot is stripped, not refused", () => {
+  const r = ItemPrice.safeParse({ ...STORED_LINE_PRICE, price_formula: { ...STORED_LINE_PRICE.price_formula, legacy: 1 } });
+  assertEquals(r.success, true);
+  assertEquals(r.data?.price_formula, STORED_LINE_PRICE.price_formula);
+});
+
+Deno.test("ItemPrice: uid_price_formula disagreeing with the echoed snapshot is refused", () => {
+  const r = ItemPrice.safeParse({ ...STORED_LINE_PRICE, uid_price_formula: "FixedPriceFormula000" });
+  assertEquals(r.success, false);
+  assertEquals(r.error?.issues.map((i) => i.path.join(".")), ["price_formula.uid"]);
 });

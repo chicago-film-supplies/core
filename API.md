@@ -6392,6 +6392,7 @@ Price breakdown for an order item (input — client sends partial data, server c
 ```ts
 interface ItemPriceType {
   uid_price_formula?: string;
+  price_formula?: PriceFormulaRef | null;
   rates?: RateSnapshotType[];
   base_percent?: number | null;
   replacement_cents?: number | null;
@@ -9890,6 +9891,18 @@ interface PriceFormulaRef {
   name: string;
   basis: PriceFormulaBasis;
 }
+```
+
+### `PriceFormulaRefInput`
+
+{@link PriceFormulaRefSchema} for an INPUT schema — unknown keys are
+stripped, not refused (§ *Document vs input schemas*). Same leaf instances,
+so every `.meta()` survives. A client echoing a stored line sends this
+snapshot back; the writer reads only its `uid` and re-derives `name` and
+`basis` from the formula itself.
+
+```ts
+const PriceFormulaRefInput: z.ZodType<PriceFormulaRef>;
 ```
 
 ### `PriceFormulaRefSchema`
@@ -16576,9 +16589,10 @@ the writer resolves it from the product.
 ### `checkLinePriceInput(price: parenthesized | null | undefined, ctx: z.RefinementCtx): void`
 
 {@link checkLinePrice} on an INPUT price, where the writer resolves the
-formula. An input names its formula by `uid_price_formula`, so that is what
-the percent-xor-formula rule reads — reading only `price_formula`, which no
-input carries, let a percent fee that also named a formula through.
+formula. An input names its formula by `uid_price_formula` or — echoing a
+stored line — by the `price_formula` snapshot, so the percent-xor-formula
+rule reads whichever is present. Both present and naming different formulas
+is refused: one of them is a client bug, and preferring either hides it.
 
 ### `checkMixedBookingGrains(items: ReadonlyArray<unknown>, ctx: z.RefinementCtx): void`
 
@@ -20071,9 +20085,10 @@ the writer resolves it from the product.
 ### `checkLinePriceInput(price: parenthesized | null | undefined, ctx: z.RefinementCtx): void`
 
 {@link checkLinePrice} on an INPUT price, where the writer resolves the
-formula. An input names its formula by `uid_price_formula`, so that is what
-the percent-xor-formula rule reads — reading only `price_formula`, which no
-input carries, let a percent fee that also named a formula through.
+formula. An input names its formula by `uid_price_formula` or — echoing a
+stored line — by the `price_formula` snapshot, so the percent-xor-formula
+rule reads whichever is present. Both present and naming different formulas
+is refused: one of them is a client bug, and preferring either hides it.
 
 ### `checkZeroPricedAmount(item: typeLiteral, ctx: z.RefinementCtx): void`
 
@@ -22931,6 +22946,7 @@ Item price input — partial, server computes the rest.
 ```ts
 interface InvoiceItemInputPriceType {
   uid_price_formula?: string;
+  price_formula?: PriceFormulaRef | null;
   rates?: RateSnapshotType[];
   base_percent?: number | null;
   discount?: DiscountInputType | null;
@@ -23951,6 +23967,7 @@ Price breakdown for an order item (input — client sends partial data, server c
 ```ts
 interface ItemPriceType {
   uid_price_formula?: string;
+  price_formula?: PriceFormulaRef | null;
   rates?: RateSnapshotType[];
   base_percent?: number | null;
   replacement_cents?: number | null;
@@ -26158,6 +26175,18 @@ interface PriceFormulaRef {
   name: string;
   basis: PriceFormulaBasis;
 }
+```
+
+### `PriceFormulaRefInput`
+
+{@link PriceFormulaRefSchema} for an INPUT schema — unknown keys are
+stripped, not refused (§ *Document vs input schemas*). Same leaf instances,
+so every `.meta()` survives. A client echoing a stored line sends this
+snapshot back; the writer reads only its `uid` and re-derives `name` and
+`basis` from the formula itself.
+
+```ts
+const PriceFormulaRefInput: z.ZodType<PriceFormulaRef>;
 ```
 
 ### `PriceFormulaRefSchema`
