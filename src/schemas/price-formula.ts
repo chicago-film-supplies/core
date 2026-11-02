@@ -5,7 +5,7 @@
  * multiplies is a separately dated RATE (`rate_key` → an absolute
  * `amount_cents`), the way a tax class names codes and the codes carry dated
  * rates. Purchases-as-documents D1/D4
- * (`api-cloudrun/.claude/plans/purchases-as-documents.md`).
+ * (`api-cloudrun/.claude/plans/purchases-as-documents-RECORD.md`).
  *
  * ```
  * metered time  = meter(windows | span − free gaps | nothing)

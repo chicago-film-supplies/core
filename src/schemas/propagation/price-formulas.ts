@@ -1,6 +1,6 @@
 /**
  * Price formula propagation — the `price-formulas` catalog
- * (purchases-as-documents D1, `api-cloudrun/.claude/plans/purchases-as-documents.md`).
+ * (purchases-as-documents D1, `api-cloudrun/.claude/plans/purchases-as-documents-RECORD.md`).
  *
  * ⚠️ **Neither transaction propagates anything, by design.** A line snapshots
  * the formula it priced with (`price.price_formula: { uid, name }`) and the
