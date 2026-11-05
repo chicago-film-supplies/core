@@ -9102,6 +9102,24 @@ both decided by it (purchases-as-documents, Phase 2 ruling 1).
 const PRICE_FORMULA_BASES: "flat" | "time"[];
 ```
 
+### `PURCHASE_ACTIONS`
+
+Every action, keyed by id. `Readonly<Record<PurchaseActionId, …>>` makes an id
+with no row a type error; the both-ways test makes a row with no id one.
+
+```ts
+const PURCHASE_ACTIONS: Readonly<Record<PurchaseActionId, PurchaseActionDefinition>>;
+```
+
+### `PURCHASE_ACTION_IDS`
+
+Every purchase action id. `tests/purchase-actions.test.ts` asserts it equals
+{@link PURCHASE_ACTIONS}' keys in both directions.
+
+```ts
+const PURCHASE_ACTION_IDS: "close" | "add_bill" | "add_credit" | "close_item" | "bill_item" | "remove_item" | "change_basis" | "allocate_credit" | "void_credit"[];
+```
+
 ### `PURCHASE_BILL_FIELD_CLASSES`
 
 The classes a bill's editable fields fall into, for the freeze question
@@ -9126,6 +9144,19 @@ rebuilt items, as the invoice's `lineMoneyAgrees` does.
 
 ```ts
 const PURCHASE_BILL_FIELD_FREEZE: Readonly<Record<PurchaseBillFieldClass, PurchaseBillFieldFreezeContract>>;
+```
+
+### `PURCHASE_BILL_STATUSES`
+
+What a bill's settlements add up to, for display. A bill stores NO status:
+`derivePurchaseBillStatus` (`@cfs/core/utils/invoices`) reads this off its
+totals. `unpaid` stands where an invoice says `issued`, because a bill has no
+issue step. `credited` has no invoice twin: the invoice folds it into `paid`,
+while an operator reading supplier bills needs to tell settled-by-credit from
+money paid.
+
+```ts
+const PURCHASE_BILL_STATUSES: "unpaid" | "part_paid" | "paid" | "credited" | "void"[];
 ```
 
 ### `PURCHASE_BILL_XERO_DOCUMENTS`
@@ -10444,6 +10475,41 @@ interface Purchase {
 }
 ```
 
+### `PurchaseActionDefinition`
+
+One row of {@link PURCHASE_ACTIONS}.
+
+```ts
+interface PurchaseActionDefinition {
+  subject: PurchaseActionSubject;
+  description: string;
+}
+```
+
+### `PurchaseActionId`
+
+One purchase action id.
+
+```ts
+type PurchaseActionId = indexedAccess;
+```
+
+### `PurchaseActionIdEnum`
+
+Zod schema for {@link PurchaseActionId}.
+
+```ts
+const PurchaseActionIdEnum: z.ZodType<PurchaseActionId>;
+```
+
+### `PurchaseActionSubject`
+
+What an action acts on — and so which offer function lists it.
+
+```ts
+type PurchaseActionSubject = "purchase" | "purchase_item" | "purchase_bill" | "purchase_credit";
+```
+
 ### `PurchaseBill`
 
 A supplier bill against one purchase.
@@ -10532,6 +10598,22 @@ A payable settlement that settles a supplier BILL — every payable type but the
 
 ```ts
 type PurchaseBillSettlement = PayableSettlement & typeLiteral;
+```
+
+### `PurchaseBillStatusEnum`
+
+Zod schema for PurchaseBillStatusType.
+
+```ts
+const PurchaseBillStatusEnum: z.ZodType<PurchaseBillStatusType>;
+```
+
+### `PurchaseBillStatusType`
+
+One {@link PURCHASE_BILL_STATUSES} member.
+
+```ts
+type PurchaseBillStatusType = indexedAccess;
 ```
 
 ### `PurchaseBillTotals`
@@ -27873,10 +27955,8 @@ No tax: purchases are resale-exempt (owner, 2026-10-05) and push `NoTax`.
 
 `PURCHASE_BILL_FIELD_FREEZE` copies `INVOICE_FIELD_FREEZE` class for class,
 and `purchaseBillIsFrozen` (`@cfs/core/utils/invoices`) is the invoice's money
-predicate over a bill's totals. Nothing edits a bill yet (a bill is written
-once), so the table is DECLARED here for whichever change adds a bill edit or
-wires the projection merge. Supplier credits get no table, matching sales
-credit notes.
+predicate over a bill's totals. `updatePurchaseBill` and the purchase → bill
+sync both read it. Supplier credits get no table, matching sales credit notes.
 
 ### `AllocatePurchaseCreditInput`
 
@@ -27974,6 +28054,19 @@ rebuilt items, as the invoice's `lineMoneyAgrees` does.
 
 ```ts
 const PURCHASE_BILL_FIELD_FREEZE: Readonly<Record<PurchaseBillFieldClass, PurchaseBillFieldFreezeContract>>;
+```
+
+### `PURCHASE_BILL_STATUSES`
+
+What a bill's settlements add up to, for display. A bill stores NO status:
+`derivePurchaseBillStatus` (`@cfs/core/utils/invoices`) reads this off its
+totals. `unpaid` stands where an invoice says `issued`, because a bill has no
+issue step. `credited` has no invoice twin: the invoice folds it into `paid`,
+while an operator reading supplier bills needs to tell settled-by-credit from
+money paid.
+
+```ts
+const PURCHASE_BILL_STATUSES: "unpaid" | "part_paid" | "paid" | "credited" | "void"[];
 ```
 
 ### `PURCHASE_BILL_XERO_DOCUMENTS`
@@ -28101,6 +28194,22 @@ Zod schema for PurchaseBill.
 
 ```ts
 const PurchaseBillSchema: z.ZodType<PurchaseBill>;
+```
+
+### `PurchaseBillStatusEnum`
+
+Zod schema for PurchaseBillStatusType.
+
+```ts
+const PurchaseBillStatusEnum: z.ZodType<PurchaseBillStatusType>;
+```
+
+### `PurchaseBillStatusType`
+
+One {@link PURCHASE_BILL_STATUSES} member.
+
+```ts
+type PurchaseBillStatusType = indexedAccess;
 ```
 
 ### `PurchaseBillTotals`
@@ -34765,7 +34874,7 @@ Quota-gate arms (added 2026-07 with the daily-budget gate):
   a dropped write needing a human.
 
 ```ts
-const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_invoice_push_skipped" | "xero_invoice_twin_adopted" | "xero_invoice_twin_refused" | "xero_stock_adjustment_bill" | "xero_bill_pushed" | "xero_bill_push_skipped" | "xero_bill_twin_adopted" | "xero_bill_validation_rejected" | "xero_bill_terminal" | "xero_bill_enqueue_failed" | "purchase_bill_pushed" | "purchase_bill_push_skipped" | "purchase_bill_twin_adopted" | "purchase_bill_push_rejected" | "purchase_bill_enqueue_failed" | "purchase_credit_pushed" | "purchase_credit_push_skipped" | "purchase_credit_twin_adopted" | "purchase_credit_push_rejected" | "purchase_credit_enqueue_failed" | "purchase_credit_allocation_pushed" | "purchase_credit_allocation_failed" | "xero_settlement_synced" | "xero_settlement_reaped" | "xero_settlement_resurrected" | "xero_manual_intervention_required" | "credit_note_counter_raised" | "xero_credit_note_refunds_synced" | "xero_payment_already_synced" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_locked" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_superseded" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_validation_rejected" | "xero_quota_exhausted" | "xero_rate_limit" | "xero_write_deferred" | "xero_defer_escalated" | "xero_tracking_option_create_failed" | "xero_tax_rate_create_failed" | "xero_tracking_option_unresolved" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice" | "xero_untracked_accpay" | "usage_bill_link_skipped" | "usage_bill_link_failed" | "usage_bill_poll_completed"[];
+const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_invoice_push_skipped" | "xero_invoice_twin_adopted" | "xero_invoice_twin_refused" | "xero_stock_adjustment_bill" | "xero_bill_pushed" | "xero_bill_push_skipped" | "xero_bill_twin_adopted" | "xero_bill_validation_rejected" | "xero_bill_terminal" | "xero_bill_enqueue_failed" | "purchase_bill_pushed" | "purchase_bill_push_skipped" | "purchase_bill_twin_adopted" | "purchase_bill_push_rejected" | "purchase_bill_enqueue_failed" | "purchase_bill_void_release_clamped" | "purchase_credit_pushed" | "purchase_credit_push_skipped" | "purchase_credit_twin_adopted" | "purchase_credit_push_rejected" | "purchase_credit_enqueue_failed" | "purchase_credit_allocation_pushed" | "purchase_credit_allocation_failed" | "xero_settlement_synced" | "xero_settlement_reaped" | "xero_settlement_resurrected" | "xero_manual_intervention_required" | "credit_note_counter_raised" | "xero_credit_note_refunds_synced" | "xero_payment_already_synced" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_locked" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_superseded" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_validation_rejected" | "xero_quota_exhausted" | "xero_rate_limit" | "xero_write_deferred" | "xero_defer_escalated" | "xero_tracking_option_create_failed" | "xero_tax_rate_create_failed" | "xero_tracking_option_unresolved" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice" | "xero_untracked_accpay" | "usage_bill_link_skipped" | "usage_bill_link_failed" | "usage_bill_poll_completed"[];
 ```
 
 ### `XeroEventLogRecord`
@@ -34793,6 +34902,9 @@ interface XeroEventLogRecord {
   movement_number?: number;
   uid_purchase_bill?: string;
   purchase_bill_number?: number;
+  item_name?: string;
+  quantity_on_bill?: number;
+  quantity_released?: number;
   uid_purchase_credit?: string;
   purchase_credit_number?: number;
   uid_purchase?: string;
@@ -40188,6 +40300,20 @@ so no caller can hand it a partial set of the buckets.
 when `total_cents` is present rather than read, so a caller holding a stale
 `amount_due_cents` beside fresh buckets cannot derive from the stale one.
 
+### `derivePurchaseBillStatus(bill: typeLiteral): PurchaseBillStatusType`
+
+**A bill's status, derived** — a bill stores none, so this reads the folded
+totals: `void` once a void is folded, `unpaid` with nothing settled toward it,
+`part_paid` while money is still due, then `paid`, or `credited` when supplier
+credit alone settled it.
+
+The due amount is recomputed from the buckets, as {@link deriveInvoiceStatus}
+does, and the `> 0` tests carry that function's reasoning: a negative bucket
+leaves more due than the total, which is not part paid.
+
+A $0 bill with nothing settled reads `unpaid`, the twin of an invoice's
+`issued`: bills have no closure row, so nothing can read it `paid`.
+
 ### `derivePurchaseCreditStatus(credit: typeLiteral, remainingCents: number): PurchaseCreditStatusType`
 
 The status a supplier credit's balance implies — the payable twin of
@@ -40806,8 +40932,7 @@ export it rather than to keep re-deriving it. Paired with
 
 **May an operator still change fields of this class on this bill?** — the
 accessor over `PURCHASE_BILL_FIELD_FREEZE` (`@cfs/core/schemas`), and the only
-way to read it. `true` means frozen. Nothing edits a bill yet; this is the
-table's one reader for when something does.
+way to read it. `true` means frozen.
 
 ### `purchaseBillIsFrozen(bill: typeLiteral): boolean`
 
@@ -48785,6 +48910,103 @@ mirror, manager's rate editors) before core#146 moved it here.
 - `changedAt` — an ISO instant; snapped to its Chicago calendar day.
 - `mintUid` — the new row's uid; injectable so a test can pin it.
 
+## `@cfs/core/utils/purchase-actions`
+
+The purchase action ruleset — ONE answer to "what may an operator do to this
+purchase, this line, this bill or this supplier credit?", the supplier side's
+twin of `utils/invoice-actions.ts`.
+
+Three offer functions, each returning only ids from `PURCHASE_ACTION_IDS`:
+
+- {@link purchaseActionsFor} — on a purchase and its lines;
+- {@link purchaseBillActionsFor} — on a bill;
+- {@link purchaseCreditActionsFor} — on a supplier credit.
+
+## ⚠️ There is no `assert*` here yet, unlike the invoice ruleset
+
+The invoice module's guarantee is that a button cannot be offered that the
+server refuses, because the route asserts the same functions. This one does
+not have that guarantee: the API keeps its own refusals, and only
+{@link purchaseItemTouched} is shared with it. So each rule here is a
+statement of what `api-cloudrun/src/services/purchases.ts` and
+`purchaseCredits.ts` refuse, matched by hand and pinned by tests on both
+sides.
+
+## Rules every caller keeps
+
+1. **Fail closed.** An action this module does not offer is refused, and a
+   line that cannot be probed is not offered.
+2. An offer is a snapshot of the documents it was handed; the server re-checks.
+
+### `PurchaseActionItem`
+
+A purchase line as the ruleset reads it.
+
+```ts
+type PurchaseActionItem = Pick<BuyItem, LineKeys | "type" | "quantity_received"> | Pick<SubrentItem, LineKeys | "type" | "quantity_received" | "quantity_returned"> | Pick<ChargeItem, LineKeys | "type">;
+```
+
+### `PurchaseActionOffer`
+
+One action the UI may offer. `key` is what a menu de-duplicates on.
+
+```ts
+interface PurchaseActionOffer {
+  key: string;
+  action: PurchaseActionId;
+  uid_item?: string;
+  max_quantity?: number;
+  max_cents?: number;
+  outcome?: "cancel" | "close";
+}
+```
+
+### `PurchaseOfferContext`
+
+What {@link purchaseActionsFor} needs that the purchase alone does not carry.
+
+```ts
+interface PurchaseOfferContext {
+  billed_paths?: ReadonlySet<string>;
+  billing?: typeLiteral;
+}
+```
+
+### `purchaseActionsFor(purchase: Pick<Purchase, "status" | "query_by_bills"> & typeLiteral, _: unknown): PurchaseActionOffer[]`
+
+**Everything an operator may do to a purchase and its lines.** Per-line offers
+follow the purchase-level ones, in line order.
+
+`close` is refused whole while any subrent has units out, because the API
+refuses a whole-purchase close on that line even when it has nothing left to
+close.
+
+### `purchaseBillActionsFor(bill: Pick<PurchaseBill, "totals" | "xero_document">): PurchaseActionOffer[]`
+
+Everything an operator may do to a bill: spend credit on it while it is a live ACCPAY with money due.
+
+### `purchaseBilledPaths(bills: readonly Pick<PurchaseBill, "totals" | "items">[]): Set<string>`
+
+The paths of the purchase lines a LIVE bill names, each joined with `/`.
+
+### `purchaseCreditActionsFor(credit: Pick<PurchaseCredit, "status" | "total_cents" | "remaining_credit_cents">): PurchaseActionOffer[]`
+
+Everything an operator may do to a supplier credit: void it while nothing has drawn on it.
+
+### `purchaseItemClosable(item: PurchaseActionItem): boolean`
+
+**Would a close change this line?** Units still to arrive are canceled; a
+charge cancels its unbilled quantity, or all of it on a time line. A subrent
+with units still out is NOT closable: the close zeroes its supply, so the API
+refuses it until they have gone back.
+
+### `purchaseItemTouched(item: PurchaseActionItem, billedPaths: ReadonlySet<string>): boolean`
+
+**Has anything happened to this line that makes it history as well as an
+order?** A touched line cannot be removed or moved across bases. A time line
+counts no `quantity_billed`, so whether a bill names it comes from
+`billedPaths` ({@link purchaseBilledPaths}).
+
 ## `@cfs/core/utils/purchase-documents`
 
 Purchase → bill: the projector, the unbilled windows, the bill pricer and the
@@ -49046,6 +49268,14 @@ read a credited span as unbilled; it only affects that default.
 
 Every live line naming `uid_unit` across `purchases` — what `query_by_units` array-contains returns.
 
+### `flatShareCents(amountCents: number, quantity: number, before: number, after: number): number`
+
+The cents a flat line's units `(before, after]` cost — `cumulativeShareCents`,
+extended past `quantity` at the same per-unit rate, because over-billing is
+legal (D5) and still needs a default. A writer pricing anything against a
+line's `quantity_billed`, which may stand past `quantity`, prices through this
+and never through `cumulativeShareCents`, which throws there.
+
 ### `meterBillLine(line: BillLineMeterInput, source: BillLineMeterSource, ctx: PurchaseDocumentContext): TierCount[]`
 
 **A time bill line's frozen counts** — the unit-periods it bills, summed over
@@ -49157,9 +49387,9 @@ purchase's value. Pure; the writer stores the `changed` bills in the purchase
 writer's transaction.
 
 After the merge each touched line is re-derived: a time line whose FORMULA
-changed is re-metered from its own windows against the coverage of the
-purchase's earlier bills, and every time line's money is re-priced from its
-rates and counts; the bill's total is the Σ. A flat line's net amount is a
+or RATES changed is re-metered from its own windows against the coverage of
+the purchase's earlier bills, and every time line's money is re-priced from
+its rates and counts; the bill's total is the Σ. A flat line's net amount is a
 homonym and never follows (its share was fixed when billed); its discount
 record is re-derived.
 
@@ -49449,6 +49679,20 @@ cents, round once).
 A REVERSAL is the same call with the bounds swapped in sign: the units
 `(after, before]` leave at exactly what they cost to arrive, because the
 cumulative value at a count does not depend on the path.
+
+### `derivePurchaseBillStatus(bill: typeLiteral): PurchaseBillStatusType`
+
+**A bill's status, derived** — a bill stores none, so this reads the folded
+totals: `void` once a void is folded, `unpaid` with nothing settled toward it,
+`part_paid` while money is still due, then `paid`, or `credited` when supplier
+credit alone settled it.
+
+The due amount is recomputed from the buckets, as {@link deriveInvoiceStatus}
+does, and the `> 0` tests carry that function's reasoning: a negative bucket
+leaves more due than the total, which is not part paid.
+
+A $0 bill with nothing settled reads `unpaid`, the twin of an invoice's
+`issued`: bills have no closure row, so nothing can read it `paid`.
 
 ### `derivePurchaseCreditStatus(credit: typeLiteral, remainingCents: number): PurchaseCreditStatusType`
 

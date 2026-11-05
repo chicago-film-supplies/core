@@ -96,6 +96,7 @@ import {
   type InvoiceFieldClass,
   PURCHASE_BILL_FIELD_FREEZE,
   type PurchaseBillFieldClass,
+  type PurchaseBillStatusType,
   InvoiceSchema,
   isDividerItemType,
   isLineItemType,
@@ -306,8 +307,7 @@ export function purchaseBillIsFrozen(bill: { totals: InvoiceSettledTotals }): bo
 /**
  * **May an operator still change fields of this class on this bill?** — the
  * accessor over `PURCHASE_BILL_FIELD_FREEZE` (`@cfs/core/schemas`), and the only
- * way to read it. `true` means frozen. Nothing edits a bill yet; this is the
- * table's one reader for when something does.
+ * way to read it. `true` means frozen.
  */
 export function purchaseBillFieldIsFrozen(bill: { totals: InvoiceSettledTotals }, cls: PurchaseBillFieldClass): boolean {
   switch (PURCHASE_BILL_FIELD_FREEZE[cls].frozen_when) {
@@ -667,6 +667,32 @@ export function derivePurchaseCreditStatus(
 ): PurchaseCreditStatusType {
   if (credit.status === "void") return "void";
   return remainingCents === 0 && credit.total_cents > 0 ? "applied" : "issued";
+}
+
+/**
+ * **A bill's status, derived** — a bill stores none, so this reads the folded
+ * totals: `void` once a void is folded, `unpaid` with nothing settled toward it,
+ * `part_paid` while money is still due, then `paid`, or `credited` when supplier
+ * credit alone settled it.
+ *
+ * The due amount is recomputed from the buckets, as {@link deriveInvoiceStatus}
+ * does, and the `> 0` tests carry that function's reasoning: a negative bucket
+ * leaves more due than the total, which is not part paid.
+ *
+ * A $0 bill with nothing settled reads `unpaid`, the twin of an invoice's
+ * `issued`: bills have no closure row, so nothing can read it `paid`.
+ */
+export function derivePurchaseBillStatus(
+  bill: { totals: InvoiceSettledTotals & { total_cents: number } },
+): PurchaseBillStatusType {
+  const { totals } = bill;
+  const paid = totals.amount_paid_cents;
+  const credited = totals.amount_credited_cents ?? 0;
+  const voided = totals.amount_void_cents ?? 0;
+  if (voided !== 0) return "void";
+  if (paid <= 0 && credited <= 0) return "unpaid";
+  if (totals.total_cents - paid - credited > 0) return "part_paid";
+  return paid > 0 ? "paid" : "credited";
 }
 
 /**

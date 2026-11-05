@@ -348,6 +348,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // core#130 row 1: the status a balance write implies — write-path; a template
     // reads the STORED status.
     "deriveCreditNoteStatus",
+    "derivePurchaseBillStatus",
     "derivePurchaseCreditStatus",
     // core#130 row 13: a pair's identity key — a join key, never printed.
     "invoicePairKey",
@@ -723,6 +724,16 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "remainingToReceive",
     "remainingToReturn",
   ],
+  // `utils/purchase-actions.ts` is the purchase twin of `invoice-actions`: which
+  // action an operator may take. Every export answers a question about a WRITE.
+  "purchase-actions": [
+    "purchaseActionsFor",
+    "purchaseBillActionsFor",
+    "purchaseBilledPaths",
+    "purchaseCreditActionsFor",
+    "purchaseItemClosable",
+    "purchaseItemTouched",
+  ],
   // Purchase → bill machinery (purchases-as-documents D5–D7): the projector, the
   // window coverage, the metering and pricing of a bill line, and the
   // purchase → bill sync. A template renders a bill whose lines already carry
@@ -731,6 +742,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "billedSpanEnd",
     "billedUnitCoverage",
     "coversForUnit",
+    "flatShareCents",
     "meterBillLine",
     "overcoveredUnitWindows",
     "pricePurchaseDocument",

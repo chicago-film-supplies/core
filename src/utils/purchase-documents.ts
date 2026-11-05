@@ -742,9 +742,11 @@ function flatDiscountShare(discount: DiscountType, billed: number, ordered: numb
 /**
  * The cents a flat line's units `(before, after]` cost — `cumulativeShareCents`,
  * extended past `quantity` at the same per-unit rate, because over-billing is
- * legal (D5) and still needs a default.
+ * legal (D5) and still needs a default. A writer pricing anything against a
+ * line's `quantity_billed`, which may stand past `quantity`, prices through this
+ * and never through `cumulativeShareCents`, which throws there.
  */
-function flatShareCents(amountCents: number, quantity: number, before: number, after: number): number {
+export function flatShareCents(amountCents: number, quantity: number, before: number, after: number): number {
   if (after <= quantity) return cumulativeShareCents(amountCents, quantity, before, after);
   const at = (k: number) => Number(roundDivHalfUp(BigInt(amountCents) * BigInt(k), BigInt(quantity)));
   return at(after) - at(before);
@@ -1133,9 +1135,9 @@ export interface SyncPurchaseToBillsArgs {
  * writer's transaction.
  *
  * After the merge each touched line is re-derived: a time line whose FORMULA
- * changed is re-metered from its own windows against the coverage of the
- * purchase's earlier bills, and every time line's money is re-priced from its
- * rates and counts; the bill's total is the Σ. A flat line's net amount is a
+ * or RATES changed is re-metered from its own windows against the coverage of
+ * the purchase's earlier bills, and every time line's money is re-priced from
+ * its rates and counts; the bill's total is the Σ. A flat line's net amount is a
  * homonym and never follows (its share was fixed when billed); its discount
  * record is re-derived.
  *
@@ -1195,7 +1197,7 @@ function withTotal(totals: PurchaseBill["totals"], total: number): PurchaseBill[
   return { ...totals, total_cents: total, amount_due_cents: total - settled };
 }
 
-/** Re-derive a merged line's derived keys: counts on a formula change, the flat discount record. */
+/** Re-derive a merged line's derived keys: counts on a formula or rate change, the flat discount record. */
 function rederiveLine(
   merged: PurchaseDocumentItem,
   stored: PurchaseDocumentItem,
@@ -1216,7 +1218,12 @@ function rederiveLine(
     }
     return out;
   }
-  if (stored.price?.price_formula.uid !== price.price_formula.uid || stored.price?.price_formula.basis !== "time") {
+  const formulaMoved = stored.price?.price_formula.uid !== price.price_formula.uid || stored.price?.price_formula.basis !== "time";
+  // A capped segment decides on the rates (Q14), so a rate change can move the
+  // counts as well as the money. A bill edit re-meters on one too; the two
+  // writers must agree on what a line's counts are.
+  const ratesMoved = JSON.stringify(stored.price?.rates) !== JSON.stringify(price.rates);
+  if (formulaMoved || ratesMoved) {
     const span = item.type === "buy" ? null : item.dates;
     outPrice.counts = meterBillLine(
       { price, units: out.units ?? [], dates: out.dates ?? null, quantity: out.quantity },

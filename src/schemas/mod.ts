@@ -813,6 +813,9 @@ export {
   type UpdatePurchaseBillInputType,
   type PurchaseDocumentItem,
   type PurchaseBillFieldClass,
+  PURCHASE_BILL_STATUSES,
+  PurchaseBillStatusEnum,
+  type PurchaseBillStatusType,
   type PurchaseBillFieldFreezeContract,
   type PurchaseBillTotals,
   type PurchaseBill,
@@ -992,6 +995,14 @@ export {
   ownsKey,
   TAKE_BACK_ORDER,
 } from "./custody.ts";
+export {
+  PURCHASE_ACTION_IDS,
+  PURCHASE_ACTIONS,
+  type PurchaseActionDefinition,
+  type PurchaseActionId,
+  PurchaseActionIdEnum,
+  type PurchaseActionSubject,
+} from "./purchase-action.ts";
 export {
   INVOICE_ACTION_IDS,
   INVOICE_ACTIONS,

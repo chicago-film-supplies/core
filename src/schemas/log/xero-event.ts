@@ -157,6 +157,10 @@ export const XERO_EVENT_MSGS = [
   // The bill committed but its push task could not be enqueued. The daily
   // bill sweep is the backstop; this arm carries an alert.
   "purchase_bill_enqueue_failed",
+  // A Xero void of a bill released less than the bill's line says, because the
+  // line was edited up after billing and an edit moves no purchase bucket. The
+  // void still lands; the record names the units the purchase never counted.
+  "purchase_bill_void_release_clamped",
   // ── Supplier credits (api-cloudrun#1210) ──
   // The purchase's supplier credit (`purchase-credits/{uid}`, an ACCPAYCREDIT
   // numbered `CFS-SCR-{n}`). Its own arms for the reason the bill has its own.
@@ -333,6 +337,12 @@ export interface XeroEventLogRecord {
   uid_purchase_bill?: string;
   /** `PurchaseBill.number` — what `CFS-BILL-{number}` is keyed on. Never reused. */
   purchase_bill_number?: number;
+  /** `purchase_bill_void_release_clamped`: the bill line's name. */
+  item_name?: string;
+  /** `purchase_bill_void_release_clamped`: the units the bill's lines name for the item. */
+  quantity_on_bill?: number;
+  /** `purchase_bill_void_release_clamped`: the units actually released from `quantity_billed`. */
+  quantity_released?: number;
   /** The supplier credit a `purchase_credit_*` arm is about. Its uid IS the document id. */
   uid_purchase_credit?: string;
   /** `PurchaseCredit.number` — what `CFS-SCR-{number}` is keyed on. Never reused. */
@@ -451,6 +461,9 @@ export const XeroEventLogRecordSchema: z.ZodType<XeroEventLogRecord> = z.object(
   movement_number: z.number().optional(),
   uid_purchase_bill: z.string().optional(),
   purchase_bill_number: z.number().optional(),
+  item_name: z.string().optional(),
+  quantity_on_bill: z.number().optional(),
+  quantity_released: z.number().optional(),
   uid_purchase_credit: z.string().optional(),
   purchase_credit_number: z.number().optional(),
   uid_purchase: z.string().optional(),

@@ -341,7 +341,7 @@ const updatePurchaseBillRules: CollectionRule[] = [
         source: ["items"],
         target: ["items"],
         transform:
-          "match each bill line to its purchase line by path_purchase_item; mergeSharedFields(prev purchase line, next purchase line, bill line) over the classification of (PurchaseSchema, PurchaseBillSchema), each purchase line first projected to the bill line's shape (`projectPurchaseLineForBill`). Then re-derive: a time line whose formula changed is re-metered from its own windows against the earlier bills' coverage, and its money is priced from rates × counts; a flat line keeps its net amount.",
+          "match each bill line to its purchase line by path_purchase_item; mergeSharedFields(prev purchase line, next purchase line, bill line) over the classification of (PurchaseSchema, PurchaseBillSchema), each purchase line first projected to the bill line's shape (`projectPurchaseLineForBill`). Then re-derive: a time line whose formula or rates changed is re-metered from its own windows against the earlier bills' coverage, and its money is priced from rates × counts; a flat line keeps its net amount.",
       },
       {
         source: ["items"],

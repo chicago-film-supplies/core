@@ -290,6 +290,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "productHasLedger", expr: "it.products.productHasLedger(type)", desc: "True iff a product of this `type` has an inventory ledger (and so a `stock/{P}` projection and a `stock-locks/{P}` token), counted or not.", returns: "boolean" },
     { name: "removeComponentEntries", expr: "it.products.removeComponentEntries(components, path)", desc: "Remove a component and all its descendants from a flat components array. An entry is removed if its `path` starts with the given path prefix — this covers the component itself and every entry nested beneath it.", returns: "T[]" },
   ],
+  "purchase-actions": [
+
+  ],
   "purchase-documents": [
 
   ],

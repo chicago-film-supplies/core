@@ -99,6 +99,7 @@
     "./utils/orders": "./src/utils/orders.ts",
     "./utils/price-document": "./src/utils/price-document.ts",
     "./utils/price-formulas": "./src/utils/price-formulas.ts",
+    "./utils/purchase-actions": "./src/utils/purchase-actions.ts",
     "./utils/purchase-documents": "./src/utils/purchase-documents.ts",
     "./utils/purchaseDiff": "./src/utils/purchaseDiff.ts",
     "./utils/purchases": "./src/utils/purchases.ts",

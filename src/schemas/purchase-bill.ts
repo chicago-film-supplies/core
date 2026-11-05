@@ -54,10 +54,8 @@
  *
  * `PURCHASE_BILL_FIELD_FREEZE` copies `INVOICE_FIELD_FREEZE` class for class,
  * and `purchaseBillIsFrozen` (`@cfs/core/utils/invoices`) is the invoice's money
- * predicate over a bill's totals. Nothing edits a bill yet (a bill is written
- * once), so the table is DECLARED here for whichever change adds a bill edit or
- * wires the projection merge. Supplier credits get no table, matching sales
- * credit notes.
+ * predicate over a bill's totals. `updatePurchaseBill` and the purchase → bill
+ * sync both read it. Supplier credits get no table, matching sales credit notes.
  *
  * @module
  */
@@ -647,6 +645,20 @@ export type PurchaseCreditStatusType = typeof PURCHASE_CREDIT_STATUSES[number];
 /** Zod schema for PurchaseCreditStatusType. */
 export const PurchaseCreditStatusEnum: z.ZodType<PurchaseCreditStatusType> = z.enum(PURCHASE_CREDIT_STATUSES);
 
+/**
+ * What a bill's settlements add up to, for display. A bill stores NO status:
+ * `derivePurchaseBillStatus` (`@cfs/core/utils/invoices`) reads this off its
+ * totals. `unpaid` stands where an invoice says `issued`, because a bill has no
+ * issue step. `credited` has no invoice twin: the invoice folds it into `paid`,
+ * while an operator reading supplier bills needs to tell settled-by-credit from
+ * money paid.
+ */
+export const PURCHASE_BILL_STATUSES = ["unpaid", "part_paid", "paid", "credited", "void"] as const;
+/** One {@link PURCHASE_BILL_STATUSES} member. */
+export type PurchaseBillStatusType = typeof PURCHASE_BILL_STATUSES[number];
+/** Zod schema for PurchaseBillStatusType. */
+export const PurchaseBillStatusEnum: z.ZodType<PurchaseBillStatusType> = z.enum(PURCHASE_BILL_STATUSES);
+
 /** A supplier credit (ACCPAYCREDIT) against one purchase. */
 export interface PurchaseCredit {
   uid: string;
@@ -973,6 +985,7 @@ export interface PurchaseBillLineEditInputType {
   quantity?: number;
   amount_cents?: number;
   coa_posting?: COACodeType;
+  /** Absent keeps the line's category; a uid sets it; `null` restores its product's, the order/invoice line rule (none with no product). */
   uid_tracking_category?: string | null;
   price?: { rates?: { rate_key: string; amount_cents: number }[]; discount?: DiscountInputType | null };
   units?: PurchaseDocumentLineUnit[];

@@ -29,12 +29,12 @@ import { apportionCents, roundDivHalfUp, toCentsBig } from "./money.ts";
 import { type FormulaDiscount, priceFromFormula } from "../schemas/_line-money.ts";
 import { componentQuantities, type ComponentRowForWalk } from "./order-lines.ts";
 import { productCountsStock } from "./products.ts";
-import { derivePurchaseCreditStatus, purchaseCreditRemainingFromJournal, recomputePurchaseBillTotals } from "./invoices.ts";
+import { derivePurchaseBillStatus, derivePurchaseCreditStatus, purchaseCreditRemainingFromJournal, recomputePurchaseBillTotals } from "./invoices.ts";
 
 // The payable settlement folds live beside their receivable twins in
 // `utils/invoices.ts`, which owns the one fold; re-exported here so a purchase
 // writer finds them in its own namespace.
-export { derivePurchaseCreditStatus, derivePurchaseStatus, purchaseCreditRemainingFromJournal, recomputePurchaseBillTotals };
+export { derivePurchaseBillStatus, derivePurchaseCreditStatus, derivePurchaseStatus, purchaseCreditRemainingFromJournal, recomputePurchaseBillTotals };
 // The mirror authors and the per-arm rules live beside the refine that checks them.
 export {
   deriveQueryByItemTypes,

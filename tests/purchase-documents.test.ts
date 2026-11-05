@@ -12,6 +12,7 @@ import { assert, assertEquals, assertNotEquals, assertThrows } from "@std/assert
 import {
   billedUnitCoverage,
   coversForUnit,
+  flatShareCents,
   meterBillLine,
   overcoveredUnitWindows,
   seedPurchaseLinesForWindows,
@@ -554,6 +555,34 @@ Deno.test("syncPurchaseToBills: a FORMULA change re-meters the line from its own
   const [out] = syncPurchaseToBills({ prev: purchaseDoc([prevItem]), next: purchaseDoc([nextItem]), bills: [billDoc(1, [line])], credits: [] }, ctx);
   assertEquals(out.bill.items[0].price?.counts, [{ rate_key: "week", num: 3, den: 1 }]);
   assertEquals(out.bill.items[0].amount_cents, 13500);
+});
+
+Deno.test("syncPurchaseToBills: a RATE change re-meters a capped line, so the sync and a bill edit cannot price it differently", () => {
+  const prevItem = visionLine({ quantity: 1, quantity_received: 1 });
+  // 27 nights: four started weeks ($180) cap at the month ($157.50).
+  const line = project(prevItem, feb(1), [unit(1, [{ start: jan(1), end: jan(28) }])])!;
+  assertEquals(line.amount_cents, 15750);
+  // The month rises to $200, so four weeks at $45 ($180) is now the cheaper reading.
+  const raised = [{ rate_key: "month", amount_cents: 20000 }, { rate_key: "week", amount_cents: 4500 }];
+  const nextItem = { ...prevItem, price: { ...prevItem.price, rates: raised } };
+  const [out] = syncPurchaseToBills({ prev: purchaseDoc([prevItem]), next: purchaseDoc([nextItem]), bills: [billDoc(1, [line])], credits: [] }, CTX);
+  assertEquals(out.bill.items[0].price?.counts, [{ rate_key: "month", num: 0, den: 1 }, { rate_key: "week", num: 4, den: 1 }]);
+  assertEquals(out.bill.items[0].amount_cents, 18000);
+  assertEquals(out.bill.totals.total_cents, 18000);
+  // Companion: keeping the stored month count prices the same 27 nights at $200.
+  assertEquals(priceFromFormula(raised, line.price!.counts, 1, null).subtotal_discounted_cents, 20000);
+});
+
+Deno.test("flatShareCents: past `quantity` it keeps the per-unit rate, and agrees with cumulativeShareCents inside it", () => {
+  // $14.09 over 3 units: 470, 939, 1409 cumulative, then 1879 and 2348 past the order.
+  assertEquals(flatShareCents(1409, 3, 3, 4), 470);
+  assertEquals(flatShareCents(1409, 3, 3, 5), 939);
+  assertEquals(flatShareCents(1409, 3, 2, 5), 1409);
+  assertEquals(flatShareCents(1409, 3, 0, 2), cumulativeShareCents(1409, 3, 0, 2));
+  // Telescoping past the order: the ranges sum to the whole.
+  assertEquals(flatShareCents(1409, 3, 0, 2) + flatShareCents(1409, 3, 2, 5), flatShareCents(1409, 3, 0, 5));
+  // Companion: the primitive refuses what this one is for.
+  assertThrows(() => cumulativeShareCents(1409, 3, 3, 4), RangeError);
 });
 
 // ── The purchase ↔ bill diff (D6) ───────────────────────────────────
