@@ -299,6 +299,11 @@ export const XERO_EVENT_MSGS = [
   // can tell a quiet day from a dead job. `info`. Carries `window_start` +
   // `transactions_seen` + `bills_linked`.
   "usage_bill_poll_completed",
+  // The daily `sweep-xero-bills` job finished every arm — emitted on each run
+  // that finishes, so an absence rule can tell a quiet day from a dead job, and
+  // `deleted_spends: 0` from a read that came back with nothing. A run that
+  // throws emits none of it. `info`. Carries the sweep's counts.
+  "xero_bill_sweep_completed",
 ] as const;
 
 /** Discriminated msg union for Xero-archetype log records. */
@@ -360,6 +365,24 @@ export interface XeroEventLogRecord {
   transactions_seen?: number;
   /** `usage_bill_poll_completed` — the bills this run linked. */
   bills_linked?: number;
+  /** `xero_bill_sweep_completed` — movements that should carry a bill link and do not. */
+  movement_candidates?: number;
+  /** `xero_bill_sweep_completed` — pushed purchase bills with no `xero_id`. */
+  purchase_bill_candidates?: number;
+  /** `xero_bill_sweep_completed` — open bills re-read against Xero. */
+  open_bill_candidates?: number;
+  /** `xero_bill_sweep_completed` — supplier credits with something left to post. */
+  purchase_credit_candidates?: number;
+  /** `xero_bill_sweep_completed` — bills whose built body differed from the last push. */
+  edit_stale?: number;
+  /** `xero_bill_sweep_completed` — tasks created, across every arm. */
+  enqueued?: number;
+  /** `xero_bill_sweep_completed` — true when any arm hit its cap, so a backlog is larger. */
+  truncated?: boolean;
+  /** `xero_bill_sweep_completed` — every SPEND Xero reports deleted. Never 0 in prod. */
+  deleted_spends?: number;
+  /** `xero_bill_sweep_completed` — card bills this run voided. */
+  spend_bills_voided?: number;
   /** Which manual-intervention seam fired. @see `xero_manual_intervention_required` */
   seam?: string;
   /** What a human must do about it — carried into the alert annotation. */
@@ -473,6 +496,15 @@ export const XeroEventLogRecordSchema: z.ZodType<XeroEventLogRecord> = z.object(
   window_start: z.string().optional(),
   transactions_seen: z.int().optional(),
   bills_linked: z.int().optional(),
+  movement_candidates: z.int().optional(),
+  purchase_bill_candidates: z.int().optional(),
+  open_bill_candidates: z.int().optional(),
+  purchase_credit_candidates: z.int().optional(),
+  edit_stale: z.int().optional(),
+  enqueued: z.int().optional(),
+  truncated: z.boolean().optional(),
+  deleted_spends: z.int().optional(),
+  spend_bills_voided: z.int().optional(),
   seam: z.string().optional(),
   remedy: z.string().optional(),
   xero_url: z.string().optional(),

@@ -34916,7 +34916,7 @@ Quota-gate arms (added 2026-07 with the daily-budget gate):
   a dropped write needing a human.
 
 ```ts
-const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_invoice_push_skipped" | "xero_invoice_twin_adopted" | "xero_invoice_twin_refused" | "xero_stock_adjustment_bill" | "xero_bill_pushed" | "xero_bill_push_skipped" | "xero_bill_twin_adopted" | "xero_bill_validation_rejected" | "xero_bill_terminal" | "xero_bill_enqueue_failed" | "purchase_bill_pushed" | "purchase_bill_push_skipped" | "purchase_bill_twin_adopted" | "purchase_bill_push_rejected" | "purchase_bill_enqueue_failed" | "purchase_bill_void_release_clamped" | "purchase_credit_pushed" | "purchase_credit_push_skipped" | "purchase_credit_twin_adopted" | "purchase_credit_push_rejected" | "purchase_credit_enqueue_failed" | "purchase_credit_allocation_pushed" | "purchase_credit_allocation_failed" | "xero_settlement_synced" | "xero_settlement_reaped" | "xero_settlement_resurrected" | "xero_manual_intervention_required" | "credit_note_counter_raised" | "xero_credit_note_refunds_synced" | "xero_payment_already_synced" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_locked" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_superseded" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_validation_rejected" | "xero_quota_exhausted" | "xero_rate_limit" | "xero_write_deferred" | "xero_defer_escalated" | "xero_tracking_option_create_failed" | "xero_tax_rate_create_failed" | "xero_tracking_option_unresolved" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice" | "xero_untracked_accpay" | "usage_bill_link_skipped" | "usage_bill_link_failed" | "usage_bill_poll_completed"[];
+const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_invoice_push_skipped" | "xero_invoice_twin_adopted" | "xero_invoice_twin_refused" | "xero_stock_adjustment_bill" | "xero_bill_pushed" | "xero_bill_push_skipped" | "xero_bill_twin_adopted" | "xero_bill_validation_rejected" | "xero_bill_terminal" | "xero_bill_enqueue_failed" | "purchase_bill_pushed" | "purchase_bill_push_skipped" | "purchase_bill_twin_adopted" | "purchase_bill_push_rejected" | "purchase_bill_enqueue_failed" | "purchase_bill_void_release_clamped" | "purchase_credit_pushed" | "purchase_credit_push_skipped" | "purchase_credit_twin_adopted" | "purchase_credit_push_rejected" | "purchase_credit_enqueue_failed" | "purchase_credit_allocation_pushed" | "purchase_credit_allocation_failed" | "xero_settlement_synced" | "xero_settlement_reaped" | "xero_settlement_resurrected" | "xero_manual_intervention_required" | "credit_note_counter_raised" | "xero_credit_note_refunds_synced" | "xero_payment_already_synced" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_locked" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_superseded" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_validation_rejected" | "xero_quota_exhausted" | "xero_rate_limit" | "xero_write_deferred" | "xero_defer_escalated" | "xero_tracking_option_create_failed" | "xero_tax_rate_create_failed" | "xero_tracking_option_unresolved" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice" | "xero_untracked_accpay" | "usage_bill_link_skipped" | "usage_bill_link_failed" | "usage_bill_poll_completed" | "xero_bill_sweep_completed"[];
 ```
 
 ### `XeroEventLogRecord`
@@ -34955,6 +34955,15 @@ interface XeroEventLogRecord {
   window_start?: string;
   transactions_seen?: number;
   bills_linked?: number;
+  movement_candidates?: number;
+  purchase_bill_candidates?: number;
+  open_bill_candidates?: number;
+  purchase_credit_candidates?: number;
+  edit_stale?: number;
+  enqueued?: number;
+  truncated?: boolean;
+  deleted_spends?: number;
+  spend_bills_voided?: number;
   seam?: string;
   remedy?: string;
   xero_url?: string;
