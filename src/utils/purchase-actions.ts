@@ -13,8 +13,9 @@
  *
  * The invoice module's guarantee is that a button cannot be offered that the
  * server refuses, because the route asserts the same functions. This one has
- * that guarantee for two rules only: {@link purchaseItemTouched} and
- * {@link purchaseBillVoidRefusal} are shared with the API. Every other rule here
+ * that guarantee for three rules only: {@link purchaseItemTouched},
+ * {@link purchaseBillVoidRefusal} and {@link purchaseBillPushRefusal} are shared
+ * with the API. Every other rule here
  * is a statement of what `api-cloudrun/src/services/purchases.ts` and
  * `purchaseCredits.ts` refuse, matched by hand and pinned by tests on both
  * sides.
@@ -46,6 +47,8 @@ import {
   purchaseLineBilledNet,
   projectPurchaseLineToBillLine,
 } from "./purchase-documents.ts";
+import { purchaseBillIsFrozen } from "./invoices.ts";
+import type { PurchaseBillXeroSyncStatus } from "./purchase-bill-xero-sync.ts";
 import { remainingToBill, remainingToReceive, remainingToReturn } from "./purchases.ts";
 
 /** The keys of a purchase line the ruleset reads — so a line not yet saved can be asked too. */
@@ -236,6 +239,11 @@ export type PurchaseBillActionBill =
  */
 export interface PurchaseBillContext extends PurchaseBilledDocuments {
   purchase: Pick<Purchase, "items">;
+  /**
+   * `purchaseBillXeroSyncStatus(bill, sidecar)`. The one optional key: absent means
+   * `push_to_xero` is not offered, so an unknown answer cannot offer it.
+   */
+  xero_sync_status?: PurchaseBillXeroSyncStatus;
 }
 
 /**
@@ -270,9 +278,33 @@ export function purchaseBillVoidRefusal(bill: PurchaseBillActionBill, ctx: Purch
 }
 
 /**
+ * Why an operator may not ask for this bill to be pushed to Xero, or `null` when
+ * they may. The offer and the API's route both ask this.
+ *
+ * ⚠️ **Unlike the invoice's `push_to_xero`, a bill not yet in Xero may be pushed.**
+ * The bill task reads before it creates, and this is the only remedy an operator
+ * has for a create Xero refused.
+ *
+ * A settled bill is refused: its push could only report the
+ * `purchase_bill_edit_has_settlements` seam.
+ */
+export function purchaseBillPushRefusal(
+  bill: PurchaseBillActionBill,
+  status: PurchaseBillXeroSyncStatus,
+): string | null {
+  if (!purchaseBillIsLive(bill)) return `Bill ${bill.number} is void.`;
+  if (bill.origin === "linked") return `Bill ${bill.number} is linked to a document in Xero, so CFS does not push it.`;
+  if (purchaseBillIsFrozen(bill)) {
+    return `Bill ${bill.number} has a payment or credit applied. Xero will not accept the edit; reconcile it there by hand.`;
+  }
+  if (status === "in_sync") return `Xero already has bill ${bill.number} as it stands.`;
+  return null;
+}
+
+/**
  * Everything an operator may do to a bill: spend credit on it while it is a live
- * ACCPAY with money due, and void it unless {@link purchaseBillVoidRefusal} says
- * otherwise.
+ * ACCPAY with money due, void it unless {@link purchaseBillVoidRefusal} says
+ * otherwise, and push it while {@link purchaseBillPushRefusal} allows.
  */
 export function purchaseBillActionsFor(
   bill: PurchaseBillActionBill & Pick<PurchaseBill, "xero_document">,
@@ -283,6 +315,9 @@ export function purchaseBillActionsFor(
     offers.push({ key: "allocate_credit", action: "allocate_credit", max_cents: bill.totals.amount_due_cents });
   }
   if (purchaseBillVoidRefusal(bill, ctx) === null) offers.push({ key: "void_bill", action: "void_bill" });
+  if (ctx.xero_sync_status !== undefined && purchaseBillPushRefusal(bill, ctx.xero_sync_status) === null) {
+    offers.push({ key: "push_to_xero", action: "push_to_xero" });
+  }
   return offers;
 }
 

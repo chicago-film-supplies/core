@@ -293,6 +293,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   "purchase-actions": [
 
   ],
+  "purchase-bill-xero-sync": [
+
+  ],
   "purchase-documents": [
 
   ],

@@ -42,6 +42,7 @@ import * as quantityAccountingUtils from "../src/utils/quantityAccounting.ts";
 import * as iconUtils from "../src/utils/icons.ts";
 import * as invoiceUtils from "../src/utils/invoices.ts";
 import * as invoiceXeroSyncUtils from "../src/utils/invoice-xero-sync.ts";
+import * as purchaseBillXeroSyncUtils from "../src/utils/purchase-bill-xero-sync.ts";
 import * as fulfillmentUtils from "../src/utils/fulfillments.ts";
 import * as fulfillmentItemUtils from "../src/utils/fulfillment-items.ts";
 import * as fulfillmentBookingRowUtils from "../src/utils/fulfillment-booking-rows.ts";
@@ -243,6 +244,8 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // Same exception as `documentDiff`: `utils/invoice-xero-sync.ts` compares an invoice
   // against its Xero watermark sidecar — sync state no rendered document holds.
   "invoice-xero-sync": invoiceXeroSyncUtils,
+  // The same for a bill.
+  "purchase-bill-xero-sync": purchaseBillXeroSyncUtils,
   taxes: taxUtils,
   templates: templateUtils,
   stock: stockUtils,

@@ -730,11 +730,19 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   "purchase-actions": [
     "purchaseActionsFor",
     "purchaseBillActionsFor",
+    "purchaseBillPushRefusal",
     "purchaseBillVoidRefusal",
     "purchaseBilledPaths",
     "purchaseCreditActionsFor",
     "purchaseItemClosable",
     "purchaseItemTouched",
+  ],
+  // `utils/purchase-bill-xero-sync.ts` is `invoice-xero-sync`'s twin: a bill against
+  // its Xero watermark sidecar. A template renders the document alone.
+  "purchase-bill-xero-sync": [
+    "purchaseBillXeroProjection",
+    "purchaseBillXeroProjectionHash",
+    "purchaseBillXeroSyncStatus",
   ],
   // Purchase → bill machinery (purchases-as-documents D5–D7): the projector, the
   // window coverage, the metering and pricing of a bill line, and the

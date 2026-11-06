@@ -9117,7 +9117,7 @@ Every purchase action id. `tests/purchase-actions.test.ts` asserts it equals
 {@link PURCHASE_ACTIONS}' keys in both directions.
 
 ```ts
-const PURCHASE_ACTION_IDS: "close" | "add_bill" | "add_credit" | "close_item" | "bill_item" | "remove_item" | "change_basis" | "allocate_credit" | "void_bill" | "void_credit"[];
+const PURCHASE_ACTION_IDS: "close" | "add_bill" | "add_credit" | "close_item" | "bill_item" | "remove_item" | "change_basis" | "allocate_credit" | "void_bill" | "push_to_xero" | "void_credit"[];
 ```
 
 ### `PURCHASE_BILL_FIELD_CLASSES`
@@ -16393,6 +16393,7 @@ interface XeroSyncState {
   uid: "state";
   pushed_hash: string;
   pushed_body_hash?: string | null;
+  pushed_projection_hash?: string;
   pushed_at: FirestoreTimestampType;
 }
 ```
@@ -49001,8 +49002,9 @@ Three offer functions, each returning only ids from `PURCHASE_ACTION_IDS`:
 
 The invoice module's guarantee is that a button cannot be offered that the
 server refuses, because the route asserts the same functions. This one has
-that guarantee for two rules only: {@link purchaseItemTouched} and
-{@link purchaseBillVoidRefusal} are shared with the API. Every other rule here
+that guarantee for three rules only: {@link purchaseItemTouched},
+{@link purchaseBillVoidRefusal} and {@link purchaseBillPushRefusal} are shared
+with the API. Every other rule here
 is a statement of what `api-cloudrun/src/services/purchases.ts` and
 `purchaseCredits.ts` refuse, matched by hand and pinned by tests on both
 sides.
@@ -49056,6 +49058,7 @@ these documents cannot compile.
 ```ts
 interface PurchaseBillContext {
   purchase: Pick<Purchase, "items">;
+  xero_sync_status?: PurchaseBillXeroSyncStatus;
 }
 ```
 
@@ -49082,8 +49085,20 @@ close.
 ### `purchaseBillActionsFor(bill: PurchaseBillActionBill & Pick<PurchaseBill, "xero_document">, ctx: PurchaseBillContext): PurchaseActionOffer[]`
 
 Everything an operator may do to a bill: spend credit on it while it is a live
-ACCPAY with money due, and void it unless {@link purchaseBillVoidRefusal} says
-otherwise.
+ACCPAY with money due, void it unless {@link purchaseBillVoidRefusal} says
+otherwise, and push it while {@link purchaseBillPushRefusal} allows.
+
+### `purchaseBillPushRefusal(bill: PurchaseBillActionBill, status: PurchaseBillXeroSyncStatus): string | null`
+
+Why an operator may not ask for this bill to be pushed to Xero, or `null` when
+they may. The offer and the API's route both ask this.
+
+⚠️ **Unlike the invoice's `push_to_xero`, a bill not yet in Xero may be pushed.**
+The bill task reads before it creates, and this is the only remedy an operator
+has for a create Xero refused.
+
+A settled bill is refused: its push could only report the
+`purchase_bill_edit_has_settlements` seam.
 
 ### `purchaseBillVoidRefusal(bill: PurchaseBillActionBill, ctx: PurchaseBillContext): string | null`
 
@@ -49120,6 +49135,69 @@ refuses it until they have gone back.
 order?** A touched line cannot be removed or moved across bases. A time line
 counts no `quantity_billed`, so whether a bill names it comes from
 `billedPaths` ({@link purchaseBilledPaths}).
+
+## `@cfs/core/utils/purchase-bill-xero-sync`
+
+**Is this pushed bill's Xero twin up to date?** Answered from the bill and its
+`purchase-bills/{uid}/xero-sync/state` watermark alone, with no Xero call. The
+supplier side's twin of `utils/invoice-xero-sync.ts`, and derived the same way:
+the watermark holds the hash of what the last SUCCESSFUL push carried, so every
+way a push can fail leaves the bill reading out of sync.
+
+## Why a second hash on the watermark
+
+A bill's `pushed_hash` hashes the API-built body, which folds in the product's
+`xero_code` and the category's Xero option. The manager cannot compute that, and
+a product change moved it for no edit anyone made, so the daily sweep sent an
+unrequested Xero edit. {@link purchaseBillXeroProjectionHash} is a pure function
+of the bill, stored as `pushed_projection_hash`. `pushed_hash` could not simply
+change meaning: stored watermarks hold the old value, and every one would read
+as an edit.
+
+### `PurchaseBillXeroFields`
+
+The part of a bill the Xero body is built from.
+
+```ts
+type PurchaseBillXeroFields = Pick<PurchaseBill, "items" | "date" | "due_date" | "reference">;
+```
+
+### `PurchaseBillXeroSyncStatus`
+
+- `in_sync` — Xero carries this bill as it stands.
+- `out_of_sync` — it does not, or the bill never reached Xero at all.
+- `unknown` — no push has recorded a projection hash yet. Not a claim either way.
+- `not_applicable` — a linked bill (CFS never pushes it) or a void one.
+
+```ts
+type PurchaseBillXeroSyncStatus = "in_sync" | "out_of_sync" | "unknown" | "not_applicable";
+```
+
+### `purchaseBillXeroProjection(bill: PurchaseBillXeroFields): unknown`
+
+Exactly what api-cloudrun's `buildPurchaseBillBody` reads of a bill.
+
+⚠️ **Lines keep their stored order**, which the body's line order follows.
+⚠️ Deliberately absent, each for a reason:
+- `uid` and `price`: the body reads neither (`amount_cents` is the money).
+- the contact: an edit sends back Xero's own.
+- totals and settlements: Xero learns of a payment from its own ledger.
+
+`api-cloudrun/tests/unit/purchaseBillXeroProjection.test.ts` perturbs every leaf
+through the real builder, so a field the body starts reading cannot be missing
+here unnoticed.
+
+### `purchaseBillXeroProjectionHash(bill: PurchaseBillXeroFields): string`
+
+The hash a successful push records as `pushed_projection_hash`.
+
+### `purchaseBillXeroSyncStatus(bill: PurchaseBillXeroFields & Pick<PurchaseBill, "origin" | "xero_id" | "totals" | "voided_at">, state: Pick<XeroSyncState, "pushed_projection_hash"> | null): PurchaseBillXeroSyncStatus`
+
+See {@link PurchaseBillXeroSyncStatus}. `state` is the watermark, or `null` when absent.
+
+⚠️ **A settled bill still compares.** Out of sync is a true statement about Xero
+whether or not CFS can do anything about it; a settled bill only loses the push
+(`purchaseBillPushRefusal`, `@cfs/core/utils/purchase-actions`).
 
 ## `@cfs/core/utils/purchase-documents`
 

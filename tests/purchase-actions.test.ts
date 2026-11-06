@@ -1,13 +1,15 @@
 /**
  * The purchase action ruleset (`src/utils/purchase-actions.ts`). Most refusals
  * here restate by hand what the API refuses, because the API asserts only
- * `purchaseItemTouched` and `purchaseBillVoidRefusal`; the module docblock says so.
+ * `purchaseItemTouched`, `purchaseBillVoidRefusal` and `purchaseBillPushRefusal`;
+ * the module docblock says so.
  */
 import { assert, assertEquals } from "@std/assert";
 import {
   type PurchaseActionItem,
   purchaseActionsFor,
   purchaseBillActionsFor,
+  purchaseBillPushRefusal,
   purchaseBillVoidRefusal,
   purchaseBilledPaths,
   purchaseCreditActionsFor,
@@ -288,4 +290,27 @@ Deno.test("derivePurchaseBillStatus: every member, read off the totals", () => {
   );
   // Coverage: the cases above reach every member.
   assertEquals(PURCHASE_BILL_STATUSES.length, 5);
+});
+
+Deno.test("purchaseBillPushRefusal: one row per reason, and the offer follows it", () => {
+  const pushes = (b: PurchaseBill, status?: "in_sync" | "out_of_sync" | "unknown" | "not_applicable") =>
+    purchaseBillActionsFor(b, { ...noDocuments, xero_sync_status: status }).filter((a) => a.action === "push_to_xero");
+  const refuse = (b: PurchaseBill, reason: string) => {
+    assertEquals(purchaseBillPushRefusal(b, "out_of_sync")?.includes(reason), true, purchaseBillPushRefusal(b, "out_of_sync") ?? "no refusal");
+    assertEquals(pushes(b, "out_of_sync"), []);
+  };
+
+  const live = voidBill("a", []);
+  for (const status of ["out_of_sync", "unknown"] as const) {
+    assertEquals(purchaseBillPushRefusal(live, status), null);
+    assertEquals(pushes(live, status), [{ key: "push_to_xero", action: "push_to_xero" }]);
+  }
+  assertEquals(purchaseBillPushRefusal(live, "in_sync")?.includes("already has"), true);
+  assertEquals(pushes(live, "in_sync"), []);
+  assertEquals(pushes(live), [], "no status given, no offer");
+
+  refuse(voidBill("a", [], { totals_over: { amount_void_cents: 1000, amount_due_cents: 0 } }), "is void");
+  refuse(voidBill("a", [], { origin: "linked" }), "linked");
+  refuse(voidBill("a", [], { totals_over: { amount_paid_cents: 1, amount_due_cents: 999 } }), "reconcile it there");
+  refuse(voidBill("a", [], { totals_over: { amount_credited_cents: 1, amount_due_cents: 999 } }), "reconcile it there");
 });

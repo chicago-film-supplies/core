@@ -77,6 +77,17 @@ export interface XeroSyncState {
    * body" is a real state that must be distinguishable from any hash value.
    */
   pushed_body_hash?: string | null;
+  /**
+   * BILL sidecars only (`purchase-bills/{uid}/xero-sync/state`):
+   * `purchaseBillXeroProjectionHash` (`utils/purchase-bill-xero-sync.ts`) of the bill
+   * as of its last successful push. A bill's `pushed_hash` hashes the API-built body,
+   * which the manager cannot compute, so this is what `purchaseBillXeroSyncStatus`
+   * compares.
+   *
+   * Absent ⇒ nothing recorded yet, which reads `unknown`. Bare `.optional()`: an
+   * order or invoice sidecar never has it, so it cannot be a present `.nullable()`.
+   */
+  pushed_projection_hash?: string;
   pushed_at: FirestoreTimestampType;
 }
 
@@ -85,6 +96,7 @@ export const XeroSyncStateSchema: z.ZodType<XeroSyncState> = z.strictObject({
   uid: z.literal("state"),
   pushed_hash: z.string().min(1).meta({ column: true, label: "Pushed Hash" }),
   pushed_body_hash: z.string().min(1).nullable().optional().meta({ column: true, label: "Pushed Body Hash" }),
+  pushed_projection_hash: z.string().min(1).optional().meta({ column: true, label: "Pushed Projection Hash" }),
   pushed_at: FirestoreTimestamp.meta({ column: true, label: "Pushed" }),
 }).meta({
   title: "Xero Sync State",
