@@ -1020,7 +1020,7 @@ Deno.test("purchaseBillIsFrozen: money settled ≠ 0, by VALUE — reversed to z
   assertEquals(purchaseBillIsFrozen({ ...t({}), voided_at: mockTimestamp }), true, "a $0 void settles no money");
 });
 
-Deno.test("PURCHASE_BILL_FIELD_FREEZE: the invoice's table, class for class; tracking freezes only on void and is not shown editable in Xero", () => {
+Deno.test("PURCHASE_BILL_FIELD_FREEZE: the invoice's table, class for class; tracking freezes only on void and is the one class Xero takes once settled", () => {
   assertEquals(Object.keys(PURCHASE_BILL_FIELD_FREEZE), [...PURCHASE_BILL_FIELD_CLASSES]);
   const paid = { totals: { ...bill().totals, amount_paid_cents: 140985, amount_due_cents: 0 } };
   const voided = { totals: { ...bill().totals, amount_void_cents: 140985, amount_due_cents: 0 } };
@@ -1029,8 +1029,7 @@ Deno.test("PURCHASE_BILL_FIELD_FREEZE: the invoice's table, class for class; tra
   assertEquals(frozenOn(open), []);
   assertEquals(frozenOn(paid), ["supplier", "date", "line_money", "coa_posting"]);
   assertEquals(frozenOn(voided), ["supplier", "date", "line_money", "coa_posting", "tracking"]);
-  // `false` is "not shown" — no settled ACCPAY edit has been measured (D10).
-  assertEquals(PURCHASE_BILL_FIELD_CLASSES.filter((c) => PURCHASE_BILL_FIELD_FREEZE[c].xero_accepts_on_settled), []);
+  assertEquals(PURCHASE_BILL_FIELD_CLASSES.filter((c) => PURCHASE_BILL_FIELD_FREEZE[c].xero_accepts_on_settled), ["tracking"]);
 });
 
 Deno.test("classifySharedFields(PurchaseSchema, bill/credit) is fail-closed — every shared key is declared (D5)", () => {

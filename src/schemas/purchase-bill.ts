@@ -590,10 +590,13 @@ export interface PurchaseBillFieldFreezeContract {
  * **The one bill field-class freeze table** (owner, 2026-10-28). Read only
  * through `purchaseBillFieldIsFrozen` (`@cfs/core/utils/invoices`).
  *
- * `tracking` says `false` where the invoice says `true`: the invoice's `true`
- * records edits Xero has ALREADY ACCEPTED on paid ACCREC invoices, and no such
- * edit has been shown on an ACCPAY bill. `line_money` is decided over the
- * rebuilt items, as the invoice's `lineMoneyAgrees` does.
+ * `tracking` says `true`, as the invoice's does. The invoice's records edits
+ * Xero has ALREADY ACCEPTED on paid ACCREC invoices. For ACCPAY the evidence is
+ * thinner: CFS-BILL-299 is PAID and carries tracking, with `UpdatedDateUTC` after
+ * its payment date, and that does not say the edit came through the API. So the
+ * push re-reads the bill and advances nothing unless money, status and lines
+ * held and the tracking landed. `line_money` is decided over the rebuilt items,
+ * as the invoice's `lineMoneyAgrees` does.
  */
 export const PURCHASE_BILL_FIELD_FREEZE: Readonly<
   Record<PurchaseBillFieldClass, PurchaseBillFieldFreezeContract>
@@ -606,7 +609,7 @@ export const PURCHASE_BILL_FIELD_FREEZE: Readonly<
     members: ["quantity", "amount_cents", "price", "units", "dates"],
   },
   coa_posting: { frozen_when: "frozen", xero_accepts_on_settled: false, members: ["coa_posting"] },
-  tracking: { frozen_when: "void", xero_accepts_on_settled: false, members: ["uid_tracking_category"] },
+  tracking: { frozen_when: "void", xero_accepts_on_settled: true, members: ["uid_tracking_category"] },
   text: {
     frozen_when: "never",
     xero_accepts_on_settled: false,

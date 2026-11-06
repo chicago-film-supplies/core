@@ -4000,7 +4000,7 @@
           "kind": "variable",
           "name": "PURCHASE_BILL_FIELD_FREEZE",
           "declaration": "const PURCHASE_BILL_FIELD_FREEZE: Readonly<Record<PurchaseBillFieldClass, PurchaseBillFieldFreezeContract>>;",
-          "doc": "**The one bill field-class freeze table** (owner, 2026-10-28). Read only\nthrough `purchaseBillFieldIsFrozen` (`@cfs/core/utils/invoices`).\n\n`tracking` says `false` where the invoice says `true`: the invoice's `true`\nrecords edits Xero has ALREADY ACCEPTED on paid ACCREC invoices, and no such\nedit has been shown on an ACCPAY bill. `line_money` is decided over the\nrebuilt items, as the invoice's `lineMoneyAgrees` does."
+          "doc": "**The one bill field-class freeze table** (owner, 2026-10-28). Read only\nthrough `purchaseBillFieldIsFrozen` (`@cfs/core/utils/invoices`).\n\n`tracking` says `true`, as the invoice's does. The invoice's records edits\nXero has ALREADY ACCEPTED on paid ACCREC invoices. For ACCPAY the evidence is\nthinner: CFS-BILL-299 is PAID and carries tracking, with `UpdatedDateUTC` after\nits payment date, and that does not say the edit came through the API. So the\npush re-reads the bill and advances nothing unless money, status and lines\nheld and the tracking landed. `line_money` is decided over the rebuilt items,\nas the invoice's `lineMoneyAgrees` does."
         },
         {
           "kind": "variable",
@@ -12993,7 +12993,7 @@
           "kind": "variable",
           "name": "PURCHASE_BILL_FIELD_FREEZE",
           "declaration": "const PURCHASE_BILL_FIELD_FREEZE: Readonly<Record<PurchaseBillFieldClass, PurchaseBillFieldFreezeContract>>;",
-          "doc": "**The one bill field-class freeze table** (owner, 2026-10-28). Read only\nthrough `purchaseBillFieldIsFrozen` (`@cfs/core/utils/invoices`).\n\n`tracking` says `false` where the invoice says `true`: the invoice's `true`\nrecords edits Xero has ALREADY ACCEPTED on paid ACCREC invoices, and no such\nedit has been shown on an ACCPAY bill. `line_money` is decided over the\nrebuilt items, as the invoice's `lineMoneyAgrees` does."
+          "doc": "**The one bill field-class freeze table** (owner, 2026-10-28). Read only\nthrough `purchaseBillFieldIsFrozen` (`@cfs/core/utils/invoices`).\n\n`tracking` says `true`, as the invoice's does. The invoice's records edits\nXero has ALREADY ACCEPTED on paid ACCREC invoices. For ACCPAY the evidence is\nthinner: CFS-BILL-299 is PAID and carries tracking, with `UpdatedDateUTC` after\nits payment date, and that does not say the edit came through the API. So the\npush re-reads the bill and advances nothing unless money, status and lines\nheld and the tracking landed. `line_money` is decided over the rebuilt items,\nas the invoice's `lineMoneyAgrees` does."
         },
         {
           "kind": "variable",
@@ -23188,7 +23188,7 @@
           "kind": "function",
           "name": "purchaseBillPushRefusal",
           "signature": "purchaseBillPushRefusal(bill: PurchaseBillActionBill, status: PurchaseBillXeroSyncStatus): string | null",
-          "doc": "Why an operator may not ask for this bill to be pushed to Xero, or `null` when\nthey may. The offer and the API's route both ask this.\n\n⚠️ **Unlike the invoice's `push_to_xero`, a bill not yet in Xero may be pushed.**\nThe bill task reads before it creates, and this is the only remedy an operator\nhas for a create Xero refused.\n\nA settled bill is refused: its push could only report the\n`purchase_bill_edit_has_settlements` seam.",
+          "doc": "Why an operator may not ask for this bill to be pushed to Xero, or `null` when\nthey may. The offer and the API's route both ask this.\n\n⚠️ **Unlike the invoice's `push_to_xero`, a bill not yet in Xero may be pushed.**\nThe bill task reads before it creates, and this is the only remedy an operator\nhas for a create Xero refused.\n\nA settled bill may be pushed, as an invoice may: Xero takes a tracking change on\nit, and the task answers anything else with the\n`purchase_bill_edit_has_settlements` seam.",
           "paramTags": [],
           "returnsTag": null
         },

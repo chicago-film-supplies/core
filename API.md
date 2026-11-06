@@ -9137,10 +9137,13 @@ const PURCHASE_BILL_FIELD_CLASSES: readonly ["supplier", "date", "line_money", "
 **The one bill field-class freeze table** (owner, 2026-10-28). Read only
 through `purchaseBillFieldIsFrozen` (`@cfs/core/utils/invoices`).
 
-`tracking` says `false` where the invoice says `true`: the invoice's `true`
-records edits Xero has ALREADY ACCEPTED on paid ACCREC invoices, and no such
-edit has been shown on an ACCPAY bill. `line_money` is decided over the
-rebuilt items, as the invoice's `lineMoneyAgrees` does.
+`tracking` says `true`, as the invoice's does. The invoice's records edits
+Xero has ALREADY ACCEPTED on paid ACCREC invoices. For ACCPAY the evidence is
+thinner: CFS-BILL-299 is PAID and carries tracking, with `UpdatedDateUTC` after
+its payment date, and that does not say the edit came through the API. So the
+push re-reads the bill and advances nothing unless money, status and lines
+held and the tracking landed. `line_money` is decided over the rebuilt items,
+as the invoice's `lineMoneyAgrees` does.
 
 ```ts
 const PURCHASE_BILL_FIELD_FREEZE: Readonly<Record<PurchaseBillFieldClass, PurchaseBillFieldFreezeContract>>;
@@ -28069,10 +28072,13 @@ const PURCHASE_BILL_FIELD_CLASSES: readonly ["supplier", "date", "line_money", "
 **The one bill field-class freeze table** (owner, 2026-10-28). Read only
 through `purchaseBillFieldIsFrozen` (`@cfs/core/utils/invoices`).
 
-`tracking` says `false` where the invoice says `true`: the invoice's `true`
-records edits Xero has ALREADY ACCEPTED on paid ACCREC invoices, and no such
-edit has been shown on an ACCPAY bill. `line_money` is decided over the
-rebuilt items, as the invoice's `lineMoneyAgrees` does.
+`tracking` says `true`, as the invoice's does. The invoice's records edits
+Xero has ALREADY ACCEPTED on paid ACCREC invoices. For ACCPAY the evidence is
+thinner: CFS-BILL-299 is PAID and carries tracking, with `UpdatedDateUTC` after
+its payment date, and that does not say the edit came through the API. So the
+push re-reads the bill and advances nothing unless money, status and lines
+held and the tracking landed. `line_money` is decided over the rebuilt items,
+as the invoice's `lineMoneyAgrees` does.
 
 ```ts
 const PURCHASE_BILL_FIELD_FREEZE: Readonly<Record<PurchaseBillFieldClass, PurchaseBillFieldFreezeContract>>;
@@ -49097,7 +49103,8 @@ they may. The offer and the API's route both ask this.
 The bill task reads before it creates, and this is the only remedy an operator
 has for a create Xero refused.
 
-A settled bill is refused: its push could only report the
+A settled bill may be pushed, as an invoice may: Xero takes a tracking change on
+it, and the task answers anything else with the
 `purchase_bill_edit_has_settlements` seam.
 
 ### `purchaseBillVoidRefusal(bill: PurchaseBillActionBill, ctx: PurchaseBillContext): string | null`

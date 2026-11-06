@@ -47,7 +47,6 @@ import {
   purchaseLineBilledNet,
   projectPurchaseLineToBillLine,
 } from "./purchase-documents.ts";
-import { purchaseBillIsFrozen } from "./invoices.ts";
 import type { PurchaseBillXeroSyncStatus } from "./purchase-bill-xero-sync.ts";
 import { remainingToBill, remainingToReceive, remainingToReturn } from "./purchases.ts";
 
@@ -285,7 +284,8 @@ export function purchaseBillVoidRefusal(bill: PurchaseBillActionBill, ctx: Purch
  * The bill task reads before it creates, and this is the only remedy an operator
  * has for a create Xero refused.
  *
- * A settled bill is refused: its push could only report the
+ * A settled bill may be pushed, as an invoice may: Xero takes a tracking change on
+ * it, and the task answers anything else with the
  * `purchase_bill_edit_has_settlements` seam.
  */
 export function purchaseBillPushRefusal(
@@ -294,9 +294,6 @@ export function purchaseBillPushRefusal(
 ): string | null {
   if (!purchaseBillIsLive(bill)) return `Bill ${bill.number} is void.`;
   if (bill.origin === "linked") return `Bill ${bill.number} is linked to a document in Xero, so CFS does not push it.`;
-  if (purchaseBillIsFrozen(bill)) {
-    return `Bill ${bill.number} has a payment or credit applied. Xero will not accept the edit; reconcile it there by hand.`;
-  }
   if (status === "in_sync") return `Xero already has bill ${bill.number} as it stands.`;
   return null;
 }
