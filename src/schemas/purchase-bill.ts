@@ -450,6 +450,17 @@ export interface PurchaseBill {
   /** Product projections and charge items, one array (D5). */
   items: PurchaseDocumentItem[];
   totals: PurchaseBillTotals;
+  /**
+   * When the bill was voided, stamped by every void path. **Absent means not
+   * voided.** `purchaseBillIsLive` (`@cfs/core/utils/invoices`) reads it as well as
+   * `totals.amount_void_cents`, because a $0 bill's void folds to 0 and would
+   * otherwise read live. A bare `.optional()` rather than `.nullable()` on purpose:
+   * required-nullable would mean backfilling every bill, for a key only a void
+   * ever writes. Not a display column and not a Typesense field:
+   * `totals.amount_void_cents` already is both, and a new field would force a
+   * `purchase-bills` reindex for nothing an operator reads.
+   */
+  voided_at?: FirestoreTimestampType;
   uid_thread?: string;
   version: number;
   created_by: ActorRefType;
@@ -509,6 +520,7 @@ export const PurchaseBillSchema: z.ZodType<PurchaseBill> = z.strictObject({
   // document-only or standing-line charge item (D5).
   items: z.array(PurchaseDocumentItemSchema).min(1).meta({ label: "Item" }),
   totals: PurchaseBillTotalsSchema,
+  voided_at: FirestoreTimestamp.optional(),
   uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
@@ -554,7 +566,7 @@ export interface PurchaseBillFieldFreezeContract {
   /**
    * - `"frozen"` — while `purchaseBillIsFrozen` (`@cfs/core/utils/invoices`):
    *   any money settled against the bill, paid, credited or voided.
-   * - `"void"` — only once the bill is void (`amount_void_cents ≠ 0`; a bill has
+   * - `"void"` — only once the bill is void (`purchaseBillIsLive` is false; a bill has
    *   no status).
    * - `"never"` — always editable.
    */

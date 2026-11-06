@@ -89,7 +89,7 @@ import {
 } from "./substitutions.ts";
 import { closestAncestor, mapPathsAcrossRebuild, pairItemsAcrossRebuild } from "./item-pairing.ts";
 import { interleaveStoredOnlyRows } from "./stored-only-rows.ts";
-import type { COARevenueType, CreditNoteStatusType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, SettlementReasonType, SettlementTargetType, SettlementTypeType, SubstitutedForEntryType, PurchaseCreditStatusType } from "../schemas/mod.ts";
+import type { COARevenueType, CreditNoteStatusType, DocDestinationType, FirestoreTimestampType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, SettlementReasonType, SettlementTargetType, SettlementTypeType, SubstitutedForEntryType, PurchaseCreditStatusType } from "../schemas/mod.ts";
 import {
   getSettlementMultiplier,
   INVOICE_FIELD_FREEZE,
@@ -288,20 +288,44 @@ export function invoiceFieldIsFrozen(
 }
 
 /**
+ * What {@link purchaseBillIsLive} reads. ⚠️ `voided_at` is an optional key, so a
+ * `Pick` that leaves it out still compiles and silently reads a $0 void as live.
+ * Name it in every narrowed type that reaches this predicate.
+ */
+export interface PurchaseBillLiveness {
+  totals: { amount_void_cents?: number };
+  voided_at?: FirestoreTimestampType;
+}
+
+/**
+ * **Is this bill live — not voided?** The ONE liveness rule: every "already
+ * billed" reader, {@link purchaseBillIsFrozen} and {@link derivePurchaseBillStatus}
+ * ask it. Declared here rather than in `utils/purchase-documents.ts` (which
+ * re-exports it) because that module imports this one.
+ *
+ * The stamp is read first and the money second. A $0 bill's `bill_void` folds to
+ * `amount_void_cents: 0`, so the money alone reads it live for ever; the money
+ * stays a term because a bill voided before `voided_at` existed carries no stamp.
+ */
+export function purchaseBillIsLive(bill: PurchaseBillLiveness): boolean {
+  return bill.voided_at === undefined && (bill.totals.amount_void_cents ?? 0) === 0;
+}
+
+/**
  * 🔴 **Is this purchase bill frozen?** — the invoice's money predicate over the
  * bill's totals (D10, owner 2026-10-28), so a bill freezes exactly when an
- * invoice with the same settled money would.
+ * invoice with the same settled money would, plus a voided bill of any amount.
  *
- * Not a copy: a bill's `totals` already fit {@link InvoiceSettledTotals}, so this
- * IS {@link invoiceHasMoneySettlement}. The terms a bill lacks drop out by
- * themselves — it has no `status` (so `amount_void_cents ≠ 0` stands in for
+ * Not a copy: a bill's `totals` already fit {@link InvoiceSettledTotals}, so the
+ * money half IS {@link invoiceHasMoneySettlement}. The terms a bill lacks drop out
+ * by themselves — it has no `status` (so {@link purchaseBillIsLive} stands in for
  * `void`) and no `closure_count`. It tests the settled VALUE, so a payment
  * reversed to zero unfreezes, and `xero_id` is not a term (invoice parity). A
  * born-paid `bank_transaction` bill carries its `bill_payment` from creation, so
  * it is frozen from birth — correctly, since the money is already settled.
  */
-export function purchaseBillIsFrozen(bill: { totals: InvoiceSettledTotals }): boolean {
-  return invoiceHasMoneySettlement(bill);
+export function purchaseBillIsFrozen(bill: { totals: InvoiceSettledTotals; voided_at?: FirestoreTimestampType }): boolean {
+  return invoiceHasMoneySettlement(bill) || !purchaseBillIsLive(bill);
 }
 
 /**
@@ -309,12 +333,15 @@ export function purchaseBillIsFrozen(bill: { totals: InvoiceSettledTotals }): bo
  * accessor over `PURCHASE_BILL_FIELD_FREEZE` (`@cfs/core/schemas`), and the only
  * way to read it. `true` means frozen.
  */
-export function purchaseBillFieldIsFrozen(bill: { totals: InvoiceSettledTotals }, cls: PurchaseBillFieldClass): boolean {
+export function purchaseBillFieldIsFrozen(
+  bill: { totals: InvoiceSettledTotals; voided_at?: FirestoreTimestampType },
+  cls: PurchaseBillFieldClass,
+): boolean {
   switch (PURCHASE_BILL_FIELD_FREEZE[cls].frozen_when) {
     case "frozen":
       return purchaseBillIsFrozen(bill);
     case "void":
-      return (bill.totals.amount_void_cents ?? 0) !== 0;
+      return !purchaseBillIsLive(bill);
     case "never":
       return false;
   }
@@ -683,13 +710,12 @@ export function derivePurchaseCreditStatus(
  * `issued`: bills have no closure row, so nothing can read it `paid`.
  */
 export function derivePurchaseBillStatus(
-  bill: { totals: InvoiceSettledTotals & { total_cents: number } },
+  bill: { totals: InvoiceSettledTotals & { total_cents: number }; voided_at?: FirestoreTimestampType },
 ): PurchaseBillStatusType {
+  if (!purchaseBillIsLive(bill)) return "void";
   const { totals } = bill;
   const paid = totals.amount_paid_cents;
   const credited = totals.amount_credited_cents ?? 0;
-  const voided = totals.amount_void_cents ?? 0;
-  if (voided !== 0) return "void";
   if (paid <= 0 && credited <= 0) return "unpaid";
   if (totals.total_cents - paid - credited > 0) return "part_paid";
   return paid > 0 ? "paid" : "credited";

@@ -23,6 +23,7 @@ import {
 } from "../src/schemas/mod.ts";
 import { priceFormulaRefOf } from "../src/utils/price-formulas.ts";
 import { FIXED, FORMULAS, VISION } from "./helpers/formulas.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const FIXED_PRICE = { price_formula: priceFormulaRefOf(FIXED), rates: [], discount: null };
 const TIME_PRICE = {
@@ -192,6 +193,14 @@ Deno.test("derivePurchaseBillStatus: every member, read off the totals", () => {
   assertEquals(status(1000, 0, 0, 1000), "void");
   assertEquals(status(1000, 600, 0, 1000), "void", "a void beats anything its reversers left");
   assertEquals(status(1000, -100, 0), "unpaid", "a net-negative bucket is not part paid");
+  assertEquals(
+    derivePurchaseBillStatus({
+      totals: { total_cents: 0, amount_paid_cents: 0, amount_credited_cents: 0, amount_void_cents: 0 },
+      voided_at: mockTimestamp,
+    }),
+    "void",
+    "a $0 void folds to 0, so the stamp is the only thing saying so",
+  );
   // Coverage: the cases above reach every member.
   assertEquals(PURCHASE_BILL_STATUSES.length, 5);
 });

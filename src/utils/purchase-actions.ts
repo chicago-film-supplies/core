@@ -97,7 +97,7 @@ export interface PurchaseOfferContext {
 }
 
 /** The paths of the purchase lines a LIVE bill names, each joined with `/`. */
-export function purchaseBilledPaths(bills: readonly Pick<PurchaseBill, "totals" | "items">[]): Set<string> {
+export function purchaseBilledPaths(bills: readonly Pick<PurchaseBill, "totals" | "items" | "voided_at">[]): Set<string> {
   return new Set(
     bills.filter(purchaseBillIsLive).flatMap((b) =>
       b.items.flatMap((l) => (l.path_purchase_item === undefined ? [] : [l.path_purchase_item.join("/")]))
@@ -220,7 +220,7 @@ export function purchaseActionsFor(
 
 /** Everything an operator may do to a bill: spend credit on it while it is a live ACCPAY with money due. */
 export function purchaseBillActionsFor(
-  bill: Pick<PurchaseBill, "totals" | "xero_document">,
+  bill: Pick<PurchaseBill, "totals" | "xero_document" | "voided_at">,
 ): PurchaseActionOffer[] {
   if (bill.xero_document !== "invoice" || !purchaseBillIsLive(bill) || bill.totals.amount_due_cents <= 0) return [];
   return [{ key: "allocate_credit", action: "allocate_credit", max_cents: bill.totals.amount_due_cents }];

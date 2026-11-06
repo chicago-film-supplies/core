@@ -1017,6 +1017,7 @@ Deno.test("purchaseBillIsFrozen: money settled ≠ 0, by VALUE — reversed to z
   assertEquals(purchaseBillIsFrozen(t({ amount_paid_cents: 1, amount_due_cents: 140984 })), true);
   assertEquals(purchaseBillIsFrozen(t({ amount_credited_cents: 1, amount_due_cents: 140984 })), true);
   assertEquals(purchaseBillIsFrozen(t({ amount_void_cents: 140985, amount_due_cents: 0 })), true);
+  assertEquals(purchaseBillIsFrozen({ ...t({}), voided_at: mockTimestamp }), true, "a $0 void settles no money");
 });
 
 Deno.test("PURCHASE_BILL_FIELD_FREEZE: the invoice's table, class for class; tracking freezes only on void and is not shown editable in Xero", () => {

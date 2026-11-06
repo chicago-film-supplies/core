@@ -158,8 +158,9 @@ export const XERO_EVENT_MSGS = [
   // bill sweep is the backstop; this arm carries an alert.
   "purchase_bill_enqueue_failed",
   // A Xero void of a bill released less than the bill's line says, because the
-  // line was edited up after billing and an edit moves no purchase bucket. The
-  // void still lands; the record names the units the purchase never counted.
+  // line was edited up after billing while the count was kept by delta. A recount
+  // has nothing to clamp (api-cloudrun#1441), so no writer emits this any more; the
+  // literal stays so a log written before then still parses.
   "purchase_bill_void_release_clamped",
   // ── Supplier credits (api-cloudrun#1210) ──
   // The purchase's supplier credit (`purchase-credits/{uid}`, an ACCPAYCREDIT

@@ -22,7 +22,11 @@ import {
   pricePurchaseDocument,
   projectPurchaseLineToBillLine,
   projectPurchaseLineToCreditLine,
+  purchaseBillIsLive,
   purchaseBillSharedLineFields,
+  purchaseCreditIsLive,
+  purchaseLineBilledNet,
+  recomputePurchaseQuantityBilled,
   syncPurchaseToBills,
   unbilledUnitWindows,
   unitWindowsForLine,
@@ -761,4 +765,114 @@ Deno.test("time credit: a SPAN credit must lie inside the billed span and not ov
     Error,
     "already credited",
   );
+});
+
+// ── The recount of `quantity_billed` (api-cloudrun#1441) ────────────
+//
+// Every expected count below is stated by hand from the row's story. None is
+// computed by the code under test.
+
+/** A bill or credit line of `quantity` units of `item`, for `amount_cents`. */
+const docLine = (item: PurchaseItem, quantity: number, amount_cents = 1000) =>
+  ({ path_purchase_item: item.path, quantity, amount_cents }) as unknown as PurchaseDocumentItem;
+
+/** A bill voided the way every void path leaves it: stamped, and folded when it holds money. */
+const voidedBill = (bill: PurchaseBill): PurchaseBill => ({
+  ...bill,
+  voided_at: mockTimestamp,
+  totals: { ...bill.totals, amount_void_cents: bill.totals.total_cents, amount_due_cents: 0 },
+});
+
+const recounted = (item: PurchaseItem, documents: PurchaseBilledDocuments, at = item) =>
+  recomputePurchaseQuantityBilled({ items: [item] }, documents).find((i) => i.uid === at.uid)!.quantity_billed;
+
+Deno.test("recomputePurchaseQuantityBilled: live bills net of live credits, floored at 0", async (t) => {
+  const item = buyLine({ quantity: 10, amount_cents: 10000 });
+  const bill = (n: number, quantity: number) => billDoc(n, [docLine(item, quantity)]);
+  const cases: [string, PurchaseBilledDocuments, number][] = [
+    ["nothing billed", NONE, 0],
+    ["a bill edited 5→3 counts 3", { bills: [bill(1, 3)], credits: [] }, 3],
+    ["…and voiding it releases 3, not the 5 it was created with", { bills: [voidedBill(bill(1, 3))], credits: [] }, 0],
+    ["a bill edited 5→8 beside a bill of 2 counts 10", { bills: [bill(1, 8), bill(2, 2)], credits: [] }, 10],
+    ["…bill B voided leaves the edited A", { bills: [bill(1, 8), voidedBill(bill(2, 2))], credits: [] }, 8],
+    ["…then A voided leaves nothing", { bills: [voidedBill(bill(1, 8)), voidedBill(bill(2, 2))], credits: [] }, 0],
+    ["bill 5, credit 2", { bills: [bill(1, 5)], credits: [credit([docLine(item, 2)])] }, 3],
+    ["…void the bill: the credit strands, and the count floors", { bills: [voidedBill(bill(1, 5))], credits: [credit([docLine(item, 2)])] }, 0],
+    ["…then void the credit too", { bills: [voidedBill(bill(1, 5))], credits: [credit([docLine(item, 2)], "void")] }, 0],
+    ["a void credit counts nothing, so its units read billed again", { bills: [bill(1, 5)], credits: [credit([docLine(item, 2)], "void")] }, 5],
+    ["an applied credit still counts", { bills: [bill(1, 5)], credits: [credit([docLine(item, 2)], "applied")] }, 3],
+    [
+      "a $0 voided bill: its void folds to 0, and the stamp is what stops it counting",
+      { bills: [voidedBill(billDoc(1, [docLine(item, 4, 0)]))], credits: [] },
+      0,
+    ],
+    ["a $0 bill not voided still counts", { bills: [billDoc(1, [docLine(item, 4, 0)])], credits: [] }, 4],
+    ["an unstamped bill folded void, as every bill before the stamp is", {
+      bills: [billDoc(1, [docLine(item, 4)], { totals: { total_cents: 1000, amount_paid_cents: 0, amount_credited_cents: 0, amount_void_cents: 1000, amount_due_cents: 0 } })],
+      credits: [],
+    }, 0],
+  ];
+  for (const [name, documents, expected] of cases) {
+    await t.step(name, () => assertEquals(recounted(item, documents), expected));
+  }
+
+  await t.step("a time line stays null, whatever names it", () => {
+    const time = visionLine();
+    assertEquals(recounted(time, { bills: [billDoc(1, [docLine(time, 2)])], credits: [] }), null);
+  });
+
+  await t.step("the join is the full path: one product on two lines keeps two counts", () => {
+    const other = buyLine({ uid: iuid(77), path: [iuid(77)], quantity: 10, amount_cents: 10000 });
+    const items = [item, other];
+    const documents = { bills: [billDoc(1, [docLine(item, 2), docLine(other, 7)])], credits: [credit([docLine(other, 1)])] };
+    assertEquals(item.uid_product, other.uid_product);
+    assertEquals(recomputePurchaseQuantityBilled({ items }, documents).map((i) => i.quantity_billed), [2, 6]);
+  });
+
+  await t.step("a document-only line names no purchase line and moves nothing", () => {
+    const documentOnly = { quantity: 9, amount_cents: 1000 } as unknown as PurchaseDocumentItem;
+    assertEquals(recounted(item, { bills: [billDoc(1, [documentOnly])], credits: [] }), 0);
+  });
+});
+
+Deno.test("purchaseLineBilledNet: the count the recount floors, and the money beside it, unfloored", () => {
+  const item = buyLine({ quantity: 10, amount_cents: 10000 });
+  const documents = {
+    bills: [voidedBill(billDoc(1, [docLine(item, 5, 5000)]))],
+    credits: [credit([docLine(item, 2, 2000)])],
+  };
+  assertEquals(purchaseLineBilledNet(item.path, documents), { quantity: -2, amount_cents: -2000 });
+});
+
+Deno.test("purchaseBillIsLive: the stamp is read as well as the money; purchaseCreditIsLive reads the status", () => {
+  const zero = { amount_void_cents: 0 };
+  assert(purchaseBillIsLive({ totals: zero }));
+  assert(!purchaseBillIsLive({ totals: zero, voided_at: mockTimestamp }), "a $0 void folds to 0");
+  assert(!purchaseBillIsLive({ totals: { amount_void_cents: 500 } }), "a void from before the stamp existed");
+  assert(purchaseCreditIsLive({ status: "issued" }));
+  assert(purchaseCreditIsLive({ status: "applied" }));
+  assert(!purchaseCreditIsLive({ status: "void" }));
+});
+
+Deno.test("a stamped bill parses, and an unstamped one does too", () => {
+  const item = project(buyLine(), feb(1), [], NONE, 10, 3)!;
+  assert(PurchaseBillSchema.safeParse(billDoc(1, [item])).success);
+  assert(PurchaseBillSchema.safeParse(billDoc(1, [item], { voided_at: mockTimestamp })).success);
+});
+
+Deno.test("diff: a live credit with no live bill left under it reads as a negative `billed`", () => {
+  const item = buyLine({ quantity_billed: 0, quantity_received: 3 });
+  const billLine = project(buyLine(), feb(1), [], NONE, 10, 3)!;
+  const creditLine = { ...billLine, quantity: 2, amount_cents: 93990 };
+  const bill = voidedBill(billDoc(1, [billLine]));
+  const stranded = credit([creditLine]);
+  const sources = { purchase: purchaseDoc([item]), bills: [bill], credits: [stranded] };
+  const entries = computePurchaseBillDiffs({ kind: "purchase" }, sources).lines.get(item.path.join("/"))!;
+  assertEquals(entries.map((e) => e.kind), ["billed"]);
+  const billed = entries[0] as { billed: number; billed_cents: number; expected_cents: number; bills: unknown[]; credits: unknown[] };
+  assertEquals([billed.billed, billed.billed_cents, billed.expected_cents], [-2, -93990, 0]);
+  assertEquals([billed.bills.length, billed.credits.length], [0, 1]);
+  // A voided credit beside it leaves nothing to say.
+  const quiet = { ...sources, credits: [credit([creditLine], "void")] };
+  assertEquals(computePurchaseBillDiffs({ kind: "purchase" }, quiet).lines.size, 0);
 });

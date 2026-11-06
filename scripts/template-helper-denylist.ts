@@ -389,6 +389,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "invoiceIsFrozen",
     "invoiceFieldIsFrozen", // its per-class form over INVOICE_FIELD_FREEZE — same reason
     "purchaseBillIsFrozen", // the bill's twin (api-cloudrun#1407 D10) — same reason
+    "purchaseBillIsLive", // the one bill liveness rule — a template reads a bill's stored totals
     "purchaseBillFieldIsFrozen", // and its per-class form over PURCHASE_BILL_FIELD_FREEZE
     // Settlement liveness, for MATCHING rows (the reap, the edit push's held
     // settlements). A rendered invoice reads its stored totals.
@@ -750,8 +751,11 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "projectPurchaseLineToBillLine",
     "projectPurchaseLineToCreditLine",
     "purchaseBillIsLive",
+    "purchaseCreditIsLive",
+    "purchaseLineBilledNet",
     "purchaseLineCovers",
     "purchaseBillSharedLineFields",
+    "recomputePurchaseQuantityBilled",
     "seedPurchaseLinesForWindows",
     "subtractChargeWindows",
     "syncPurchaseToBills",

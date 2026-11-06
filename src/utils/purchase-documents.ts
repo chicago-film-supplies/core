@@ -90,7 +90,9 @@ import {
 import { cumulativeShareCents } from "./purchases.ts";
 import { roundDivHalfUp } from "./money.ts";
 import { classifySharedFields, fieldsUnder, mergeSharedFields, type SharedField } from "./shared-fields.ts";
-import { purchaseBillIsFrozen } from "./invoices.ts";
+import { purchaseBillIsFrozen, purchaseBillIsLive } from "./invoices.ts";
+
+export { purchaseBillIsLive };
 
 // ── Context ─────────────────────────────────────────────────────
 
@@ -107,11 +109,10 @@ export interface PurchaseDocumentContext {
 /**
  * The purchase's existing bills and credits, as the "already billed" readers
  * see them. Pass EVERY bill and credit of the purchase; liveness is decided
- * here (a bill is live while `amount_void_cents === 0`, a credit while its
- * `status !== "void"`).
+ * here ({@link purchaseBillIsLive}, {@link purchaseCreditIsLive}).
  */
 export interface PurchaseBilledDocuments {
-  bills: readonly Pick<PurchaseBill, "uid" | "number" | "totals" | "items">[];
+  bills: readonly Pick<PurchaseBill, "uid" | "number" | "totals" | "items" | "voided_at">[];
   credits: readonly Pick<PurchaseCredit, "status" | "items">[];
 }
 
@@ -197,9 +198,9 @@ export function subtractChargeWindows(
 const samePath = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((s, k) => s === b[k]);
 
-/** Is this bill live — not voided? Every "already billed" reader asks it. */
-export function purchaseBillIsLive(bill: Pick<PurchaseBill, "totals">): boolean {
-  return (bill.totals.amount_void_cents ?? 0) === 0;
+/** Is this credit live — not voided? Every "already billed" reader asks it. */
+export function purchaseCreditIsLive(credit: Pick<PurchaseCredit, "status">): boolean {
+  return credit.status !== "void";
 }
 
 /** The lines of a document that project the purchase item at `path`. */
@@ -539,7 +540,7 @@ export function billedUnitCoverage(
   }
   const credited = new Map<string, Interval[]>();
   for (const credit of documents.credits) {
-    if (credit.status === "void") continue;
+    if (!purchaseCreditIsLive(credit)) continue;
     byUnit(credit.items, credited);
   }
   const out = new Map<string, ChargeWindowType[]>();
@@ -548,6 +549,57 @@ export function billedUnitCoverage(
     if (net.length > 0) out.set(unit, net.map(fromInterval));
   }
   return out;
+}
+
+/** What the live documents bill of one purchase line, net of credits. */
+export interface PurchaseLineBilledNet {
+  /** Σ live bill line quantity − Σ live credit line quantity. May be negative. */
+  quantity: number;
+  /** Σ live bill line `amount_cents` − Σ live credit line `amount_cents`. May be negative. */
+  amount_cents: number;
+}
+
+/**
+ * **What the purchase line at `path` is billed, net of credits, UNFLOORED.** The
+ * one sum behind {@link recomputePurchaseQuantityBilled} and the diff's `billed`
+ * entry: lines join on the full path, because one product may sit on two lines.
+ * A negative is a credit with no live bill left under it, which the diff has to
+ * be able to show.
+ */
+export function purchaseLineBilledNet(path: readonly string[], documents: PurchaseBilledDocuments): PurchaseLineBilledNet {
+  const net: PurchaseLineBilledNet = { quantity: 0, amount_cents: 0 };
+  const add = (items: readonly PurchaseDocumentItem[], sign: 1 | -1) => {
+    for (const line of linesFor(items, path)) {
+      net.quantity += sign * line.quantity;
+      net.amount_cents += sign * line.amount_cents;
+    }
+  };
+  for (const bill of documents.bills) if (purchaseBillIsLive(bill)) add(bill.items, 1);
+  for (const credit of documents.credits) if (purchaseCreditIsLive(credit)) add(credit.items, -1);
+  return net;
+}
+
+/**
+ * **A purchase's lines with `quantity_billed` recounted** from its documents
+ * (api-cloudrun#1441). A flat line's count is {@link purchaseLineBilledNet}
+ * floored at 0, because the schema's bucket is `.min(0)`; the diff keeps the
+ * unfloored number. A time line counts nothing and comes back as it went in.
+ *
+ * ⚠️ `quantity_billed` is unlike its sibling buckets. `quantity_received` and
+ * `quantity_returned` are kept by delta, because a receipt's quantity never
+ * changes; a bill line's does, so a delta here releases the wrong number on a
+ * void. Pass EVERY bill and credit of the purchase, including the one the
+ * caller is writing.
+ */
+export function recomputePurchaseQuantityBilled(
+  purchase: Pick<Purchase, "items">,
+  documents: PurchaseBilledDocuments,
+): PurchaseItem[] {
+  return purchase.items.map((item) =>
+    purchaseItemBasis(item) === "flat"
+      ? { ...item, quantity_billed: Math.max(0, purchaseLineBilledNet(item.path, documents).quantity) }
+      : item
+  );
 }
 
 /**
@@ -1010,7 +1062,7 @@ export function projectPurchaseLineToCreditLine(
     // A span credit names no unit windows, so coverage cannot net it: refuse a
     // span an earlier live credit already un-billed.
     for (const credit of opts.billed.credits) {
-      if (credit.status === "void") continue;
+      if (!purchaseCreditIsLive(credit)) continue;
       for (const line of linesFor(credit.items, item.path)) {
         if (line.dates && Date.parse(line.dates.start) < to && Date.parse(line.dates.end) > from) {
           throw new Error(`The span ${opts.dates.start}–${opts.dates.end} overlaps one already credited`);

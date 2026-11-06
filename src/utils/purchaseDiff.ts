@@ -50,6 +50,8 @@ import {
   projectPurchaseLineForBill,
   purchaseBillIsLive,
   purchaseBillSharedLineFields,
+  purchaseCreditIsLive,
+  purchaseLineBilledNet,
   subtractChargeWindows,
   unitWindowsForLine,
 } from "./purchase-documents.ts";
@@ -86,9 +88,11 @@ export interface PurchaseSourceDiffEntry {
  * A FLAT purchase line's units and money across every live bill, net of live
  * credits, emitted when they disagree with what was ordered or received, or
  * when the billed money is not what the line's cumulative share says those
- * units cost. Emitted only once at least one live bill bills the line, and
- * then when billed ≠ ordered or the money disagrees. `received` is stated for
- * the reader and is not a trigger: billing before delivery is normal.
+ * units cost. Emitted only once a live bill or a live credit names the line,
+ * and then when billed ≠ ordered or the money disagrees. A live credit with no
+ * live bill left under it reads as a negative `billed`, which is how a voided
+ * bill's stranded credit reaches the operator. `received` is stated for the
+ * reader and is not a trigger: billing before delivery is normal.
  */
 export interface PurchaseBilledEntry {
   kind: "billed";
@@ -98,9 +102,9 @@ export interface PurchaseBilledEntry {
   ordered: number;
   /** `quantity_received` on a buy or subrent; `null` on a charge, which receives nothing. */
   received: number | null;
-  /** Σ live bill line quantity − Σ live credit line quantity. */
+  /** Σ live bill line quantity − Σ live credit line quantity, unfloored. */
   billed: number;
-  /** Σ live bill line money − Σ live credit line money. */
+  /** Σ live bill line money − Σ live credit line money, unfloored. */
   billed_cents: number;
   /** What `billed` units cost at the line's cumulative share (past `quantity`, at the same rate). */
   expected_cents: number;
@@ -224,12 +228,9 @@ function billedEntry(
   const lines = (items: readonly PurchaseDocumentItem[]) =>
     items.filter((l) => l.path_purchase_item !== undefined && key(l.path_purchase_item) === key(item.path));
   const bills = liveBills.filter((b) => lines(b.items).length > 0);
-  if (bills.length === 0) return null;
   const credits = liveCredits.filter((c) => lines(c.items).length > 0);
-  const sum = (docs: readonly { items: PurchaseDocumentItem[] }[], pick: (l: PurchaseDocumentItem) => number) =>
-    docs.reduce((s, d) => s + lines(d.items).reduce((t, l) => t + pick(l), 0), 0);
-  const billed = sum(bills, (l) => l.quantity) - sum(credits, (l) => l.quantity);
-  const billed_cents = sum(bills, (l) => l.amount_cents) - sum(credits, (l) => l.amount_cents);
+  if (bills.length === 0 && credits.length === 0) return null;
+  const { quantity: billed, amount_cents: billed_cents } = purchaseLineBilledNet(item.path, { bills, credits });
   const ordered = item.quantity - item.quantity_canceled;
   const received = item.type === "charge" ? null : item.quantity_received;
   const expected_cents = shareCents(item.amount_cents ?? 0, item.quantity, billed);
@@ -292,7 +293,7 @@ export function computePurchaseBillDiffs(view: PurchaseDiffView, sources: Purcha
   const purchaseRef = refOfPurchase(sources.purchase);
   const byPath = new Map(sources.purchase.items.map((i) => [key(i.path), i]));
   const liveBills = sources.bills.filter(purchaseBillIsLive);
-  const liveCredits = sources.credits.filter((c) => c.status !== "void");
+  const liveCredits = sources.credits.filter(purchaseCreditIsLive);
 
   const summed = (item: PurchaseItem): PurchaseDiffEntry[] => {
     if (purchaseItemBasis(item) === "flat") {
