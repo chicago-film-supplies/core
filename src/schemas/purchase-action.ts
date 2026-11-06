@@ -31,6 +31,7 @@ export const PURCHASE_ACTION_IDS = [
   "change_basis",
   // on a bill
   "allocate_credit",
+  "void_bill",
   // on a supplier credit
   "void_credit",
 ] as const;
@@ -63,5 +64,6 @@ export const PURCHASE_ACTIONS: Readonly<Record<PurchaseActionId, PurchaseActionD
   remove_item: { subject: "purchase_item", description: "Remove a line with no history." },
   change_basis: { subject: "purchase_item", description: "Move a line with no history between flat and time." },
   allocate_credit: { subject: "purchase_bill", description: "Spend supplier credit on a live bill with money due." },
+  void_bill: { subject: "purchase_bill", description: "Void a pushed bill nothing has settled." },
   void_credit: { subject: "purchase_credit", description: "Void a credit nothing has drawn on." },
 };

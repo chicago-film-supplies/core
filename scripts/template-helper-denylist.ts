@@ -730,6 +730,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   "purchase-actions": [
     "purchaseActionsFor",
     "purchaseBillActionsFor",
+    "purchaseBillVoidRefusal",
     "purchaseBilledPaths",
     "purchaseCreditActionsFor",
     "purchaseItemClosable",

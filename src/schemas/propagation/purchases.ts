@@ -451,6 +451,16 @@ const BILL_VOIDED: EnforcementRef = {
   gates: true,
 };
 
+/** An operator void, asserted with its refusals. */
+const BILL_VOIDED_FROM_CFS: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/purchases/purchaseBillSettlements.test.ts::void from CFS — a bill nothing settles voids in Xero and releases its lines; one with a live payment is refused",
+  clause:
+    "voiding a pushed bill from CFS voids the posted Xero bill, then appends one bill_void for total_cents, stamps voided_at, folds the bill to amount_due_cents 0 and recounts each billed purchase line's quantity_billed without it, in one commit; a bill purchaseBillVoidRefusal refuses is refused before Xero is called",
+  gates: true,
+};
+
 const settlePurchaseBillRules: CollectionRule[] = [
   {
     id: "settle-purchase-bill:xero-to-settlements",
@@ -498,6 +508,43 @@ const settlePurchaseBillRules: CollectionRule[] = [
         source: ["amount_cents"],
         target: ["totals", "amount_due_cents"],
         transform: "total − paid − credited − void",
+      },
+    ],
+  },
+];
+
+const voidPurchaseBillRules: CollectionRule[] = [
+  {
+    id: "void-purchase-bill:void-to-settlements",
+    source: "purchase-bills",
+    target: "settlements",
+    mode: "co-write",
+    invariant:
+      "An operator's void appends ONE `bill_void` for the bill's `total_cents`, so its due is derived as 0 rather than assigned. There is nothing to retract: a bill any payment or allocation has settled is refused (`purchaseBillVoidRefusal`). The row is keyed as the Xero void's is (`nextBillVoidSettlementId`), so the webhook that follows the Xero void finds it and moves nothing.",
+    enforced_by: [BILL_VOIDED_FROM_CFS],
+    transaction: "void-purchase-bill",
+    fields: [
+      {
+        source: ["totals", "total_cents"],
+        target: ["amount_cents"],
+        transform: "the bill_void row annuls the whole bill",
+      },
+    ],
+  },
+  {
+    id: "void-purchase-bill:settlements-to-bill",
+    source: "settlements",
+    target: "purchase-bills",
+    mode: "co-write",
+    invariant:
+      "The voided bill's `totals` are its journal folded: `amount_void_cents === total_cents`, everything else 0, in the commit that wrote the row.",
+    enforced_by: [BILL_VOIDED_FROM_CFS],
+    transaction: "void-purchase-bill",
+    fields: [
+      {
+        source: ["amount_cents"],
+        target: ["totals", "amount_void_cents"],
+        transform: "the bill_void row, by fold",
       },
     ],
   },
@@ -923,7 +970,7 @@ const purchaseBilledRules: CollectionRule[] = [
     mode: "co-write",
     invariant:
       "A FLAT purchase line's `quantity_billed` is recounted from the purchase's live documents (`recomputePurchaseQuantityBilled`): Σ live bill line quantities − Σ live credit line quantities, joined on the full path through `path_purchase_item`, floored at 0, written in the same commit as the bill or credit that moved it. So a bill line's quantity edit moves the count (5→3 frees 2 units; 5→8 reads over-billed, which the purchase ↔ bill diff flags), and a void releases what the bill says NOW, not what it said when it was created. A voided bill stays in `query_by_bills` and stops counting. A later bill of the same units is priced at its cumulative share of the new range, so the live bills of a line can sum to its amount ±1¢. A TIME line counts nothing: `quantity_billed` stays null.",
-    enforced_by: [BILLED_RECOUNT, BILL_MOVES_THE_BUCKET, BILL_VOIDED],
+    enforced_by: [BILLED_RECOUNT, BILL_MOVES_THE_BUCKET, BILL_VOIDED, BILL_VOIDED_FROM_CFS],
     fields: [
       {
         source: ["items", "quantity"],
@@ -999,6 +1046,17 @@ const settlePurchaseBillTransaction: TransactionDefinition = {
     "settle-purchase-bill:xero-to-settlements",
     "settle-purchase-bill:settlements-to-bill",
     "settle-purchase-bill:settlements-to-credit",
+  ],
+};
+
+const voidPurchaseBillTransaction: TransactionDefinition = {
+  id: "void-purchase-bill",
+  description:
+    "An operator voids a pushed bill nothing has settled: a bill Xero holds is voided there first, then one commit appends one `bill_void` for its total, stamps `voided_at`, folds the bill to nothing due and recounts its purchase lines. A bill with no `xero_id` is voided in CFS alone, and its push then posts nothing. If the commit loses a race after Xero voided, the webhook's `void-purchase-bill-from-xero` finishes it. Refused by `purchaseBillVoidRefusal`, before Xero is called. A void Xero throttles changes nothing and re-runs from a task. Fires on: every void that is not a replay.",
+  steps: [
+    "void-purchase-bill:void-to-settlements",
+    "void-purchase-bill:settlements-to-bill",
+    ...RECOUNT_STEPS,
   ],
 };
 
@@ -1187,6 +1245,7 @@ export const purchases: PropagationModule = {
     ...createPurchaseBillRules,
     ...settlePurchaseBillRules,
     settlementsToCreditRule("settle-purchase-bill:settlements-to-credit", "settle-purchase-bill"),
+    ...voidPurchaseBillRules,
     ...voidPurchaseBillFromXeroRules,
     settlementsToCreditRule("void-purchase-bill-from-xero:settlements-to-credit", "void-purchase-bill-from-xero"),
     ...createPurchaseCreditRules,
@@ -1208,6 +1267,7 @@ export const purchases: PropagationModule = {
     createPurchaseBillTransaction,
     updatePurchaseBillTransaction,
     settlePurchaseBillTransaction,
+    voidPurchaseBillTransaction,
     voidPurchaseBillFromXeroTransaction,
     createPurchaseCreditTransaction,
     allocatePurchaseCreditTransaction,

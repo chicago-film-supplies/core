@@ -1962,7 +1962,8 @@ const SETTLEMENT_REASONS = [
   /** bill_credit — the supplier corrected a price or quantity after billing. */
   "supplier_adjustment",
   /**
-   * bill_void — the supplier bill was annulled in Xero. Not `invoice_voided`:
+   * bill_void — the supplier bill was annulled, in Xero or, for a bill no Xero
+   * document ever carried, in CFS alone. Not `invoice_voided`:
    * that member already describes receivable history, and re-meaning it to
    * cover a payable is the expensive kind of change this enum's docblock warns of.
    */
@@ -2278,8 +2279,7 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
     counts_into: null,
     reverses: "required",
   },
-  // A bill voided in Xero zeroes its due amount through the fold, mirroring
-  // `void` — the plan's `markInvoiceVoidedFromXero` twin.
+  // A voided bill zeroes its due amount through the fold, mirroring `void`.
   bill_void: {
     settles: "purchase_bill",
     draws_credit: false,

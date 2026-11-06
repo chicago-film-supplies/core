@@ -12,10 +12,10 @@
  * ## ⚠️ There is no `assert*` here yet, unlike the invoice ruleset
  *
  * The invoice module's guarantee is that a button cannot be offered that the
- * server refuses, because the route asserts the same functions. This one does
- * not have that guarantee: the API keeps its own refusals, and only
- * {@link purchaseItemTouched} is shared with it. So each rule here is a
- * statement of what `api-cloudrun/src/services/purchases.ts` and
+ * server refuses, because the route asserts the same functions. This one has
+ * that guarantee for two rules only: {@link purchaseItemTouched} and
+ * {@link purchaseBillVoidRefusal} are shared with the API. Every other rule here
+ * is a statement of what `api-cloudrun/src/services/purchases.ts` and
  * `purchaseCredits.ts` refuse, matched by hand and pinned by tests on both
  * sides.
  *
@@ -43,6 +43,7 @@ import {
   type PurchaseBilledDocuments,
   purchaseBillIsLive,
   type PurchaseDocumentContext,
+  purchaseLineBilledNet,
   projectPurchaseLineToBillLine,
 } from "./purchase-documents.ts";
 import { remainingToBill, remainingToReceive, remainingToReturn } from "./purchases.ts";
@@ -218,12 +219,71 @@ export function purchaseActionsFor(
   return offers;
 }
 
-/** Everything an operator may do to a bill: spend credit on it while it is a live ACCPAY with money due. */
+/**
+ * The bill an operator asks to void, or asks what it may do to: one of
+ * {@link PurchaseBilledDocuments}' bills, and who authored it.
+ */
+export type PurchaseBillActionBill =
+  & PurchaseBilledDocuments["bills"][number]
+  & Pick<PurchaseBill, "origin">;
+
+/**
+ * What a bill's void is decided on: the bill's purchase and EVERY bill and credit
+ * of that purchase. ⚠️ **Required, unlike {@link PurchaseOfferContext}.** That
+ * context reads an absent key as "none", which is safe there because the server
+ * re-checks. Here it would offer Void on an unknown answer, so a caller without
+ * these documents cannot compile.
+ */
+export interface PurchaseBillContext extends PurchaseBilledDocuments {
+  purchase: Pick<Purchase, "items">;
+}
+
+/**
+ * Why an operator may not void this bill, or `null` when they may. The offer and
+ * the API's route both ask this, so a button cannot offer what the server
+ * refuses. A void from Xero is never refused and never reads this: Xero has
+ * already voided the bill, and the count floors at 0.
+ *
+ * ⚠️ `amount_paid_cents` and `amount_credited_cents` are the journal folded, so
+ * an unsynced allocation refuses too. Xero would refuse any payment or
+ * allocation it holds.
+ *
+ * Only FLAT lines are read for the negative: a time line counts no
+ * `quantity_billed`, so there is nothing for a recount to take below zero.
+ */
+export function purchaseBillVoidRefusal(bill: PurchaseBillActionBill, ctx: PurchaseBillContext): string | null {
+  if (!purchaseBillIsLive(bill)) return `Bill ${bill.number} is already void.`;
+  if (bill.origin === "linked") return `Bill ${bill.number} is linked to a document in Xero. Void it in Xero.`;
+  if (bill.totals.amount_paid_cents > 0 || bill.totals.amount_credited_cents > 0) {
+    return `Cannot void bill ${bill.number}: payments or supplier credits are applied to it. Remove them first.`;
+  }
+  const others = { bills: ctx.bills.filter((b) => b.uid !== bill.uid), credits: ctx.credits };
+  const named = purchaseBilledPaths([bill]);
+  const stranded = ctx.purchase.items.filter((item) =>
+    purchaseItemBasis(item) === "flat" && named.has(item.path.join("/")) &&
+    purchaseLineBilledNet(item.path, others).quantity < 0
+  );
+  if (stranded.length > 0) {
+    return `Cannot void bill ${bill.number}: a supplier credit would be left with no bill under it. Void the credit first.`;
+  }
+  return null;
+}
+
+/**
+ * Everything an operator may do to a bill: spend credit on it while it is a live
+ * ACCPAY with money due, and void it unless {@link purchaseBillVoidRefusal} says
+ * otherwise.
+ */
 export function purchaseBillActionsFor(
-  bill: Pick<PurchaseBill, "totals" | "xero_document" | "voided_at">,
+  bill: PurchaseBillActionBill & Pick<PurchaseBill, "xero_document">,
+  ctx: PurchaseBillContext,
 ): PurchaseActionOffer[] {
-  if (bill.xero_document !== "invoice" || !purchaseBillIsLive(bill) || bill.totals.amount_due_cents <= 0) return [];
-  return [{ key: "allocate_credit", action: "allocate_credit", max_cents: bill.totals.amount_due_cents }];
+  const offers: PurchaseActionOffer[] = [];
+  if (bill.xero_document === "invoice" && purchaseBillIsLive(bill) && bill.totals.amount_due_cents > 0) {
+    offers.push({ key: "allocate_credit", action: "allocate_credit", max_cents: bill.totals.amount_due_cents });
+  }
+  if (purchaseBillVoidRefusal(bill, ctx) === null) offers.push({ key: "void_bill", action: "void_bill" });
+  return offers;
 }
 
 /** Everything an operator may do to a supplier credit: void it while nothing has drawn on it. */
