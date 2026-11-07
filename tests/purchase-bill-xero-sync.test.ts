@@ -3,8 +3,8 @@ import type { PurchaseBill } from "../src/schemas/mod.ts";
 import { purchaseBillXeroProjectionHash, purchaseBillXeroSyncStatus } from "../src/utils/purchase-bill-xero-sync.ts";
 
 const item = {
-  uid: "line-1", path: ["line-1"], type: "charge", name: "Dolly", quantity: 3, amount_cents: 12345,
-  coa_posting: 5100, uid_tracking_category: "cat",
+  uid: "line-1", path: ["line-1"], type: "service", name: "Dolly", quantity: 3, amount_cents: 12345,
+  ledger_account: 5100, uid_tracking_category: "cat",
 };
 const bill = (over: Record<string, unknown> = {}) => ({
   uid: "b", number: 7, origin: "pushed", xero_id: "x-1", version: 2, items: [item],
@@ -14,9 +14,15 @@ const bill = (over: Record<string, unknown> = {}) => ({
 }) as unknown as PurchaseBill;
 
 Deno.test("purchaseBillXeroProjectionHash: the stored form is byte-stable", () => {
-  // FNV-1a 48 of the canonical projection, computed outside this code. A change here
-  // reads every stored bill as an edit.
-  assertEquals(purchaseBillXeroProjectionHash(bill()), "jyyyiiux5");
+  // FNV-1a 48 of the canonical projection, computed outside this code (a Python
+  // reimplementation of canonical JSON + FNV-1a, 2026-11-07). A change here reads
+  // every stored bill as an edit.
+  //
+  // ⚠️ It MOVED in the one-document-model Phase 1 (from "jyyyiiux5", the same
+  // projection with `type: "charge"` and `coa_posting`), so every pushed bill's
+  // `pushed_projection_hash` reads stale until that phase's maintenance window
+  // re-stamps it with the bodies proven identical and no push (plan item S1).
+  assertEquals(purchaseBillXeroProjectionHash(bill()), "1eln8podv1");
 });
 
 Deno.test("purchaseBillXeroProjectionHash: every field the body reads moves it", () => {
@@ -28,7 +34,7 @@ Deno.test("purchaseBillXeroProjectionHash: every field the body reads moves it",
     { items: [{ ...item, name: "Cart" }] },
     { items: [{ ...item, quantity: 4 }] },
     { items: [{ ...item, amount_cents: 12346 }] },
-    { items: [{ ...item, coa_posting: 5200 }] },
+    { items: [{ ...item, ledger_account: 5200 }] },
     { items: [{ ...item, uid_tracking_category: null }] },
     { items: [{ ...item, uid_product: "p" }] },
   ];

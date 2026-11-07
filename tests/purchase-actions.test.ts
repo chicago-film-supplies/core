@@ -30,23 +30,24 @@ import { priceFormulaRefOf } from "../src/utils/price-formulas.ts";
 import { FIXED, FORMULAS, VISION } from "./helpers/formulas.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
-const FIXED_PRICE = { price_formula: priceFormulaRefOf(FIXED), rates: [], discount: null };
+const FIXED_PRICE = { price_formula: priceFormulaRefOf(FIXED), rates: [], discount: null, taxes: [] };
 const TIME_PRICE = {
   price_formula: priceFormulaRefOf(VISION),
   rates: [{ rate_key: "month", amount_cents: 15750 }, { rate_key: "week", amount_cents: 4500 }],
   discount: null,
+  taxes: [],
 };
 
 const buy = (o: Record<string, unknown> = {}) => ({
-  type: "buy", uid: "b", path: ["b"], quantity: 3, price: FIXED_PRICE,
+  type: "sale", uid: "b", path: ["b"], quantity: 3, price: FIXED_PRICE,
   quantity_received: 0, quantity_billed: 0, quantity_canceled: 0, ...o,
 }) as PurchaseActionItem;
 const subrent = (o: Record<string, unknown> = {}) => ({
-  type: "subrent", uid: "s", path: ["s"], quantity: 2, price: FIXED_PRICE,
+  type: "rental", uid: "s", path: ["s"], quantity: 2, price: FIXED_PRICE,
   quantity_received: 0, quantity_returned: 0, quantity_billed: 0, quantity_canceled: 0, ...o,
 }) as PurchaseActionItem;
 const charge = (o: Record<string, unknown> = {}) => ({
-  type: "charge", uid: "c", path: ["c"], quantity: 2, price: FIXED_PRICE, quantity_billed: 0, quantity_canceled: 0, ...o,
+  type: "service", uid: "c", path: ["c"], quantity: 2, price: FIXED_PRICE, quantity_billed: 0, quantity_canceled: 0, ...o,
 }) as PurchaseActionItem;
 const timeCharge = (o: Record<string, unknown> = {}) => charge({ price: TIME_PRICE, quantity_billed: null, ...o });
 

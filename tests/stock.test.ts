@@ -808,7 +808,7 @@ Deno.test("supply: with no demand, availability is owned + supply over the hire,
 
 Deno.test("supplyFromPurchase: a live subrent item, net of canceled and returned; [] for anything else", () => {
   const item = {
-    type: "subrent" as const,
+    type: "rental" as const,
     uid_product: "P",
     quantity: 10,
     quantity_canceled: 0,
@@ -827,7 +827,7 @@ Deno.test("supplyFromPurchase: a live subrent item, net of canceled and returned
 
 Deno.test("supplyFromPurchase: a STANDING subrent (end null) is +∞; a charge item supplies nothing", () => {
   const standing = {
-    type: "subrent" as const,
+    type: "rental" as const,
     uid_product: "P",
     quantity: 4,
     quantity_canceled: 0,
@@ -836,7 +836,7 @@ Deno.test("supplyFromPurchase: a STANDING subrent (end null) is +∞; a charge i
   };
   const p = {
     status: "active" as const,
-    items: [standing, { type: "charge" as const }],
+    items: [standing, { type: "service" as const }],
   };
   assertEquals(supplyFromPurchase(p, "P"), [{ start: H_START, end: null, quantity: 4, kind: "subrent" }]);
   const far = computeStockAvailability(stock(0, [], supplyFromPurchase(p, "P")), win("2029-01-01", "2029-12-31"));
@@ -844,9 +844,9 @@ Deno.test("supplyFromPurchase: a STANDING subrent (end null) is +∞; a charge i
 });
 
 Deno.test("supplyFromPurchase: one product on TWO items gives two entries (D2)", () => {
-  const buy = { type: "buy" as const, uid_product: "P", quantity: 3, quantity_canceled: 0, quantity_received: 0, expected_date: EXPECTED_EARLY };
+  const buy = { type: "sale" as const, uid_product: "P", quantity: 3, quantity_canceled: 0, quantity_received: 0, expected_date: EXPECTED_EARLY };
   const sub = {
-    type: "subrent" as const,
+    type: "rental" as const,
     uid_product: "P",
     quantity: 2,
     quantity_canceled: 0,
@@ -872,7 +872,7 @@ const inb = (start: string, quantity: number): StockSupplyEntry => ({ start, end
 
 Deno.test("supplyFromPurchase: a live buy item is open-ended inbound for its unreceived remainder", () => {
   const item = {
-    type: "buy" as const,
+    type: "sale" as const,
     uid_product: "P",
     quantity: 10,
     quantity_canceled: 0,
@@ -913,7 +913,7 @@ Deno.test("inbound: an open-ended entry counts in every window from its start on
 });
 
 Deno.test("inbound: a partial receipt leaves held + inbound unchanged", () => {
-  const item = { type: "buy" as const, uid_product: "P", quantity: 10, quantity_canceled: 0, quantity_received: 0, expected_date: EXPECTED };
+  const item = { type: "sale" as const, uid_product: "P", quantity: 10, quantity_canceled: 0, quantity_received: 0, expected_date: EXPECTED };
   const p = { status: "active" as const, items: [item] };
   const w = win("2026-10-22", "2026-10-24");
   const ordered = stock(10, [iv(B_START, B_END, 15)], supplyFromPurchase(p, "P"));

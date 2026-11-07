@@ -100,7 +100,7 @@ export interface PurchaseBilledEntry {
   credits: PurchaseDocumentRef[];
   /** `quantity − quantity_canceled`. */
   ordered: number;
-  /** `quantity_received` on a buy or subrent; `null` on a charge, which receives nothing. */
+  /** `quantity_received` on a sale or rental; `null` on a service or replacement, which receives nothing. */
   received: number | null;
   /** Σ live bill line quantity − Σ live credit line quantity, unfloored. */
   billed: number;
@@ -232,7 +232,7 @@ function billedEntry(
   if (bills.length === 0 && credits.length === 0) return null;
   const { quantity: billed, amount_cents: billed_cents } = purchaseLineBilledNet(item.path, { bills, credits });
   const ordered = item.quantity - item.quantity_canceled;
-  const received = item.type === "charge" ? null : item.quantity_received;
+  const received = item.type === "service" || item.type === "replacement" ? null : item.quantity_received;
   const expected_cents = shareCents(item.amount_cents ?? 0, item.quantity, billed);
   // Received is stated, never a trigger: the owner bills before delivery as
   // often as after. A short close lowers `ordered` to what came, so billing
@@ -250,7 +250,7 @@ function coverageEntries(
   const bills = liveBills.filter((b) =>
     b.items.some((l) => l.path_purchase_item !== undefined && key(l.path_purchase_item) === key(item.path))
   );
-  const recorded = item.type === "buy"
+  const recorded = item.type === "sale"
     ? new Map<string, ChargeWindowType[]>()
     : unitWindowsForLine(sources.units, item, sources.through);
   const billed = billedUnitCoverage({ bills: sources.bills, credits: sources.credits }, item.path);

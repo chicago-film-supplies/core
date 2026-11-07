@@ -7,8 +7,8 @@
  * @module
  */
 import {
-  type BuyItem,
-  type BuyItemInputType,
+  type PurchaseSaleItem,
+  type PurchaseSaleItemInputType,
   derivePurchaseStatus,
   deriveQueryByItemTypes,
   deriveQueryByOrders,
@@ -22,8 +22,8 @@ import {
   type PurchaseItemInputType,
   type PurchaseLandedCost,
   type StockMethodType,
-  type SubrentItem,
-  type SubrentItemInputType,
+  type PurchaseRentalItem,
+  type PurchaseRentalItemInputType,
 } from "../schemas/mod.ts";
 import { apportionCents, roundDivHalfUp, toCentsBig } from "./money.ts";
 import { type FormulaDiscount, priceFromFormula } from "../schemas/_line-money.ts";
@@ -48,7 +48,7 @@ export {
 };
 
 /** The co-written receipt buckets — a buy or subrent item. */
-type ReceivableItem = Pick<BuyItem, "quantity" | "quantity_received" | "quantity_canceled">;
+type ReceivableItem = Pick<PurchaseSaleItem, "quantity" | "quantity_received" | "quantity_canceled">;
 
 /**
  * The cents a line's units `(before, after]` cost — the k-th receipt or the
@@ -149,7 +149,7 @@ export function landedPricedCents(
  * formula.
  */
 export function purchaseLineReceiptTargetCents(
-  line: Pick<BuyItem, "amount_cents" | "quantity" | "landed_costs">,
+  line: Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "landed_costs">,
   quantityReceived: number,
 ): number {
   return line.landed_costs.reduce(
@@ -161,7 +161,7 @@ export function purchaseLineReceiptTargetCents(
 /** Is a landed cost frozen? A receipt has priced part of it once `received > received_at_entry`. */
 export function isLandedCostFrozen(
   entry: Pick<PurchaseLandedCost, "received_at_entry">,
-  line: Pick<BuyItem, "quantity_received">,
+  line: Pick<PurchaseSaleItem, "quantity_received">,
 ): boolean {
   return line.quantity_received > entry.received_at_entry;
 }
@@ -176,7 +176,7 @@ export function isLandedCostFrozen(
  * post-receipt re-base, which is designed with depreciation (api-cloudrun#1388).
  */
 export function strandedLandedCents(
-  line: Pick<BuyItem, "quantity" | "quantity_received" | "quantity_canceled" | "landed_costs">,
+  line: Pick<PurchaseSaleItem, "quantity" | "quantity_received" | "quantity_canceled" | "landed_costs">,
 ): number {
   if (remainingToReceive(line) > 0) return 0;
   return line.landed_costs.reduce(
@@ -192,7 +192,7 @@ export function strandedLandedCents(
  * entry only ever prices units received after it.
  */
 export function landedCostWeightCents(
-  line: Pick<BuyItem, "amount_cents" | "quantity" | "quantity_received" | "quantity_canceled">,
+  line: Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "quantity_received" | "quantity_canceled">,
 ): number {
   return cumulativeShareCents(line.amount_cents, line.quantity, line.quantity_received, line.quantity - line.quantity_canceled);
 }
@@ -211,7 +211,7 @@ export function landedCostWeightCents(
  */
 export function allocateLandedCostCents(
   amountCents: number,
-  lines: readonly Pick<BuyItem, "amount_cents" | "quantity" | "quantity_received" | "quantity_canceled">[],
+  lines: readonly Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "quantity_received" | "quantity_canceled">[],
 ): number[] {
   return apportionCents(BigInt(amountCents), lines.map((l) => BigInt(landedCostWeightCents(l)))).map(Number);
 }
@@ -277,7 +277,7 @@ export function remainingToBill(
  * Bounded by what came in, not by what was ordered — an unreceived unit owes no
  * return.
  */
-export function remainingToReturn(item: Pick<SubrentItem, "quantity_received" | "quantity_returned">): number {
+export function remainingToReturn(item: Pick<PurchaseRentalItem, "quantity_received" | "quantity_returned">): number {
   return item.quantity_received - item.quantity_returned;
 }
 
@@ -351,7 +351,7 @@ export function expandPurchaseItems(
 ): PurchaseExpansionResult {
   const expanded: PurchaseItemInputType[] = [];
   for (const item of items) {
-    if (item.type !== "buy" && item.type !== "subrent") {
+    if (item.type !== "sale" && item.type !== "rental") {
       expanded.push(item);
       continue;
     }
@@ -387,11 +387,11 @@ export function expandPurchaseItems(
 }
 
 function expandOnto(
-  item: BuyItemInputType | SubrentItemInputType,
+  item: PurchaseSaleItemInputType | PurchaseRentalItemInputType,
   uidProduct: string,
   quantity: number,
-): BuyItemInputType | SubrentItemInputType {
-  if (item.type === "buy") {
+): PurchaseSaleItemInputType | PurchaseRentalItemInputType {
+  if (item.type === "sale") {
     return {
       ...item,
       uid_product: uidProduct,

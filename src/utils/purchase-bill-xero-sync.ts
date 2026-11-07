@@ -45,7 +45,7 @@ export function purchaseBillXeroProjection(bill: PurchaseBillXeroFields): unknow
       name: item.name,
       quantity: item.quantity,
       amount_cents: item.amount_cents,
-      coa_posting: item.coa_posting,
+      ledger_account: item.ledger_account,
       uid_tracking_category: item.uid_tracking_category,
     })),
     date: bill.date,

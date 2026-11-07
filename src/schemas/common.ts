@@ -904,7 +904,8 @@ export type ComponentTypeType = typeof COMPONENT_TYPES[number];
 /** Zod schema for ComponentTypeType. */
 export const ComponentTypeEnum: z.ZodType<ComponentTypeType> = z.enum(COMPONENT_TYPES);
 
-const COA_REVENUE_CODES = [
+/** The revenue accounts a receivable line may post to (`COARevenueEnum`). */
+export const COA_REVENUE_CODES = [
   2210, 2800, 4000, 4100, 4110, 4120, 4130, 4140, 4150,
   4200, 4210, 4700, 4800,
 ] as const;
@@ -940,7 +941,8 @@ export const COACostEnum: z.ZodType<COACostType> = z.union([
 /**
  * The inventory asset accounts a purchased unit's value can land on — a POLICY
  * subset, for the reason {@link COA_COST_CODES} is one: a buy item's
- * `coa_posting` is refined against it (`schemas/purchase.ts`), and a schema
+ * `ledger_account` is refined against it (`payablePostingIssues`,
+ * `schemas/purchase.ts`), and a schema
  * cannot import `utils/`. `1400` Retail Inventory (a `sale` product) and `1999`
  * Fixed Asset Clearing (a `rental`). `XERO_ASSET_ACCOUNTS`
  * (`@cfs/core/utils/movements`) names the same two codes for the posting
@@ -952,6 +954,20 @@ export const COA_ASSET_CODES = [1400, 1999] as const;
 export type COAAssetType = typeof COA_ASSET_CODES[number];
 /** Zod schema for COAAssetType. */
 export const COAAssetEnum: z.ZodType<COAAssetType> = z.union([z.literal(1400), z.literal(1999)]);
+
+/**
+ * Expense accounts a payable `sale` line may post to beside
+ * {@link COA_ASSET_CODES}: an asset acquisition under $1,000 expensed directly
+ * (de minimis) rather than capitalised. **TEMPORARY** (owner, 2026-11-07): in use
+ * until about the end of 2026, when the de minimis practice is expected to stop
+ * and this list is deleted. The census that found them: 193 linked bill lines
+ * buying a product and posting to 6500 / 6300 (api-cloudrun's
+ * `one-document-model` plan, Phase 1). `6000` is deliberately absent: the one
+ * line coded there was a mistake the owner recodes.
+ */
+export const COA_EXPENSED_ASSET_CODES = [6204, 6300, 6500] as const;
+/** One {@link COA_EXPENSED_ASSET_CODES} member. */
+export type COAExpensedAssetType = typeof COA_EXPENSED_ASSET_CODES[number];
 
 const DOC_ITEM_TYPES = ["rental", "destination", "group", "replacement", "sale", "service", "surcharge", "transaction_fee"] as const;
 /** All item types accepted in order/invoice input schemas (includes structural dividers). */

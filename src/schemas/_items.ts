@@ -95,6 +95,7 @@
 import { z } from "zod";
 import { FirestoreId, ItemUid } from "./_uid.ts";
 import { COARevenueEnum, type COARevenueType } from "./common.ts";
+import { COACode, type COACodeType } from "./chart-of-accounts.ts";
 
 /**
  * The six fields an order line, an invoice line and a fulfillment line all
@@ -327,6 +328,41 @@ export const LinePostingCore: {
   coa_revenue: COARevenueEnum.nullable().meta({ propagate: true }),
   uid_tracking_category: FirestoreId.nullable().meta({ propagate: true }),
 };
+
+/**
+ * **Where a line POSTS, under the one key every priced grain will carry** —
+ * `ledger_account` (api-cloudrun's `one-document-model` plan; Odoo's single
+ * `account_id` is the precedent). It means "this line posts to", whatever the
+ * side.
+ *
+ * Today the PAYABLE grains spread it (purchase, bill and supplier-credit lines),
+ * replacing their `coa_posting`. The receivable grains still spread
+ * {@link LinePostingCore} until that plan's Phase 8 renames `coa_revenue` onto
+ * this core and deletes the other.
+ *
+ * - `ledger_account` — REQUIRED and non-null (owner, 2026-11-07). Which accounts
+ *   a line may name is a per-ARM refine reading
+ *   `SIDE_CONTRACTS[side].posting_class[type]` (`schemas/side.ts`), because one
+ *   shared instance cannot hold a per-type class.
+ * - `uid_tracking_category` — the SAME instance as {@link LinePostingCore}'s,
+ *   so the two cores never disagree about tracking.
+ *
+ * Both `propagate: true`: a bill line follows its purchase line until an
+ * operator changes it there.
+ */
+export const LedgerPostingCore: {
+  ledger_account: z.ZodType<COACodeType>;
+  uid_tracking_category: z.ZodNullable<z.ZodType<string>>;
+} = {
+  ledger_account: COACode.meta({ propagate: true }),
+  uid_tracking_category: LinePostingCore.uid_tracking_category,
+};
+
+/** The {@link LedgerPostingCore} keys, for code that copies the posting between grains. */
+export const LEDGER_POSTING_FIELDS: readonly ["ledger_account", "uid_tracking_category"] = [
+  "ledger_account",
+  "uid_tracking_category",
+];
 
 /** The {@link LinePostingCore} keys, for code that copies the posting between grains. */
 export const LINE_POSTING_FIELDS: readonly ["coa_revenue", "uid_tracking_category"] = [

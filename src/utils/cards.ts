@@ -21,7 +21,7 @@ import {
   isPurchaseCard,
   ownsKey,
   type Purchase,
-  type SubrentItem,
+  type PurchaseRentalItem,
 } from "../schemas/mod.ts";
 import { sumBreakdownKeys, terminalQuantity } from "./bookings.ts";
 
@@ -305,8 +305,8 @@ export { isEventCard, isPurchaseCard };
 export const PURCHASE_CARD_LOCKED: readonly CardLockKey[] = ["card", "subject", "sources", "attachments", "status_auto"];
 
 /** The purchase's subrent items — the only ones a return card is about. */
-function subrentItems(purchase: Pick<Purchase, "items">): SubrentItem[] {
-  return purchase.items.filter((i): i is SubrentItem => i.type === "subrent");
+function subrentItems(purchase: Pick<Purchase, "items">): PurchaseRentalItem[] {
+  return purchase.items.filter((i): i is PurchaseRentalItem => i.type === "rental");
 }
 
 /** Does any subrent item hold units received and not yet returned? */

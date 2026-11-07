@@ -35,18 +35,21 @@ import { computePurchaseBillDiffs } from "../src/utils/purchaseDiff.ts";
 import { meterUnits, priceFromFormula, priceFormulaRefOf, type TierCount } from "../src/utils/price-formulas.ts";
 import { cumulativeShareCents } from "../src/utils/purchases.ts";
 import {
-  type ChargeItem,
+  type PurchaseServiceItem,
   type Purchase,
   type PurchaseBill,
   PurchaseBillSchema,
   type PurchaseCredit,
   type PurchaseDocumentItem,
   type PurchaseItem,
-  type SubrentItem,
+  type PurchaseRentalItem,
   type UnitType,
 } from "../src/schemas/mod.ts";
 import { FIXED, FORMULAS, VERIZON, VISION } from "./helpers/formulas.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
+
+/** The tax class every payable test line is stamped with: exempt on this side, so it prices nothing. */
+const TAX_CLASS = "TaxClassResale000000";
 
 const CTX: PurchaseDocumentContext = {
   formulas: new Map([...FORMULAS, [VISION.uid, VISION], [VERIZON.uid, VERIZON]]),
@@ -65,19 +68,22 @@ const VISION_RATES = [{ rate_key: "month", amount_cents: 15750 }, { rate_key: "w
 const FIXED_REF = priceFormulaRefOf(FIXED);
 
 /** Vision hotspots on a time subrent of `quantity` units. */
-function visionLine(over: Partial<SubrentItem> = {}): SubrentItem {
+function visionLine(over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem {
   const uid = over.uid ?? iuid(1);
   return {
-    type: "subrent",
+    type: "rental",
     uid,
     path: [uid],
+    description: "",
+    zero_priced: null,
     name: "Hotspot",
     uid_product: PRODUCT,
     quantity: 2,
     amount_cents: null,
-    price: { price_formula: priceFormulaRefOf(VISION), rates: VISION_RATES, discount: null },
-    coa_posting: 5100,
+    price: { price_formula: priceFormulaRefOf(VISION), rates: VISION_RATES, discount: null, taxes: [] },
+    ledger_account: 5100,
     uid_tracking_category: null,
+    uid_tax_class: TAX_CLASS,
     dates: { start: jan(1), end: null },
     quantity_received: 2,
     quantity_billed: null,
@@ -94,16 +100,19 @@ function visionLine(over: Partial<SubrentItem> = {}): SubrentItem {
 function buyLine(over: Record<string, unknown> = {}): PurchaseItem {
   const uid = iuid(2);
   return {
-    type: "buy",
+    type: "sale",
     uid,
     path: [uid],
+    description: "",
+    zero_priced: null,
     name: "Walkie Talkie",
     uid_product: PRODUCT,
     quantity: 3,
     amount_cents: 140985,
-    price: { price_formula: FIXED_REF, rates: [], discount: null },
-    coa_posting: 1999,
+    price: { price_formula: FIXED_REF, rates: [], discount: null, taxes: [] },
+    ledger_account: 1999,
     uid_tracking_category: null,
+    uid_tax_class: TAX_CLASS,
     expected_date: null,
     quantity_received: 0,
     quantity_billed: 0,
@@ -114,18 +123,21 @@ function buyLine(over: Record<string, unknown> = {}): PurchaseItem {
 }
 
 /** A Verizon device line (time charge, span-metered). */
-function verizonLine(over: Partial<ChargeItem> = {}): ChargeItem {
+function verizonLine(over: Partial<PurchaseServiceItem> = {}): PurchaseServiceItem {
   const uid = iuid(3);
   return {
-    type: "charge",
+    type: "service",
     uid,
     path: [uid],
+    description: "",
+    zero_priced: null,
     name: "Hotspot (Unlimited)",
     quantity: 1,
     amount_cents: null,
-    price: { price_formula: priceFormulaRefOf(VERIZON), rates: [{ rate_key: "month", amount_cents: 8000 }], discount: null },
-    coa_posting: 5150,
+    price: { price_formula: priceFormulaRefOf(VERIZON), rates: [{ rate_key: "month", amount_cents: 8000 }], discount: null, taxes: [] },
+    ledger_account: 5150,
     uid_tracking_category: null,
+    uid_tax_class: TAX_CLASS,
     dates: { start: jan(2), end: null },
     quantity_billed: null,
     quantity_canceled: 0,
@@ -211,7 +223,7 @@ Deno.test("projector: OVER-billing a flat line still defaults, at the same per-u
 });
 
 Deno.test("projector: a flat line's discount is recorded as its share; amount_cents stays the NET (ruling 7)", () => {
-  const item = buyLine({ price: { price_formula: FIXED_REF, rates: [], discount: { rate: 10, type: "percent", amount_cents: 15665 } } });
+  const item = buyLine({ price: { price_formula: FIXED_REF, rates: [], discount: { rate: 10, type: "percent", amount_cents: 15665 }, taxes: [] } });
   const line = project(item, jan(1), [], NONE, 10, 1)!;
   assertEquals(line.amount_cents, 46995);
   assertEquals(line.price?.discount?.amount_cents, 5222);
@@ -302,7 +314,7 @@ Deno.test("seedPurchaseLinesForWindows: one time charge per (product, formula), 
   assertEquals(seed.provider, provider);
   assertEquals(seed.dates, { start: jan(3), end: null });
   assertEquals(seed.rates, [{ rate_key: "month", amount_cents: 7000 }], "the rate in force at the earliest uncovered instant");
-  assertEquals(seed.coa_posting, 5150);
+  assertEquals(seed.ledger_account, 5150);
   assertEquals(seed.warning, null);
   // Companion: with no cost entry the seed still offers, and says why it is not plain.
   const bare = seedPurchaseLinesForWindows(units, [], new Map([[PRODUCT, { uid: PRODUCT, name: "Hotspot", cogs: [] }]]) as never, jan(25));
@@ -465,7 +477,7 @@ function purchaseDoc(items: PurchaseItem[]): Purchase {
     total_cents: 0,
     query_by_products: [PRODUCT],
     query_by_orders: [],
-    query_by_item_types: ["subrent"],
+    query_by_item_types: ["rental"],
     query_by_bills: [],
     version: 0,
     created_by: actor,
@@ -554,7 +566,7 @@ Deno.test("syncPurchaseToBills: a FORMULA change re-meters the line from its own
   const ctx = { ...CTX, formulas: new Map([...CTX.formulas, [weeklyOnly.uid, weeklyOnly]]) };
   const nextItem = {
     ...prevItem,
-    price: { price_formula: priceFormulaRefOf(weeklyOnly), rates: [{ rate_key: "week", amount_cents: 4500 }], discount: null },
+    price: { price_formula: priceFormulaRefOf(weeklyOnly), rates: [{ rate_key: "week", amount_cents: 4500 }], discount: null, taxes: [] },
   };
   const [out] = syncPurchaseToBills({ prev: purchaseDoc([prevItem]), next: purchaseDoc([nextItem]), bills: [billDoc(1, [line])], credits: [] }, ctx);
   assertEquals(out.bill.items[0].price?.counts, [{ rate_key: "week", num: 3, den: 1 }]);
@@ -605,14 +617,14 @@ Deno.test("diff: a bill line that matches its purchase line is silent, on both v
 
 Deno.test("diff: an overridden account is a `differs` on both views, here/there in each view's own sense", () => {
   const item = buyLine({ quantity_billed: 3, quantity_received: 3 });
-  const line = { ...project(buyLine(), feb(1), [], NONE, 10, 3)!, coa_posting: 6500 };
+  const line = { ...project(buyLine(), feb(1), [], NONE, 10, 3)!, ledger_account: 6500 };
   const bill = billDoc(1, [line]);
   const sources = { purchase: purchaseDoc([item]), bills: [bill], credits: [] };
   const onBill = computePurchaseBillDiffs({ kind: "bill", uid: bill.uid }, sources).lines.get(line.path.join("/"));
   assertEquals(onBill?.map((e) => e.kind), ["differs"]);
-  assertEquals((onBill![0] as { fields: unknown }).fields, [{ field: "coa_posting", here: 6500, there: 1999 }]);
+  assertEquals((onBill![0] as { fields: unknown }).fields, [{ field: "ledger_account", here: 6500, there: 1999 }]);
   const onPurchase = computePurchaseBillDiffs({ kind: "purchase" }, sources).lines.get(item.path.join("/"));
-  assertEquals((onPurchase![0] as { fields: unknown }).fields, [{ field: "coa_posting", here: 1999, there: 6500 }]);
+  assertEquals((onPurchase![0] as { fields: unknown }).fields, [{ field: "ledger_account", here: 1999, there: 6500 }]);
 });
 
 Deno.test("diff: OVER-billing a flat line is a `billed` entry summed across bills net of credits — flagged, never refused", () => {
@@ -645,8 +657,8 @@ Deno.test("diff: a flat line billed at the wrong money is flagged even at the ri
 Deno.test("diff: a document-only charge line is `not_on_source` on the bill view", () => {
   const item = buyLine({ quantity_billed: 3, quantity_received: 3 });
   const freight: PurchaseDocumentItem = {
-    type: "charge", uid: iuid(20), path: [iuid(20)], name: "Freight", quantity: 1, amount_cents: 1500, coa_posting: 5300,
-    uid_tracking_category: null, price: { price_formula: FIXED_REF, rates: [], discount: null, counts: [] }, units: [], dates: null,
+    type: "service", uid: iuid(20), path: [iuid(20)], name: "Freight", description: "", zero_priced: null, quantity: 1, amount_cents: 1500, ledger_account: 5300,
+    uid_tracking_category: null, uid_tax_class: TAX_CLASS, price: { price_formula: FIXED_REF, rates: [], discount: null, taxes: [], counts: [] }, units: [], dates: null,
   };
   const bill = billDoc(1, [project(buyLine(), feb(1), [], NONE, 10, 3)!, freight]);
   const got = computePurchaseBillDiffs({ kind: "bill", uid: bill.uid }, { purchase: purchaseDoc([item]), bills: [bill], credits: [] });

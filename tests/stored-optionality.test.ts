@@ -182,6 +182,17 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["orders.items[].price.base_percent", "array-member-uncensusable"],
   ["orders.items[].price.replacement_cents", "array-member-uncensusable"],
   ["out-of-service.sources[].label", "array-member-uncensusable"],
+  // one-document-model Phase 1 — the payable lines spread the SHARED head and
+  // tax core, so they inherit the receivable twins' optionality (the same
+  // instances), and bill/credit lines gain the invoice line's `xero_id` twin,
+  // copied exactly. `quantity_per_parent` is a kit ratio a purchase line never
+  // carries; `xero_id` is backfilled from the linked Xero documents in the
+  // Phase 1 window, with an unpairable line left absent and listed.
+  ["purchase-bills.items[].quantity_per_parent", "array-member-uncensusable"],
+  ["purchase-bills.items[].xero_id", "array-member-uncensusable"],
+  ["purchase-credits.items[].quantity_per_parent", "array-member-uncensusable"],
+  ["purchase-credits.items[].xero_id", "array-member-uncensusable"],
+  ["purchases.items[].quantity_per_parent", "array-member-uncensusable"],
   ["out-of-service.stores[].locations[].max", "array-member-uncensusable"],
   ["products.component_of[].price.replacement_cents", "array-member-uncensusable"],
   ["products.components[].price.replacement_cents", "array-member-uncensusable"],
@@ -224,6 +235,10 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   // fields are still in transit.
   ["invoices.items[].uid_tax_class_override", "mid-expand"],
   ["orders.items[].uid_tax_class_override", "mid-expand"],
+  // The same `LineTaxCore` instance, spread by the payable lines (one-document-model Phase 1).
+  ["purchase-bills.items[].uid_tax_class_override", "mid-expand"],
+  ["purchase-credits.items[].uid_tax_class_override", "mid-expand"],
+  ["purchases.items[].uid_tax_class_override", "mid-expand"],
   ["products.tax_class_name", "mid-expand"],
   ["products.uid_tax_class", "mid-expand"],
   ["webshop-products.tax_class_name", "mid-expand"],

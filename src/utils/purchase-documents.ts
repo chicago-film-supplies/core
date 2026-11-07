@@ -47,7 +47,8 @@
  * ## Sync never touches windows or quantities
  *
  * The merge follows `price` (formula, rates, discount terms), `name`, `type`,
- * `coa_posting`, `uid_tracking_category` and the attribution keys onto every
+ * `description`, `ledger_account`, `uid_tracking_category`, the tax class and
+ * the attribution keys onto every
  * UNSETTLED, PUSHED bill, three-way against the previous purchase — the
  * classification `classifySharedFields(PurchaseSchema, PurchaseBillSchema)`
  * reads off the two schemas. `quantity`, `amount_cents` and `dates` are
@@ -71,6 +72,7 @@ import {
   type COACostType,
   type Product,
   type PurchaseItem,
+  type PurchaseLinePrice,
   purchaseItemBasis,
   purchaseItemCanceled,
   PurchaseSchema,
@@ -217,7 +219,7 @@ export interface PurchaseLineCoverage {
 
 /** A buy covers no unit's windows — it is custody, not a service line. */
 function coverageOf(item: PurchaseItem): PurchaseLineCoverage | null {
-  return item.type === "buy" ? null : { uid_units: item.uid_units, dates: item.dates };
+  return item.type === "sale" ? null : { uid_units: item.uid_units, dates: item.dates };
 }
 
 /** `w` clipped to the line's span and to `through`, or `null` when nothing of it is left. */
@@ -283,7 +285,7 @@ export function unitWindowsForLine(
  * covered.
  */
 export function purchaseLineCovers(purchase: Pick<Purchase, "status">, item: PurchaseItem): boolean {
-  return purchase.status !== "canceled" && item.type !== "buy" && !purchaseItemCanceled(item);
+  return purchase.status !== "canceled" && item.type !== "sale" && !purchaseItemCanceled(item);
 }
 
 /** One live line covering one unit — the covering line and its span. */
@@ -403,12 +405,12 @@ export type SeedSourceProduct = Pick<Product, "uid" | "name" | "cogs">;
 
 /**
  * One offered purchase line for uncovered windows — the supplier twin of a
- * `ReplacementLineSeed`. Always a TIME `charge` line: a window is a service
+ * `ReplacementLineSeed`. Always a TIME `service` (Charge) line: a window is a service
  * line, not custody, and a supplier-owned unit's subrent line already names it
  * from its receipt.
  */
 export interface PurchaseLineSeed {
-  type: "charge";
+  type: "service";
   uid_product: string;
   /** The product's name — the line's default `name`. */
   name: string;
@@ -423,8 +425,11 @@ export interface PurchaseLineSeed {
   provider: UidNameRefType | null;
   /** The entry's rates in force at `dates.start`, or `[]` with no entry. */
   rates: { rate_key: string; amount_cents: number }[];
-  /** The entry's Direct Costs account, or `null` with no entry. */
-  coa_posting: COACostType | null;
+  /**
+   * The entry's Direct Costs account (the product's `coa_cost`, renamed in
+   * one-document-model Phase 8), or `null` with no entry.
+   */
+  ledger_account: COACostType | null;
   /** From the earliest uncovered instant, open-ended: a carrier line accrues for as long as it lives. */
   dates: { start: string; end: null };
   /** The uncovered windows, per unit — what the offer is FOR, for display. */
@@ -489,14 +494,14 @@ export function seedPurchaseLinesForWindows(
       windows[0].windows[0].start,
     );
     seeds.push({
-      type: "charge",
+      type: "service",
       uid_product: g.product,
       name: product?.name ?? g.product,
       uid_units: windows.map((u) => u.uid_unit),
       uid_price_formula: g.formula,
       provider: entry?.provider ?? null,
       rates: entry ? catalogRateSnapshot(entry.rates, start) : [],
-      coa_posting: entry?.coa_cost ?? null,
+      ledger_account: entry?.coa_cost ?? null,
       dates: { start, end: null },
       windows,
       warning: entry === undefined
@@ -846,6 +851,59 @@ function structuredCloneLine<T extends PurchaseDocumentItem>(line: T): T {
 
 // ── The projector ───────────────────────────────────────────────
 
+/**
+ * The shared keys a bill or credit line copies from the purchase line it
+ * projects: the line head, posting and tax cores (one instance per key,
+ * `schemas/_items.ts`) and the pointer back to the purchase line. `quantity` is
+ * NOT here — it is the units the line bills, a homonym of the ordered quantity.
+ */
+function projectedLineHead(item: PurchaseItem, uid: string) {
+  return {
+    uid,
+    name: item.name,
+    description: item.description,
+    path: [uid],
+    zero_priced: item.zero_priced,
+    ...(item.quantity_per_parent !== undefined ? { quantity_per_parent: item.quantity_per_parent } : {}),
+    ledger_account: item.ledger_account,
+    uid_tracking_category: item.uid_tracking_category,
+    uid_tax_class: item.uid_tax_class,
+    ...(item.uid_tax_class_override !== undefined ? { uid_tax_class_override: item.uid_tax_class_override } : {}),
+    path_purchase_item: [...item.path],
+  };
+}
+
+/**
+ * What a purchase line's bill line attributes: the product a sale or rental
+ * orders, or a service's optional product, and a replacement's record.
+ */
+function attributionOf(item: PurchaseItem): { uid_product?: string; uid_out_of_service?: string } {
+  switch (item.type) {
+    case "sale":
+    case "rental":
+      return { uid_product: item.uid_product };
+    case "service":
+      return item.uid_product !== undefined ? { uid_product: item.uid_product } : {};
+    case "replacement":
+      return {
+        ...(item.uid_product !== undefined ? { uid_product: item.uid_product } : {}),
+        uid_out_of_service: item.uid_out_of_service,
+      };
+    default: {
+      const unreachable: never = item;
+      throw new Error(`attributionOf: unknown purchase item ${JSON.stringify(unreachable)}`);
+    }
+  }
+}
+
+/** The purchase line's exempt tax keys, copied onto a bill or credit line's price. */
+function priceTaxesOf(price: PurchaseLinePrice): Pick<PurchaseLinePrice, "taxes" | "taxes_base"> {
+  return {
+    taxes: price.taxes.map((t) => ({ ...t })),
+    ...(price.taxes_base !== undefined ? { taxes_base: price.taxes_base.map((t) => ({ ...t })) } : {}),
+  };
+}
+
 /** {@link projectPurchaseLineToBillLine}'s inputs beside the purchase line. */
 export interface ProjectBillLineOptions {
   /** The new bill line's row identity, minted by the writer. */
@@ -891,20 +949,8 @@ export function projectPurchaseLineToBillLine(
   opts: ProjectBillLineOptions,
   ctx: PurchaseDocumentContext,
 ): PurchaseDocumentItem | null {
-  const head = {
-    uid: opts.uid,
-    path: [opts.uid],
-    name: item.name,
-    coa_posting: item.coa_posting,
-    uid_tracking_category: item.uid_tracking_category,
-    path_purchase_item: [...item.path],
-  };
-  const attribution = item.type === "charge"
-    ? {
-      ...(item.uid_product !== undefined ? { uid_product: item.uid_product } : {}),
-      ...(item.uid_out_of_service !== undefined ? { uid_out_of_service: item.uid_out_of_service } : {}),
-    }
-    : { uid_product: item.uid_product };
+  const head = projectedLineHead(item, opts.uid);
+  const attribution = attributionOf(item);
 
   if (purchaseItemBasis(item) === "flat") {
     const amount = item.amount_cents ?? 0;
@@ -917,6 +963,7 @@ export function projectPurchaseLineToBillLine(
         discount: item.price.discount
           ? { ...item.price.discount, amount_cents: flatDiscountShare(item.price.discount, opts.quantity, item.quantity) }
           : null,
+        ...priceTaxesOf(item.price),
         counts: [],
       }
       : undefined;
@@ -939,7 +986,7 @@ export function projectPurchaseLineToBillLine(
   const formula = formulaFor(itemPrice, ctx);
   const recorded = unitWindowsForLine(opts.units, coverageOf(item) ?? { uid_units: [], dates: null }, opts.through);
   const billed = billedUnitCoverage(opts.billed, item.path);
-  const itemSpan = item.type === "buy" ? null : item.dates;
+  const itemSpan = item.type === "sale" ? null : item.dates;
   const source: BillLineMeterSource = {
     span: itemSpan,
     recorded,
@@ -973,6 +1020,7 @@ export function projectPurchaseLineToBillLine(
     price_formula: { ...itemPrice.price_formula },
     rates: itemPrice.rates.map((r) => ({ ...r })),
     discount: itemPrice.discount ? { ...itemPrice.discount } : null,
+    ...priceTaxesOf(itemPrice),
     counts,
   };
   const { amount_cents, discount_cents } = timeLineMoney(price);
@@ -1024,7 +1072,7 @@ export function projectPurchaseLineToCreditLine(
   opts: ProjectCreditLineOptions,
   ctx: PurchaseDocumentContext,
 ): PurchaseDocumentItem {
-  if (purchaseItemBasis(item) !== "time" || item.type === "buy") {
+  if (purchaseItemBasis(item) !== "time" || item.type === "sale") {
     throw new Error(`${item.name} is billed by quantity; credit it in units`);
   }
   const itemPrice = item.price!;
@@ -1085,25 +1133,15 @@ export function projectPurchaseLineToCreditLine(
     price_formula: { ...itemPrice.price_formula },
     rates: itemPrice.rates.map((r) => ({ ...r })),
     discount: itemPrice.discount ? { ...itemPrice.discount } : null,
+    ...priceTaxesOf(itemPrice),
     counts,
   };
   const { amount_cents, discount_cents } = timeLineMoney(price);
   if (price.discount) price.discount.amount_cents = discount_cents;
-  const attribution = item.type === "charge"
-    ? {
-      ...(item.uid_product !== undefined ? { uid_product: item.uid_product } : {}),
-      ...(item.uid_out_of_service !== undefined ? { uid_out_of_service: item.uid_out_of_service } : {}),
-    }
-    : { uid_product: item.uid_product };
   return {
     type: item.type,
-    uid: opts.uid,
-    path: [opts.uid],
-    name: item.name,
-    coa_posting: item.coa_posting,
-    uid_tracking_category: item.uid_tracking_category,
-    path_purchase_item: [...item.path],
-    ...attribution,
+    ...projectedLineHead(item, opts.uid),
+    ...attributionOf(item),
     quantity,
     amount_cents,
     price,
@@ -1142,8 +1180,13 @@ export function projectPurchaseLineForBill(item: PurchaseItem): Record<string, u
   return {
     type: item.type,
     name: item.name,
-    coa_posting: item.coa_posting,
+    description: item.description,
+    zero_priced: item.zero_priced,
+    ...(item.quantity_per_parent !== undefined ? { quantity_per_parent: item.quantity_per_parent } : {}),
+    ledger_account: item.ledger_account,
     uid_tracking_category: item.uid_tracking_category,
+    uid_tax_class: item.uid_tax_class,
+    ...(item.uid_tax_class_override !== undefined ? { uid_tax_class_override: item.uid_tax_class_override } : {}),
     ...(item.price
       ? {
         price: {
@@ -1153,9 +1196,7 @@ export function projectPurchaseLineForBill(item: PurchaseItem): Record<string, u
         },
       }
       : {}),
-    ...(item.type === "charge"
-      ? { uid_product: item.uid_product, uid_out_of_service: item.uid_out_of_service }
-      : { uid_product: item.uid_product }),
+    ...attributionOf(item),
   };
 }
 
@@ -1276,7 +1317,7 @@ function rederiveLine(
   // writers must agree on what a line's counts are.
   const ratesMoved = JSON.stringify(stored.price?.rates) !== JSON.stringify(price.rates);
   if (formulaMoved || ratesMoved) {
-    const span = item.type === "buy" ? null : item.dates;
+    const span = item.type === "sale" ? null : item.dates;
     outPrice.counts = meterBillLine(
       { price, units: out.units ?? [], dates: out.dates ?? null, quantity: out.quantity },
       {

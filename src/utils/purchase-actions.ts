@@ -29,15 +29,16 @@
  * @module
  */
 import {
-  type BuyItem,
-  type ChargeItem,
   type Purchase,
   type PurchaseActionId,
   type PurchaseBill,
   type PurchaseCredit,
   type PurchaseItem,
   purchaseItemBasis,
-  type SubrentItem,
+  type PurchaseRentalItem,
+  type PurchaseReplacementItem,
+  type PurchaseSaleItem,
+  type PurchaseServiceItem,
   type UnitType,
 } from "../schemas/mod.ts";
 import {
@@ -55,9 +56,10 @@ type LineKeys = "uid" | "path" | "quantity" | "quantity_billed" | "quantity_canc
 
 /** A purchase line as the ruleset reads it. */
 export type PurchaseActionItem =
-  | Pick<BuyItem, LineKeys | "type" | "quantity_received">
-  | Pick<SubrentItem, LineKeys | "type" | "quantity_received" | "quantity_returned">
-  | Pick<ChargeItem, LineKeys | "type">;
+  | Pick<PurchaseSaleItem, LineKeys | "type" | "quantity_received">
+  | Pick<PurchaseRentalItem, LineKeys | "type" | "quantity_received" | "quantity_returned">
+  | Pick<PurchaseServiceItem, LineKeys | "type">
+  | Pick<PurchaseReplacementItem, LineKeys | "type">;
 
 /** One action the UI may offer. `key` is what a menu de-duplicates on. */
 export interface PurchaseActionOffer {
@@ -117,11 +119,12 @@ export function purchaseBilledPaths(bills: readonly Pick<PurchaseBill, "totals" 
 export function purchaseItemTouched(item: PurchaseActionItem, billedPaths: ReadonlySet<string>): boolean {
   const billed = (item.quantity_billed ?? 0) > 0 || billedPaths.has(item.path.join("/"));
   switch (item.type) {
-    case "buy":
+    case "sale":
       return billed || item.quantity_received + item.quantity_canceled > 0;
-    case "subrent":
+    case "rental":
       return billed || item.quantity_received + item.quantity_canceled + item.quantity_returned > 0;
-    case "charge":
+    case "service":
+    case "replacement":
       return billed || item.quantity_canceled > 0;
     default: {
       const unreachable: never = item;
@@ -132,17 +135,18 @@ export function purchaseItemTouched(item: PurchaseActionItem, billedPaths: Reado
 
 /**
  * **Would a close change this line?** Units still to arrive are canceled; a
- * charge cancels its unbilled quantity, or all of it on a time line. A subrent
+ * service or replacement cancels its unbilled quantity, or all of it on a time line. A rental
  * with units still out is NOT closable: the close zeroes its supply, so the API
  * refuses it until they have gone back.
  */
 export function purchaseItemClosable(item: PurchaseActionItem): boolean {
   switch (item.type) {
-    case "charge":
+    case "service":
+    case "replacement":
       return item.quantity - item.quantity_canceled - (item.quantity_billed ?? 0) > 0;
-    case "subrent":
+    case "rental":
       return remainingToReturn(item) === 0 && remainingToReceive(item) > 0;
-    case "buy":
+    case "sale":
       return remainingToReceive(item) > 0;
     default: {
       const unreachable: never = item;
@@ -153,7 +157,9 @@ export function purchaseItemClosable(item: PurchaseActionItem): boolean {
 
 /** Whether a close leaves this line canceled in full: nothing received, and no flat charge billed. */
 function closeCancels(item: PurchaseActionItem): boolean {
-  return item.type === "charge" ? (item.quantity_billed ?? 0) === 0 : item.quantity_received === 0;
+  return item.type === "service" || item.type === "replacement"
+    ? (item.quantity_billed ?? 0) === 0
+    : item.quantity_received === 0;
 }
 
 /** The units a line may still bill, 0 when it has nothing to bill. */
@@ -196,7 +202,7 @@ export function purchaseActionsFor(
   const offers: PurchaseActionOffer[] = [];
   const { items, status } = purchase;
   const active = status === "active";
-  const unitsOut = items.some((i) => i.type === "subrent" && remainingToReturn(i) > 0);
+  const unitsOut = items.some((i) => i.type === "rental" && remainingToReturn(i) > 0);
   if (active && !unitsOut && items.some(purchaseItemClosable)) {
     offers.push({ key: "close", action: "close", outcome: items.every(closeCancels) ? "cancel" : "close" });
   }

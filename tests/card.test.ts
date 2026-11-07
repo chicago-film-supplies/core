@@ -9,7 +9,7 @@ import {
   PURCHASE_CARD_LOCKED,
   purchaseCardDue,
 } from "../src/utils/cards.ts";
-import type { BuyItem, SubrentItem } from "../src/schemas/purchase.ts";
+import type { PurchaseSaleItem, PurchaseRentalItem } from "../src/schemas/purchase.ts";
 
 /**
  * A genuine ORDER-DERIVED EVENT CARD — `sources` names an order, so
@@ -472,19 +472,22 @@ Deno.test("purchase card: a purchase action sits only on a purchase card, and a 
   assertEquals(cardPaths({ ...purchaseCard(), action: null }), []);
 });
 
-const pline = (over: Partial<SubrentItem> = {}): SubrentItem => {
+const pline = (over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem => {
   const uid = over.uid ?? "9a1b2c3d-0000-4000-8000-000000000002";
   return {
-    type: "subrent",
+    type: "rental",
     uid,
     path: [uid],
+    description: "",
+    zero_priced: null,
     uid_product: "testprod100000000000",
     name: "J-2000",
     quantity: 10,
-    coa_posting: 5100,
+    ledger_account: 5100,
     uid_tracking_category: null,
+    uid_tax_class: "TaxClassResale000000",
     amount_cents: 50_000,
-    price: { price_formula: { uid: "FixedFormula00000000", name: "Fixed", basis: "flat" }, rates: [], discount: null },
+    price: { price_formula: { uid: "FixedFormula00000000", name: "Fixed", basis: "flat" }, rates: [], discount: null, taxes: [] },
     auto_link: false,
     quantity_received: 0,
     quantity_billed: 0,
@@ -498,17 +501,20 @@ const pline = (over: Partial<SubrentItem> = {}): SubrentItem => {
 };
 
 /** A buy item on the same purchase — a return card never reads it (D3). */
-const bline: BuyItem = {
-  type: "buy",
+const bline: PurchaseSaleItem = {
+  type: "sale",
   uid: "9a1b2c3d-0000-4000-8000-000000000001",
   path: ["9a1b2c3d-0000-4000-8000-000000000001"],
+  description: "",
+  zero_priced: null,
   uid_product: "testprod200000000000",
   name: "Gaff tape",
   quantity: 5,
   amount_cents: 1_000,
-  price: { price_formula: { uid: "FixedFormula00000000", name: "Fixed", basis: "flat" }, rates: [], discount: null },
-  coa_posting: 1400,
+  price: { price_formula: { uid: "FixedFormula00000000", name: "Fixed", basis: "flat" }, rates: [], discount: null, taxes: [] },
+  ledger_account: 1400,
   uid_tracking_category: null,
+  uid_tax_class: "TaxClassResale000000",
   expected_date: null,
   quantity_received: 0,
   quantity_billed: 0,
@@ -517,7 +523,7 @@ const bline: BuyItem = {
 };
 
 Deno.test("computeCardStatusFromPurchase / computeCardActionFromPurchase — the table", () => {
-  const cases: [string, "active" | "canceled" | "complete", Partial<SubrentItem>, string, string | null][] = [
+  const cases: [string, "active" | "canceled" | "complete", Partial<PurchaseRentalItem>, string, string | null][] = [
     ["nothing received", "active", {}, "planned", null],
     ["received, none returned", "active", { quantity_received: 10 }, "active", "return_to_supplier"],
     ["partly returned", "active", { quantity_received: 10, quantity_returned: 4 }, "active", "return_to_supplier"],

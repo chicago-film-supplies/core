@@ -346,7 +346,7 @@ const updatePurchaseBillRules: CollectionRule[] = [
     enforced_by: [PURCHASE_BILL_SYNC_SEMANTICS],
     transaction: "update-purchase",
     trigger:
-      "an item's name, type, price (formula, rates, discount), coa_posting, uid_tracking_category or attribution changes on the purchase — targets every bill in `query_by_bills` that is pushed, has no money settlement and is not voided",
+      "an item's name, description, type, price (formula, rates, discount), ledger_account, uid_tracking_category, tax class or attribution changes on the purchase — targets every bill in `query_by_bills` that is pushed, has no money settlement and is not voided",
     fields: [
       {
         source: ["items"],

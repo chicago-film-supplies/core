@@ -441,7 +441,7 @@ export function unavailableFromOOS(o: StockOOSSource): StockUnavailableEntry | n
  */
 export type StockPurchaseItemSource =
   | {
-    type: "buy";
+    type: "sale";
     uid_product: string;
     quantity: number;
     quantity_canceled: number;
@@ -449,14 +449,14 @@ export type StockPurchaseItemSource =
     expected_date: string | null;
   }
   | {
-    type: "subrent";
+    type: "rental";
     uid_product: string;
     quantity: number;
     quantity_canceled: number;
     quantity_returned: number;
     dates: { start: string; end: string | null };
   }
-  | { type: "charge" };
+  | { type: "service" | "replacement" };
 
 /** Just enough of a purchase to reduce it to the supply it adds. */
 export interface StockPurchaseSource {
@@ -472,9 +472,9 @@ export interface StockPurchaseSource {
  *
  * | item | entry | quantity |
  * |---|---|---|
- * | `subrent` | `[dates.start, dates.end]` (`end: null` is +∞), kind `subrent` | `quantity − canceled − returned` |
- * | `buy` | `[expected_date, +∞)`, kind `inbound` | `quantity − canceled − received` |
- * | `charge` | none — it brings no unit into custody | — |
+ * | `rental` (Subrent) | `[dates.start, dates.end]` (`end: null` is +∞), kind `subrent` | `quantity − canceled − returned` |
+ * | `sale` (Buy) | `[expected_date, +∞)`, kind `inbound` | `quantity − canceled − received` |
+ * | `service` / `replacement` | none — they bring no unit into custody | — |
  *
  * Liveness is the reducers' one filter, as for bookings and out-of-service:
  * only an `active` purchase supplies anything, and an item supplying nothing is
@@ -504,19 +504,20 @@ export function supplyFromPurchase(p: StockPurchaseSource, uidProduct: string): 
   const entries: StockSupplyEntry[] = [];
   for (const item of p.items) {
     switch (item.type) {
-      case "subrent": {
+      case "rental": {
         if (item.uid_product !== uidProduct) break;
         const quantity = item.quantity - item.quantity_canceled - item.quantity_returned;
         if (quantity > 0) entries.push({ start: item.dates.start, end: item.dates.end, quantity, kind: "subrent" });
         break;
       }
-      case "buy": {
+      case "sale": {
         if (item.uid_product !== uidProduct || item.expected_date === null) break;
         const quantity = remainingToReceive(item);
         if (quantity > 0) entries.push({ start: item.expected_date, end: null, quantity, kind: "inbound" });
         break;
       }
-      case "charge":
+      case "service":
+      case "replacement":
         break;
       default: {
         const unreachable: never = item;

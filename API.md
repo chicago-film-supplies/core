@@ -1234,50 +1234,6 @@ interface BulkBookingUpdateResponseType {
 }
 ```
 
-### `BuyItem`
-
-A BUY item — ownership of `quantity` units of one product. Always flat.
-
-```ts
-interface BuyItem {
-  type: "buy";
-  uid_product: string;
-  quantity: number;
-  amount_cents: number;
-  price: PurchaseLinePrice;
-  coa_posting: COAAssetType;
-  expected_date: string | null;
-  quantity_received: number;
-  quantity_billed: number;
-  quantity_canceled: number;
-  landed_costs: PurchaseLandedCost[];
-}
-```
-
-### `BuyItemInputType`
-
-A buy item as an operator orders it — the buckets are the server's.
-
-```ts
-interface BuyItemInputType {
-  type: "buy";
-  uid_product: string;
-  quantity: number;
-  amount_cents: number;
-  coa_posting?: COAAssetType;
-  expected_date?: string | null;
-  landed_costs?: PurchaseLandedCostInputType[];
-}
-```
-
-### `BuyItemSchema`
-
-Zod schema for BuyItem.
-
-```ts
-const BuyItemSchema: z.ZodType<BuyItem>;
-```
-
 ### `CARD_BEARING_ORDER_STATUSES`
 
 These carry live event cards (`cardBearing`): `{quoted, reserved, active, complete}`.
@@ -1394,6 +1350,14 @@ One allowed Direct Costs code. See {@link COA_COST_CODES}.
 type COACostType = indexedAccess;
 ```
 
+### `COAExpensedAssetType`
+
+One {@link COA_EXPENSED_ASSET_CODES} member.
+
+```ts
+type COAExpensedAssetType = indexedAccess;
+```
+
 ### `COARevenueEnum`
 
 Zod schema for COARevenueType.
@@ -1446,7 +1410,8 @@ type COATypeType = indexedAccess;
 
 The inventory asset accounts a purchased unit's value can land on — a POLICY
 subset, for the reason {@link COA_COST_CODES} is one: a buy item's
-`coa_posting` is refined against it (`schemas/purchase.ts`), and a schema
+`ledger_account` is refined against it (`payablePostingIssues`,
+`schemas/purchase.ts`), and a schema
 cannot import `utils/`. `1400` Retail Inventory (a `sale` product) and `1999`
 Fixed Asset Clearing (a `rental`). `XERO_ASSET_ACCOUNTS`
 (`@cfs/core/utils/movements`) names the same two codes for the posting
@@ -1478,6 +1443,29 @@ owned devices; `api-cloudrun/.claude/plans/serialized-subrent.md` § 7a).
 
 ```ts
 const COA_COST_CODES: 5000 | 5001 | 5100 | 5150 | 5200 | 5300 | 5400 | 5500 | 5600 | 5700[];
+```
+
+### `COA_EXPENSED_ASSET_CODES`
+
+Expense accounts a payable `sale` line may post to beside
+{@link COA_ASSET_CODES}: an asset acquisition under $1,000 expensed directly
+(de minimis) rather than capitalised. **TEMPORARY** (owner, 2026-11-07): in use
+until about the end of 2026, when the de minimis practice is expected to stop
+and this list is deleted. The census that found them: 193 linked bill lines
+buying a product and posting to 6500 / 6300 (api-cloudrun's
+`one-document-model` plan, Phase 1). `6000` is deliberately absent: the one
+line coded there was a mistake the owner recodes.
+
+```ts
+const COA_EXPENSED_ASSET_CODES: 6204 | 6300 | 6500[];
+```
+
+### `COA_REVENUE_CODES`
+
+The revenue accounts a receivable line may post to (`COARevenueEnum`).
+
+```ts
+const COA_REVENUE_CODES: 2210 | 2800 | 4000 | 4100 | 4110 | 4120 | 4130 | 4140 | 4150 | 4200 | 4210 | 4700 | 4800[];
 ```
 
 ### `COGS_OWNERSHIPS`
@@ -2122,61 +2110,6 @@ A collection name valid in a {@link DocSourceType}.
 
 ```ts
 type CfsSourceCollectionType = indexedAccess;
-```
-
-### `ChargeItem`
-
-A CHARGE item — something CFS pays for with no custody: a carrier line on a
-device CFS owns (Verizon), freight, a fee, Vision's standing history line.
-Flat (freight: one amount) or time (a carrier line, priced from the device's
-charge windows).
-
-Attribution, as on a bill's charge item (api-cloudrun#1360, #1364):
-`uid_product` is the product the spend is for, `uid_out_of_service` the
-record a loss or damage charge is for. Both permanently optional — freight
-attributes nothing.
-
-```ts
-interface ChargeItem {
-  type: "charge";
-  quantity: number;
-  amount_cents: number | null;
-  price: PurchaseLinePrice;
-  dates: PurchaseItemDates | null;
-  quantity_billed: number | null;
-  quantity_canceled: number;
-  auto_link: boolean;
-  uid_units: string[];
-  uid_product?: string;
-  uid_out_of_service?: string;
-}
-```
-
-### `ChargeItemInputType`
-
-A charge item as an operator raises it. Its account is the operator's — there is no default.
-
-```ts
-interface ChargeItemInputType {
-  type: "charge";
-  name: string;
-  quantity?: number;
-  amount_cents?: number | null;
-  coa_posting: COACodeType;
-  dates?: PurchaseItemDates | null;
-  auto_link?: boolean;
-  uid_units?: string[];
-  uid_product?: string;
-  uid_out_of_service?: string;
-}
-```
-
-### `ChargeItemSchema`
-
-Zod schema for ChargeItem.
-
-```ts
-const ChargeItemSchema: z.ZodType<ChargeItem>;
 ```
 
 ### `ChargeWindow`
@@ -3360,7 +3293,8 @@ A PUSHED bill item carries no amount: the writer defaults it from the
 purchase item (`projectPurchaseLineToBillLine`, `@cfs/core/utils/purchase-documents`) —
 a flat line at the item's cumulative share, a time line priced from its
 units' UNBILLED charge windows — and stamps the purchase item's `name`,
-`price`, `coa_posting` and `uid_tracking_category`. The operator then
+`description`, `price`, `ledger_account`, `uid_tracking_category` and tax
+class. The operator then
 overrides any of them until the bill is settled ({@link UpdatePurchaseBillInput}).
 A LINKED bill carries `total_cents` as Xero has it.
 
@@ -6457,6 +6391,14 @@ Allowed values for tax jurisdiction.
 type JurisdictionType = indexedAccess;
 ```
 
+### `LEDGER_POSTING_FIELDS`
+
+The {@link LedgerPostingCore} keys, for code that copies the posting between grains.
+
+```ts
+const LEDGER_POSTING_FIELDS: readonly ["ledger_account", "uid_tracking_category"];
+```
+
 ### `LINE_POSTING_FIELDS`
 
 The {@link LinePostingCore} keys, for code that copies the posting between grains.
@@ -6536,6 +6478,43 @@ interface LeafPath {
   format?: string;
   meta: Record<string, unknown>;
 }
+```
+
+### `LedgerPostingCore`
+
+**Where a line POSTS, under the one key every priced grain will carry** —
+`ledger_account` (api-cloudrun's `one-document-model` plan; Odoo's single
+`account_id` is the precedent). It means "this line posts to", whatever the
+side.
+
+Today the PAYABLE grains spread it (purchase, bill and supplier-credit lines),
+replacing their `coa_posting`. The receivable grains still spread
+{@link LinePostingCore} until that plan's Phase 8 renames `coa_revenue` onto
+this core and deletes the other.
+
+- `ledger_account` — REQUIRED and non-null (owner, 2026-11-07). Which accounts
+  a line may name is a per-ARM refine reading
+  `SIDE_CONTRACTS[side].posting_class[type]` (`schemas/side.ts`), because one
+  shared instance cannot hold a per-type class.
+- `uid_tracking_category` — the SAME instance as {@link LinePostingCore}'s,
+  so the two cores never disagree about tracking.
+
+Both `propagate: true`: a bill line follows its purchase line until an
+operator changes it there.
+
+```ts
+const LedgerPostingCore: typeLiteral;
+```
+
+### `LineCustody`
+
+Whether a line of one type moves custody on its side. On the payable side a
+`sale` (Buy) and a `rental` (Subrent) bring units in; a `service` (freight)
+and a `replacement` (a supplier billing CFS for its lost unit) do not — a
+freight line must never land on a receipt.
+
+```ts
+type LineCustody = "custody" | "none";
 ```
 
 ### `LinePostingCore`
@@ -9124,12 +9103,14 @@ const PURCHASE_ACTION_IDS: "close" | "add_bill" | "add_credit" | "close_item" | 
 
 The classes a bill's editable fields fall into, for the freeze question
 *"may an operator still change this field?"* — `INVOICE_FIELD_CLASSES` with
-`organization` → `supplier` and `coa_revenue` → `coa_posting`.
+`organization` → `supplier` and `coa_revenue` → `ledger_account` (the class is
+named after its one member, as the invoice's is; `coa_posting` until the
+one-document-model Phase 1 rename).
 
 Explicit tuple type rather than `as const` alone (core#43).
 
 ```ts
-const PURCHASE_BILL_FIELD_CLASSES: readonly ["supplier", "date", "line_money", "coa_posting", "tracking", "text"];
+const PURCHASE_BILL_FIELD_CLASSES: readonly ["supplier", "date", "line_money", "ledger_account", "tracking", "text"];
 ```
 
 ### `PURCHASE_BILL_FIELD_FREEZE`
@@ -9209,29 +9190,36 @@ const PURCHASE_DOCUMENT_ORIGINS: "pushed" | "linked"[];
 
 ### `PURCHASE_ITEM_TYPES`
 
-The item arms — see the module docblock. `buy` is FIRST so `getInitialValues`
-seeds a buy.
+The item arms — the SHARED line types (`SHARED_LINE_TYPES`,
+`schemas/side.ts`), labelled per side (owner, 2026-11-07): a payable `sale` is
+a Buy, `rental` a Subrent, `service` a Charge, and `replacement` a supplier
+billing CFS for a unit lost in CFS's hands. Until 2026-11 they were stored as
+`buy` / `subrent` / `charge`. `sale` is FIRST so `getInitialValues` seeds a buy.
+
+⚠️ **On this side a line's type is NOT its product's type** — a fleet buy is
+a `sale` line naming a RENTAL product (posting to 1999). Never derive a
+product type, stock method or asset account from it.
 
 🔴 **Closed, and read through exhaustive switches.** Every reader that
 branches on an item's arm switches over this union with a `never` default
-(`purchaseItemSupplies`, `purchaseItemResolved`, …), so a fourth member is a
-compile error at every one of them rather than a silent fall-through into
-the buy branch.
+(`purchaseItemSupplies`, `purchaseItemResolved`, …), so a new member is a
+compile error at every one of them rather than a silent fall-through.
 
 Explicit tuple type rather than `as const` alone: core#43 is JSR's npm
 `.d.ts` emit truncating an inferred tuple.
 
 ```ts
-const PURCHASE_ITEM_TYPES: readonly ["buy", "subrent", "charge"];
+const PURCHASE_ITEM_TYPES: readonly ["sale", "rental", "service", "replacement"];
 ```
 
 ### `PURCHASE_PRODUCT_ITEM_TYPES`
 
-The arms that ORDER a product (a required `uid_product`). A `charge` line's
-`uid_product` is attribution only, so it is not one.
+The arms that ORDER a product (a required `uid_product`) — the payable types
+whose `SIDE_CONTRACTS.payable.custody` is `"custody"`. A `service` or
+`replacement` line's `uid_product` is attribution only, so it is not one.
 
 ```ts
-const PURCHASE_PRODUCT_ITEM_TYPES: readonly ["buy", "subrent"];
+const PURCHASE_PRODUCT_ITEM_TYPES: readonly ["sale", "rental"];
 ```
 
 ### `PURCHASE_STATUSES`
@@ -9637,6 +9625,20 @@ A destination pair as far as {@link unplacedEndpoints} reads it.
 
 ```ts
 type PlaceablePair = typeLiteral;
+```
+
+### `PostingClass`
+
+Which accounts a line of one type may post to (its `ledger_account`):
+
+- `revenue` — `COA_REVENUE_CODES` (the receivable side, today read from `coa_revenue`);
+- `asset_or_expensed` — `COA_ASSET_CODES` plus the temporary
+  `COA_EXPENSED_ASSET_CODES` (a payable `sale`);
+- `cost` — `COA_COST_CODES` (a payable `rental`);
+- `any` — any `COACode` (freight, a fee, a supplier's lost-unit charge).
+
+```ts
+type PostingClass = "revenue" | "asset_or_expensed" | "cost" | "any";
 ```
 
 ### `PreTaxItemType`
@@ -10578,9 +10580,11 @@ writer re-meters `counts` and re-prices `amount_cents`. A flat line's
 interface PurchaseBillLineEditInputType {
   uid: string;
   name?: string;
+  description?: string;
   quantity?: number;
   amount_cents?: number;
-  coa_posting?: COACodeType;
+  ledger_account?: COACodeType;
+  uid_tax_class_override?: string | null;
   uid_tracking_category?: string | null;
   price?: typeLiteral;
   units?: PurchaseDocumentLineUnit[];
@@ -10758,46 +10762,6 @@ One {@link PURCHASE_CREDIT_STATUSES} member.
 type PurchaseCreditStatusType = indexedAccess;
 ```
 
-### `PurchaseDocumentChargeItem`
-
-A bill or credit CHARGE line — freight, a fee, a carrier line, or a supplier's
-loss or damage charge on a subrent. Posts to its own account and never
-touches basis.
-
-A **document-only** charge (no `path_purchase_item`) is the document's own
-row, like an invoice's loss-and-damage line: freight nobody expected, and
-Vision's historic SPENDs. One that projects a purchase `charge` item names it.
-
-## Attribution (api-cloudrun#1360, #1364)
-
-- `uid_product` — the product the spend is attributed to. The writer emits
-  the product's Xero `ItemCode` beside the stated account when it has one;
-  rental items are untracked in Xero, so the code moves no Xero quantity or
-  value.
-- `uid_out_of_service` — the record a loss or damage charge is for. A
-  `mark_lost` record's id is a `MovementId`, hence `OutOfServiceId`.
-
-Both permanent `.optional()`: freight and fees name nothing.
-
-```ts
-interface PurchaseDocumentChargeItem {
-  type: "charge";
-  uid: string;
-  path: string[];
-  name: string;
-  quantity: number;
-  amount_cents: number;
-  coa_posting: COACodeType;
-  uid_tracking_category: string | null;
-  price: PurchaseDocumentLinePrice;
-  units: PurchaseDocumentLineUnit[];
-  dates: ChargeWindowType | null;
-  uid_product?: string;
-  uid_out_of_service?: string;
-  path_purchase_item?: string[];
-}
-```
-
 ### `PurchaseDocumentChargeItemInputType`
 
 A document-only charge item as an operator states it on a PUSHED bill or
@@ -10814,7 +10778,8 @@ an attribution would vanish with nothing failing (api-cloudrun#1360).
 ```ts
 interface PurchaseDocumentChargeItemInputType {
   name: string;
-  coa_posting: COACodeType;
+  description?: string;
+  ledger_account: COACodeType;
   amount_cents: number;
   uid_product?: string;
   uid_out_of_service?: string;
@@ -10822,20 +10787,12 @@ interface PurchaseDocumentChargeItemInputType {
 }
 ```
 
-### `PurchaseDocumentChargeItemSchema`
-
-Zod schema for PurchaseDocumentChargeItem.
-
-```ts
-const PurchaseDocumentChargeItemSchema: z.ZodType<PurchaseDocumentChargeItem>;
-```
-
 ### `PurchaseDocumentItem`
 
 Union of a bill or credit item's arms, discriminated on `type`.
 
 ```ts
-type PurchaseDocumentItem = PurchaseDocumentProductItem | PurchaseDocumentChargeItem;
+type PurchaseDocumentItem = PurchaseDocumentProductItem | PurchaseDocumentServiceItem | PurchaseDocumentReplacementItem;
 ```
 
 ### `PurchaseDocumentItemInput`
@@ -10869,8 +10826,8 @@ const PurchaseDocumentItemSchema: z.ZodType<PurchaseDocumentItem>;
 
 How a bill or credit line is priced: the purchase line's {@link PurchaseLinePrice}
 (formula snapshot, rates, discount — each `propagate: true` there, so an
-un-overridden bill line follows its purchase line) plus the line's frozen
-metered `counts` (ruling 8).
+un-overridden bill line follows its purchase line; and the exempt tax keys)
+plus the line's frozen metered `counts` (ruling 8).
 
 - **flat** — `rates: []`, `counts: []`; `amount_cents` is the stated net share.
 - **time** — `rates` ≥ 1, and `counts` are the UNIT-periods the line bills:
@@ -10912,7 +10869,7 @@ interface PurchaseDocumentLineUnit {
 
 ### `PurchaseDocumentLineUnitSchema`
 
-Zod schema for {@link PurchaseDocumentLineUnit}.
+Zod schema for PurchaseDocumentLineUnit.
 
 ```ts
 const PurchaseDocumentLineUnitSchema: z.ZodType<PurchaseDocumentLineUnit>;
@@ -10937,29 +10894,23 @@ type PurchaseDocumentOriginType = indexedAccess;
 ### `PurchaseDocumentProductItem`
 
 A bill or credit item that PROJECTS a purchase item — some quantity of one
-buy or subrent item (D5). It names that item by `path_purchase_item`, as an
-invoice line names its order line by `path_order_item`, and carries its own
-copy of the shared fields, each of which it may override until the bill is
-settled: the billed `quantity` and `amount_cents` (homonyms of the purchase
-item's ordered ones), `price`, `name`, `coa_posting` and
-`uid_tracking_category` (`propagate: true` on the purchase side).
+sale (Buy) or rental (Subrent) item (D5). It names that item by
+`path_purchase_item`, as an invoice line names its order line by
+`path_order_item`, and carries its own copy of the shared fields, each of
+which it may override until the bill is settled: the billed `quantity` and
+`amount_cents` (homonyms of the purchase item's ordered ones), `price`,
+`name`, `description`, `ledger_account`, `uid_tracking_category` and the tax
+class (`propagate: true` on the shared declarations).
 
 On a LINKED bill the posting is the Xero document's where it has one; the
 purchase item's is the expected one, so an account divergence is an ordinary
-field difference between projection and source. That is why `coa_posting`
-here is any `COACode`, not the purchase arm's subset.
+field difference between projection and source. The account still has to
+sit in the type's class (`payablePostingIssues`).
 
 ```ts
 interface PurchaseDocumentProductItem {
   type: PurchaseProductItemTypeType;
-  uid: string;
-  path: string[];
-  name: string;
   uid_product: string;
-  quantity: number;
-  amount_cents: number;
-  coa_posting: COACodeType;
-  uid_tracking_category: string | null;
   path_purchase_item: string[];
 }
 ```
@@ -10972,12 +10923,64 @@ Zod schema for PurchaseDocumentProductItem.
 const PurchaseDocumentProductItemSchema: z.ZodType<PurchaseDocumentProductItem>;
 ```
 
+### `PurchaseDocumentReplacementItem`
+
+A bill or credit REPLACEMENT line — the supplier billing CFS for its unit
+lost or damaged in CFS's hands, naming the out-of-service record (until
+2026-11 a `charge` with `uid_out_of_service`). A `mark_lost` record's id is a
+`MovementId`, hence `OutOfServiceId`.
+
+```ts
+interface PurchaseDocumentReplacementItem {
+  type: "replacement";
+  uid_out_of_service: string;
+}
+```
+
+### `PurchaseDocumentReplacementItemSchema`
+
+Zod schema for PurchaseDocumentReplacementItem.
+
+```ts
+const PurchaseDocumentReplacementItemSchema: z.ZodType<PurchaseDocumentReplacementItem>;
+```
+
+### `PurchaseDocumentServiceItem`
+
+A bill or credit SERVICE (Charge) line — freight, a fee, a carrier line.
+Posts to its own account and never touches basis.
+
+A **document-only** service line (no `path_purchase_item`) is the document's
+own row, like an invoice's loss-and-damage line: freight nobody expected.
+One that projects a purchase `service` item names it.
+
+`uid_product` is attribution (api-cloudrun#1360, #1364): the writer emits the
+product's Xero `ItemCode` beside the stated account when it has one; rental
+items are untracked in Xero, so the code moves no Xero quantity or value.
+Permanent `.optional()`: freight and fees name nothing.
+
+```ts
+interface PurchaseDocumentServiceItem {
+  type: "service";
+  uid_product?: string;
+  path_purchase_item?: string[];
+}
+```
+
+### `PurchaseDocumentServiceItemSchema`
+
+Zod schema for PurchaseDocumentServiceItem.
+
+```ts
+const PurchaseDocumentServiceItemSchema: z.ZodType<PurchaseDocumentServiceItem>;
+```
+
 ### `PurchaseItem`
 
 Union of every purchase item arm, discriminated on `type`.
 
 ```ts
-type PurchaseItem = BuyItem | SubrentItem | ChargeItem;
+type PurchaseItem = PurchaseSaleItem | PurchaseRentalItem | PurchaseServiceItem | PurchaseReplacementItem;
 ```
 
 ### `PurchaseItemDates`
@@ -11022,7 +11025,7 @@ const PurchaseItemInput: z.ZodType<PurchaseItemInputType>;
 Union of every item input arm.
 
 ```ts
-type PurchaseItemInputType = BuyItemInputType | SubrentItemInputType | ChargeItemInputType;
+type PurchaseItemInputType = PurchaseSaleItemInputType | PurchaseRentalItemInputType | PurchaseServiceItemInputType | PurchaseReplacementItemInputType;
 ```
 
 ### `PurchaseItemSchema`
@@ -11143,14 +11146,24 @@ discount.
 flat line it records what came off the operator's GROSS, and `amount_cents`
 is the NET — what CFS pays, which receipts, basis and bills slice.
 
-There is no subtotal/discounted/taxes/total triple: purchases are
-resale-exempt (no tax), and gross = `amount_cents + discount.amount_cents`.
+There is no subtotal/discounted/total triple, and gross =
+`amount_cents + discount.amount_cents`.
+
+**Tax is EXEMPTION, not absence** (api-cloudrun's `one-document-model` plan):
+a payable line is stamped with its type's default tax class like any other
+priced line (`LineTaxCore`), and the payable side resolves it exempt, so
+`taxes` is `[]`. `taxes_base` is the class's rates BEFORE the exemption, as
+on an order line, so an exempt line records a non-empty base. A taxable
+purchase later (consumables, use tax) then needs no new path. Neither key
+reaches a Xero body or the bill's projection hash.
 
 ```ts
 interface PurchaseLinePrice {
   price_formula: PriceFormulaRef;
   rates: RateSnapshotType[];
   discount: DiscountType | null;
+  taxes: PriceModifierType[];
+  taxes_base?: TaxRefType[];
 }
 ```
 
@@ -11212,12 +11225,184 @@ One {@link PURCHASE_PRODUCT_ITEM_TYPES} member.
 type PurchaseProductItemTypeType = indexedAccess;
 ```
 
+### `PurchaseRentalItem`
+
+A RENTAL (Subrent) item — `quantity` units borrowed for a hire window and given back. Flat or time.
+
+```ts
+interface PurchaseRentalItem {
+  type: "rental";
+  uid_product: string;
+  amount_cents: number | null;
+  price: PurchaseLinePrice;
+  dates: PurchaseItemDates;
+  quantity_received: number;
+  quantity_billed: number | null;
+  quantity_canceled: number;
+  quantity_returned: number;
+  uid_orders: string[];
+  auto_link: boolean;
+  uid_units: string[];
+}
+```
+
+### `PurchaseRentalItemInputType`
+
+A rental (Subrent) item as an operator orders it. `amount_cents` on a flat line only (gross when discounted).
+
+```ts
+interface PurchaseRentalItemInputType {
+  type: "rental";
+  uid_product: string;
+  quantity: number;
+  amount_cents?: number | null;
+  ledger_account?: COACodeType;
+  dates: PurchaseItemDates;
+  uid_orders?: string[];
+  auto_link?: boolean;
+  uid_units?: string[];
+}
+```
+
+### `PurchaseRentalItemSchema`
+
+Zod schema for PurchaseRentalItem.
+
+```ts
+const PurchaseRentalItemSchema: z.ZodType<PurchaseRentalItem>;
+```
+
+### `PurchaseReplacementItem`
+
+A REPLACEMENT item — the supplier billing CFS for one of ITS units lost or
+damaged in CFS's hands, naming the out-of-service record the loss opened
+(until 2026-11 a `charge` with `uid_out_of_service`). No custody: the
+settlement movement (`return_to_supplier`) moves the units, not this line.
+Otherwise a {@link PurchaseServiceItem}.
+
+```ts
+interface PurchaseReplacementItem {
+  type: "replacement";
+  uid_out_of_service: string;
+}
+```
+
+### `PurchaseReplacementItemInputType`
+
+A replacement item as an operator raises it: a {@link PurchaseServiceItemInputType} naming its record.
+
+```ts
+interface PurchaseReplacementItemInputType {
+  type: "replacement";
+  uid_out_of_service: string;
+}
+```
+
+### `PurchaseReplacementItemSchema`
+
+Zod schema for PurchaseReplacementItem.
+
+```ts
+const PurchaseReplacementItemSchema: z.ZodType<PurchaseReplacementItem>;
+```
+
+### `PurchaseSaleItem`
+
+A SALE (Buy) item — ownership of `quantity` units of one product. Always flat.
+
+```ts
+interface PurchaseSaleItem {
+  type: "sale";
+  uid_product: string;
+  amount_cents: number;
+  price: PurchaseLinePrice;
+  expected_date: string | null;
+  quantity_received: number;
+  quantity_billed: number;
+  quantity_canceled: number;
+  landed_costs: PurchaseLandedCost[];
+}
+```
+
+### `PurchaseSaleItemInputType`
+
+A sale (Buy) item as an operator orders it — the buckets are the server's.
+
+```ts
+interface PurchaseSaleItemInputType {
+  type: "sale";
+  uid_product: string;
+  quantity: number;
+  amount_cents: number;
+  ledger_account?: COACodeType;
+  expected_date?: string | null;
+  landed_costs?: PurchaseLandedCostInputType[];
+}
+```
+
+### `PurchaseSaleItemSchema`
+
+Zod schema for PurchaseSaleItem.
+
+```ts
+const PurchaseSaleItemSchema: z.ZodType<PurchaseSaleItem>;
+```
+
 ### `PurchaseSchema`
 
 Zod schema for Purchase.
 
 ```ts
 const PurchaseSchema: z.ZodType<Purchase>;
+```
+
+### `PurchaseServiceItem`
+
+A SERVICE (Charge) item — something CFS pays for with no custody: a carrier
+line on a device CFS owns (Verizon), freight, a fee, Vision's standing history
+line. Flat (freight: one amount) or time (a carrier line).
+
+`uid_product` is attribution only (api-cloudrun#1360, #1364): the product the
+spend is for. Permanently optional — freight attributes nothing.
+
+```ts
+interface PurchaseServiceItem {
+  type: "service";
+  amount_cents: number | null;
+  price: PurchaseLinePrice;
+  dates: PurchaseItemDates | null;
+  quantity_billed: number | null;
+  quantity_canceled: number;
+  auto_link: boolean;
+  uid_units: string[];
+  uid_product?: string;
+}
+```
+
+### `PurchaseServiceItemInputType`
+
+A service (Charge) item as an operator raises it. Its account is the operator's — there is no default.
+
+```ts
+interface PurchaseServiceItemInputType {
+  type: "service";
+  name: string;
+  quantity?: number;
+  amount_cents?: number | null;
+  ledger_account: COACodeType;
+  dates?: PurchaseItemDates | null;
+  auto_link?: boolean;
+  uid_units?: string[];
+  uid_product?: string;
+}
+```
+
+### `PurchaseServiceItemSchema`
+
+Zod schema for PurchaseServiceItem.
+
+```ts
+const PurchaseServiceItemSchema: z.ZodType<PurchaseServiceItem>;
 ```
 
 ### `PurchaseStatusEnum`
@@ -12103,6 +12288,36 @@ settlement refine reads this to decide which party key the row must carry.
 const SETTLEMENT_TARGET_SIDE: Readonly<Record<SettlementTargetType, "receivable" | "payable">>;
 ```
 
+### `SHARED_LINE_TYPES`
+
+The line types BOTH sides carry (owner, 2026-11-07). The receivable side has
+more (`surcharge`, `transaction_fee`), which a payable document does not take.
+
+Explicit tuple type rather than `as const` alone: core#43 is JSR's npm `.d.ts`
+emit truncating an inferred tuple.
+
+```ts
+const SHARED_LINE_TYPES: readonly ["sale", "rental", "service", "replacement"];
+```
+
+### `SIDES`
+
+The two sides. The spelling `SETTLEMENT_TARGET_SIDE` (`schemas/common.ts`) already uses.
+
+```ts
+const SIDES: readonly ["receivable", "payable"];
+```
+
+### `SIDE_CONTRACTS`
+
+Every way the two sides differ, one total table — the pattern of
+`ITEM_CONTRACTS` and `SETTLEMENT_CONTRACTS`. A new key is a compile error
+until both sides state it.
+
+```ts
+const SIDE_CONTRACTS: Readonly<Record<Side, SideContract>>;
+```
+
 ### `STATEMENT_FORMATS`
 
 How a statement presents the account.
@@ -12450,6 +12665,14 @@ One settlement event's kind. @see {@link SETTLEMENT_CONTRACTS}
 type SettlementTypeType = indexedAccess;
 ```
 
+### `SharedLineType`
+
+One {@link SHARED_LINE_TYPES} member.
+
+```ts
+type SharedLineType = indexedAccess;
+```
+
 ### `ShelfShortfall`
 
 Zod schema for {@link ShelfShortfallType}.
@@ -12473,6 +12696,26 @@ interface ShelfShortfallType {
   uid: string;
   requested: number;
   moved: number;
+}
+```
+
+### `Side`
+
+One {@link SIDES} member.
+
+```ts
+type Side = indexedAccess;
+```
+
+### `SideContract`
+
+One side's entries. Total over {@link SharedLineType}, so a new type is a compile error until both sides state it.
+
+```ts
+interface SideContract {
+  line_labels: Readonly<Record<SharedLineType, string>>;
+  posting_class: Readonly<Record<SharedLineType, PostingClass>>;
+  custody: Readonly<Record<SharedLineType, LineCustody>>;
 }
 ```
 
@@ -12941,55 +13184,6 @@ interface StoreTransferLineInputType {
 
 ```ts
 type StoreUpdated = EventEnvelope<Store> & typeLiteral;
-```
-
-### `SubrentItem`
-
-A SUBRENT item — `quantity` units borrowed for a hire window and given back. Flat or time.
-
-```ts
-interface SubrentItem {
-  type: "subrent";
-  uid_product: string;
-  quantity: number;
-  amount_cents: number | null;
-  price: PurchaseLinePrice;
-  coa_posting: COACostType;
-  dates: PurchaseItemDates;
-  quantity_received: number;
-  quantity_billed: number | null;
-  quantity_canceled: number;
-  quantity_returned: number;
-  uid_orders: string[];
-  auto_link: boolean;
-  uid_units: string[];
-}
-```
-
-### `SubrentItemInputType`
-
-A subrent item as an operator orders it. `amount_cents` on a flat line only (gross when discounted).
-
-```ts
-interface SubrentItemInputType {
-  type: "subrent";
-  uid_product: string;
-  quantity: number;
-  amount_cents?: number | null;
-  coa_posting?: COACostType;
-  dates: PurchaseItemDates;
-  uid_orders?: string[];
-  auto_link?: boolean;
-  uid_units?: string[];
-}
-```
-
-### `SubrentItemSchema`
-
-Zod schema for SubrentItem.
-
-```ts
-const SubrentItemSchema: z.ZodType<SubrentItem>;
 ```
 
 ### `SubrentMarginCostLine`
@@ -16946,17 +17140,17 @@ Derive `query_by_item_types` — the distinct item types, in first-seen order.
 
 ### `deriveQueryByOrders(items: readonly PurchaseItem[]): string[]`
 
-Derive `query_by_orders` — the distinct union of the subrent items' `uid_orders`, in first-seen order.
+Derive `query_by_orders` — the distinct union of the rental items' `uid_orders`, in first-seen order.
 
 ### `deriveQueryByProducts(items: readonly PurchaseItem[]): string[]`
 
 Derive `query_by_products` — the distinct products the items ORDER, in first
-appearance order. A charge's attribution is not an order and is left out.
-The one author of the mirror, called by every writer.
+appearance order. Attribution is not an order and is left out. The one author
+of the mirror, called by every writer.
 
 ### `deriveQueryByUnits(items: readonly PurchaseItem[]): string[]`
 
-Derive `query_by_units` — the distinct units the subrent and charge lines cover, sorted.
+Derive `query_by_units` — the distinct units the rental, service and replacement lines cover, sorted.
 
 ### `destinationJoinViolations(items: ReadonlyArray<unknown>, destinations: ReadonlyArray<unknown>): DestinationJoinViolation[]`
 
@@ -17639,6 +17833,22 @@ as `active` while `isBookingClosed` read it closed).
 `liveCustody` read it terminal. Neither type carries an inventory ledger, so
 no availability answer moves; the rule just stops having two answers.
 
+### `payablePostingIssues(type: SharedLineType, account: number): typeLiteral[]`
+
+May a payable line of `type` post to `account`? The class is
+`SIDE_CONTRACTS.payable.posting_class[type]` (`schemas/side.ts`):
+
+- `asset_or_expensed` (a Buy) — `COA_ASSET_CODES`, plus the TEMPORARY
+  `COA_EXPENSED_ASSET_CODES` (de minimis acquisitions expensed directly;
+  owner, 2026-11-07);
+- `cost` (a Subrent) — `COA_COST_CODES`;
+- `any` (a Charge or Replacement) — any `COACode`.
+
+One rule for the purchase, bill and credit lines alike. Until 2026-11 a bill
+line took any account while the purchase's buy took an asset one; the
+census found the bills' non-asset buys were all de minimis acquisitions
+(6500 / 6300) plus one mis-coding (6000) the owner recodes.
+
 ### `pickSheetGateAdmits(pair: PickSheetGatePair, gate: PickSheetGateType): boolean`
 
 Does this leg have work on a sheet gated this way? See {@link PICK_SHEET_GATES}.
@@ -17723,20 +17933,22 @@ line, whose cost is decided as it accrues.
 
 ### `purchaseItemProduct(item: PurchaseItem): string | undefined`
 
-The product an item ORDERS, or `undefined` — a charge's `uid_product` is attribution, not an order.
+The product an item ORDERS, or `undefined` — a service or replacement line's
+`uid_product` is attribution, not an order.
 
 ### `purchaseItemResolved(item: PurchaseItem): boolean`
 
 Has this item nothing left to happen?
 
-- **buy** — every unit received or canceled, and billed for at least what was
+- **sale** — every unit received or canceled, and billed for at least what was
   not canceled (over-billing is flagged, not held open).
-- **subrent** — every unit received or canceled, every unit received gone
+- **rental** — every unit received or canceled, every unit received gone
   back (a hire with units still in CFS's custody is not finished), and on a
   flat line billed in full. A TIME line resolves on custody alone (Q7): it
   bills windows as they accrue, with no count to close.
-- **charge** — a flat one when billed or canceled in full; a time one only
-  once canceled in full, since a carrier line accrues for as long as it lives.
+- **service** / **replacement** — a flat one when billed or canceled in
+  full; a time one only once canceled in full, since a carrier line accrues
+  for as long as it lives.
 
 Payment is the bill's business and holds nothing open.
 
@@ -18460,6 +18672,14 @@ One allowed Direct Costs code. See {@link COA_COST_CODES}.
 type COACostType = indexedAccess;
 ```
 
+### `COAExpensedAssetType`
+
+One {@link COA_EXPENSED_ASSET_CODES} member.
+
+```ts
+type COAExpensedAssetType = indexedAccess;
+```
+
 ### `COARevenueEnum`
 
 Zod schema for COARevenueType.
@@ -18480,7 +18700,8 @@ type COARevenueType = indexedAccess;
 
 The inventory asset accounts a purchased unit's value can land on — a POLICY
 subset, for the reason {@link COA_COST_CODES} is one: a buy item's
-`coa_posting` is refined against it (`schemas/purchase.ts`), and a schema
+`ledger_account` is refined against it (`payablePostingIssues`,
+`schemas/purchase.ts`), and a schema
 cannot import `utils/`. `1400` Retail Inventory (a `sale` product) and `1999`
 Fixed Asset Clearing (a `rental`). `XERO_ASSET_ACCOUNTS`
 (`@cfs/core/utils/movements`) names the same two codes for the posting
@@ -18504,6 +18725,29 @@ owned devices; `api-cloudrun/.claude/plans/serialized-subrent.md` § 7a).
 
 ```ts
 const COA_COST_CODES: 5000 | 5001 | 5100 | 5150 | 5200 | 5300 | 5400 | 5500 | 5600 | 5700[];
+```
+
+### `COA_EXPENSED_ASSET_CODES`
+
+Expense accounts a payable `sale` line may post to beside
+{@link COA_ASSET_CODES}: an asset acquisition under $1,000 expensed directly
+(de minimis) rather than capitalised. **TEMPORARY** (owner, 2026-11-07): in use
+until about the end of 2026, when the de minimis practice is expected to stop
+and this list is deleted. The census that found them: 193 linked bill lines
+buying a product and posting to 6500 / 6300 (api-cloudrun's
+`one-document-model` plan, Phase 1). `6000` is deliberately absent: the one
+line coded there was a mistake the owner recodes.
+
+```ts
+const COA_EXPENSED_ASSET_CODES: 6204 | 6300 | 6500[];
+```
+
+### `COA_REVENUE_CODES`
+
+The revenue accounts a receivable line may post to (`COARevenueEnum`).
+
+```ts
+const COA_REVENUE_CODES: 2210 | 2800 | 4000 | 4100 | 4110 | 4120 | 4130 | 4140 | 4150 | 4200 | 4210 | 4700 | 4800[];
 ```
 
 ### `COMPONENT_TYPES`
@@ -27071,14 +27315,18 @@ copies every part of it:
 (`OrderDocItem`, `InvoiceDocItem`), and the ARM is per item — there is no
 document-level `kind`, so one purchase may mix arms:
 
-| `type` | what CFS gets | custody | supply | priced |
+| `type` (label) | what CFS gets | custody | supply | priced |
 |---|---|---|---|---|
-| `buy` | ownership | receipts raise `quantity_held` and basis | `inbound` until received | flat |
-| `subrent` | units for a hire window | `subrent_in` / `subrent_out`, never owned | `subrent` over `dates` | flat or time |
-| `charge` | a service with no custody — a carrier line on an owned device, freight, a fee | none | none | flat or time |
+| `sale` (Buy) | ownership | receipts raise `quantity_held` and basis | `inbound` until received | flat |
+| `rental` (Subrent) | units for a hire window | `subrent_in` / `subrent_out`, never owned | `subrent` over `dates` | flat or time |
+| `service` (Charge) | a service with no custody — a carrier line on an owned device, freight, a fee | none | none | flat or time |
+| `replacement` | the supplier billing CFS for its unit lost in CFS's hands | none | none | flat or time |
 
-(`usage` and `direct` retired into `charge`, and the nested `SubrentBilling`
-union into the price rule below — purchases-as-documents Phase 2.)
+The types are the receivable side's, labelled per side (`SIDE_CONTRACTS`,
+`schemas/side.ts`; stored as `buy` / `subrent` / `charge` until the
+one-document-model Phase 1 migration). (`usage` and `direct` retired into
+`charge`, and the nested `SubrentBilling` union into the price rule below —
+purchases-as-documents Phase 2.)
 
 Each item carries its own **row identity** (`uid`, and `path` = `[uid]`
 until a divider type exists — the writer is its one author), so one product
@@ -27086,13 +27334,14 @@ may sit on two items: a buy plus a re-order, or two hire windows. Bills and
 credits name an item by `path` (`path_purchase_item`), the way an invoice line
 names its order line.
 
-Each item also carries its own **posting** — `coa_posting` and
-`uid_tracking_category`, stamped at write rather than worked out at push.
-The account is constrained per arm: a buy posts to an inventory asset
-account (`COA_ASSET_CODES`), a subrent to a Direct Costs account
-(`COA_COST_CODES`), a charge to any account. Both are `propagate: true`, so a
-bill item follows its purchase item's posting until an operator changes it
-there.
+Each item also carries its own **posting** — `ledger_account` and
+`uid_tracking_category` (`LedgerPostingCore`), stamped at write rather than
+worked out at push. The account is constrained per type by
+{@link payablePostingIssues}: a sale posts to an inventory asset account
+(`COA_ASSET_CODES`, or a temporary de minimis expense account), a rental to a
+Direct Costs account (`COA_COST_CODES`), a service or replacement to any
+account. Both are `propagate: true`, so a bill item follows its purchase
+item's posting until an operator changes it there.
 
 ## Money — flat lines state a total, time lines carry rates
 
@@ -27121,113 +27370,15 @@ co-written bucket only on flat lines, and a time line resolves on custody
 lines' amounts. A time line adds 0; what was billed against it is its bills'
 totals.
 
-There is no tax anywhere on a purchase (owner, 2026-10-05): stock bought for
-sale or rent is bought resale-exempt and the tax is collected from the end
-user, so `priceDocument` never runs here.
+No tax is CHARGED on a purchase (owner, 2026-10-05): stock bought for sale or
+rent is bought resale-exempt and the tax is collected from the end user. The
+line still carries a tax class and `taxes: []` — exemption, not absence (see
+{@link PurchaseLinePrice}).
 
 The document stays one `z.strictObject` with a `superRefine` rather than a
 root `discriminatedUnion`: no registered document schema has one, and the
 column walker, `getInitialValues`, `getTestDoc` and the stored-defaults walk
 all assume a root object.
-
-### `BuyItem`
-
-A BUY item — ownership of `quantity` units of one product. Always flat.
-
-```ts
-interface BuyItem {
-  type: "buy";
-  uid_product: string;
-  quantity: number;
-  amount_cents: number;
-  price: PurchaseLinePrice;
-  coa_posting: COAAssetType;
-  expected_date: string | null;
-  quantity_received: number;
-  quantity_billed: number;
-  quantity_canceled: number;
-  landed_costs: PurchaseLandedCost[];
-}
-```
-
-### `BuyItemInputType`
-
-A buy item as an operator orders it — the buckets are the server's.
-
-```ts
-interface BuyItemInputType {
-  type: "buy";
-  uid_product: string;
-  quantity: number;
-  amount_cents: number;
-  coa_posting?: COAAssetType;
-  expected_date?: string | null;
-  landed_costs?: PurchaseLandedCostInputType[];
-}
-```
-
-### `BuyItemSchema`
-
-Zod schema for BuyItem.
-
-```ts
-const BuyItemSchema: z.ZodType<BuyItem>;
-```
-
-### `ChargeItem`
-
-A CHARGE item — something CFS pays for with no custody: a carrier line on a
-device CFS owns (Verizon), freight, a fee, Vision's standing history line.
-Flat (freight: one amount) or time (a carrier line, priced from the device's
-charge windows).
-
-Attribution, as on a bill's charge item (api-cloudrun#1360, #1364):
-`uid_product` is the product the spend is for, `uid_out_of_service` the
-record a loss or damage charge is for. Both permanently optional — freight
-attributes nothing.
-
-```ts
-interface ChargeItem {
-  type: "charge";
-  quantity: number;
-  amount_cents: number | null;
-  price: PurchaseLinePrice;
-  dates: PurchaseItemDates | null;
-  quantity_billed: number | null;
-  quantity_canceled: number;
-  auto_link: boolean;
-  uid_units: string[];
-  uid_product?: string;
-  uid_out_of_service?: string;
-}
-```
-
-### `ChargeItemInputType`
-
-A charge item as an operator raises it. Its account is the operator's — there is no default.
-
-```ts
-interface ChargeItemInputType {
-  type: "charge";
-  name: string;
-  quantity?: number;
-  amount_cents?: number | null;
-  coa_posting: COACodeType;
-  dates?: PurchaseItemDates | null;
-  auto_link?: boolean;
-  uid_units?: string[];
-  uid_product?: string;
-  uid_out_of_service?: string;
-}
-```
-
-### `ChargeItemSchema`
-
-Zod schema for ChargeItem.
-
-```ts
-const ChargeItemSchema: z.ZodType<ChargeItem>;
-```
 
 ### `ClosePurchaseInput`
 
@@ -27287,29 +27438,36 @@ interface CreatePurchaseInputType {
 
 ### `PURCHASE_ITEM_TYPES`
 
-The item arms — see the module docblock. `buy` is FIRST so `getInitialValues`
-seeds a buy.
+The item arms — the SHARED line types (`SHARED_LINE_TYPES`,
+`schemas/side.ts`), labelled per side (owner, 2026-11-07): a payable `sale` is
+a Buy, `rental` a Subrent, `service` a Charge, and `replacement` a supplier
+billing CFS for a unit lost in CFS's hands. Until 2026-11 they were stored as
+`buy` / `subrent` / `charge`. `sale` is FIRST so `getInitialValues` seeds a buy.
+
+⚠️ **On this side a line's type is NOT its product's type** — a fleet buy is
+a `sale` line naming a RENTAL product (posting to 1999). Never derive a
+product type, stock method or asset account from it.
 
 🔴 **Closed, and read through exhaustive switches.** Every reader that
 branches on an item's arm switches over this union with a `never` default
-(`purchaseItemSupplies`, `purchaseItemResolved`, …), so a fourth member is a
-compile error at every one of them rather than a silent fall-through into
-the buy branch.
+(`purchaseItemSupplies`, `purchaseItemResolved`, …), so a new member is a
+compile error at every one of them rather than a silent fall-through.
 
 Explicit tuple type rather than `as const` alone: core#43 is JSR's npm
 `.d.ts` emit truncating an inferred tuple.
 
 ```ts
-const PURCHASE_ITEM_TYPES: readonly ["buy", "subrent", "charge"];
+const PURCHASE_ITEM_TYPES: readonly ["sale", "rental", "service", "replacement"];
 ```
 
 ### `PURCHASE_PRODUCT_ITEM_TYPES`
 
-The arms that ORDER a product (a required `uid_product`). A `charge` line's
-`uid_product` is attribution only, so it is not one.
+The arms that ORDER a product (a required `uid_product`) — the payable types
+whose `SIDE_CONTRACTS.payable.custody` is `"custody"`. A `service` or
+`replacement` line's `uid_product` is attribution only, so it is not one.
 
 ```ts
-const PURCHASE_PRODUCT_ITEM_TYPES: readonly ["buy", "subrent"];
+const PURCHASE_PRODUCT_ITEM_TYPES: readonly ["sale", "rental"];
 ```
 
 ### `PURCHASE_STATUSES`
@@ -27362,7 +27520,7 @@ interface Purchase {
 Union of every purchase item arm, discriminated on `type`.
 
 ```ts
-type PurchaseItem = BuyItem | SubrentItem | ChargeItem;
+type PurchaseItem = PurchaseSaleItem | PurchaseRentalItem | PurchaseServiceItem | PurchaseReplacementItem;
 ```
 
 ### `PurchaseItemDates`
@@ -27407,7 +27565,7 @@ const PurchaseItemInput: z.ZodType<PurchaseItemInputType>;
 Union of every item input arm.
 
 ```ts
-type PurchaseItemInputType = BuyItemInputType | SubrentItemInputType | ChargeItemInputType;
+type PurchaseItemInputType = PurchaseSaleItemInputType | PurchaseRentalItemInputType | PurchaseServiceItemInputType | PurchaseReplacementItemInputType;
 ```
 
 ### `PurchaseItemSchema`
@@ -27528,14 +27686,24 @@ discount.
 flat line it records what came off the operator's GROSS, and `amount_cents`
 is the NET — what CFS pays, which receipts, basis and bills slice.
 
-There is no subtotal/discounted/taxes/total triple: purchases are
-resale-exempt (no tax), and gross = `amount_cents + discount.amount_cents`.
+There is no subtotal/discounted/total triple, and gross =
+`amount_cents + discount.amount_cents`.
+
+**Tax is EXEMPTION, not absence** (api-cloudrun's `one-document-model` plan):
+a payable line is stamped with its type's default tax class like any other
+priced line (`LineTaxCore`), and the payable side resolves it exempt, so
+`taxes` is `[]`. `taxes_base` is the class's rates BEFORE the exemption, as
+on an order line, so an exempt line records a non-empty base. A taxable
+purchase later (consumables, use tax) then needs no new path. Neither key
+reaches a Xero body or the bill's projection hash.
 
 ```ts
 interface PurchaseLinePrice {
   price_formula: PriceFormulaRef;
   rates: RateSnapshotType[];
   discount: DiscountType | null;
+  taxes: PriceModifierType[];
+  taxes_base?: TaxRefType[];
 }
 ```
 
@@ -27597,12 +27765,184 @@ One {@link PURCHASE_PRODUCT_ITEM_TYPES} member.
 type PurchaseProductItemTypeType = indexedAccess;
 ```
 
+### `PurchaseRentalItem`
+
+A RENTAL (Subrent) item — `quantity` units borrowed for a hire window and given back. Flat or time.
+
+```ts
+interface PurchaseRentalItem {
+  type: "rental";
+  uid_product: string;
+  amount_cents: number | null;
+  price: PurchaseLinePrice;
+  dates: PurchaseItemDates;
+  quantity_received: number;
+  quantity_billed: number | null;
+  quantity_canceled: number;
+  quantity_returned: number;
+  uid_orders: string[];
+  auto_link: boolean;
+  uid_units: string[];
+}
+```
+
+### `PurchaseRentalItemInputType`
+
+A rental (Subrent) item as an operator orders it. `amount_cents` on a flat line only (gross when discounted).
+
+```ts
+interface PurchaseRentalItemInputType {
+  type: "rental";
+  uid_product: string;
+  quantity: number;
+  amount_cents?: number | null;
+  ledger_account?: COACodeType;
+  dates: PurchaseItemDates;
+  uid_orders?: string[];
+  auto_link?: boolean;
+  uid_units?: string[];
+}
+```
+
+### `PurchaseRentalItemSchema`
+
+Zod schema for PurchaseRentalItem.
+
+```ts
+const PurchaseRentalItemSchema: z.ZodType<PurchaseRentalItem>;
+```
+
+### `PurchaseReplacementItem`
+
+A REPLACEMENT item — the supplier billing CFS for one of ITS units lost or
+damaged in CFS's hands, naming the out-of-service record the loss opened
+(until 2026-11 a `charge` with `uid_out_of_service`). No custody: the
+settlement movement (`return_to_supplier`) moves the units, not this line.
+Otherwise a {@link PurchaseServiceItem}.
+
+```ts
+interface PurchaseReplacementItem {
+  type: "replacement";
+  uid_out_of_service: string;
+}
+```
+
+### `PurchaseReplacementItemInputType`
+
+A replacement item as an operator raises it: a {@link PurchaseServiceItemInputType} naming its record.
+
+```ts
+interface PurchaseReplacementItemInputType {
+  type: "replacement";
+  uid_out_of_service: string;
+}
+```
+
+### `PurchaseReplacementItemSchema`
+
+Zod schema for PurchaseReplacementItem.
+
+```ts
+const PurchaseReplacementItemSchema: z.ZodType<PurchaseReplacementItem>;
+```
+
+### `PurchaseSaleItem`
+
+A SALE (Buy) item — ownership of `quantity` units of one product. Always flat.
+
+```ts
+interface PurchaseSaleItem {
+  type: "sale";
+  uid_product: string;
+  amount_cents: number;
+  price: PurchaseLinePrice;
+  expected_date: string | null;
+  quantity_received: number;
+  quantity_billed: number;
+  quantity_canceled: number;
+  landed_costs: PurchaseLandedCost[];
+}
+```
+
+### `PurchaseSaleItemInputType`
+
+A sale (Buy) item as an operator orders it — the buckets are the server's.
+
+```ts
+interface PurchaseSaleItemInputType {
+  type: "sale";
+  uid_product: string;
+  quantity: number;
+  amount_cents: number;
+  ledger_account?: COACodeType;
+  expected_date?: string | null;
+  landed_costs?: PurchaseLandedCostInputType[];
+}
+```
+
+### `PurchaseSaleItemSchema`
+
+Zod schema for PurchaseSaleItem.
+
+```ts
+const PurchaseSaleItemSchema: z.ZodType<PurchaseSaleItem>;
+```
+
 ### `PurchaseSchema`
 
 Zod schema for Purchase.
 
 ```ts
 const PurchaseSchema: z.ZodType<Purchase>;
+```
+
+### `PurchaseServiceItem`
+
+A SERVICE (Charge) item — something CFS pays for with no custody: a carrier
+line on a device CFS owns (Verizon), freight, a fee, Vision's standing history
+line. Flat (freight: one amount) or time (a carrier line).
+
+`uid_product` is attribution only (api-cloudrun#1360, #1364): the product the
+spend is for. Permanently optional — freight attributes nothing.
+
+```ts
+interface PurchaseServiceItem {
+  type: "service";
+  amount_cents: number | null;
+  price: PurchaseLinePrice;
+  dates: PurchaseItemDates | null;
+  quantity_billed: number | null;
+  quantity_canceled: number;
+  auto_link: boolean;
+  uid_units: string[];
+  uid_product?: string;
+}
+```
+
+### `PurchaseServiceItemInputType`
+
+A service (Charge) item as an operator raises it. Its account is the operator's — there is no default.
+
+```ts
+interface PurchaseServiceItemInputType {
+  type: "service";
+  name: string;
+  quantity?: number;
+  amount_cents?: number | null;
+  ledger_account: COACodeType;
+  dates?: PurchaseItemDates | null;
+  auto_link?: boolean;
+  uid_units?: string[];
+  uid_product?: string;
+}
+```
+
+### `PurchaseServiceItemSchema`
+
+Zod schema for PurchaseServiceItem.
+
+```ts
+const PurchaseServiceItemSchema: z.ZodType<PurchaseServiceItem>;
 ```
 
 ### `PurchaseStatusEnum`
@@ -27763,55 +28103,6 @@ interface ReversePurchaseReturnInputType {
 }
 ```
 
-### `SubrentItem`
-
-A SUBRENT item — `quantity` units borrowed for a hire window and given back. Flat or time.
-
-```ts
-interface SubrentItem {
-  type: "subrent";
-  uid_product: string;
-  quantity: number;
-  amount_cents: number | null;
-  price: PurchaseLinePrice;
-  coa_posting: COACostType;
-  dates: PurchaseItemDates;
-  quantity_received: number;
-  quantity_billed: number | null;
-  quantity_canceled: number;
-  quantity_returned: number;
-  uid_orders: string[];
-  auto_link: boolean;
-  uid_units: string[];
-}
-```
-
-### `SubrentItemInputType`
-
-A subrent item as an operator orders it. `amount_cents` on a flat line only (gross when discounted).
-
-```ts
-interface SubrentItemInputType {
-  type: "subrent";
-  uid_product: string;
-  quantity: number;
-  amount_cents?: number | null;
-  coa_posting?: COACostType;
-  dates: PurchaseItemDates;
-  uid_orders?: string[];
-  auto_link?: boolean;
-  uid_units?: string[];
-}
-```
-
-### `SubrentItemSchema`
-
-Zod schema for SubrentItem.
-
-```ts
-const SubrentItemSchema: z.ZodType<SubrentItem>;
-```
-
 ### `UpdatePurchaseInput`
 
 Zod schema for UpdatePurchaseInputType.
@@ -27868,17 +28159,33 @@ Derive `query_by_item_types` — the distinct item types, in first-seen order.
 
 ### `deriveQueryByOrders(items: readonly PurchaseItem[]): string[]`
 
-Derive `query_by_orders` — the distinct union of the subrent items' `uid_orders`, in first-seen order.
+Derive `query_by_orders` — the distinct union of the rental items' `uid_orders`, in first-seen order.
 
 ### `deriveQueryByProducts(items: readonly PurchaseItem[]): string[]`
 
 Derive `query_by_products` — the distinct products the items ORDER, in first
-appearance order. A charge's attribution is not an order and is left out.
-The one author of the mirror, called by every writer.
+appearance order. Attribution is not an order and is left out. The one author
+of the mirror, called by every writer.
 
 ### `deriveQueryByUnits(items: readonly PurchaseItem[]): string[]`
 
-Derive `query_by_units` — the distinct units the subrent and charge lines cover, sorted.
+Derive `query_by_units` — the distinct units the rental, service and replacement lines cover, sorted.
+
+### `payablePostingIssues(type: SharedLineType, account: number): typeLiteral[]`
+
+May a payable line of `type` post to `account`? The class is
+`SIDE_CONTRACTS.payable.posting_class[type]` (`schemas/side.ts`):
+
+- `asset_or_expensed` (a Buy) — `COA_ASSET_CODES`, plus the TEMPORARY
+  `COA_EXPENSED_ASSET_CODES` (de minimis acquisitions expensed directly;
+  owner, 2026-11-07);
+- `cost` (a Subrent) — `COA_COST_CODES`;
+- `any` (a Charge or Replacement) — any `COACode`.
+
+One rule for the purchase, bill and credit lines alike. Until 2026-11 a bill
+line took any account while the purchase's buy took an asset one; the
+census found the bills' non-asset buys were all de minimis acquisitions
+(6500 / 6300) plus one mis-coding (6000) the owner recodes.
 
 ### `purchaseItemBasis(item: typeLiteral): PriceFormulaBasis`
 
@@ -27898,20 +28205,22 @@ line, whose cost is decided as it accrues.
 
 ### `purchaseItemProduct(item: PurchaseItem): string | undefined`
 
-The product an item ORDERS, or `undefined` — a charge's `uid_product` is attribution, not an order.
+The product an item ORDERS, or `undefined` — a service or replacement line's
+`uid_product` is attribution, not an order.
 
 ### `purchaseItemResolved(item: PurchaseItem): boolean`
 
 Has this item nothing left to happen?
 
-- **buy** — every unit received or canceled, and billed for at least what was
+- **sale** — every unit received or canceled, and billed for at least what was
   not canceled (over-billing is flagged, not held open).
-- **subrent** — every unit received or canceled, every unit received gone
+- **rental** — every unit received or canceled, every unit received gone
   back (a hire with units still in CFS's custody is not finished), and on a
   flat line billed in full. A TIME line resolves on custody alone (Q7): it
   bills windows as they accrue, with no count to close.
-- **charge** — a flat one when billed or canceled in full; a time one only
-  once canceled in full, since a carrier line accrues for as long as it lives.
+- **service** / **replacement** — a flat one when billed or canceled in
+  full; a time one only once canceled in full, since a carrier line accrues
+  for as long as it lives.
 
 Payment is the bill's business and holds nothing open.
 
@@ -27935,13 +28244,22 @@ some quantity of one purchase item, and moves that item's `quantity_billed` in
 the same transaction. Design: api-cloudrun#1210; the item shape,
 api-cloudrun#1407.
 
-## Why not `invoices` with a direction
+## Own collections, one MODEL (superseded ruling)
 
-A CFS invoice is an order PROJECTION — shared-field merge, destinations,
-`priceDocument` tax, invoice actions, templates — and every one of those
-readers would need a direction filter. A bill shares none of it. Supplier
-credits are likewise not AR `credit-notes`: those carry an organization
-snapshot, `priceCreditNote` tax and AR reasons.
+This docblock used to argue against `invoices` with a direction: every AR
+reader would need a direction filter. That argument stands for the
+COLLECTION — bills and supplier credits stay their own collections (owner,
+2026-11-07) — and it was never an argument against sharing a MODEL.
+api-cloudrun's `one-document-model` plan moves the supplier side onto the
+customer side's: a bill is the payable twin of an invoice, a supplier credit
+of a credit note, and every difference is an entry in `SIDE_CONTRACTS`
+(`schemas/side.ts`) rather than a branch on the collection. No sign enters the
+math; the side is derived from the collection, never stored.
+
+Phase 1 shares the LINE: the head (`LineItemCore`), the posting
+(`LedgerPostingCore`, `ledger_account`) and the tax levers (`LineTaxCore`),
+with the receivable line types labelled per side. The pricer, sync, diff and
+status follow in later phases.
 
 ## Pushed or linked
 
@@ -27974,7 +28292,9 @@ because `SETTLEMENT_CONTRACTS[type].sums_into` names those storage fields and
 identity `paid + credited + void + due === total` is refined, as on the
 invoice.
 
-No tax: purchases are resale-exempt (owner, 2026-10-05) and push `NoTax`.
+No tax is charged: purchases are resale-exempt (owner, 2026-10-05) and push
+`NoTax`. A line still carries its type's tax class and `price.taxes: []` —
+exemption, not absence (`PurchaseLinePrice`, `schemas/purchase.ts`).
 
 ## A bill freezes under the invoice's rules (D10)
 
@@ -28023,7 +28343,8 @@ A PUSHED bill item carries no amount: the writer defaults it from the
 purchase item (`projectPurchaseLineToBillLine`, `@cfs/core/utils/purchase-documents`) —
 a flat line at the item's cumulative share, a time line priced from its
 units' UNBILLED charge windows — and stamps the purchase item's `name`,
-`price`, `coa_posting` and `uid_tracking_category`. The operator then
+`description`, `price`, `ledger_account`, `uid_tracking_category` and tax
+class. The operator then
 overrides any of them until the bill is settled ({@link UpdatePurchaseBillInput}).
 A LINKED bill carries `total_cents` as Xero has it.
 
@@ -28059,12 +28380,14 @@ type CreatePurchaseCreditInputType = typeLiteral | typeLiteral;
 
 The classes a bill's editable fields fall into, for the freeze question
 *"may an operator still change this field?"* — `INVOICE_FIELD_CLASSES` with
-`organization` → `supplier` and `coa_revenue` → `coa_posting`.
+`organization` → `supplier` and `coa_revenue` → `ledger_account` (the class is
+named after its one member, as the invoice's is; `coa_posting` until the
+one-document-model Phase 1 rename).
 
 Explicit tuple type rather than `as const` alone (core#43).
 
 ```ts
-const PURCHASE_BILL_FIELD_CLASSES: readonly ["supplier", "date", "line_money", "coa_posting", "tracking", "text"];
+const PURCHASE_BILL_FIELD_CLASSES: readonly ["supplier", "date", "line_money", "ledger_account", "tracking", "text"];
 ```
 
 ### `PURCHASE_BILL_FIELD_FREEZE`
@@ -28207,9 +28530,11 @@ writer re-meters `counts` and re-prices `amount_cents`. A flat line's
 interface PurchaseBillLineEditInputType {
   uid: string;
   name?: string;
+  description?: string;
   quantity?: number;
   amount_cents?: number;
-  coa_posting?: COACodeType;
+  ledger_account?: COACodeType;
+  uid_tax_class_override?: string | null;
   uid_tracking_category?: string | null;
   price?: typeLiteral;
   units?: PurchaseDocumentLineUnit[];
@@ -28379,46 +28704,6 @@ One {@link PURCHASE_CREDIT_STATUSES} member.
 type PurchaseCreditStatusType = indexedAccess;
 ```
 
-### `PurchaseDocumentChargeItem`
-
-A bill or credit CHARGE line — freight, a fee, a carrier line, or a supplier's
-loss or damage charge on a subrent. Posts to its own account and never
-touches basis.
-
-A **document-only** charge (no `path_purchase_item`) is the document's own
-row, like an invoice's loss-and-damage line: freight nobody expected, and
-Vision's historic SPENDs. One that projects a purchase `charge` item names it.
-
-## Attribution (api-cloudrun#1360, #1364)
-
-- `uid_product` — the product the spend is attributed to. The writer emits
-  the product's Xero `ItemCode` beside the stated account when it has one;
-  rental items are untracked in Xero, so the code moves no Xero quantity or
-  value.
-- `uid_out_of_service` — the record a loss or damage charge is for. A
-  `mark_lost` record's id is a `MovementId`, hence `OutOfServiceId`.
-
-Both permanent `.optional()`: freight and fees name nothing.
-
-```ts
-interface PurchaseDocumentChargeItem {
-  type: "charge";
-  uid: string;
-  path: string[];
-  name: string;
-  quantity: number;
-  amount_cents: number;
-  coa_posting: COACodeType;
-  uid_tracking_category: string | null;
-  price: PurchaseDocumentLinePrice;
-  units: PurchaseDocumentLineUnit[];
-  dates: ChargeWindowType | null;
-  uid_product?: string;
-  uid_out_of_service?: string;
-  path_purchase_item?: string[];
-}
-```
-
 ### `PurchaseDocumentChargeItemInputType`
 
 A document-only charge item as an operator states it on a PUSHED bill or
@@ -28435,7 +28720,8 @@ an attribution would vanish with nothing failing (api-cloudrun#1360).
 ```ts
 interface PurchaseDocumentChargeItemInputType {
   name: string;
-  coa_posting: COACodeType;
+  description?: string;
+  ledger_account: COACodeType;
   amount_cents: number;
   uid_product?: string;
   uid_out_of_service?: string;
@@ -28443,20 +28729,12 @@ interface PurchaseDocumentChargeItemInputType {
 }
 ```
 
-### `PurchaseDocumentChargeItemSchema`
-
-Zod schema for PurchaseDocumentChargeItem.
-
-```ts
-const PurchaseDocumentChargeItemSchema: z.ZodType<PurchaseDocumentChargeItem>;
-```
-
 ### `PurchaseDocumentItem`
 
 Union of a bill or credit item's arms, discriminated on `type`.
 
 ```ts
-type PurchaseDocumentItem = PurchaseDocumentProductItem | PurchaseDocumentChargeItem;
+type PurchaseDocumentItem = PurchaseDocumentProductItem | PurchaseDocumentServiceItem | PurchaseDocumentReplacementItem;
 ```
 
 ### `PurchaseDocumentItemInput`
@@ -28490,8 +28768,8 @@ const PurchaseDocumentItemSchema: z.ZodType<PurchaseDocumentItem>;
 
 How a bill or credit line is priced: the purchase line's {@link PurchaseLinePrice}
 (formula snapshot, rates, discount — each `propagate: true` there, so an
-un-overridden bill line follows its purchase line) plus the line's frozen
-metered `counts` (ruling 8).
+un-overridden bill line follows its purchase line; and the exempt tax keys)
+plus the line's frozen metered `counts` (ruling 8).
 
 - **flat** — `rates: []`, `counts: []`; `amount_cents` is the stated net share.
 - **time** — `rates` ≥ 1, and `counts` are the UNIT-periods the line bills:
@@ -28533,7 +28811,7 @@ interface PurchaseDocumentLineUnit {
 
 ### `PurchaseDocumentLineUnitSchema`
 
-Zod schema for {@link PurchaseDocumentLineUnit}.
+Zod schema for PurchaseDocumentLineUnit.
 
 ```ts
 const PurchaseDocumentLineUnitSchema: z.ZodType<PurchaseDocumentLineUnit>;
@@ -28558,29 +28836,23 @@ type PurchaseDocumentOriginType = indexedAccess;
 ### `PurchaseDocumentProductItem`
 
 A bill or credit item that PROJECTS a purchase item — some quantity of one
-buy or subrent item (D5). It names that item by `path_purchase_item`, as an
-invoice line names its order line by `path_order_item`, and carries its own
-copy of the shared fields, each of which it may override until the bill is
-settled: the billed `quantity` and `amount_cents` (homonyms of the purchase
-item's ordered ones), `price`, `name`, `coa_posting` and
-`uid_tracking_category` (`propagate: true` on the purchase side).
+sale (Buy) or rental (Subrent) item (D5). It names that item by
+`path_purchase_item`, as an invoice line names its order line by
+`path_order_item`, and carries its own copy of the shared fields, each of
+which it may override until the bill is settled: the billed `quantity` and
+`amount_cents` (homonyms of the purchase item's ordered ones), `price`,
+`name`, `description`, `ledger_account`, `uid_tracking_category` and the tax
+class (`propagate: true` on the shared declarations).
 
 On a LINKED bill the posting is the Xero document's where it has one; the
 purchase item's is the expected one, so an account divergence is an ordinary
-field difference between projection and source. That is why `coa_posting`
-here is any `COACode`, not the purchase arm's subset.
+field difference between projection and source. The account still has to
+sit in the type's class (`payablePostingIssues`).
 
 ```ts
 interface PurchaseDocumentProductItem {
   type: PurchaseProductItemTypeType;
-  uid: string;
-  path: string[];
-  name: string;
   uid_product: string;
-  quantity: number;
-  amount_cents: number;
-  coa_posting: COACodeType;
-  uid_tracking_category: string | null;
   path_purchase_item: string[];
 }
 ```
@@ -28591,6 +28863,58 @@ Zod schema for PurchaseDocumentProductItem.
 
 ```ts
 const PurchaseDocumentProductItemSchema: z.ZodType<PurchaseDocumentProductItem>;
+```
+
+### `PurchaseDocumentReplacementItem`
+
+A bill or credit REPLACEMENT line — the supplier billing CFS for its unit
+lost or damaged in CFS's hands, naming the out-of-service record (until
+2026-11 a `charge` with `uid_out_of_service`). A `mark_lost` record's id is a
+`MovementId`, hence `OutOfServiceId`.
+
+```ts
+interface PurchaseDocumentReplacementItem {
+  type: "replacement";
+  uid_out_of_service: string;
+}
+```
+
+### `PurchaseDocumentReplacementItemSchema`
+
+Zod schema for PurchaseDocumentReplacementItem.
+
+```ts
+const PurchaseDocumentReplacementItemSchema: z.ZodType<PurchaseDocumentReplacementItem>;
+```
+
+### `PurchaseDocumentServiceItem`
+
+A bill or credit SERVICE (Charge) line — freight, a fee, a carrier line.
+Posts to its own account and never touches basis.
+
+A **document-only** service line (no `path_purchase_item`) is the document's
+own row, like an invoice's loss-and-damage line: freight nobody expected.
+One that projects a purchase `service` item names it.
+
+`uid_product` is attribution (api-cloudrun#1360, #1364): the writer emits the
+product's Xero `ItemCode` beside the stated account when it has one; rental
+items are untracked in Xero, so the code moves no Xero quantity or value.
+Permanent `.optional()`: freight and fees name nothing.
+
+```ts
+interface PurchaseDocumentServiceItem {
+  type: "service";
+  uid_product?: string;
+  path_purchase_item?: string[];
+}
+```
+
+### `PurchaseDocumentServiceItemSchema`
+
+Zod schema for PurchaseDocumentServiceItem.
+
+```ts
+const PurchaseDocumentServiceItemSchema: z.ZodType<PurchaseDocumentServiceItem>;
 ```
 
 ### `ReversePurchaseCreditAllocationInput`
@@ -44367,9 +44691,9 @@ The item's ARM decides the interval:
 
 | item | entry | quantity |
 |---|---|---|
-| `subrent` | `[dates.start, dates.end]` (`end: null` is +∞), kind `subrent` | `quantity − canceled − returned` |
-| `buy` | `[expected_date, +∞)`, kind `inbound` | `quantity − canceled − received` |
-| `charge` | none — it brings no unit into custody | — |
+| `rental` (Subrent) | `[dates.start, dates.end]` (`end: null` is +∞), kind `subrent` | `quantity − canceled − returned` |
+| `sale` (Buy) | `[expected_date, +∞)`, kind `inbound` | `quantity − canceled − received` |
+| `service` / `replacement` | none — they bring no unit into custody | — |
 
 Liveness is the reducers' one filter, as for bookings and out-of-service:
 only an `active` purchase supplies anything, and an item supplying nothing is
@@ -49026,7 +49350,7 @@ sides.
 A purchase line as the ruleset reads it.
 
 ```ts
-type PurchaseActionItem = Pick<BuyItem, LineKeys | "type" | "quantity_received"> | Pick<SubrentItem, LineKeys | "type" | "quantity_received" | "quantity_returned"> | Pick<ChargeItem, LineKeys | "type">;
+type PurchaseActionItem = Pick<PurchaseSaleItem, LineKeys | "type" | "quantity_received"> | Pick<PurchaseRentalItem, LineKeys | "type" | "quantity_received" | "quantity_returned"> | Pick<PurchaseServiceItem, LineKeys | "type"> | Pick<PurchaseReplacementItem, LineKeys | "type">;
 ```
 
 ### `PurchaseActionOffer`
@@ -49132,7 +49456,7 @@ Everything an operator may do to a supplier credit: void it while nothing has dr
 ### `purchaseItemClosable(item: PurchaseActionItem): boolean`
 
 **Would a close change this line?** Units still to arrive are canceled; a
-charge cancels its unbilled quantity, or all of it on a time line. A subrent
+service or replacement cancels its unbilled quantity, or all of it on a time line. A rental
 with units still out is NOT closable: the close zeroes its supply, so the API
 refuses it until they have gone back.
 
@@ -49256,7 +49580,8 @@ line's money is still the delta of two non-negative amounts.
 ## Sync never touches windows or quantities
 
 The merge follows `price` (formula, rates, discount terms), `name`, `type`,
-`coa_posting`, `uid_tracking_category` and the attribution keys onto every
+`description`, `ledger_account`, `uid_tracking_category`, the tax class and
+the attribution keys onto every
 UNSETTLED, PUSHED bill, three-way against the previous purchase — the
 classification `classifySharedFields(PurchaseSchema, PurchaseBillSchema)`
 reads off the two schemas. `quantity`, `amount_cents` and `dates` are
@@ -49394,20 +49719,20 @@ interface PurchaseLineCoverage {
 ### `PurchaseLineSeed`
 
 One offered purchase line for uncovered windows — the supplier twin of a
-`ReplacementLineSeed`. Always a TIME `charge` line: a window is a service
+`ReplacementLineSeed`. Always a TIME `service` (Charge) line: a window is a service
 line, not custody, and a supplier-owned unit's subrent line already names it
 from its receipt.
 
 ```ts
 interface PurchaseLineSeed {
-  type: "charge";
+  type: "service";
   uid_product: string;
   name: string;
   uid_units: string[];
   uid_price_formula: string;
   provider: UidNameRefType | null;
   rates: typeLiteral[];
-  coa_posting: COACostType | null;
+  ledger_account: COACostType | null;
   dates: typeLiteral;
   windows: typeLiteral[];
   warning: string | null;
@@ -49889,7 +50214,7 @@ The result of {@link expandPurchaseItems}.
 type PurchaseExpansionResult = typeLiteral | typeLiteral;
 ```
 
-### `allocateLandedCostCents(amountCents: number, lines: readonly Pick<BuyItem, "amount_cents" | "quantity" | "quantity_received" | "quantity_canceled">[]): number[]`
+### `allocateLandedCostCents(amountCents: number, lines: readonly Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "quantity_received" | "quantity_canceled">[]): number[]`
 
 Spread one landed amount over several buy lines, in proportion to each
 line's value still to arrive ({@link landedCostWeightCents}), with
@@ -49969,17 +50294,17 @@ Derive `query_by_item_types` — the distinct item types, in first-seen order.
 
 ### `deriveQueryByOrders(items: readonly PurchaseItem[]): string[]`
 
-Derive `query_by_orders` — the distinct union of the subrent items' `uid_orders`, in first-seen order.
+Derive `query_by_orders` — the distinct union of the rental items' `uid_orders`, in first-seen order.
 
 ### `deriveQueryByProducts(items: readonly PurchaseItem[]): string[]`
 
 Derive `query_by_products` — the distinct products the items ORDER, in first
-appearance order. A charge's attribution is not an order and is left out.
-The one author of the mirror, called by every writer.
+appearance order. Attribution is not an order and is left out. The one author
+of the mirror, called by every writer.
 
 ### `deriveQueryByUnits(items: readonly PurchaseItem[]): string[]`
 
-Derive `query_by_units` — the distinct units the subrent and charge lines cover, sorted.
+Derive `query_by_units` — the distinct units the rental, service and replacement lines cover, sorted.
 
 ### `expandPurchaseItems(items: readonly PurchaseItemInputType[], products: ReadonlyMap<string, PurchaseExpansionProduct>): PurchaseExpansionResult`
 
@@ -50033,11 +50358,11 @@ schema refuses — the caller's 400 to make, not this function's to clamp.
 **Returns** — `discount` is `null` when none was stated; otherwise its
 `amount_cents` is `gross − net`.
 
-### `isLandedCostFrozen(entry: Pick<PurchaseLandedCost, "received_at_entry">, line: Pick<BuyItem, "quantity_received">): boolean`
+### `isLandedCostFrozen(entry: Pick<PurchaseLandedCost, "received_at_entry">, line: Pick<PurchaseSaleItem, "quantity_received">): boolean`
 
 Is a landed cost frozen? A receipt has priced part of it once `received > received_at_entry`.
 
-### `landedCostWeightCents(line: Pick<BuyItem, "amount_cents" | "quantity" | "quantity_received" | "quantity_canceled">): number`
+### `landedCostWeightCents(line: Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "quantity_received" | "quantity_canceled">): number`
 
 A line's weight when one landed amount is spread over several lines: the
 value still to arrive, `cumulativeShareCents(amount, quantity, received,
@@ -50090,24 +50415,26 @@ line, whose cost is decided as it accrues.
 
 ### `purchaseItemProduct(item: PurchaseItem): string | undefined`
 
-The product an item ORDERS, or `undefined` — a charge's `uid_product` is attribution, not an order.
+The product an item ORDERS, or `undefined` — a service or replacement line's
+`uid_product` is attribution, not an order.
 
 ### `purchaseItemResolved(item: PurchaseItem): boolean`
 
 Has this item nothing left to happen?
 
-- **buy** — every unit received or canceled, and billed for at least what was
+- **sale** — every unit received or canceled, and billed for at least what was
   not canceled (over-billing is flagged, not held open).
-- **subrent** — every unit received or canceled, every unit received gone
+- **rental** — every unit received or canceled, every unit received gone
   back (a hire with units still in CFS's custody is not finished), and on a
   flat line billed in full. A TIME line resolves on custody alone (Q7): it
   bills windows as they accrue, with no count to close.
-- **charge** — a flat one when billed or canceled in full; a time one only
-  once canceled in full, since a carrier line accrues for as long as it lives.
+- **service** / **replacement** — a flat one when billed or canceled in
+  full; a time one only once canceled in full, since a carrier line accrues
+  for as long as it lives.
 
 Payment is the bill's business and holds nothing open.
 
-### `purchaseLineReceiptTargetCents(line: Pick<BuyItem, "amount_cents" | "quantity" | "landed_costs">, quantityReceived: number): number`
+### `purchaseLineReceiptTargetCents(line: Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "landed_costs">, quantityReceived: number): number`
 
 The CUMULATIVE cost a buy line's receipts should have journalled once
 `quantityReceived` units are in: the goods' share plus every landed cost's
@@ -50157,13 +50484,13 @@ the bill projector, not a number here.
 
 Units of a buy or subrent item still to be received: `quantity − canceled − received`.
 
-### `remainingToReturn(item: Pick<SubrentItem, "quantity_received" | "quantity_returned">): number`
+### `remainingToReturn(item: Pick<PurchaseRentalItem, "quantity_received" | "quantity_returned">): number`
 
 Units of a SUBRENT item still to go back to the supplier: `received − returned`.
 Bounded by what came in, not by what was ordered — an unreceived unit owes no
 return.
 
-### `strandedLandedCents(line: Pick<BuyItem, "quantity" | "quantity_received" | "quantity_canceled" | "landed_costs">): number`
+### `strandedLandedCents(line: Pick<PurchaseSaleItem, "quantity" | "quantity_received" | "quantity_canceled" | "landed_costs">): number`
 
 Landed cents a line can no longer price, because no unit is left to arrive:
 Σ over its entries of `amount_cents − landedPricedCents(entry, received)`,

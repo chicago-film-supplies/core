@@ -1043,7 +1043,7 @@ export const XERO_ASSET_ACCOUNTS = {
   /** Fixed Asset Clearing — the fleet, `product.type === "rental"`. */
   fixed_asset_clearing: 1999,
 } as const;
-// The schema-side list a buy item's `coa_posting` is refined against
+// The schema-side list a sale (Buy) item's `ledger_account` is refined against
 // (`COA_ASSET_CODES`, `schemas/common.ts`) must name exactly these two codes —
 // a compile error both ways, since a schema cannot import this module.
 type _AssetAccountsAreAssetCodes = typeof XERO_ASSET_ACCOUNTS[keyof typeof XERO_ASSET_ACCOUNTS] extends COAAssetType
