@@ -4726,7 +4726,7 @@
           "kind": "interface",
           "name": "PurchaseCreditItemInputType",
           "declaration": "interface PurchaseCreditItemInputType {\n  units?: PurchaseDocumentLineUnit[];\n  dates?: ChargeWindowType | null;\n}",
-          "doc": "One line of a supplier CREDIT as an operator states it: a purchase item and\nwhat it un-bills.\n\n- **flat** — `quantity` units, priced at the item's cumulative share of the\n  range they un-bill (`cumulativeShareCents`). `units` and `dates` are refused.\n- **time** — the TIME it un-bills, never units of an amount: `units` names each\n  unit's credited windows, `dates` the credited span of a span-metered line\n  (Verizon). Every credited piece must already be billed and not credited\n  (`billedUnitCoverage`), and the line is priced as what those windows\n  contributed: `meter(coverage) − meter(coverage − credited)`, at the purchase\n  line's snapshotted rates (`projectPurchaseLineToCreditLine`,\n  `@cfs/core/utils/purchase-documents`). `quantity` is the count of units\n  credited, or of the span's units on a unit-less span line."
+          "doc": "One line of a supplier CREDIT as an operator states it: a purchase item and\nwhat it un-bills.\n\n- **flat** — `quantity` units, priced at the item's cumulative share of the\n  range they un-bill (`cumulativeShareCents`). `units` and `dates` are refused.\n- **time** — refused: every payable line is priced flat until api-cloudrun's\n  `one-document-model` Phase 3, whose pair-window coverage credits time by\n  counts as an AR credit note does (0b ruling 3). `units` and `dates` stay\n  declared here until that phase reshapes this input; nothing accepts them."
         },
         {
           "kind": "variable",
@@ -4792,7 +4792,7 @@
           "kind": "interface",
           "name": "PurchaseDocumentLinePrice",
           "declaration": "interface PurchaseDocumentLinePrice {\n  counts: TierCountType[];\n}",
-          "doc": "How a bill or credit line is priced: the purchase line's {@link PurchaseLinePrice}\n(formula snapshot, rates, discount — each `propagate: true` there, so an\nun-overridden bill line follows its purchase line; and the exempt tax keys)\nplus the line's frozen metered `counts` (ruling 8).\n\n- **flat** — `rates: []`, `counts: []`; `amount_cents` is the stated net share.\n- **time** — `rates` ≥ 1, and `counts` are the UNIT-periods the line bills:\n  the engine's tier counts summed over every unit's windows, so the line's\n  money is `priceFromFormula(rates, counts, 1, discount)` — quantity is\n  folded into the counts, because each unit meters its own windows and a\n  per-unit count does not factor out. On a PUSHED document the refine\n  asserts `amount_cents` equals exactly that; a LINKED document's money is\n  Xero's and is diffed, never refused."
+          "doc": "How a bill or credit line is priced: the purchase line's {@link PurchaseLinePrice}\n(formula snapshot, rates, discount — each `propagate: true` there, so an\nun-overridden bill line follows its purchase line; the exempt tax keys; and\nthe computed money `priceDocument` writes from the line's stated\n`amount_cents`) plus the line's metered `counts`, always `[]` while every\npayable line is flat (time lines return in one-document-model Phase 3).\n\nA LINKED document's `amount_cents` is Xero's money, stamped by the link\nwriter; the computed money follows from it like any other stated total."
         },
         {
           "kind": "variable",
@@ -4935,8 +4935,8 @@
         {
           "kind": "interface",
           "name": "PurchaseLinePrice",
-          "declaration": "interface PurchaseLinePrice {\n  price_formula: PriceFormulaRef;\n  rates: RateSnapshotType[];\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n}",
-          "doc": "How a purchase line is priced (purchases-as-documents Phase 2 rulings 1, 2,\n7): the formula it is priced by, the rates it snapshots, and a supplier\ndiscount.\n\n- A **flat** line (`price_formula.basis === \"flat\"`: a buy, a fixed-cost\n  subrent, freight or a fee) states its WHOLE cost in the line's\n  `amount_cents` and carries `rates: []`. Measured: most stored buys cost a\n  total that does not divide by their quantity, and every reader slices the\n  total with `cumulativeShareCents`, so no per-unit rate is stored.\n- A **time** line (Vision's \"weekly while on\", Verizon's \"monthly unless\n  suspended\") has `amount_cents: null` and the rates in force when it was\n  raised (Q13); what it costs is decided by the bills, priced from the\n  units' charge windows.\n\n`discount` is core's `Discount`. On a time line the engine applies it; on a\nflat line it records what came off the operator's GROSS, and `amount_cents`\nis the NET — what CFS pays, which receipts, basis and bills slice.\n\nThere is no subtotal/discounted/total triple, and gross =\n`amount_cents + discount.amount_cents`.\n\n**Tax is EXEMPTION, not absence** (api-cloudrun's `one-document-model` plan):\na payable line is stamped with its type's default tax class like any other\npriced line (`LineTaxCore`), and the payable side resolves it exempt, so\n`taxes` is `[]`. `taxes_base` is the class's rates BEFORE the exemption, as\non an order line, so an exempt line records a non-empty base. A taxable\npurchase later (consumables, use tax) then needs no new path. Neither key\nreaches a Xero body or the bill's projection hash."
+          "declaration": "interface PurchaseLinePrice {\n  price_formula: PriceFormulaRef;\n  rates: RateSnapshotType[];\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  total_cents: number;\n}",
+          "doc": "How a purchase line is priced (purchases-as-documents Phase 2 rulings 1, 2,\n7): the formula it is priced by, the rates it snapshots, a supplier\ndiscount, and the money `priceDocument` computes from them.\n\n- A line states its WHOLE net cost in the line's `amount_cents` (the DECLARED\n  stated total: a buy, a fixed-cost subrent, freight or a fee) and carries\n  `rates: []`. Measured: most stored buys cost a total that does not divide\n  by their quantity, and every reader slices the total with\n  `cumulativeShareCents`, so no per-unit rate is stored.\n- The COMPUTED half is the receivable line's money (`subtotal_cents`,\n  `subtotal_discounted_cents`, `taxes`, `total_cents`), written by\n  `priceDocument`'s stated-total arm (one-document-model Phase 2): subtotal =\n  `amount_cents + discount.amount_cents` (the operator's gross),\n  discounted = `amount_cents`, total = discounted + Σ taxes. Every money\n  reader reads it, as on an order line; `amount_cents` is the input.\n\n⚠️ **A TIME-priced payable line is refused until one-document-model Phase 3**,\nwhich meters a time line from its destination pair's charge windows as an\norder line is metered. Neither environment stores one (Phase 0b census).\n\n`discount` is core's `Discount`. On a payable line it records what came off\nthe operator's GROSS, so `discount.amount_cents` is declared, not derived;\n`amount_cents` is the NET — what CFS pays, which receipts, basis and bills\nslice.\n\n**Tax is EXEMPTION, not absence** (api-cloudrun's `one-document-model` plan):\na payable line is stamped with its type's default tax class like any other\npriced line (`LineTaxCore`), and the payable side resolves it exempt, so\n`taxes` is `[]`. `taxes_base` is the class's rates BEFORE the exemption, as\non an order line, so an exempt line records a non-empty base. A taxable\npurchase later (consumables, use tax) then needs no new path. Neither key\nreaches a Xero body or the bill's projection hash."
         },
         {
           "kind": "interface",
@@ -5709,8 +5709,14 @@
         {
           "kind": "interface",
           "name": "SideContract",
-          "declaration": "interface SideContract {\n  line_labels: Readonly<Record<SharedLineType, string>>;\n  posting_class: Readonly<Record<SharedLineType, PostingClass>>;\n  custody: Readonly<Record<SharedLineType, LineCustody>>;\n}",
+          "declaration": "interface SideContract {\n  line_labels: Readonly<Record<SharedLineType, string>>;\n  posting_class: Readonly<Record<SharedLineType, PostingClass>>;\n  custody: Readonly<Record<SharedLineType, LineCustody>>;\n  tax: SideTax;\n}",
           "doc": "One side's entries. Total over {@link SharedLineType}, so a new type is a compile error until both sides state it."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "SideTax",
+          "declaration": "type SideTax = \"resolved\" | \"exempt\";",
+          "doc": "How a side's lines are taxed:\n\n- `resolved` — the jurisdiction rule decides, per line and destination\n  (`resolveLineTax`); an exempt customer is exempt, and a `replacement` line\n  is taxed at the origin regardless (the receivable side).\n- `exempt` — every line is exempt, `replacement` included: CFS buys for\n  resale (owner, 2026-10-05). The line still resolves its class, so\n  `taxes_base` records what it is exempt FROM (the payable side)."
         },
         {
           "kind": "interface",
@@ -8276,7 +8282,7 @@
           "kind": "function",
           "name": "purchaseLineMoneyIssues",
           "signature": "purchaseLineMoneyIssues(item: typeLiteral): typeLiteral[]",
-          "doc": "The single-document money rule (ruling 1), shared by every arm and by the\nbill line: a flat line states an amount and no rates, a time line states\nrates and — on a purchase — no amount. A refine rather than a union arm\nbecause `basis` cuts across all three line types; arms would split each in\ntwo.",
+          "doc": "The single-document money rule (ruling 1), shared by every arm and by the\nbill line: a payable line is priced FLAT (time lines return in\none-document-model Phase 3), states its amount and no rates, and its computed\nmoney is what `priceDocument`'s stated-total arm derives from that amount.\nA refine rather than a union arm because it cuts across all four line types.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -12673,7 +12679,7 @@
     },
     {
       "entrypoint": "@cfs/core/schemas/purchase",
-      "moduleDoc": "Purchase document schema — Firestore collection: `purchases`\n\nWhat CFS ORDERED from a supplier: one ITEM per thing ordered, each with the\nquantity and the amount agreed. It moves nothing. api-cloudrun#1210 split a\n`purchase` movement, which used to be the order, the delivery, the bill and\n(through Xero) the debt all at once, into four facts with four homes:\n\n| fact     | home                                                   | moves                         |\n|----------|--------------------------------------------------------|-------------------------------|\n| ordered  | this document                                          | nothing                       |\n| received | `purchase` movements naming it in `sources[]`          | `quantity_held`, basis, units |\n| billed   | `purchase-bills` / `purchase-credits` naming it        | the Xero document             |\n| paid     | `settlements` rows against a bill                      | the bill's `totals`           |\n\nThe owner's real sequence is order → bill → delivery (days or weeks later,\npossibly partial) → payment, and before this document nothing could hold\n\"billed, not received\" — movement #3882 recorded three radios that had not\narrived. Design: api-cloudrun#1210.\n\n## The shape is the out-of-service record's, on purpose\n\n`schemas/out-of-service.ts` is the package's parent-with-movements shape and this\ncopies every part of it:\n\n- **Its receipts name it in `sources[]`** and it finds them through\n  `query_by_sources`. There is no `Movement.purchase` field and no back-list\n  of movement ids here — the HISTORY of a purchase is the journal.\n- **Co-written buckets** per item (`quantity_received`, `quantity_billed`,\n  `quantity_canceled`), each written in the same transaction as the receipt,\n  bill or close that moves it — the analogue of the record's `breakdown`.\n- **A derived status** in the record's vocabulary (`active | complete |\n  canceled`), authored by {@link derivePurchaseStatus} and refined here, so a\n  document asserting one status and holding buckets that say another does not\n  parse.\n\n## Items take the invoice's shape (api-cloudrun#1407)\n\n`items[]` is discriminated on `type`, the house key for a stored line union\n(`OrderDocItem`, `InvoiceDocItem`), and the ARM is per item — there is no\ndocument-level `kind`, so one purchase may mix arms:\n\n| `type` (label) | what CFS gets | custody | supply | priced |\n|---|---|---|---|---|\n| `sale` (Buy) | ownership | receipts raise `quantity_held` and basis | `inbound` until received | flat |\n| `rental` (Subrent) | units for a hire window | `subrent_in` / `subrent_out`, never owned | `subrent` over `dates` | flat or time |\n| `service` (Charge) | a service with no custody — a carrier line on an owned device, freight, a fee | none | none | flat or time |\n| `replacement` | the supplier billing CFS for its unit lost in CFS's hands | none | none | flat or time |\n\nThe types are the receivable side's, labelled per side (`SIDE_CONTRACTS`,\n`schemas/side.ts`; stored as `buy` / `subrent` / `charge` until the\none-document-model Phase 1 migration). (`usage` and `direct` retired into\n`charge`, and the nested `SubrentBilling` union into the price rule below —\npurchases-as-documents Phase 2.)\n\nEach item carries its own **row identity** (`uid`, and `path` = `[uid]`\nuntil a divider type exists — the writer is its one author), so one product\nmay sit on two items: a buy plus a re-order, or two hire windows. Bills and\ncredits name an item by `path` (`path_purchase_item`), the way an invoice line\nnames its order line.\n\nEach item also carries its own **posting** — `ledger_account` and\n`uid_tracking_category` (`LedgerPostingCore`), stamped at write rather than\nworked out at push. The account is constrained per type by\n{@link payablePostingIssues}: a sale posts to an inventory asset account\n(`COA_ASSET_CODES`, or a temporary de minimis expense account), a rental to a\nDirect Costs account (`COA_COST_CODES`), a service or replacement to any\naccount. Both are `propagate: true`, so a bill item follows its purchase\nitem's posting until an operator changes it there.\n\n## Money — flat lines state a total, time lines carry rates\n\nEvery item snapshots the formula it is priced by\n(`price.price_formula = { uid, name, basis }`, see {@link PurchaseLinePrice}):\n\n- **flat** — `amount_cents` is what the whole item costs, NET of any supplier\n  discount, integer cents, and `price.rates` is empty. The k-th receipt or\n  bill against an item is priced by `cumulativeShareCents`\n  (`@cfs/core/utils/purchases`), which rounds the CUMULATIVE share once, so the\n  partials sum to `amount_cents` exactly with no remainder rule. There is no\n  stored per-unit rate: measured on prod, most buys cost a total that does\n  not divide by their quantity, and no reader needs one (`perUnitCostAt4dp`\n  derives the display rate).\n- **time** — `amount_cents: null` and `price.rates` holds the rates in force\n  when the line was raised. What it costs is decided by its bills, priced\n  from the units' charge windows (`pricePurchaseDocument`).\n\nA per-line REFINE ({@link purchaseLineMoneyIssues}) rather than union arms,\nbecause `basis` cuts across all three types; arms would split each in two.\nIt also makes `quantity_billed` null exactly on time lines: billed is a\nco-written bucket only on flat lines, and a time line resolves on custody\n(Q7). Over-billing is never refused (D5) — the purchase↔bill diff flags it.\n\n`total_cents` is the COMMITTED amount (owner, 2026-10-30): Σ of the flat\nlines' amounts. A time line adds 0; what was billed against it is its bills'\ntotals.\n\nNo tax is CHARGED on a purchase (owner, 2026-10-05): stock bought for sale or\nrent is bought resale-exempt and the tax is collected from the end user. The\nline still carries a tax class and `taxes: []` — exemption, not absence (see\n{@link PurchaseLinePrice}).\n\nThe document stays one `z.strictObject` with a `superRefine` rather than a\nroot `discriminatedUnion`: no registered document schema has one, and the\ncolumn walker, `getInitialValues`, `getTestDoc` and the stored-defaults walk\nall assume a root object.",
+      "moduleDoc": "Purchase document schema — Firestore collection: `purchases`\n\nWhat CFS ORDERED from a supplier: one ITEM per thing ordered, each with the\nquantity and the amount agreed. It moves nothing. api-cloudrun#1210 split a\n`purchase` movement, which used to be the order, the delivery, the bill and\n(through Xero) the debt all at once, into four facts with four homes:\n\n| fact     | home                                                   | moves                         |\n|----------|--------------------------------------------------------|-------------------------------|\n| ordered  | this document                                          | nothing                       |\n| received | `purchase` movements naming it in `sources[]`          | `quantity_held`, basis, units |\n| billed   | `purchase-bills` / `purchase-credits` naming it        | the Xero document             |\n| paid     | `settlements` rows against a bill                      | the bill's `totals`           |\n\nThe owner's real sequence is order → bill → delivery (days or weeks later,\npossibly partial) → payment, and before this document nothing could hold\n\"billed, not received\" — movement #3882 recorded three radios that had not\narrived. Design: api-cloudrun#1210.\n\n## The shape is the out-of-service record's, on purpose\n\n`schemas/out-of-service.ts` is the package's parent-with-movements shape and this\ncopies every part of it:\n\n- **Its receipts name it in `sources[]`** and it finds them through\n  `query_by_sources`. There is no `Movement.purchase` field and no back-list\n  of movement ids here — the HISTORY of a purchase is the journal.\n- **Co-written buckets** per item (`quantity_received`, `quantity_billed`,\n  `quantity_canceled`), each written in the same transaction as the receipt,\n  bill or close that moves it — the analogue of the record's `breakdown`.\n- **A derived status** in the record's vocabulary (`active | complete |\n  canceled`), authored by {@link derivePurchaseStatus} and refined here, so a\n  document asserting one status and holding buckets that say another does not\n  parse.\n\n## Items take the invoice's shape (api-cloudrun#1407)\n\n`items[]` is discriminated on `type`, the house key for a stored line union\n(`OrderDocItem`, `InvoiceDocItem`), and the ARM is per item — there is no\ndocument-level `kind`, so one purchase may mix arms:\n\n| `type` (label) | what CFS gets | custody | supply | priced |\n|---|---|---|---|---|\n| `sale` (Buy) | ownership | receipts raise `quantity_held` and basis | `inbound` until received | flat |\n| `rental` (Subrent) | units for a hire window | `subrent_in` / `subrent_out`, never owned | `subrent` over `dates` | flat or time |\n| `service` (Charge) | a service with no custody — a carrier line on an owned device, freight, a fee | none | none | flat or time |\n| `replacement` | the supplier billing CFS for its unit lost in CFS's hands | none | none | flat or time |\n\nThe types are the receivable side's, labelled per side (`SIDE_CONTRACTS`,\n`schemas/side.ts`; stored as `buy` / `subrent` / `charge` until the\none-document-model Phase 1 migration). (`usage` and `direct` retired into\n`charge`, and the nested `SubrentBilling` union into the price rule below —\npurchases-as-documents Phase 2.)\n\nEach item carries its own **row identity** (`uid`, and `path` = `[uid]`\nuntil a divider type exists — the writer is its one author), so one product\nmay sit on two items: a buy plus a re-order, or two hire windows. Bills and\ncredits name an item by `path` (`path_purchase_item`), the way an invoice line\nnames its order line.\n\nEach item also carries its own **posting** — `ledger_account` and\n`uid_tracking_category` (`LedgerPostingCore`), stamped at write rather than\nworked out at push. The account is constrained per type by\n{@link payablePostingIssues}: a sale posts to an inventory asset account\n(`COA_ASSET_CODES`, or a temporary de minimis expense account), a rental to a\nDirect Costs account (`COA_COST_CODES`), a service or replacement to any\naccount. Both are `propagate: true`, so a bill item follows its purchase\nitem's posting until an operator changes it there.\n\n## Money — flat lines state a total, time lines carry rates\n\nEvery item snapshots the formula it is priced by\n(`price.price_formula = { uid, name, basis }`, see {@link PurchaseLinePrice}):\n\n- **flat** — `amount_cents` is what the whole item costs, NET of any supplier\n  discount, integer cents, and `price.rates` is empty. The k-th receipt or\n  bill against an item is priced by `cumulativeShareCents`\n  (`@cfs/core/utils/purchases`), which rounds the CUMULATIVE share once, so the\n  partials sum to `amount_cents` exactly with no remainder rule. There is no\n  stored per-unit rate: measured on prod, most buys cost a total that does\n  not divide by their quantity, and no reader needs one (`perUnitCostAt4dp`\n  derives the display rate).\n- **time** — REFUSED until api-cloudrun's `one-document-model` Phase 3, which\n  meters a time line from its destination pair's charge windows as an order\n  line is metered. The per-unit metering it used was deleted in Phase 2;\n  neither environment stores a time purchase line.\n\nEither way the line's `price` carries the money `priceDocument` computes —\nsee {@link PurchaseLinePrice}.\n\nA per-line REFINE ({@link purchaseLineMoneyIssues}) rather than union arms,\nbecause `basis` cuts across all three types; arms would split each in two.\nIt also makes `quantity_billed` null exactly on time lines: billed is a\nco-written bucket only on flat lines, and a time line resolves on custody\n(Q7). Over-billing is never refused (D5) — the purchase↔bill diff flags it.\n\n`total_cents` is the COMMITTED amount (owner, 2026-10-30): Σ of the flat\nlines' amounts. A time line adds 0; what was billed against it is its bills'\ntotals.\n\nNo tax is CHARGED on a purchase (owner, 2026-10-05): stock bought for sale or\nrent is bought resale-exempt and the tax is collected from the end user. The\nline still carries a tax class and `taxes: []` — exemption, not absence (see\n{@link PurchaseLinePrice}).\n\nThe document stays one `z.strictObject` with a `superRefine` rather than a\nroot `discriminatedUnion`: no registered document schema has one, and the\ncolumn walker, `getInitialValues`, `getTestDoc` and the stored-defaults walk\nall assume a root object.",
       "symbols": [
         {
           "kind": "variable",
@@ -12716,6 +12722,12 @@
           "name": "PURCHASE_STATUSES",
           "declaration": "const PURCHASE_STATUSES: \"active\" | \"complete\" | \"canceled\"[];",
           "doc": "Derived by {@link derivePurchaseStatus}, never client-set. The out-of-service\nvocabulary, for the reason `OOS_STATUSES` gives: orders, bookings and cards\nall say `active` for \"in progress\".\n\nPartial progress — some received, some billed — is read off the buckets, not\nencoded here. A status per stage (`partially_received`, `billed`, …) would be\na second rendering of numbers the item already carries."
+        },
+        {
+          "kind": "variable",
+          "name": "PayablePriceMoneyCore",
+          "declaration": "const PayablePriceMoneyCore: typeLiteral;",
+          "doc": "The computed money keys every payable line price carries — ONE instance per\nkey, spread by the purchase line and the bill/credit line alike, so the two\ncannot drift (`tests/item-shape-parity.test.ts` asserts the identity).\nDerived, so the purchase → bill merge never carries them: the pricer\nre-derives them on every grain.\n\n⚠️ Not on the `@cfs/core/schemas` barrel, like `TotalsCore`: no consumer\nassembles a price from parts."
         },
         {
           "kind": "interface",
@@ -12798,8 +12810,8 @@
         {
           "kind": "interface",
           "name": "PurchaseLinePrice",
-          "declaration": "interface PurchaseLinePrice {\n  price_formula: PriceFormulaRef;\n  rates: RateSnapshotType[];\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n}",
-          "doc": "How a purchase line is priced (purchases-as-documents Phase 2 rulings 1, 2,\n7): the formula it is priced by, the rates it snapshots, and a supplier\ndiscount.\n\n- A **flat** line (`price_formula.basis === \"flat\"`: a buy, a fixed-cost\n  subrent, freight or a fee) states its WHOLE cost in the line's\n  `amount_cents` and carries `rates: []`. Measured: most stored buys cost a\n  total that does not divide by their quantity, and every reader slices the\n  total with `cumulativeShareCents`, so no per-unit rate is stored.\n- A **time** line (Vision's \"weekly while on\", Verizon's \"monthly unless\n  suspended\") has `amount_cents: null` and the rates in force when it was\n  raised (Q13); what it costs is decided by the bills, priced from the\n  units' charge windows.\n\n`discount` is core's `Discount`. On a time line the engine applies it; on a\nflat line it records what came off the operator's GROSS, and `amount_cents`\nis the NET — what CFS pays, which receipts, basis and bills slice.\n\nThere is no subtotal/discounted/total triple, and gross =\n`amount_cents + discount.amount_cents`.\n\n**Tax is EXEMPTION, not absence** (api-cloudrun's `one-document-model` plan):\na payable line is stamped with its type's default tax class like any other\npriced line (`LineTaxCore`), and the payable side resolves it exempt, so\n`taxes` is `[]`. `taxes_base` is the class's rates BEFORE the exemption, as\non an order line, so an exempt line records a non-empty base. A taxable\npurchase later (consumables, use tax) then needs no new path. Neither key\nreaches a Xero body or the bill's projection hash."
+          "declaration": "interface PurchaseLinePrice {\n  price_formula: PriceFormulaRef;\n  rates: RateSnapshotType[];\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  total_cents: number;\n}",
+          "doc": "How a purchase line is priced (purchases-as-documents Phase 2 rulings 1, 2,\n7): the formula it is priced by, the rates it snapshots, a supplier\ndiscount, and the money `priceDocument` computes from them.\n\n- A line states its WHOLE net cost in the line's `amount_cents` (the DECLARED\n  stated total: a buy, a fixed-cost subrent, freight or a fee) and carries\n  `rates: []`. Measured: most stored buys cost a total that does not divide\n  by their quantity, and every reader slices the total with\n  `cumulativeShareCents`, so no per-unit rate is stored.\n- The COMPUTED half is the receivable line's money (`subtotal_cents`,\n  `subtotal_discounted_cents`, `taxes`, `total_cents`), written by\n  `priceDocument`'s stated-total arm (one-document-model Phase 2): subtotal =\n  `amount_cents + discount.amount_cents` (the operator's gross),\n  discounted = `amount_cents`, total = discounted + Σ taxes. Every money\n  reader reads it, as on an order line; `amount_cents` is the input.\n\n⚠️ **A TIME-priced payable line is refused until one-document-model Phase 3**,\nwhich meters a time line from its destination pair's charge windows as an\norder line is metered. Neither environment stores one (Phase 0b census).\n\n`discount` is core's `Discount`. On a payable line it records what came off\nthe operator's GROSS, so `discount.amount_cents` is declared, not derived;\n`amount_cents` is the NET — what CFS pays, which receipts, basis and bills\nslice.\n\n**Tax is EXEMPTION, not absence** (api-cloudrun's `one-document-model` plan):\na payable line is stamped with its type's default tax class like any other\npriced line (`LineTaxCore`), and the payable side resolves it exempt, so\n`taxes` is `[]`. `taxes_base` is the class's rates BEFORE the exemption, as\non an order line, so an exempt line records a non-empty base. A taxable\npurchase later (consumables, use tax) then needs no new path. Neither key\nreaches a Xero body or the bill's projection hash."
         },
         {
           "kind": "interface",
@@ -13097,7 +13109,7 @@
           "kind": "function",
           "name": "purchaseLineMoneyIssues",
           "signature": "purchaseLineMoneyIssues(item: typeLiteral): typeLiteral[]",
-          "doc": "The single-document money rule (ruling 1), shared by every arm and by the\nbill line: a flat line states an amount and no rates, a time line states\nrates and — on a purchase — no amount. A refine rather than a union arm\nbecause `basis` cuts across all three line types; arms would split each in\ntwo.",
+          "doc": "The single-document money rule (ruling 1), shared by every arm and by the\nbill line: a payable line is priced FLAT (time lines return in\none-document-model Phase 3), states its amount and no rates, and its computed\nmoney is what `priceDocument`'s stated-total arm derives from that amount.\nA refine rather than a union arm because it cuts across all four line types.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -13267,7 +13279,7 @@
           "kind": "interface",
           "name": "PurchaseCreditItemInputType",
           "declaration": "interface PurchaseCreditItemInputType {\n  units?: PurchaseDocumentLineUnit[];\n  dates?: ChargeWindowType | null;\n}",
-          "doc": "One line of a supplier CREDIT as an operator states it: a purchase item and\nwhat it un-bills.\n\n- **flat** — `quantity` units, priced at the item's cumulative share of the\n  range they un-bill (`cumulativeShareCents`). `units` and `dates` are refused.\n- **time** — the TIME it un-bills, never units of an amount: `units` names each\n  unit's credited windows, `dates` the credited span of a span-metered line\n  (Verizon). Every credited piece must already be billed and not credited\n  (`billedUnitCoverage`), and the line is priced as what those windows\n  contributed: `meter(coverage) − meter(coverage − credited)`, at the purchase\n  line's snapshotted rates (`projectPurchaseLineToCreditLine`,\n  `@cfs/core/utils/purchase-documents`). `quantity` is the count of units\n  credited, or of the span's units on a unit-less span line."
+          "doc": "One line of a supplier CREDIT as an operator states it: a purchase item and\nwhat it un-bills.\n\n- **flat** — `quantity` units, priced at the item's cumulative share of the\n  range they un-bill (`cumulativeShareCents`). `units` and `dates` are refused.\n- **time** — refused: every payable line is priced flat until api-cloudrun's\n  `one-document-model` Phase 3, whose pair-window coverage credits time by\n  counts as an AR credit note does (0b ruling 3). `units` and `dates` stay\n  declared here until that phase reshapes this input; nothing accepts them."
         },
         {
           "kind": "variable",
@@ -13333,7 +13345,7 @@
           "kind": "interface",
           "name": "PurchaseDocumentLinePrice",
           "declaration": "interface PurchaseDocumentLinePrice {\n  counts: TierCountType[];\n}",
-          "doc": "How a bill or credit line is priced: the purchase line's {@link PurchaseLinePrice}\n(formula snapshot, rates, discount — each `propagate: true` there, so an\nun-overridden bill line follows its purchase line; and the exempt tax keys)\nplus the line's frozen metered `counts` (ruling 8).\n\n- **flat** — `rates: []`, `counts: []`; `amount_cents` is the stated net share.\n- **time** — `rates` ≥ 1, and `counts` are the UNIT-periods the line bills:\n  the engine's tier counts summed over every unit's windows, so the line's\n  money is `priceFromFormula(rates, counts, 1, discount)` — quantity is\n  folded into the counts, because each unit meters its own windows and a\n  per-unit count does not factor out. On a PUSHED document the refine\n  asserts `amount_cents` equals exactly that; a LINKED document's money is\n  Xero's and is diffed, never refused."
+          "doc": "How a bill or credit line is priced: the purchase line's {@link PurchaseLinePrice}\n(formula snapshot, rates, discount — each `propagate: true` there, so an\nun-overridden bill line follows its purchase line; the exempt tax keys; and\nthe computed money `priceDocument` writes from the line's stated\n`amount_cents`) plus the line's metered `counts`, always `[]` while every\npayable line is flat (time lines return in one-document-model Phase 3).\n\nA LINKED document's `amount_cents` is Xero's money, stamped by the link\nwriter; the computed money follows from it like any other stated total."
         },
         {
           "kind": "variable",
@@ -22933,14 +22945,38 @@
         },
         {
           "kind": "interface",
+          "name": "FlatPayablePrice",
+          "declaration": "interface FlatPayablePrice {\n  price_formula: PriceFormulaRef;\n  rates: never[];\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  total_cents: number;\n}",
+          "doc": "What {@link flatPayablePrice} returns: a flat payable line price, money stated."
+        },
+        {
+          "kind": "interface",
           "name": "PairChargeWindows",
           "declaration": "interface PairChargeWindows {\n  divider_path: readonly string[];\n  windows: readonly typeLiteral[];\n}",
           "doc": "The charge windows of one destination pair, as the pricer reads them."
         },
         {
+          "kind": "typeAlias",
+          "name": "PayableDocumentKind",
+          "declaration": "type PayableDocumentKind = typeLiteral | typeLiteral | typeLiteral;",
+          "doc": "A payable document. No arm carries a refusal: a payable line's money is its\nstated `amount_cents`, so pricing reproduces it rather than moving it — a\nLINKED document's amount is Xero's, stamped by the link writer, and prices to\nexactly that. What may be EDITED on a settled bill is the freeze table's\nquestion (`PURCHASE_BILL_FIELD_FREEZE`), asked by the writer."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PayableLine",
+          "declaration": "type PayableLine = PurchaseItem | PurchaseDocumentItem;",
+          "doc": "A line on a payable document: a purchase line, or a bill or credit line."
+        },
+        {
+          "kind": "interface",
+          "name": "PayablePriceDocumentContext",
+          "declaration": "interface PayablePriceDocumentContext {\n  document: PayableDocumentKind;\n  tax: typeLiteral;\n}",
+          "doc": "How a payable document is priced. There is no destination, organization,\nformula or window input: a payable line is taxed exempt at the store's origin\n(`SIDE_CONTRACTS.payable.tax`) and states its own money."
+        },
+        {
           "kind": "interface",
           "name": "PriceDocumentContext",
-          "declaration": "interface PriceDocumentContext {\n  document: PriceDocumentKind;\n  tax: DocumentTaxContext;\n  extensions?: readonly PriceDocumentExtension[];\n  charge_windows: readonly PairChargeWindows[];\n  formulas: PricingFormulas;\n  holidays: readonly string[];\n}",
+          "declaration": "interface PriceDocumentContext {\n  document: ReceivableDocumentKind;\n  tax: DocumentTaxContext;\n  extensions?: readonly PriceDocumentExtension[];\n  charge_windows: readonly PairChargeWindows[];\n  formulas: PricingFormulas;\n  holidays: readonly string[];\n}",
           "doc": "Everything {@link priceDocument} reads besides the items."
         },
         {
@@ -22952,8 +22988,8 @@
         {
           "kind": "typeAlias",
           "name": "PriceDocumentKind",
-          "declaration": "type PriceDocumentKind = typeLiteral | typeLiteral;",
-          "doc": "Which document is being priced, and whether it may be.\n\nAn invoice states its `status` and `has_settlement`, which every caller\ncomputes with `invoiceHasSettlement` (`utils/invoices.ts`) — money paid,\ncredited or voided, or a live closure. The refusal therefore reads exactly\nwhat api-cloudrun's `updateInvoice` gate reads —\n`invoiceHasSettlement || paid || void` — so the two cannot disagree about\nwhat \"settled\" means. (An exported `hasSettlement` used to answer this with\n`> 0` over two buckets; core#130 row 2 deleted it.)\n\nAn order also states `stored_items`: the rows the order carries IN STORAGE,\nbefore the edit being priced — `[]` for an order that does not exist yet. On\na `complete`/`canceled` order they decide which lines keep their own days\n(see {@link lineChargeableDays}). ⚠️ **Required, with no default, because\nboth defaults are wrong:** \"every line is carried\" is api-cloudrun#1341 (a\nline added to a finished order priced on whatever days the client sent), and\n\"no line is carried\" re-derives every frozen line's money.\n\n🔴 **A carried line's days are read off its STORED row, never off the row\nbeing priced.** The order input schema strips `counts`, so on a PUT\nevery incoming row arrives with none. Reading the incoming row is how an\noperator's quantity nudge on complete order 1013 nulled 25 lines' days and\nrepriced it from $4,952.91 to $2,667.17 at the one-week floor (2026-10-08)."
+          "declaration": "type PriceDocumentKind = ReceivableDocumentKind | PayableDocumentKind;",
+          "doc": "Every document `priceDocument` prices, on either side."
         },
         {
           "kind": "other",
@@ -22986,6 +23022,18 @@
           "doc": "**Every formula a set of lines names, keyed by uid** — build it with\n{@link formulaUidsOf} and a point read per uid. Retired (`active: false`)\nformulas included: a carried or frozen line keeps the formula it priced by."
         },
         {
+          "kind": "typeAlias",
+          "name": "ReceivableDocumentKind",
+          "declaration": "type ReceivableDocumentKind = typeLiteral | typeLiteral;",
+          "doc": "Which document is being priced, and whether it may be.\n\nAn invoice states its `status` and `has_settlement`, which every caller\ncomputes with `invoiceHasSettlement` (`utils/invoices.ts`) — money paid,\ncredited or voided, or a live closure. The refusal therefore reads exactly\nwhat api-cloudrun's `updateInvoice` gate reads —\n`invoiceHasSettlement || paid || void` — so the two cannot disagree about\nwhat \"settled\" means. (An exported `hasSettlement` used to answer this with\n`> 0` over two buckets; core#130 row 2 deleted it.)\n\nAn order also states `stored_items`: the rows the order carries IN STORAGE,\nbefore the edit being priced — `[]` for an order that does not exist yet. On\na `complete`/`canceled` order they decide which lines keep their own days\n(see {@link lineChargeableDays}). ⚠️ **Required, with no default, because\nboth defaults are wrong:** \"every line is carried\" is api-cloudrun#1341 (a\nline added to a finished order priced on whatever days the client sent), and\n\"no line is carried\" re-derives every frozen line's money.\n\n🔴 **A carried line's days are read off its STORED row, never off the row\nbeing priced.** The order input schema strips `counts`, so on a PUT\nevery incoming row arrives with none. Reading the incoming row is how an\noperator's quantity nudge on complete order 1013 nulled 25 lines' days and\nrepriced it from $4,952.91 to $2,667.17 at the one-week floor (2026-10-08)."
+        },
+        {
+          "kind": "interface",
+          "name": "StatedTotalLine",
+          "declaration": "interface StatedTotalLine {\n  uid: string;\n  quantity: number;\n  amount_cents: number | null;\n  price: typeLiteral;\n}",
+          "doc": "The line surface {@link priceStatedTotalLine} reads."
+        },
+        {
           "kind": "interface",
           "name": "StoredDaysRow",
           "declaration": "interface StoredDaysRow {\n  readonly price?: typeLiteral | null;\n}",
@@ -23012,6 +23060,14 @@
           "name": "chargeWindowPairViolations",
           "signature": "chargeWindowPairViolations(items: readonly LineItem[], ctx: Pick<PriceDocumentContext, \"document\" | \"charge_windows\" | \"extensions\" | \"formulas\" | \"holidays\">): ChargeWindowPairViolation[]",
           "doc": "**The charge-window pair invariant, checked (core#113):** in a pair holding\ntwo or more charge windows, every time-formula line outside an extension\nsection stores the counts its formula meters from those windows.\n\nIt holds **by construction**: {@link lineCounts} is the one author of a\nline's counts and every order/invoice writer prices through\n{@link priceDocument}. This exists for the writers that do not — a `scripts/`\nrepair, a direct Firestore write — and is called from api-cloudrun's\n`assertValidForWrite`, so a divergent document is refused at the write.\n\n⚠️ **Returns violations rather than throwing** — the write path turns one into\na 400, the audit script reports every row.\n\n⚠️ **Single-window pairs are NOT checked**: a one-window line whose counts\ndiffer from its window is legacy CRMS divergence the 2026-09-16 census left\nalone on purpose, carried into `counts` by the ruling-8 backfill.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "flatPayablePrice",
+          "signature": "flatPayablePrice(args: typeLiteral): FlatPayablePrice & parenthesized",
+          "doc": "**The one builder of a FLAT payable line's price** — the declared half\n(`price_formula`, `rates: []`, the discount record, the tax modifiers, and\n`counts: []` on a bill or credit line) plus the stated-total money\n({@link withStatedTotalMoney}). Every payable line builder calls it: the\npurchase-line writer, the bill-line projector, a bill's charge line, a credit\nline. A hand-spelled declared literal per builder is how a key gets dropped\nfrom one of them (`ORDER_DECLARED_PRICE_KEYS`' docblock, api-cloudrun#984).",
           "paramTags": [],
           "returnsTag": null
         },
@@ -23073,6 +23129,22 @@
         },
         {
           "kind": "function",
+          "name": "priceDocument",
+          "signature": "priceDocument(items: readonly T[], ctx: PayablePriceDocumentContext): PricedDocument<T>",
+          "doc": "",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "priceDocument",
+          "signature": "priceDocument(input: readonly T[], ctx: PriceDocumentContext | PayablePriceDocumentContext): PricedDocument<T>",
+          "doc": "",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "priceFormulaRefOf",
           "signature": "priceFormulaRefOf(formula: PricingFormula): PriceFormulaRef",
           "doc": "The snapshot a line stores for `formula` — `{ uid, name, basis }`.",
@@ -23084,6 +23156,14 @@
           "name": "priceLine",
           "signature": "priceLine(item: LineItem, taxes: Tax[], _: unknown): LinePriceMoney",
           "doc": "**Stage 2 for one line: the line pricer.** `priceDocument` prices every line\nthrough it, and so does the one reader that must price a line outside a\ndocument — `accountLine` (`./quantityAccounting.ts`), which prices a\nremainder and a billed row's extension (#997 D11).\n\nThe line must already carry its `counts` ({@link lineCounts}). `extension`\nmarks a line whose counts are the days an extension section ADDS, stated with\nthe minimum skipped — only a flat tax reads it, and is refused.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "priceStatedTotalLine",
+          "signature": "priceStatedTotalLine(line: StatedTotalLine): LinePriceMoney",
+          "doc": "**The stated-total arm: a payable line's money is its stated amount.**\n\n- `subtotal_discounted_cents` = `amount_cents`, the net CFS pays;\n- `subtotal_cents` = net + `discount.amount_cents` — the operator's gross, the\n  discount being DECLARED on a payable line (what came off), not derived;\n- `taxes` re-amounted on the net from each tax's own rate and type\n  (`computeItemTaxAmountCents`, the one tax-amount author) — `[]` on an exempt\n  side;\n- `total_cents` = net + Σ taxes.\n\nThe twin of stage 4's fee arm: a declared amount stored as the line's money,\nnot re-derived from rates. Exported for the projectors that default a bill\nor credit line from its purchase line before the writer prices the document.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -23108,6 +23188,14 @@
           "name": "sumPricedLines",
           "signature": "sumPricedLines(items: readonly LineItem[]): DocumentTotalsCore",
           "doc": "**Stage 5 on its own: a document's totals as the SUM of its stored line\nmoney.** Nothing is re-priced.\n\n`priceDocument` calls it after pricing. It is exported for the reader that\nmust total a document without pricing it — the manager when no tax catalog is\nloaded, where the contract is \"fold the stored lines, never re-price\".\n\n- `subtotal_cents`, `subtotal_discounted_cents` and the discount are summed\n  over PRE-TAX lines only, as the totals always have been.\n- `taxes` aggregates each pre-tax line's stored taxes by NAME, in first-seen\n  order, dropping zero amounts.\n- `transaction_fees` aggregates fee lines' stored `total_cents`.\n- `total_cents` = `subtotal_discounted` + Σ tax + Σ fees.\n\n⚠️ A percent fee line stored before D6 carries `total_cents: 0`, so a document\nnot yet re-priced by `priceDocument` folds with no fee. Re-pricing it stores\nthe amount (api-cloudrun#997 step 7 re-prices the two live ones).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "withStatedTotalMoney",
+          "signature": "withStatedTotalMoney(declared: P, line: Omit<StatedTotalLine, \"price\">): P & typeLiteral",
+          "doc": "**A payable line's declared price, with its stated-total money added** —\n{@link priceStatedTotalLine}'s three money keys spread onto the declared\nhalf, and its `taxes` re-amounted on the net. For a writer BUILDING a line\n(a projector, a charge line, a credit line) so that the line parses before\nthe document is priced; the writer still runs `priceDocument` over the whole\ndocument, which states the same money and the line's `taxes_base`.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -23337,7 +23425,7 @@
         {
           "kind": "interface",
           "name": "PurchaseOfferContext",
-          "declaration": "interface PurchaseOfferContext {\n  billed_paths?: ReadonlySet<string>;\n  billing?: typeLiteral;\n}",
+          "declaration": "interface PurchaseOfferContext {\n  billed_paths?: ReadonlySet<string>;\n}",
           "doc": "What {@link purchaseActionsFor} needs that the purchase alone does not carry."
         },
         {
@@ -23450,37 +23538,13 @@
     },
     {
       "entrypoint": "@cfs/core/utils/purchase-documents",
-      "moduleDoc": "Purchase → bill: the projector, the unbilled windows, the bill pricer and the\npurchase → bill three-way sync (purchases-as-documents D5, D7; Phase 2\nrulings 1, 3, 4, 7, 8).\n\nThe supplier side's twin of the order → invoice machinery, built from the\nsame parts:\n\n| customer side | here |\n|---|---|\n| `projectOrderItemToInvoiceItem` | {@link projectPurchaseLineToBillLine} |\n| `buildRemainingInvoice`'s \"what is not yet billed\" | {@link unbilledUnitWindows} |\n| `priceDocument` / `priceCreditNote` | {@link pricePurchaseDocument} — an ASSEMBLER, not a second money author |\n| `syncOrderToInvoiceSelective` | {@link syncPurchaseToBills} |\n\n## One money step\n\n`priceFromFormula` (`schemas/_line-money.ts`) is the only place a time line's\ncounts become cents, for customer and supplier lines alike (ruling 3). A flat\nline states its amount: its k-th bill is priced by `cumulativeShareCents`,\nexactly as its receipts are, so the bills of a fully billed line sum to the\nline's `amount_cents`.\n\n## Counts are DELTAS of a cumulative meter\n\nA time bill line's `price.counts` are the UNIT-periods it bills, summed over\nits units. For each unit they are\n\n```\nmeter(billed ∪ new) − meter(billed)\n```\n\nwhere `billed` is the unit's coverage on the purchase line's EARLIER live\nbills (net of live credits) and `new` the pieces this bill adds. Metering the\ndifference rather than the new pieces alone is what keeps a window billed in\ntwo halves on ONE anchor: Vision's month runs from the switch-on, so a window\nbilled at day 10 and again at day 40 must bill a month and two weeks in all,\nnot two weeks and then a fresh month and a week. The deltas telescope: the\ncounts of every bill of a window sum to the meter of the whole window.\n\n⚠️ **Pieces are unioned only INSIDE one unit window**, so two unit windows\nthat touch (one ends at the instant the next starts, which the unit refine\nallows) never merge into one and the per-window anchor restart survives. A\nsingle delta may carry a negative tier (a week becomes part of a month); the\nline's money is still the delta of two non-negative amounts.\n\n## Sync never touches windows or quantities\n\nThe merge follows `price` (formula, rates, discount terms), `name`, `type`,\n`description`, `ledger_account`, `uid_tracking_category`, the tax class and\nthe attribution keys onto every\nUNSETTLED, PUSHED bill, three-way against the previous purchase — the\nclassification `classifySharedFields(PurchaseSchema, PurchaseBillSchema)`\nreads off the two schemas. `quantity`, `amount_cents` and `dates` are\nhomonyms there, and `units` is bill-only, so a purchase-side extension can\nnever rewrite what the supplier already billed. A linked bill's money is\nXero's and is never written; a frozen (settled) bill is skipped whole.",
+      "moduleDoc": "Purchase → bill: the projector, unit coverage and the purchase → bill\nthree-way sync (purchases-as-documents D5, D7; api-cloudrun\n`one-document-model` Phase 2).\n\nThe supplier side's twin of the order → invoice machinery, built from the\nsame parts:\n\n| customer side | here |\n|---|---|\n| `projectOrderItemToInvoiceItem` | {@link projectPurchaseLineToBillLine} |\n| `syncOrderToInvoiceSelective` | {@link syncPurchaseToBills} |\n| `priceDocument` | `priceDocument` itself — its payable arm (`./price-document.ts`) |\n\n## One pricer\n\nA payable line's money is written by `priceDocument`'s stated-total arm\n(`priceStatedTotalLine`): the line states its net in `amount_cents`, and its\nk-th bill is defaulted by `cumulativeShareCents` (via {@link flatShareCents}),\nexactly as its receipts are, so the bills of a fully billed line sum to the\nline's `amount_cents`.\n\n⚠️ **Every payable line is priced FLAT until one-document-model Phase 3.**\nThe per-unit time metering that lived here (`meterBillLine`, the unbilled-window\nprojector, time credits) was deleted with `pricePurchaseDocument`: neither\nenvironment stores a time purchase line (Phase 0b census), and Phase 3 meters\ntime lines from their destination pair's windows, as an order line is\nmetered. The unit-window READERS below (`unitWindowsForLine`, the coverage\nhelpers, `seedPurchaseLinesForWindows`) retire in that phase too.\n\n## Sync never touches windows or quantities\n\nThe merge follows `price` (formula, rates, discount terms), `name`, `type`,\n`description`, `ledger_account`, `uid_tracking_category`, the tax class and\nthe attribution keys onto every\nUNSETTLED, PUSHED bill, three-way against the previous purchase — the\nclassification `classifySharedFields(PurchaseSchema, PurchaseBillSchema)`\nreads off the two schemas. `quantity`, `amount_cents` and `dates` are\nhomonyms there, and `units` is bill-only, so a purchase-side extension can\nnever rewrite what the supplier already billed. A linked bill's money is\nXero's and is never written; a frozen (settled) bill is skipped whole.",
       "symbols": [
         {
           "kind": "interface",
-          "name": "BillLineMeterInput",
-          "declaration": "interface BillLineMeterInput {\n  price: Pick<PurchaseDocumentLinePrice, \"price_formula\" | \"rates\">;\n  units: readonly PurchaseDocumentLineUnit[];\n  dates: ChargeWindowType | null;\n  quantity: number;\n}",
-          "doc": "What {@link meterBillLine} needs about the bill line."
-        },
-        {
-          "kind": "interface",
-          "name": "BillLineMeterSource",
-          "declaration": "interface BillLineMeterSource {\n  span: typeLiteral | null;\n  recorded: ReadonlyMap<string, readonly ChargeWindowType[]>;\n  billed: ReadonlyMap<string, readonly ChargeWindowType[]>;\n  billedSpanEnd: string | null;\n}",
-          "doc": "What {@link meterBillLine} needs about the purchase line and what is billed before it."
-        },
-        {
-          "kind": "interface",
-          "name": "PricedPurchaseDocument",
-          "declaration": "interface PricedPurchaseDocument {\n  items: PurchaseDocumentItem[];\n  total_cents: number | null;\n}",
-          "doc": "The result of {@link pricePurchaseDocument}."
-        },
-        {
-          "kind": "interface",
           "name": "ProjectBillLineOptions",
-          "declaration": "interface ProjectBillLineOptions {\n  uid: string;\n  uid_purchase: string;\n  quantity: number;\n  through: string;\n  units: readonly Pick<UnitType, \"uid\" | \"charge_windows\">[];\n  billed: PurchaseBilledDocuments;\n}",
+          "declaration": "interface ProjectBillLineOptions {\n  uid: string;\n  uid_purchase: string;\n  quantity: number;\n}",
           "doc": "{@link projectPurchaseLineToBillLine}'s inputs beside the purchase line."
-        },
-        {
-          "kind": "interface",
-          "name": "ProjectCreditLineOptions",
-          "declaration": "interface ProjectCreditLineOptions {\n  uid: string;\n  units: readonly PurchaseDocumentLineUnit[];\n  dates: ChargeWindowType | null;\n  quantity: number;\n  billed: PurchaseBilledDocuments;\n}",
-          "doc": "{@link projectPurchaseLineToCreditLine}'s inputs beside the purchase line."
         },
         {
           "kind": "interface",
@@ -23493,12 +23557,6 @@
           "name": "PurchaseBilledDocuments",
           "declaration": "interface PurchaseBilledDocuments {\n  bills: readonly Pick<PurchaseBill, \"uid\" | \"number\" | \"totals\" | \"items\" | \"voided_at\">[];\n  credits: readonly Pick<PurchaseCredit, \"status\" | \"items\">[];\n}",
           "doc": "The purchase's existing bills and credits, as the \"already billed\" readers\nsee them. Pass EVERY bill and credit of the purchase; liveness is decided\nhere ({@link purchaseBillIsLive}, {@link purchaseCreditIsLive})."
-        },
-        {
-          "kind": "interface",
-          "name": "PurchaseDocumentContext",
-          "declaration": "interface PurchaseDocumentContext {\n  formulas: PricingFormulas;\n  holidays: readonly string[];\n}",
-          "doc": "What metering needs: every formula the purchase's lines name (retired ones\nincluded — a billed line keeps the formula it priced by) and the holiday\nlist. The customer side's `AccountingContext`."
         },
         {
           "kind": "interface",
@@ -23533,7 +23591,7 @@
         {
           "kind": "interface",
           "name": "SyncPurchaseToBillsArgs",
-          "declaration": "interface SyncPurchaseToBillsArgs {\n  prev: Purchase;\n  next: Purchase;\n  bills: readonly PurchaseBill[];\n  credits: readonly Pick<PurchaseCredit, \"status\" | \"items\">[];\n}",
+          "declaration": "interface SyncPurchaseToBillsArgs {\n  prev: Purchase;\n  next: Purchase;\n  bills: readonly PurchaseBill[];\n  tax: Omit<indexedAccess, \"asOf\">;\n}",
           "doc": "{@link syncPurchaseToBills}' inputs."
         },
         {
@@ -23541,14 +23599,6 @@
           "name": "UnitCover",
           "declaration": "interface UnitCover {\n  uid_purchase: string;\n  path: string[];\n  dates: indexedAccess;\n}",
           "doc": "One live line covering one unit — the covering line and its span."
-        },
-        {
-          "kind": "function",
-          "name": "billedSpanEnd",
-          "signature": "billedSpanEnd(documents: PurchaseBilledDocuments, path: readonly string[], before?: number): string | null",
-          "doc": "**The latest end a span-metered line has been billed to** — the max `dates.end`\nover the live bills projecting `path` (before `before`, if given), or `null`\nwhen none has. A span line (Verizon) bills its span forward in contiguous\nperiods, so the next period starts there.",
-          "paramTags": [],
-          "returnsTag": null
         },
         {
           "kind": "function",
@@ -23576,14 +23626,6 @@
         },
         {
           "kind": "function",
-          "name": "meterBillLine",
-          "signature": "meterBillLine(line: BillLineMeterInput, source: BillLineMeterSource, ctx: PurchaseDocumentContext): TierCount[]",
-          "doc": "**A time bill line's frozen counts** — the unit-periods it bills, summed over\nits units (ruling 8). Windows formulas meter each unit's delta (module\ndocblock); a span formula (`span_less_gaps`) meters each unit's span from the\npurchase line's start to the bill's `dates.end`, less the same to where\nearlier bills left it, with the unit's windows as the \"on\" time. A span line\nwith no units meters the span with no gaps, times `quantity`.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
           "name": "overcoveredUnitWindows",
           "signature": "overcoveredUnitWindows(units: readonly Pick<UnitType, \"uid\" | \"charge_windows\">[], purchases: readonly Pick<Purchase, \"uid\" | \"status\" | \"items\">[], through: string): Map<string, typeLiteral>",
           "doc": "**Window time covered by TWO OR MORE live lines** — one unit's time billed\ntwice over. ADVISORY, never a refusal (D5: what is billed is flagged), the\n`overbilled_out_of_service` twin. Keyed by unit; each entry names the lines\nthat overlap there.",
@@ -23592,33 +23634,17 @@
         },
         {
           "kind": "function",
-          "name": "pricePurchaseDocument",
-          "signature": "pricePurchaseDocument(doc: typeLiteral): PricedPurchaseDocument",
-          "doc": "**Price a bill or credit from its lines** (D7) — the assembler beside\n`priceCreditNote`, with no tax, fee, carried-line or replacement stage.\n\n- **pushed** — each time line's `amount_cents` and `discount.amount_cents`\n  are re-derived from its own `rates × counts` (the refine's rule, run as\n  the writer); a flat line keeps its stated net. The total is the Σ.\n- **linked** — returned untouched: Xero's money is never written (D5).\n\nCounts are NOT re-metered here; they are frozen on the line, and a writer\nthat moves a line's windows re-meters through {@link meterBillLine} first.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
           "name": "projectPurchaseLineForBill",
-          "signature": "projectPurchaseLineForBill(item: PurchaseItem): Record<string, unknown>",
-          "doc": "**A purchase line in a BILL line's shape, over the shared keys only** — the\nmerge's three arguments must all be in the downstream shape (core#52), and\nthe purchase↔bill diff compares exactly what the merge follows.",
+          "signature": "projectPurchaseLineForBill(item: PurchaseItem, quantity: number): Record<string, unknown>",
+          "doc": "**A purchase line in a BILL line's shape, over the shared keys only** — the\nmerge's three arguments must all be in the downstream shape (core#52), and\nthe purchase↔bill diff compares exactly what the merge follows.\n\n`quantity` is the units the bill line bills: the discount record is that\nshare of the purchase line's ({@link projectPurchaseLineToBillLine}'s rule),\nso an untouched bill line compares equal to its projection and follows it,\nand a followed discount lands as the bill's share rather than the whole.",
           "paramTags": [],
           "returnsTag": null
         },
         {
           "kind": "function",
           "name": "projectPurchaseLineToBillLine",
-          "signature": "projectPurchaseLineToBillLine(item: PurchaseItem, opts: ProjectBillLineOptions, ctx: PurchaseDocumentContext): PurchaseDocumentItem | null",
-          "doc": "**Default a bill line from its purchase line** (D5). Name, formula, rates,\ndiscount terms, posting and attribution are the purchase line's (each then\noverridable on the bill until it settles); the money depends on the basis:\n\n- **flat** — `quantity` units at the line's cumulative share from where its\n  `quantity_billed` stands (`cumulativeShareCents`, extended past the\n  ordered count because over-billing is legal), so the bills of a line sum to\n  its `amount_cents`.\n- **time** — the units' UNBILLED windows up to `through`\n  ({@link unbilledUnitWindows}), metered as deltas ({@link meterBillLine})\n  and priced by the one money step. A span line (Verizon) bills from where\n  its earlier bills left off to `through` (or the line's end, if sooner).\n\nReturns `null` when a time line has nothing to bill — no unbilled windows, or\na span already billed through `through` (the poll's `nothing_to_bill`). A\nflat line always projects: what to bill is the operator's call.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
-          "name": "projectPurchaseLineToCreditLine",
-          "signature": "projectPurchaseLineToCreditLine(item: PurchaseItem, opts: ProjectCreditLineOptions, ctx: PurchaseDocumentContext): PurchaseDocumentItem",
-          "doc": "**A TIME credit line** — what un-billing some of a time line's billed time is\nworth (`PurchaseCreditItemInput`'s docblock).\n\nEvery credited piece must sit inside what is billed and not yet credited\n(`billedUnitCoverage`; for a span line, between the line's start and where\nits bills left it), or this throws: a credit cannot un-bill time nobody billed.\nThe counts are the meter's delta — the credited windows metered on top of what\nstays billed — so a credit of a whole bill reverses it exactly, and a credit of\na window's tail inside a capped month credits the weeks the month still covers\n(Q14), never the month. The money is the one money step at the purchase line's\nsnapshotted rates and discount; the account, category and attribution are the\npurchase line's.",
+          "signature": "projectPurchaseLineToBillLine(item: PurchaseItem, opts: ProjectBillLineOptions): PurchaseDocumentItem",
+          "doc": "**Default a bill line from its purchase line** (D5). Name, formula, discount\nterms, posting and attribution are the purchase line's (each then\noverridable on the bill until it settles). The amount is `quantity` units at\nthe line's cumulative share from where its `quantity_billed` stands\n({@link flatShareCents}, extended past the ordered count because\nover-billing is legal), so the bills of a line sum to its `amount_cents`; the\ndiscount record is the same share of the purchase line's.\n\nThe line's price is built by `flatPayablePrice` (the stated-total arm), so\nthe projection parses on its own; the writer prices the whole document with\n`priceDocument`, which states the same money and the line's `taxes_base`.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -23689,16 +23715,8 @@
         {
           "kind": "function",
           "name": "syncPurchaseToBills",
-          "signature": "syncPurchaseToBills(args: SyncPurchaseToBillsArgs, ctx: PurchaseDocumentContext): PurchaseBillSync[]",
-          "doc": "**The purchase → bill three-way sync** (D5, the `stageOrderInvoiceSync`\nshape): every PUSHED, unsettled, live bill's lines follow the purchase lines\nthey project, field by field, wherever the bill still holds the PREVIOUS\npurchase's value. Pure; the writer stores the `changed` bills in the purchase\nwriter's transaction.\n\nAfter the merge each touched line is re-derived: a time line whose FORMULA\nor RATES changed is re-metered from its own windows against the coverage of\nthe purchase's earlier bills, and every time line's money is re-priced from\nits rates and counts; the bill's total is the Σ. A flat line's net amount is a\nhomonym and never follows (its share was fixed when billed); its discount\nrecord is re-derived.\n\nSkipped whole: a linked bill (Xero is authoritative), a frozen one\n(`purchaseBillIsFrozen`), a voided one.\n\n`total_cents` and `amount_due_cents` move together (an unfrozen bill has no\nmoney settlement, so the identity holds with what is due); a writer that\nalso holds the settlement rows may refold with `recomputePurchaseBillTotals`.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
-          "name": "unbilledUnitWindows",
-          "signature": "unbilledUnitWindows(recorded: ReadonlyMap<string, readonly ChargeWindowType[]>, billed: ReadonlyMap<string, readonly ChargeWindowType[]>): PurchaseDocumentLineUnit[]",
-          "doc": "**The windows a time line's units have recorded and no live bill covers** —\nwhat a new bill defaults to (D5, the `buildRemainingInvoice` rule). Per unit,\nits recorded windows (closed at `through`) less its billed coverage. A unit\nwith nothing left is left out.",
+          "signature": "syncPurchaseToBills(args: SyncPurchaseToBillsArgs): PurchaseBillSync[]",
+          "doc": "**The purchase → bill three-way sync** (D5, the `stageOrderInvoiceSync`\nshape): every PUSHED, unsettled, live bill's lines follow the purchase lines\nthey project, field by field, wherever the bill still holds the PREVIOUS\npurchase's value. Pure; the writer stores the `changed` bills in the purchase\nwriter's transaction.\n\nA changed bill is re-priced whole by `priceDocument` (its stated-total arm,\nat the bill's own date), and its total is the Σ. A line's net amount is a\nhomonym and never follows (its share was fixed when billed); a followed\ndiscount arrives as the bill line's share of it\n({@link projectPurchaseLineForBill}).\n\nSkipped whole: a linked bill (Xero is authoritative), a frozen one\n(`purchaseBillIsFrozen`), a voided one.\n\n`total_cents` and `amount_due_cents` move together (an unfrozen bill has no\nmoney settlement, so the identity holds with what is due); a writer that\nalso holds the settlement rows may refold with `recomputePurchaseBillTotals`.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25115,7 +25133,7 @@
         {
           "kind": "interface",
           "name": "DocumentTaxContext",
-          "declaration": "interface DocumentTaxContext {\n  destinations: ReadonlyArray<TaxDestination | null | undefined>;\n  organizationClaim?: JurisdictionType | null;\n  origin: JurisdictionType;\n  exempt: boolean;\n  catalog: TaxCatalog;\n  asOf: string;\n}",
+          "declaration": "interface DocumentTaxContext {\n  destinations: ReadonlyArray<TaxDestination | null | undefined>;\n  organizationClaim?: JurisdictionType | null;\n  origin: JurisdictionType;\n  exempt: boolean;\n  catalog: TaxCatalog;\n  side?: Side;\n  asOf: string;\n}",
           "doc": "Everything the per-line rule needs that is not the line itself.\n\nOne object rather than seven positional arguments, because every field is a\nproperty of the DOCUMENT and they are read together — and because a caller\nthat omits one gets a compile error naming it rather than a silently shifted\nargument."
         },
         {

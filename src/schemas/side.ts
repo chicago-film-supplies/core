@@ -71,6 +71,18 @@ export type PostingClass = "revenue" | "asset_or_expensed" | "cost" | "any";
  */
 export type LineCustody = "custody" | "none";
 
+/**
+ * How a side's lines are taxed:
+ *
+ * - `resolved` — the jurisdiction rule decides, per line and destination
+ *   (`resolveLineTax`); an exempt customer is exempt, and a `replacement` line
+ *   is taxed at the origin regardless (the receivable side).
+ * - `exempt` — every line is exempt, `replacement` included: CFS buys for
+ *   resale (owner, 2026-10-05). The line still resolves its class, so
+ *   `taxes_base` records what it is exempt FROM (the payable side).
+ */
+export type SideTax = "resolved" | "exempt";
+
 /** One side's entries. Total over {@link SharedLineType}, so a new type is a compile error until both sides state it. */
 export interface SideContract {
   /** The operator-facing name of each shared line type on this side. */
@@ -79,6 +91,8 @@ export interface SideContract {
   posting_class: Readonly<Record<SharedLineType, PostingClass>>;
   /** Whether each shared line type moves custody. */
   custody: Readonly<Record<SharedLineType, LineCustody>>;
+  /** How the side's lines are taxed. */
+  tax: SideTax;
 }
 
 /**
@@ -91,10 +105,12 @@ export const SIDE_CONTRACTS: Readonly<Record<Side, SideContract>> = {
     line_labels: { sale: "Sale", rental: "Rental", service: "Service", replacement: "Replacement" },
     posting_class: { sale: "revenue", rental: "revenue", service: "revenue", replacement: "revenue" },
     custody: { sale: "custody", rental: "custody", service: "custody", replacement: "none" },
+    tax: "resolved",
   },
   payable: {
     line_labels: { sale: "Buy", rental: "Subrent", service: "Charge", replacement: "Replacement" },
     posting_class: { sale: "asset_or_expensed", rental: "cost", service: "any", replacement: "any" },
     custody: { sale: "custody", rental: "custody", service: "none", replacement: "none" },
+    tax: "exempt",
   },
 };

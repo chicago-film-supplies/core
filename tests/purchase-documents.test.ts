@@ -1,38 +1,35 @@
 /**
- * Purchase → bill: the projector, the unbilled windows, the bill pricer and the
- * purchase → bill sync (`src/utils/purchase-documents.ts`; purchases-as-documents
- * D5, D7, Phase 2 rulings 1, 3, 4, 7, 8).
+ * Purchase → bill: the projector, unit coverage, the payable arm of
+ * `priceDocument` and the purchase → bill sync (`src/utils/purchase-documents.ts`;
+ * purchases-as-documents D5, D7; one-document-model Phase 2).
  *
- * The load-bearing claim is that a time line's counts TELESCOPE: the bills of a
- * window sum to the meter of the whole window, however it was split. Each such
- * test is paired with the naive form — metering only the new pieces — asserted
- * to DISAGREE, so a green run says the delta matters on this corpus.
+ * Every payable line is priced FLAT until one-document-model Phase 3 meters
+ * time lines from their destination pair's windows, so the time projector,
+ * meter and credit tests went with the code they covered. The time-shaped
+ * fixtures below stay for the utils that still read a time line's units.
  */
-import { assert, assertEquals, assertNotEquals, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
-  billedUnitCoverage,
   coversForUnit,
   flatShareCents,
-  meterBillLine,
   overcoveredUnitWindows,
   seedPurchaseLinesForWindows,
   uncoveredUnitWindows,
   type PurchaseBilledDocuments,
-  type PurchaseDocumentContext,
-  pricePurchaseDocument,
   projectPurchaseLineToBillLine,
-  projectPurchaseLineToCreditLine,
   purchaseBillIsLive,
   purchaseBillSharedLineFields,
   purchaseCreditIsLive,
   purchaseLineBilledNet,
   recomputePurchaseQuantityBilled,
   syncPurchaseToBills,
-  unbilledUnitWindows,
   unitWindowsForLine,
 } from "../src/utils/purchase-documents.ts";
+import { priceDocument, PriceRefusalError } from "../src/utils/price-document.ts";
+import type { TaxCatalog } from "../src/utils/tax-classes.ts";
+import { payablePrice, withPayableMoney } from "./helpers/payable.ts";
 import { computePurchaseBillDiffs } from "../src/utils/purchaseDiff.ts";
-import { meterUnits, priceFromFormula, priceFormulaRefOf, type TierCount } from "../src/utils/price-formulas.ts";
+import { priceFormulaRefOf } from "../src/utils/price-formulas.ts";
 import { cumulativeShareCents } from "../src/utils/purchases.ts";
 import {
   type PurchaseServiceItem,
@@ -45,16 +42,19 @@ import {
   type PurchaseRentalItem,
   type UnitType,
 } from "../src/schemas/mod.ts";
-import { FIXED, FORMULAS, VERIZON, VISION } from "./helpers/formulas.ts";
+import { FIXED, VERIZON, VISION } from "./helpers/formulas.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 /** The tax class every payable test line is stamped with: exempt on this side, so it prices nothing. */
 const TAX_CLASS = "TaxClassResale000000";
 
-const CTX: PurchaseDocumentContext = {
-  formulas: new Map([...FORMULAS, [VISION.uid, VISION], [VERIZON.uid, VERIZON]]),
-  holidays: [],
-};
+/** An empty catalog: no class resolves a rate, so an exempt line's `taxes_base` is `[]`. */
+const NO_TAXES = { codes: [], rates: [], classes: [] } as unknown as TaxCatalog;
+const TAX = { origin: "chicago", catalog: NO_TAXES } as const;
+const payableCtx = (kind: "purchase" | "purchase_bill" | "purchase_credit") => ({
+  document: { kind },
+  tax: { ...TAX, asOf: jan(1) },
+});
 
 const PURCHASE = "testpurch10000000000";
 const PRODUCT = "testprod100000000000";
@@ -62,7 +62,6 @@ const actor = { uid: "testuser100000000000", name: "Test User" };
 const iuid = (n: number) => `9a1b2c3d-0000-4000-8000-${String(n).padStart(12, "0")}`;
 /** A Chicago midnight in January (CST). */
 const jan = (d: number) => `2026-01-${String(d).padStart(2, "0")}T00:00:00.000-06:00`;
-const feb = (d: number) => `2026-02-${String(d).padStart(2, "0")}T00:00:00.000-06:00`;
 
 const VISION_RATES = [{ rate_key: "month", amount_cents: 15750 }, { rate_key: "week", amount_cents: 4500 }];
 const FIXED_REF = priceFormulaRefOf(FIXED);
@@ -80,7 +79,7 @@ function visionLine(over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem 
     uid_product: PRODUCT,
     quantity: 2,
     amount_cents: null,
-    price: { price_formula: priceFormulaRefOf(VISION), rates: VISION_RATES, discount: null, taxes: [] },
+    price: { ...payablePrice(0, { formula: priceFormulaRefOf(VISION) }), rates: VISION_RATES },
     ledger_account: 5100,
     uid_tracking_category: null,
     uid_tax_class: TAX_CLASS,
@@ -99,7 +98,7 @@ function visionLine(over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem 
 /** A FLAT buy of 3 radios for $1,409.85. */
 function buyLine(over: Record<string, unknown> = {}): PurchaseItem {
   const uid = iuid(2);
-  return {
+  return withPayableMoney({
     type: "sale",
     uid,
     path: [uid],
@@ -109,7 +108,7 @@ function buyLine(over: Record<string, unknown> = {}): PurchaseItem {
     uid_product: PRODUCT,
     quantity: 3,
     amount_cents: 140985,
-    price: { price_formula: FIXED_REF, rates: [], discount: null, taxes: [] },
+    price: payablePrice(0, { formula: FIXED_REF }),
     ledger_account: 1999,
     uid_tracking_category: null,
     uid_tax_class: TAX_CLASS,
@@ -119,7 +118,7 @@ function buyLine(over: Record<string, unknown> = {}): PurchaseItem {
     quantity_canceled: 0,
     landed_costs: [],
     ...over,
-  } as PurchaseItem;
+  }) as PurchaseItem;
 }
 
 /** A Verizon device line (time charge, span-metered). */
@@ -134,7 +133,7 @@ function verizonLine(over: Partial<PurchaseServiceItem> = {}): PurchaseServiceIt
     name: "Hotspot (Unlimited)",
     quantity: 1,
     amount_cents: null,
-    price: { price_formula: priceFormulaRefOf(VERIZON), rates: [{ rate_key: "month", amount_cents: 8000 }], discount: null, taxes: [] },
+    price: { ...payablePrice(0, { formula: priceFormulaRefOf(VERIZON) }), rates: [{ rate_key: "month", amount_cents: 8000 }] },
     ledger_account: 5150,
     uid_tracking_category: null,
     uid_tax_class: TAX_CLASS,
@@ -189,16 +188,9 @@ function billDoc(number: number, items: PurchaseDocumentItem[], over: Partial<Pu
 }
 
 const NONE: PurchaseBilledDocuments = { bills: [], credits: [] };
-const project = (
-  item: PurchaseItem,
-  through: string,
-  units: Pick<UnitType, "uid" | "charge_windows">[],
-  billed: PurchaseBilledDocuments = NONE,
-  n = 10,
-  quantity = 1,
-) => projectPurchaseLineToBillLine(item, { uid: iuid(n), uid_purchase: PURCHASE, quantity, through, units, billed }, CTX);
-
-const money = (counts: readonly TierCount[]) => priceFromFormula(VISION_RATES, counts, 1, null).subtotal_discounted_cents;
+/** The bill line projected from `item` for `quantity` units, with row uid `iuid(n)`. */
+const project = (item: PurchaseItem, n = 10, quantity = 1) =>
+  projectPurchaseLineToBillLine(item, { uid: iuid(n), uid_purchase: PURCHASE, quantity });
 
 // ── Flat lines ──────────────────────────────────────────────────────
 
@@ -206,7 +198,7 @@ Deno.test("projector: a FLAT line bills its cumulative share — three bills of 
   let item = buyLine();
   const amounts: number[] = [];
   for (let k = 0; k < 3; k++) {
-    const line = project(item, jan(1), [], NONE, 10 + k)!;
+    const line = project(item, 10 + k);
     amounts.push(line.amount_cents);
     assertEquals(line.price?.counts, []);
     item = { ...item, quantity_billed: (item as { quantity_billed: number }).quantity_billed + 1 } as PurchaseItem;
@@ -216,17 +208,22 @@ Deno.test("projector: a FLAT line bills its cumulative share — three bills of 
 });
 
 Deno.test("projector: OVER-billing a flat line still defaults, at the same per-unit rate (D5: flagged, never refused)", () => {
-  const line = project(buyLine({ quantity_billed: 3 }), jan(1), [], NONE, 10, 1)!;
+  const line = project(buyLine({ quantity_billed: 3 }), 10, 1);
   assertEquals(line.amount_cents, 46995);
   // Within the ordered count it is exactly cumulativeShareCents.
-  assertEquals(project(buyLine(), jan(1), [], NONE, 10, 2)!.amount_cents, cumulativeShareCents(140985, 3, 0, 2));
+  assertEquals(project(buyLine(), 10, 2).amount_cents, cumulativeShareCents(140985, 3, 0, 2));
 });
 
 Deno.test("projector: a flat line's discount is recorded as its share; amount_cents stays the NET (ruling 7)", () => {
-  const item = buyLine({ price: { price_formula: FIXED_REF, rates: [], discount: { rate: 10, type: "percent", amount_cents: 15665 }, taxes: [] } });
-  const line = project(item, jan(1), [], NONE, 10, 1)!;
+  const item = buyLine({ price: payablePrice(140985, { formula: FIXED_REF, discount: { rate: 10, type: "percent", amount_cents: 15665 } }) });
+  const line = project(item, 10, 1);
   assertEquals(line.amount_cents, 46995);
   assertEquals(line.price?.discount?.amount_cents, 5222);
+  assertEquals([line.price.subtotal_cents, line.price.subtotal_discounted_cents, line.price.total_cents], [46995 + 5222, 46995, 46995]);
+});
+
+Deno.test("projector: a TIME line is refused until one-document-model Phase 3", () => {
+  assertThrows(() => project(visionLine()), PriceRefusalError, "pair's windows");
 });
 
 // ── Time lines: the unbilled windows and the telescoping meter ─────
@@ -325,139 +322,53 @@ Deno.test("seedPurchaseLinesForWindows: one time charge per (product, formula), 
   assertEquals(seedPurchaseLinesForWindows(units, [purchaseOf(PURCHASE, [verizonLine({ uid_units: ["unit-1", "unit-2", "unit-3"], dates: null })])], products as never, jan(25)), []);
 });
 
-Deno.test("projector: a Vision window billed in TWO halves bills a month and two weeks in all — the counts telescope", () => {
-  const item = visionLine({ quantity: 1, quantity_received: 1 });
-  const units = [unit(1, [{ start: jan(1), end: null }])];
-  const first = project(item, jan(21), units)!; // 20 nights → 3 weeks, under the cap
-  assertEquals(first.quantity, 1);
-  assertEquals(first.units, [{ uid_unit: "unit-1", charge_windows: [{ start: jan(1), end: jan(21) }] }]);
-  assertEquals(first.amount_cents, 13500);
-
-  const billed = { bills: [billDoc(1, [first])], credits: [] };
-  const second = project(item, feb(10), units, billed, 11)!; // through 40 nights
-  assertEquals(second.units, [{ uid_unit: "unit-1", charge_windows: [{ start: jan(21), end: feb(10) }] }]);
-  // The whole window meters 1 month (Jan 1 → Feb 1, capped) + 9 nights → 2 weeks.
-  const whole = meterUnits(VISION, { windows: [{ start: jan(1), end: feb(10) }], holidays: [], rates: VISION_RATES }).tiers;
-  assertEquals(first.amount_cents + second.amount_cents, money(whole));
-  // The delta carries a NEGATIVE tier: +1 month, −1 week (Q14).
-  assertEquals(second.price?.counts, [{ rate_key: "month", num: 1, den: 1 }, { rate_key: "week", num: -1, den: 1 }]);
-  assertEquals(second.amount_cents, 11250);
-
-  // Companion: metering the second half ALONE restarts the month at Jan 21 and
-  // bills 20 nights as three weeks — the defect the delta exists to prevent.
-  const alone = meterUnits(VISION, { windows: [{ start: jan(21), end: feb(10) }], holidays: [], rates: VISION_RATES }).tiers;
-  assertNotEquals(money(alone), second.amount_cents);
-  assertEquals(money(alone), 13500);
-});
-
-Deno.test("projector: two unit windows that TOUCH stay two windows — each restarts its anchor", () => {
-  const item = visionLine({ quantity: 1, quantity_received: 1 });
-  const units = [unit(1, [{ start: jan(1), end: jan(4) }, { start: jan(4), end: jan(8) }])];
-  const line = project(item, feb(1), units)!;
-  // 3 nights → 1 week, then 4 nights → 1 week. Merged they would be 7 nights → 1 week.
-  assertEquals(line.amount_cents, 9000);
-  const merged = meterUnits(VISION, { windows: [{ start: jan(1), end: jan(8) }], holidays: [], rates: VISION_RATES }).tiers;
-  assertEquals(money(merged), 4500);
-});
-
-Deno.test("projector: a time line's quantity is the units it bills, and counts are UNIT-periods (quantity folded in)", () => {
-  const units = [unit(1, [{ start: jan(1), end: jan(8) }]), unit(2, [{ start: jan(1), end: jan(15) }])];
-  const line = project(visionLine(), feb(1), units)!;
-  assertEquals(line.quantity, 2);
-  assertEquals(line.price?.counts, [{ rate_key: "month", num: 0, den: 1 }, { rate_key: "week", num: 3, den: 1 }]);
-  assertEquals(line.amount_cents, 13500);
-});
-
-Deno.test("projector: nothing unbilled is null — the poll's nothing_to_bill", () => {
-  const item = visionLine({ quantity: 1, quantity_received: 1 });
-  const units = [unit(1, [{ start: jan(1), end: jan(8) }])];
-  const first = project(item, feb(1), units)!;
-  assertEquals(project(item, feb(1), units, { bills: [billDoc(1, [first])], credits: [] }), null);
-  assertEquals(project(item, feb(1), []), null);
-});
-
-Deno.test("coverage: a VOID bill bills nothing, and a live credit's windows are owed again", () => {
-  const item = visionLine({ quantity: 1, quantity_received: 1 });
-  const units = [unit(1, [{ start: jan(1), end: jan(8) }])];
-  const first = project(item, feb(1), units)!;
-  const voided = billDoc(1, [first], {
-    totals: { total_cents: 4500, amount_paid_cents: 0, amount_credited_cents: 0, amount_void_cents: 4500, amount_due_cents: 0 },
-  });
-  assertEquals(billedUnitCoverage({ bills: [voided], credits: [] }, item.path).size, 0);
-  const credit = { status: "issued" as const, items: [first] };
-  const live = { bills: [billDoc(1, [first])], credits: [credit] };
-  assertEquals(billedUnitCoverage(live, item.path).size, 0);
-  assertEquals(project(item, feb(1), units, live)?.amount_cents, 4500);
-  assertEquals(project(item, feb(1), units, { ...live, credits: [{ ...credit, status: "void" as const }] }), null);
-});
-
-Deno.test("unbilledUnitWindows: a hole in the billed coverage is what is left; a fully billed unit is left out", () => {
-  const recorded = new Map([["unit-1", [{ start: jan(1), end: jan(20) }]], ["unit-2", [{ start: jan(1), end: jan(5) }]]]);
-  const billed = new Map([["unit-1", [{ start: jan(5), end: jan(10) }]], ["unit-2", [{ start: jan(1), end: jan(5) }]]]);
-  assertEquals(unbilledUnitWindows(recorded, billed), [
-    { uid_unit: "unit-1", charge_windows: [{ start: jan(1), end: jan(5) }, { start: jan(10), end: jan(20) }] },
-  ]);
-});
-
-// ── Span lines (Verizon) ────────────────────────────────────────────
-
-Deno.test("projector: a SPAN line bills forward from where its bills left off, and its periods telescope", () => {
-  const item = verizonLine();
-  const first = project(item, feb(2), [])!;
-  assertEquals(first.dates, { start: jan(2), end: feb(2) });
-  assertEquals(first.units, []);
-  const billed = { bills: [billDoc(1, [first])], credits: [] };
-  const second = project(item, "2026-03-02T00:00:00.000-06:00", [], billed, 11)!;
-  assertEquals(second.dates, { start: feb(2), end: "2026-03-02T00:00:00.000-06:00" });
-  const whole = meterUnits(VERIZON, {
-    windows: [{ start: jan(2), end: "2026-03-02T00:00:00.000-06:00" }],
-    span: { start: jan(2), end: "2026-03-02T00:00:00.000-06:00" },
-    holidays: [],
-  }).tiers;
-  const rates = [{ rate_key: "month", amount_cents: 8000 }];
-  assertEquals(first.amount_cents + second.amount_cents, priceFromFormula(rates, whole, 1, null).subtotal_discounted_cents);
-  assertEquals([first.amount_cents, second.amount_cents], [8000, 8000]);
-  assertEquals(project(item, "2026-03-02T00:00:00.000-06:00", [], { bills: [billDoc(1, [first]), billDoc(2, [second])], credits: [] }), null);
-});
-
-Deno.test("meterBillLine: a flat line meters nothing, a missing formula and a span-less span line throw", () => {
-  const src = { span: null, recorded: new Map(), billed: new Map(), billedSpanEnd: null };
-  assertThrows(() => meterBillLine({ price: { price_formula: FIXED_REF, rates: [] }, units: [], dates: null, quantity: 1 }, src, CTX));
-  const ghost = { uid: "GhostFormula00000000", name: "Ghost", basis: "time" as const };
-  assertThrows(() => meterBillLine({ price: { price_formula: ghost, rates: [] }, units: [], dates: null, quantity: 1 }, src, CTX), Error, "not loaded");
-  assertThrows(
-    () => meterBillLine({ price: { price_formula: priceFormulaRefOf(VERIZON), rates: [] }, units: [], dates: null, quantity: 1 }, src, CTX),
-    Error,
-    "meters a span",
-  );
-});
-
 // ── The projected line is a valid stored line ───────────────────────
 
-Deno.test("projected lines parse inside a PUSHED bill — flat, time and span", () => {
-  const units = [unit(1, [{ start: jan(1), end: jan(20) }])];
-  const items = [
-    project(buyLine(), feb(1), [], NONE, 10, 1)!,
-    project(visionLine({ quantity: 1, quantity_received: 1 }), feb(1), units, NONE, 11)!,
-    project(verizonLine(), feb(2), [], NONE, 12)!,
-  ];
-  const r = PurchaseBillSchema.safeParse(billDoc(1, items));
+Deno.test("projected flat lines parse inside a PUSHED bill, and in a LINKED one", () => {
+  const other = buyLine({ uid: iuid(5), path: [iuid(5)], quantity_billed: 1 });
+  const items = [project(buyLine(), 10, 1), project(other, 11, 2)];
+  for (const over of [{}, { origin: "linked" as const, xero_id: "8a1b2c3d-0000-4000-8000-000000000001" }]) {
+    const r = PurchaseBillSchema.safeParse(billDoc(1, items, over));
+    assert(r.success, JSON.stringify(r.error?.issues));
+  }
+});
+
+// ── priceDocument, payable arm ──────────────────────────────────────
+
+Deno.test("priceDocument (payable): the stated amount IS the money, the discount the gross on top; totals are the Σ", () => {
+  const discount = { rate: 10, type: "percent" as const, amount_cents: 5222 };
+  const base = project(buyLine(), 10, 1);
+  const stale = { ...base, price: { ...base.price, discount, subtotal_cents: 1, subtotal_discounted_cents: 1, total_cents: 1 } };
+  const freight = { ...project(buyLine({ uid: iuid(5), path: [iuid(5)] }), 11, 1), amount_cents: 1500 };
+  const priced = priceDocument([stale, freight], payableCtx("purchase_bill"));
+  assertEquals(priced.items[0].price.subtotal_cents, 46995 + 5222);
+  assertEquals(priced.items[0].price.subtotal_discounted_cents, 46995);
+  assertEquals(priced.items[0].price.total_cents, 46995);
+  assertEquals(priced.items[0].price.discount, discount, "the declared discount is kept, not re-derived");
+  assertEquals(priced.items[1].price.total_cents, 1500);
+  assertEquals(priced.totals.total_cents, 46995 + 1500);
+  assertEquals(priced.totals.discount_amount_cents, 5222);
+  assertEquals(priced.replacement_total_cents, null);
+  assertEquals(stale.price.total_cents, 1, "pure: the caller's line is untouched");
+  const r = PurchaseBillSchema.safeParse(billDoc(1, priced.items));
   assert(r.success, JSON.stringify(r.error?.issues));
 });
 
-// ── The pricer ──────────────────────────────────────────────────────
+Deno.test("priceDocument (payable): a LINKED line's stamped Xero amount prices to exactly itself", () => {
+  const line = { ...project(buyLine(), 10, 3), amount_cents: 140000 };
+  const priced = priceDocument([line], payableCtx("purchase_bill"));
+  assertEquals(priced.items[0].price.total_cents, 140000);
+  assertEquals(priced.items[0].amount_cents, 140000);
+});
 
-Deno.test("pricePurchaseDocument: a pushed time line's money is re-derived from rates × counts; a linked document is untouched", () => {
-  const units = [unit(1, [{ start: jan(1), end: jan(20) }])];
-  const line = project(visionLine({ quantity: 1, quantity_received: 1 }), feb(1), units)!;
-  const stale = { ...line, amount_cents: 1 };
-  const flat = project(buyLine(), feb(1), [], NONE, 12, 1)!;
-  const pushed = pricePurchaseDocument({ origin: "pushed", items: [stale, flat] });
-  assertEquals(pushed.items[0].amount_cents, line.amount_cents);
-  assertEquals(pushed.total_cents, line.amount_cents + flat.amount_cents);
-  const linked = pricePurchaseDocument({ origin: "linked", items: [stale] });
-  assertEquals(linked.items[0].amount_cents, 1);
-  assertEquals(linked.total_cents, null);
+Deno.test("priceDocument (payable): prices a PURCHASE line, which carries no counts", () => {
+  const priced = priceDocument([buyLine()], payableCtx("purchase"));
+  assertEquals(priced.items[0].price.total_cents, 140985);
+  assertEquals("counts" in priced.items[0].price, false, "no key the purchase price does not declare");
+});
+
+Deno.test("priceDocument (payable): a TIME line is refused by name", () => {
+  assertThrows(() => priceDocument([visionLine()], payableCtx("purchase")), PriceRefusalError, "Phase 3");
 });
 
 // ── The purchase → bill sync ────────────────────────────────────────
@@ -499,94 +410,57 @@ Deno.test("purchaseBillSharedLineFields: price follows as formula ATOM + rates V
   assertEquals(kinds["units"], undefined);
 });
 
-Deno.test("syncPurchaseToBills: a rate change reaches an un-overridden time line and re-prices it; windows and quantity never move", () => {
-  const prevItem = visionLine({ quantity: 1, quantity_received: 1 });
-  const units = [unit(1, [{ start: jan(1), end: jan(20) }])];
-  const line = project(prevItem, feb(1), units)!; // 19 nights → 3 weeks
-  const bill = billDoc(1, [line]);
-  const raised = [{ rate_key: "month", amount_cents: 15750 }, { rate_key: "week", amount_cents: 5000 }];
-  const nextItem = { ...prevItem, name: "Hotspot (5G)", price: { ...prevItem.price, rates: raised } };
-  const [out] = syncPurchaseToBills(
-    { prev: purchaseDoc([prevItem]), next: purchaseDoc([nextItem]), bills: [bill], credits: [] },
-    CTX,
-  );
+const sync = (prevItem: PurchaseItem, nextItem: PurchaseItem, bills: PurchaseBill[]) =>
+  syncPurchaseToBills({ prev: purchaseDoc([prevItem]), next: purchaseDoc([nextItem]), bills, tax: TAX });
+
+Deno.test("syncPurchaseToBills: a name and a discount reach an un-overridden line; the discount lands as the bill's SHARE and re-prices it", () => {
+  const prevItem = buyLine();
+  const line = project(prevItem, 10, 1);
+  const discount = { rate: 10, type: "percent" as const, amount_cents: 15665 };
+  const nextItem = { ...prevItem, name: "Walkie (UHF)", price: { ...prevItem.price, discount } } as PurchaseItem;
+  const [out] = sync(prevItem, nextItem, [billDoc(1, [line])]);
   assert(out.changed);
   assertEquals(out.overridden, []);
   const synced = out.bill.items[0];
-  assertEquals(synced.price?.rates, raised);
-  assertEquals(synced.name, "Hotspot (5G)");
-  assertEquals(synced.units, line.units);
-  assertEquals(synced.quantity, line.quantity);
-  assertEquals(synced.amount_cents, 15000);
-  assertEquals(out.bill.totals.total_cents, 15000);
+  assertEquals(synced.name, "Walkie (UHF)");
+  assertEquals(synced.price.discount?.amount_cents, 5222, "one unit's share of 15665 over 3");
+  assertEquals(synced.amount_cents, line.amount_cents, "the net is a homonym and stays");
+  assertEquals(synced.price.subtotal_cents, 46995 + 5222, "and the gross is re-priced on it");
+  assertEquals(out.bill.totals.total_cents, 46995);
   const parsed = PurchaseBillSchema.safeParse(out.bill);
   assert(parsed.success, JSON.stringify(parsed.error?.issues));
 });
 
-Deno.test("syncPurchaseToBills: an operator's rate override is KEPT, and reported", () => {
-  const prevItem = visionLine({ quantity: 1, quantity_received: 1 });
-  const units = [unit(1, [{ start: jan(1), end: jan(20) }])];
-  const line = project(prevItem, feb(1), units)!;
-  const operator = [{ rate_key: "month", amount_cents: 15000 }, { rate_key: "week", amount_cents: 4000 }];
-  const edited = pricePurchaseDocument({ origin: "pushed", items: [{ ...line, price: { ...line.price!, rates: operator } }] }).items[0];
-  const bill = billDoc(1, [edited]);
-  const nextItem = { ...prevItem, price: { ...prevItem.price, rates: VISION_RATES.map((r) => ({ ...r, amount_cents: r.amount_cents + 100 })) } };
-  const [out] = syncPurchaseToBills(
-    { prev: purchaseDoc([prevItem]), next: purchaseDoc([nextItem]), bills: [bill], credits: [] },
-    CTX,
-  );
+Deno.test("syncPurchaseToBills: an untouched line compares equal to its projection — no edit means no change", () => {
+  const prevItem = buyLine({ price: payablePrice(140985, { formula: FIXED_REF, discount: { rate: 10, type: "percent", amount_cents: 15665 } }) });
+  const [out] = sync(prevItem, prevItem, [billDoc(1, [project(prevItem, 10, 2)])]);
   assertEquals(out.changed, false);
-  assertEquals(out.overridden, ["items[0].price.rates"]);
-  assertEquals(out.bill, bill);
+  assertEquals(out.overridden, []);
+});
+
+Deno.test("syncPurchaseToBills: an operator's account override is KEPT, and reported", () => {
+  const prevItem = buyLine();
+  const bill = billDoc(1, [{ ...project(prevItem, 10, 1), ledger_account: 1400 }]);
+  const [kept] = sync(prevItem, { ...prevItem, ledger_account: 6500 } as PurchaseItem, [bill]);
+  assertEquals(kept.changed, false);
+  assertEquals(kept.overridden, ["items[0].ledger_account"]);
+  assertEquals(kept.bill, bill);
 });
 
 Deno.test("syncPurchaseToBills: a linked, a frozen and a voided bill are skipped whole", () => {
-  const prevItem = visionLine({ quantity: 1, quantity_received: 1 });
-  const units = [unit(1, [{ start: jan(1), end: jan(20) }])];
-  const line = project(prevItem, feb(1), units)!;
-  const nextItem = { ...prevItem, name: "Renamed" };
+  const prevItem = buyLine();
+  const line = project(prevItem, 10, 1);
+  const nextItem = { ...prevItem, name: "Renamed" } as PurchaseItem;
   const t = line.amount_cents;
   const bills = [
     billDoc(1, [line], { origin: "linked", xero_id: "8a1b2c3d-0000-4000-8000-000000000001" }),
     billDoc(2, [line], { totals: { total_cents: t, amount_paid_cents: t, amount_credited_cents: 0, amount_void_cents: 0, amount_due_cents: 0 } }),
     billDoc(3, [line], { totals: { total_cents: t, amount_paid_cents: 0, amount_credited_cents: 0, amount_void_cents: t, amount_due_cents: 0 } }),
   ];
-  const out = syncPurchaseToBills({ prev: purchaseDoc([prevItem]), next: purchaseDoc([nextItem]), bills, credits: [] }, CTX);
-  assertEquals(out.map((o) => o.changed), [false, false, false]);
+  assertEquals(sync(prevItem, nextItem, bills).map((o) => o.changed), [false, false, false]);
   // Companion: the same bill pushed and open DOES follow.
-  const [open] = syncPurchaseToBills({ prev: purchaseDoc([prevItem]), next: purchaseDoc([nextItem]), bills: [billDoc(4, [line])], credits: [] }, CTX);
+  const [open] = sync(prevItem, nextItem, [billDoc(4, [line])]);
   assertEquals(open.bill.items[0].name, "Renamed");
-});
-
-Deno.test("syncPurchaseToBills: a FORMULA change re-meters the line from its own windows", () => {
-  const prevItem = visionLine({ quantity: 1, quantity_received: 1 });
-  const units = [unit(1, [{ start: jan(1), end: jan(20) }])];
-  const line = project(prevItem, feb(1), units)!;
-  const weeklyOnly = { ...VISION, uid: "WeeklyOnlyFormula000", name: "Weekly", segments: [VISION.segments[1]] };
-  const ctx = { ...CTX, formulas: new Map([...CTX.formulas, [weeklyOnly.uid, weeklyOnly]]) };
-  const nextItem = {
-    ...prevItem,
-    price: { price_formula: priceFormulaRefOf(weeklyOnly), rates: [{ rate_key: "week", amount_cents: 4500 }], discount: null, taxes: [] },
-  };
-  const [out] = syncPurchaseToBills({ prev: purchaseDoc([prevItem]), next: purchaseDoc([nextItem]), bills: [billDoc(1, [line])], credits: [] }, ctx);
-  assertEquals(out.bill.items[0].price?.counts, [{ rate_key: "week", num: 3, den: 1 }]);
-  assertEquals(out.bill.items[0].amount_cents, 13500);
-});
-
-Deno.test("syncPurchaseToBills: a RATE change re-meters a capped line, so the sync and a bill edit cannot price it differently", () => {
-  const prevItem = visionLine({ quantity: 1, quantity_received: 1 });
-  // 27 nights: four started weeks ($180) cap at the month ($157.50).
-  const line = project(prevItem, feb(1), [unit(1, [{ start: jan(1), end: jan(28) }])])!;
-  assertEquals(line.amount_cents, 15750);
-  // The month rises to $200, so four weeks at $45 ($180) is now the cheaper reading.
-  const raised = [{ rate_key: "month", amount_cents: 20000 }, { rate_key: "week", amount_cents: 4500 }];
-  const nextItem = { ...prevItem, price: { ...prevItem.price, rates: raised } };
-  const [out] = syncPurchaseToBills({ prev: purchaseDoc([prevItem]), next: purchaseDoc([nextItem]), bills: [billDoc(1, [line])], credits: [] }, CTX);
-  assertEquals(out.bill.items[0].price?.counts, [{ rate_key: "month", num: 0, den: 1 }, { rate_key: "week", num: 4, den: 1 }]);
-  assertEquals(out.bill.items[0].amount_cents, 18000);
-  assertEquals(out.bill.totals.total_cents, 18000);
-  // Companion: keeping the stored month count prices the same 27 nights at $200.
-  assertEquals(priceFromFormula(raised, line.price!.counts, 1, null).subtotal_discounted_cents, 20000);
 });
 
 Deno.test("flatShareCents: past `quantity` it keeps the per-unit rate, and agrees with cumulativeShareCents inside it", () => {
@@ -608,7 +482,7 @@ const credit = (items: PurchaseDocumentItem[], status: PurchaseCredit["status"] 
 
 Deno.test("diff: a bill line that matches its purchase line is silent, on both views", () => {
   const item = buyLine({ quantity_billed: 3, quantity_received: 3 });
-  const line = project(buyLine(), feb(1), [], NONE, 10, 3)!;
+  const line = project(buyLine(), 10, 3);
   const bill = billDoc(1, [line]);
   const sources = { purchase: purchaseDoc([item]), bills: [bill], credits: [] };
   assertEquals(computePurchaseBillDiffs({ kind: "purchase" }, sources).lines.size, 0);
@@ -617,7 +491,7 @@ Deno.test("diff: a bill line that matches its purchase line is silent, on both v
 
 Deno.test("diff: an overridden account is a `differs` on both views, here/there in each view's own sense", () => {
   const item = buyLine({ quantity_billed: 3, quantity_received: 3 });
-  const line = { ...project(buyLine(), feb(1), [], NONE, 10, 3)!, ledger_account: 6500 };
+  const line = { ...project(buyLine(), 10, 3), ledger_account: 6500 };
   const bill = billDoc(1, [line]);
   const sources = { purchase: purchaseDoc([item]), bills: [bill], credits: [] };
   const onBill = computePurchaseBillDiffs({ kind: "bill", uid: bill.uid }, sources).lines.get(line.path.join("/"));
@@ -629,8 +503,8 @@ Deno.test("diff: an overridden account is a `differs` on both views, here/there 
 
 Deno.test("diff: OVER-billing a flat line is a `billed` entry summed across bills net of credits — flagged, never refused", () => {
   const item = buyLine({ quantity_billed: 4, quantity_received: 3 });
-  const a = project(buyLine(), feb(1), [], NONE, 10, 2)!;
-  const b = project(buyLine({ quantity_billed: 2 }), feb(1), [], NONE, 11, 2)!;
+  const a = project(buyLine(), 10, 2);
+  const b = project(buyLine({ quantity_billed: 2 }), 11, 2);
   const sources = { purchase: purchaseDoc([item]), bills: [billDoc(1, [a]), billDoc(2, [b])], credits: [] };
   const [entry] = computePurchaseBillDiffs({ kind: "purchase" }, sources).lines.get(item.path.join("/"))!;
   assertEquals(entry.kind, "billed");
@@ -638,7 +512,7 @@ Deno.test("diff: OVER-billing a flat line is a `billed` entry summed across bill
   assertEquals([billed.ordered, billed.received, billed.billed], [3, 3, 4]);
   assertEquals(billed.billed_cents, billed.expected_cents);
   // A credit of the extra unit makes it agree again.
-  const back = project(buyLine({ quantity_billed: 3 }), feb(1), [], NONE, 12, 1)!;
+  const back = project(buyLine({ quantity_billed: 3 }), 12, 1);
   const credited = { ...sources, credits: [credit([back])] };
   assertEquals(computePurchaseBillDiffs({ kind: "purchase" }, credited).lines.size, 0);
   // …and a VOID credit does not.
@@ -647,7 +521,7 @@ Deno.test("diff: OVER-billing a flat line is a `billed` entry summed across bill
 
 Deno.test("diff: a flat line billed at the wrong money is flagged even at the right count", () => {
   const item = buyLine({ quantity_billed: 3, quantity_received: 3 });
-  const line = { ...project(buyLine(), feb(1), [], NONE, 10, 3)!, amount_cents: 140000 };
+  const line = { ...project(buyLine(), 10, 3), amount_cents: 140000 };
   const sources = { purchase: purchaseDoc([item]), bills: [billDoc(1, [line], { origin: "linked", xero_id: "8a1b2c3d-0000-4000-8000-000000000001" })], credits: [] };
   const [entry] = computePurchaseBillDiffs({ kind: "purchase" }, sources).lines.get(item.path.join("/"))!;
   assertEquals((entry as { billed_cents: number; expected_cents: number }).billed_cents, 140000);
@@ -658,125 +532,11 @@ Deno.test("diff: a document-only charge line is `not_on_source` on the bill view
   const item = buyLine({ quantity_billed: 3, quantity_received: 3 });
   const freight: PurchaseDocumentItem = {
     type: "service", uid: iuid(20), path: [iuid(20)], name: "Freight", description: "", zero_priced: null, quantity: 1, amount_cents: 1500, ledger_account: 5300,
-    uid_tracking_category: null, uid_tax_class: TAX_CLASS, price: { price_formula: FIXED_REF, rates: [], discount: null, taxes: [], counts: [] }, units: [], dates: null,
+    uid_tracking_category: null, uid_tax_class: TAX_CLASS, price: { ...payablePrice(1500, { formula: FIXED_REF }), counts: [] }, units: [], dates: null,
   };
-  const bill = billDoc(1, [project(buyLine(), feb(1), [], NONE, 10, 3)!, freight]);
+  const bill = billDoc(1, [project(buyLine(), 10, 3), freight]);
   const got = computePurchaseBillDiffs({ kind: "bill", uid: bill.uid }, { purchase: purchaseDoc([item]), bills: [bill], credits: [] });
   assertEquals(got.lines.get(iuid(20))?.map((e) => e.kind), ["not_on_source"]);
-});
-
-Deno.test("diff: a time line's COVERAGE — recorded-not-billed and billed-not-recorded, per unit", () => {
-  const item = visionLine({ quantity: 1, quantity_received: 1 });
-  const units = [unit(1, [{ start: jan(1), end: jan(20) }])];
-  const line = project(item, jan(10), units)!; // bills Jan 1 → Jan 10
-  // The supplier also billed Jan 25 → Jan 28, which no window recorded.
-  const extra = { ...line, units: [{ uid_unit: "unit-1", charge_windows: [{ start: jan(1), end: jan(10) }, { start: jan(25), end: jan(28) }] }] };
-  const sources = { purchase: purchaseDoc([item]), bills: [billDoc(1, [extra])], credits: [], units, through: feb(1) };
-  const [entry] = computePurchaseBillDiffs({ kind: "purchase" }, sources).lines.get(item.path.join("/"))!;
-  assertEquals(entry, {
-    kind: "coverage",
-    bills: [{ kind: "bill", uid: "testbill000000000001", number: 1, version: 0 }],
-    uid_unit: "unit-1",
-    recorded_not_billed: [{ start: jan(10), end: jan(20) }],
-    billed_not_recorded: [{ start: jan(25), end: jan(28) }],
-  });
-  // Without units/through, coverage is not asked.
-  assertEquals(computePurchaseBillDiffs({ kind: "purchase" }, { ...sources, units: undefined }).lines.size, 0);
-});
-
-Deno.test("diff: a LINKED time line's Xero money is compared with its own rates × counts; a pushed one cannot differ", () => {
-  const item = visionLine({ quantity: 1, quantity_received: 1 });
-  const units = [unit(1, [{ start: jan(1), end: jan(20) }])];
-  const line = { ...project(item, feb(1), units)!, amount_cents: 12000 };
-  const linked = billDoc(1, [line], { origin: "linked", xero_id: "8a1b2c3d-0000-4000-8000-000000000001" });
-  const got = computePurchaseBillDiffs({ kind: "bill", uid: linked.uid }, { purchase: purchaseDoc([item]), bills: [linked], credits: [] });
-  const [entry] = got.lines.get(line.path.join("/"))!;
-  assertEquals((entry as { fields: unknown }).fields, [{ field: "amount_cents", here: 12000, there: 13500 }]);
-});
-
-// ── Time credits: un-billing windows ──────────────────────────────
-
-const creditOf = (items: PurchaseDocumentItem[]) => ({ status: "issued" as const, items });
-
-Deno.test("time credit: crediting everything a bill billed reverses it exactly, and leaves nothing billed", () => {
-  const item = visionLine();
-  const units = [unit(1, [{ start: jan(1), end: jan(15) }]), unit(2, [{ start: jan(3), end: jan(10) }])];
-  const billLine = project(item, jan(20), units)!;
-  const billed: PurchaseBilledDocuments = { bills: [billDoc(1, [billLine])], credits: [] };
-  const credit = projectPurchaseLineToCreditLine(
-    item,
-    { uid: iuid(40), units: billLine.units!, dates: null, quantity: 2, billed },
-    CTX,
-  );
-  assertEquals(credit.amount_cents, billLine.amount_cents);
-  assertEquals(credit.price?.counts, billLine.price?.counts);
-  assertEquals(credit.quantity, 2);
-  const after: PurchaseBilledDocuments = { bills: billed.bills, credits: [creditOf([credit])] };
-  assertEquals(billedUnitCoverage(after, item.path).size, 0, "the credit un-bills all of it");
-  // Companion: the same windows cannot be credited twice.
-  assertThrows(() =>
-    projectPurchaseLineToCreditLine(item, { uid: iuid(41), units: billLine.units!, dates: null, quantity: 2, billed: after }, CTX)
-  );
-});
-
-Deno.test("time credit: a window nobody billed cannot be credited", () => {
-  const item = visionLine();
-  const units = [unit(1, [{ start: jan(1), end: jan(8) }])];
-  const billed: PurchaseBilledDocuments = { bills: [billDoc(1, [project(item, jan(20), units)!])], credits: [] };
-  const inside = [{ uid_unit: "unit-1", charge_windows: [{ start: jan(2), end: jan(4) }] }];
-  const outside = [{ uid_unit: "unit-1", charge_windows: [{ start: jan(6), end: jan(12) }] }];
-  projectPurchaseLineToCreditLine(item, { uid: iuid(40), units: inside, dates: null, quantity: 1, billed }, CTX);
-  assertThrows(
-    () => projectPurchaseLineToCreditLine(item, { uid: iuid(40), units: outside, dates: null, quantity: 1, billed }, CTX),
-    Error,
-    "not billed",
-  );
-  assertThrows(
-    () => projectPurchaseLineToCreditLine(buyLine(), { uid: iuid(40), units: inside, dates: null, quantity: 1, billed }, CTX),
-    Error,
-    "credit it in units",
-  );
-});
-
-Deno.test("time credit: a tail credited out of a CAPPED month credits the delta, not the tail's weeks (Q14)", () => {
-  const item = visionLine({ quantity: 1, uid_units: ["unit-1"] });
-  // 27 nights: four started weeks ($180) cap at the month ($157.50).
-  const units = [unit(1, [{ start: jan(1), end: jan(28) }])];
-  const billLine = project(item, jan(28), units)!;
-  assertEquals(billLine.amount_cents, 15750);
-  const billed: PurchaseBilledDocuments = { bills: [billDoc(1, [billLine])], credits: [] };
-  // Credit the last 6 nights: 21 nights stay billed — three weeks ($135), under the cap.
-  const tail = [{ uid_unit: "unit-1", charge_windows: [{ start: jan(22), end: jan(28) }] }];
-  const credit = projectPurchaseLineToCreditLine(item, { uid: iuid(40), units: tail, dates: null, quantity: 1, billed }, CTX);
-  assertEquals(credit.amount_cents, 15750 - 3 * 4500);
-  // Companion: metering only the credited piece reads one week ($45) — the naive form disagrees.
-  const naive = money(meterUnits(VISION, { windows: tail[0].charge_windows, span: null, holidays: [], rates: VISION_RATES }).tiers);
-  assertEquals(naive, 4500);
-  assertNotEquals(naive, credit.amount_cents);
-});
-
-Deno.test("time credit: a SPAN credit must lie inside the billed span and not overlap an earlier span credit", () => {
-  const item = verizonLine({ uid_units: [] });
-  const billLine = project(item, feb(2), [])!;
-  assert(billLine.dates !== null);
-  const billed: PurchaseBilledDocuments = { bills: [billDoc(1, [billLine])], credits: [] };
-  const credit = projectPurchaseLineToCreditLine(
-    item,
-    { uid: iuid(40), units: [], dates: { start: jan(2), end: feb(2) }, quantity: 1, billed },
-    CTX,
-  );
-  assertEquals(credit.amount_cents, billLine.amount_cents, "a credit of the whole billed span reverses it");
-  assertThrows(
-    () => projectPurchaseLineToCreditLine(item, { uid: iuid(41), units: [], dates: { start: jan(2), end: feb(10) }, quantity: 1, billed }, CTX),
-    Error,
-    "not inside",
-  );
-  const after: PurchaseBilledDocuments = { bills: billed.bills, credits: [creditOf([credit])] };
-  assertThrows(
-    () => projectPurchaseLineToCreditLine(item, { uid: iuid(42), units: [], dates: { start: jan(10), end: jan(20) }, quantity: 1, billed: after }, CTX),
-    Error,
-    "already credited",
-  );
 });
 
 // ── The recount of `quantity_billed` (api-cloudrun#1441) ────────────
@@ -867,14 +627,14 @@ Deno.test("purchaseBillIsLive: the stamp is read as well as the money; purchaseC
 });
 
 Deno.test("a stamped bill parses, and an unstamped one does too", () => {
-  const item = project(buyLine(), feb(1), [], NONE, 10, 3)!;
+  const item = project(buyLine(), 10, 3);
   assert(PurchaseBillSchema.safeParse(billDoc(1, [item])).success);
   assert(PurchaseBillSchema.safeParse(billDoc(1, [item], { voided_at: mockTimestamp })).success);
 });
 
 Deno.test("diff: a live credit with no live bill left under it reads as a negative `billed`", () => {
   const item = buyLine({ quantity_billed: 0, quantity_received: 3 });
-  const billLine = project(buyLine(), feb(1), [], NONE, 10, 3)!;
+  const billLine = project(buyLine(), 10, 3);
   const creditLine = { ...billLine, quantity: 2, amount_cents: 93990 };
   const bill = voidedBill(billDoc(1, [billLine]));
   const stranded = credit([creditLine]);

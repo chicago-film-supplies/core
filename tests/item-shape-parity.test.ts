@@ -47,6 +47,7 @@ import {
 import { classifySharedFields } from "../src/utils/shared-fields.ts";
 import { pickLinePostingFields, pickLineTaxFields } from "../src/utils/invoices.ts";
 import { InvoiceDocItem, schemas } from "../src/schemas/mod.ts";
+import { PayablePriceMoneyCore } from "../src/schemas/purchase.ts";
 
 const GRAINS = ["orders", "invoices", "fulfillments"] as const;
 
@@ -383,6 +384,28 @@ Deno.test("payable grains: every shared head, posting and tax field is the SAME 
   // Non-vacuity: 4 purchase arms + 3 bill arms + 3 credit arms.
   assertEquals(arms, 10, "the payable arm walk stopped reaching every arm");
   assertEquals(drifted, [], "a payable grain drifted from the shared line cores:\n" + drifted.join("\n"));
+});
+
+Deno.test("payable grains: the price money keys are the SAME INSTANCE on every arm's price (one-document-model Phase 2)", () => {
+  const drifted: string[] = [];
+  let prices = 0;
+  for (const grain of PAYABLE_GRAINS) {
+    for (const shape of payableArmShapes(grain)) {
+      // The price node is annotated `z.ZodType<…>`, so walk to its object shape.
+      // deno-lint-ignore no-explicit-any
+      let node: any = shape.price;
+      while (node && !node._zod.def.shape) node = node._zod.def.innerType ?? node._zod.def.in;
+      const priceShape = node?._zod.def.shape;
+      assert(priceShape, `${grain}: no price shape reached`);
+      prices++;
+      for (const [key, canonical] of Object.entries(PayablePriceMoneyCore)) {
+        if (priceShape[key] !== canonical) drifted.push(`${grain}.items[].price.${key}`);
+      }
+    }
+  }
+  assertEquals(prices, 10, "the payable price walk stopped reaching every arm");
+  assertEquals(Object.keys(PayablePriceMoneyCore).length, 3, "the money core is not vacuous");
+  assertEquals(drifted, [], "a payable price re-declared a money key:\n" + drifted.join("\n"));
 });
 
 Deno.test("payable grains: the posting key is `ledger_account`, and neither retired spelling survives", () => {

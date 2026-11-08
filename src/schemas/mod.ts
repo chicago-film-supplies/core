@@ -41,6 +41,7 @@ export {
   type Side,
   SIDE_CONTRACTS,
   type SideContract,
+  type SideTax,
   SIDES,
 } from "./side.ts";
 

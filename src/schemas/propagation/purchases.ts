@@ -331,7 +331,7 @@ const PURCHASE_BILL_SYNC_SEMANTICS: EnforcementRef = {
   kind: "test",
   ref: "core/tests/purchase-documents.test.ts::syncPurchaseToBills",
   clause:
-    "the three-way policy per field: a pushed, live, unsettled bill line takes the purchase line's new value of each shared field read off the two schemas (`purchaseBillSharedLineFields`) unless the bill's differs from the PREVIOUS purchase's; quantity, amount_cents and dates are homonyms and the bill's `units` are bill-only, so windows and quantities never move; a formula change re-meters the line from its own windows and every time line is re-priced from rates × counts; a linked, frozen or voided bill is skipped whole. Does NOT cover the writer's point-get of `query_by_bills` or the post-commit Xero edit push.",
+    "the three-way policy per field: a pushed, live, unsettled bill line takes the purchase line's new value of each shared field read off the two schemas (`purchaseBillSharedLineFields`) unless the bill's differs from the PREVIOUS purchase's; quantity, amount_cents and dates are homonyms and the bill's `units` are bill-only, so windows and quantities never move; a followed discount lands as the bill line's share of it, and a changed bill is re-priced whole by `priceDocument`'s stated-total arm; a linked, frozen or voided bill is skipped whole. Does NOT cover the writer's point-get of `query_by_bills` or the post-commit Xero edit push.",
   gates: true,
 };
 
@@ -352,12 +352,12 @@ const updatePurchaseBillRules: CollectionRule[] = [
         source: ["items"],
         target: ["items"],
         transform:
-          "match each bill line to its purchase line by path_purchase_item; mergeSharedFields(prev purchase line, next purchase line, bill line) over the classification of (PurchaseSchema, PurchaseBillSchema), each purchase line first projected to the bill line's shape (`projectPurchaseLineForBill`). Then re-derive: a time line whose formula or rates changed is re-metered from its own windows against the earlier bills' coverage, and its money is priced from rates × counts; a flat line keeps its net amount.",
+          "match each bill line to its purchase line by path_purchase_item; mergeSharedFields(prev purchase line, next purchase line, bill line) over the classification of (PurchaseSchema, PurchaseBillSchema), each purchase line first projected to the bill line's shape at the bill line's quantity (`projectPurchaseLineForBill`), so its discount is that quantity's share. A line keeps its net amount (a homonym); the changed bill is then priced by `priceDocument` (payable arm), whose stated-total arm states each line's money from that amount and its discount.",
       },
       {
         source: ["items"],
         target: ["totals"],
-        transform: "total_cents = Σ line money (`pricePurchaseDocument`); amount_due_cents moves with it",
+        transform: "total_cents = Σ line money (`priceDocument`, payable arm); amount_due_cents moves with it",
       },
     ],
   },
@@ -370,7 +370,7 @@ const createPurchaseBillRules: CollectionRule[] = [
     target: "purchases",
     mode: "co-write",
     invariant:
-      "Every bill product line bills ONE purchase line, named by `path_purchase_item` (never by product: one product may sit on two lines), and is defaulted from it by `projectPurchaseLineToBillLine` (`@cfs/core/utils/purchase-documents`). A FLAT line is counted by the recount (`purchase-billed:bills-to-purchase`) and priced at `flatShareCents(line.amount_cents, line.quantity, billed_before, billed_after)` — never a client input — so the bills of a fully billed line sum to its amount exactly. A TIME line has no billed count (`quantity_billed: null`): it bills its units' UNBILLED charge windows, metered as a delta of the cumulative meter so a window split across bills keeps one anchor. Billing past what was ordered is LEGAL and flagged by the purchase↔bill diff, never refused (D5, reversing #1396). The bill's uid is appended to the purchase's `query_by_bills` in the same commit. A LINKED bill's lines are projected the same way for attribution; its total is Xero's and is exempt.",
+      "Every bill product line bills ONE purchase line, named by `path_purchase_item` (never by product: one product may sit on two lines), and is defaulted from it by `projectPurchaseLineToBillLine` (`@cfs/core/utils/purchase-documents`). A FLAT line is counted by the recount (`purchase-billed:bills-to-purchase`) and priced at `flatShareCents(line.amount_cents, line.quantity, billed_before, billed_after)` — never a client input — so the bills of a fully billed line sum to its amount exactly. Every payable line is priced flat until one-document-model Phase 3 meters a time line from its destination pair's windows. Billing past what was ordered is LEGAL and flagged by the purchase↔bill diff, never refused (D5, reversing #1396). The bill's uid is appended to the purchase's `query_by_bills` in the same commit. A LINKED bill's lines are projected the same way for attribution; its total is Xero's and is exempt.",
     enforced_by: [BILL_MOVES_THE_BUCKET],
     transaction: "create-purchase-bill",
     fields: [
@@ -1034,7 +1034,7 @@ const createPurchaseBillTransaction: TransactionDefinition = {
 const updatePurchaseBillTransaction: TransactionDefinition = {
   id: "update-purchase-bill",
   description:
-    "Edits a PUSHED, unsettled bill (`PUT /purchase-bills/{uid}`, D5): any line's shared field may be overridden until the bill settles, exactly the invoice rule; a time line's money is edited through its rates, discount, units and dates, from which the writer re-meters its counts (`meterBillLine`) and re-prices it (`pricePurchaseDocument`). Refused on a linked bill (Xero is authoritative) and, per field class, on a frozen one (`PURCHASE_BILL_FIELD_FREEZE`). The accepted edit is pushed to Xero after the commit by the ACCPAY edit push — GET-modify-POST against Xero's own InvoiceID, hash-gated so an unchanged body pushes nothing. Editing a flat line's quantity recounts the purchase's `quantity_billed` and bumps its version in the same commit — fires on: an edit that moves a line's count, with the return card when that moves the purchase's status.",
+    "Edits a PUSHED, unsettled bill (`PUT /purchase-bills/{uid}`, D5): any line's shared field may be overridden until the bill settles, exactly the invoice rule; the writer re-prices the edited bill with `priceDocument` (payable arm), whose stated-total arm states each line's money from its amount and discount. Refused on a linked bill (Xero is authoritative) and, per field class, on a frozen one (`PURCHASE_BILL_FIELD_FREEZE`). The accepted edit is pushed to Xero after the commit by the ACCPAY edit push — GET-modify-POST against Xero's own InvoiceID, hash-gated so an unchanged body pushes nothing. Editing a flat line's quantity recounts the purchase's `quantity_billed` and bumps its version in the same commit — fires on: an edit that moves a line's count, with the return card when that moves the purchase's status.",
   steps: [...RECOUNT_STEPS],
 };
 

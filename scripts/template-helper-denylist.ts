@@ -745,20 +745,15 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "purchaseBillXeroSyncStatus",
   ],
   // Purchase → bill machinery (purchases-as-documents D5–D7): the projector, the
-  // window coverage, the metering and pricing of a bill line, and the
-  // purchase → bill sync. A template renders a bill whose lines already carry
+  // window coverage and the purchase → bill sync. A template renders a bill whose lines already carry
   // their counts and money.
   "purchase-documents": [
-    "billedSpanEnd",
     "billedUnitCoverage",
     "coversForUnit",
     "flatShareCents",
-    "meterBillLine",
     "overcoveredUnitWindows",
-    "pricePurchaseDocument",
     "projectPurchaseLineForBill",
     "projectPurchaseLineToBillLine",
-    "projectPurchaseLineToCreditLine",
     "purchaseBillIsLive",
     "purchaseCreditIsLive",
     "purchaseLineBilledNet",
@@ -768,7 +763,6 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "seedPurchaseLinesForWindows",
     "subtractChargeWindows",
     "syncPurchaseToBills",
-    "unbilledUnitWindows",
     "uncoveredUnitWindows",
     "unitWindowsForLine",
   ],

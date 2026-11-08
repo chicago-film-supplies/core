@@ -177,7 +177,7 @@ function readPath(root: unknown, path: string): unknown {
  * side) compares the parent whole, as the merge does.
  */
 function lineFieldDiffs(line: PurchaseDocumentItem, item: PurchaseItem): DocumentDiffField[] {
-  const there = projectPurchaseLineForBill(item);
+  const there = projectPurchaseLineForBill(item, line.quantity);
   const out: DocumentDiffField[] = [];
   const seen = new Set<string>();
   for (const f of purchaseBillSharedLineFields()) {

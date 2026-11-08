@@ -10,6 +10,7 @@ import {
   purchaseCardDue,
 } from "../src/utils/cards.ts";
 import type { PurchaseSaleItem, PurchaseRentalItem } from "../src/schemas/purchase.ts";
+import { payablePrice } from "./helpers/payable.ts";
 
 /**
  * A genuine ORDER-DERIVED EVENT CARD — `sources` names an order, so
@@ -487,7 +488,7 @@ const pline = (over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem => {
     uid_tracking_category: null,
     uid_tax_class: "TaxClassResale000000",
     amount_cents: 50_000,
-    price: { price_formula: { uid: "FixedFormula00000000", name: "Fixed", basis: "flat" }, rates: [], discount: null, taxes: [] },
+    price: payablePrice(50_000),
     auto_link: false,
     quantity_received: 0,
     quantity_billed: 0,
@@ -511,7 +512,7 @@ const bline: PurchaseSaleItem = {
   name: "Gaff tape",
   quantity: 5,
   amount_cents: 1_000,
-  price: { price_formula: { uid: "FixedFormula00000000", name: "Fixed", basis: "flat" }, rates: [], discount: null, taxes: [] },
+  price: payablePrice(1_000),
   ledger_account: 1400,
   uid_tracking_category: null,
   uid_tax_class: "TaxClassResale000000",

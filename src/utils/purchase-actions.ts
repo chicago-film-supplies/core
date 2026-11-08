@@ -33,20 +33,16 @@ import {
   type PurchaseActionId,
   type PurchaseBill,
   type PurchaseCredit,
-  type PurchaseItem,
   purchaseItemBasis,
   type PurchaseRentalItem,
   type PurchaseReplacementItem,
   type PurchaseSaleItem,
   type PurchaseServiceItem,
-  type UnitType,
 } from "../schemas/mod.ts";
 import {
   type PurchaseBilledDocuments,
   purchaseBillIsLive,
-  type PurchaseDocumentContext,
   purchaseLineBilledNet,
-  projectPurchaseLineToBillLine,
 } from "./purchase-documents.ts";
 import type { PurchaseBillXeroSyncStatus } from "./purchase-bill-xero-sync.ts";
 import { remainingToBill, remainingToReceive, remainingToReturn } from "./purchases.ts";
@@ -87,18 +83,6 @@ export interface PurchaseOfferContext {
    * so a billed time line reads as untouched; the server re-checks.
    */
   billed_paths?: ReadonlySet<string>;
-  /**
-   * What a time line's bill is projected from. **Absent ⇒ a time line is offered
-   * for its open units unprobed**, and the server answers `nothing_to_bill` if
-   * they are already billed.
-   */
-  billing?: {
-    /** The billing cut-off, a Chicago instant. */
-    through: string;
-    units: readonly Pick<UnitType, "uid" | "charge_windows">[];
-    billed: PurchaseBilledDocuments;
-    pricing: PurchaseDocumentContext;
-  };
 }
 
 /** The paths of the purchase lines a LIVE bill names, each joined with `/`. */
@@ -162,29 +146,17 @@ function closeCancels(item: PurchaseActionItem): boolean {
     : item.quantity_received === 0;
 }
 
-/** The units a line may still bill, 0 when it has nothing to bill. */
-function billableQuantity(item: PurchaseActionItem, billing: PurchaseOfferContext["billing"]): number {
-  if (purchaseItemBasis(item) === "flat") {
-    return remainingToBill({
-      quantity: item.quantity,
-      quantity_billed: item.quantity_billed ?? 0,
-      quantity_canceled: item.quantity_canceled,
-    });
-  }
-  const open = Math.max(0, item.quantity - item.quantity_canceled);
-  if (billing === undefined || open === 0) return open;
-  try {
-    // The projector reads the line's price, span and units, none of them
-    // stamped by the server, so a line not yet saved projects `null` or throws.
-    const line = projectPurchaseLineToBillLine(
-      item as PurchaseItem,
-      { uid: "probe", uid_purchase: "probe", quantity: 0, through: billing.through, units: billing.units, billed: billing.billed },
-      billing.pricing,
-    );
-    return line?.quantity ?? 0;
-  } catch {
-    return 0;
-  }
+/**
+ * The units a line may still bill, 0 when it has nothing to bill. Every payable
+ * line is priced flat (time lines return in one-document-model Phase 3), so
+ * this is what is ordered, less what is billed and canceled.
+ */
+function billableQuantity(item: PurchaseActionItem): number {
+  return remainingToBill({
+    quantity: item.quantity,
+    quantity_billed: item.quantity_billed ?? 0,
+    quantity_canceled: item.quantity_canceled,
+  });
 }
 
 /**
@@ -216,7 +188,7 @@ export function purchaseActionsFor(
       offers.push({ key: `${action}:${item.uid}`, action, uid_item: item.uid, ...extra });
     if (active && purchaseItemClosable(item)) line("close_item");
     if (status !== "canceled") {
-      const max = billableQuantity(item, ctx.billing);
+      const max = billableQuantity(item);
       if (max > 0) line("bill_item", { max_quantity: max });
     }
     if (!purchaseItemTouched(item, billedPaths)) {

@@ -36,15 +36,37 @@
  * re-priced on any path, so the refusal is part of the input type rather than a
  * gate each caller has to remember.
  *
+ * ## Both sides (api-cloudrun `one-document-model` Phase 2)
+ *
+ * The same five stages price a PAYABLE document — a purchase, a bill or a
+ * supplier credit — given a {@link PayablePriceDocumentContext}. Two arms
+ * differ, both read off the side rather than the collection:
+ *
+ * - **Tax.** The side's `SIDE_CONTRACTS` tax entry is `exempt`, so stage 1
+ *   records each line's `taxes_base` and charges nothing, `replacement`
+ *   included.
+ * - **Line money: the stated-total arm** ({@link priceStatedTotalLine}). A
+ *   payable line states its whole net cost in `amount_cents` — a buy's cost
+ *   rarely divides by its quantity — so the money is that amount, with the
+ *   declared discount on top as the gross. It is the twin of stage 4's fee arm:
+ *   a declared amount stored as the line's money. A TIME-priced payable line is
+ *   refused until Phase 3 gives purchases destination pairs to meter.
+ *
  * ## Pure
  *
  * The input items are not mutated. Items come back as copies with a new `price`
  * on every priced line; dividers are returned as they were.
  */
 import {
+  type DiscountType,
   type InvoiceStatusType,
+  type JurisdictionType,
   type OrderStatusType,
   type PriceFormulaRef,
+  type PriceModifierType,
+  type PurchaseDocumentItem,
+  type PurchaseItem,
+  SIDE_CONTRACTS,
   type TaxRefType,
   TERMINAL_ORDER_STATUSES,
 } from "../schemas/mod.ts";
@@ -52,6 +74,7 @@ import {
   assembleLinePrice,
   calculateReplacementTotals,
   calculateTransactionFeeAmountCents,
+  computeItemTaxAmountCents,
   computeLineMoney,
   type DocumentTotalsCore,
   getTransactionFeeTotals,
@@ -77,7 +100,7 @@ import {
 } from "./price-formulas.ts";
 import { pairItemsAcrossRebuild, type PathedItem } from "./item-pairing.ts";
 import { assignLineTaxes, type DocumentTaxContext, type UnreviewedTaxWarning } from "./taxes.ts";
-import { pricingTaxesOf } from "./tax-classes.ts";
+import { pricingTaxesOf, type TaxCatalog } from "./tax-classes.ts";
 
 /**
  * Which document is being priced, and whether it may be.
@@ -104,9 +127,24 @@ import { pricingTaxesOf } from "./tax-classes.ts";
  * operator's quantity nudge on complete order 1013 nulled 25 lines' days and
  * repriced it from $4,952.91 to $2,667.17 at the one-week floor (2026-10-08).
  */
-export type PriceDocumentKind =
+export type ReceivableDocumentKind =
   | { kind: "order"; status: OrderStatusType; stored_items: readonly StoredDaysRow[] }
   | { kind: "invoice"; status: InvoiceStatusType; has_settlement: boolean };
+
+/**
+ * A payable document. No arm carries a refusal: a payable line's money is its
+ * stated `amount_cents`, so pricing reproduces it rather than moving it — a
+ * LINKED document's amount is Xero's, stamped by the link writer, and prices to
+ * exactly that. What may be EDITED on a settled bill is the freeze table's
+ * question (`PURCHASE_BILL_FIELD_FREEZE`), asked by the writer.
+ */
+export type PayableDocumentKind =
+  | { kind: "purchase" }
+  | { kind: "purchase_bill" }
+  | { kind: "purchase_credit" };
+
+/** Every document `priceDocument` prices, on either side. */
+export type PriceDocumentKind = ReceivableDocumentKind | PayableDocumentKind;
 
 /** A stored order row as {@link carriedLines} reads it: its identity, and the counts it carries. */
 export interface StoredDaysRow extends PathedItem {
@@ -234,7 +272,7 @@ export { formulaUidsOf, type PricingFormula, type PricingFormulas, priceFormulaR
 
 /** Everything {@link priceDocument} reads besides the items. */
 export interface PriceDocumentContext {
-  document: PriceDocumentKind;
+  document: ReceivableDocumentKind;
   /** The tax rule's context: destinations, organization, origin, catalog, as-of. */
   tax: DocumentTaxContext;
   /** Date-extension sections, if the document has any. */
@@ -253,15 +291,35 @@ export interface PriceDocumentContext {
   holidays: readonly string[];
 }
 
+/** A line on a payable document: a purchase line, or a bill or credit line. */
+export type PayableLine = PurchaseItem | PurchaseDocumentItem;
+
+/**
+ * How a payable document is priced. There is no destination, organization,
+ * formula or window input: a payable line is taxed exempt at the store's origin
+ * (`SIDE_CONTRACTS.payable.tax`) and states its own money.
+ */
+export interface PayablePriceDocumentContext {
+  document: PayableDocumentKind;
+  tax: {
+    /** The store's jurisdiction — where an exempt line's `taxes_base` resolves. */
+    origin: JurisdictionType;
+    /** The tax catalog, as on the receivable side. */
+    catalog: TaxCatalog;
+    /** The document's own date. */
+    asOf: string;
+  };
+}
+
 /** What {@link priceDocument} returns. */
-export interface PricedDocument<T extends LineItem> {
+export interface PricedDocument<T> {
   /** Copies of the input items, every priced line carrying its stored price. */
   items: T[];
   /** The six totals fields orders and invoices share, as a sum of `items`. */
   totals: DocumentTotalsCore;
   /**
-   * An order's replacement cost, or `null` for an invoice. Order-only, like the
-   * `replacement_total_cents` it fills.
+   * An order's replacement cost, or `null` for any other document. Order-only,
+   * like the `replacement_total_cents` it fills.
    */
   replacement_total_cents: number | null;
   /** Rates that priced on a lapsed review. A dropped value makes the lapse invisible. */
@@ -498,7 +556,7 @@ export interface ChargeWindowPairViolation {
  * (`updateInvoice` admits non-money edits on one), and it carries its stored
  * counts through by design (charge-windows decision 10).
  */
-function keepsStoredLineDays(document: PriceDocumentKind): boolean {
+function keepsStoredLineDays(document: ReceivableDocumentKind): boolean {
   if (document.kind === "order") return TERMINAL_ORDER_STATUSES.includes(document.status);
   return document.status === "void" || document.status === "paid" || document.has_settlement;
 }
@@ -564,6 +622,158 @@ function extensionFor(
   return match[0];
 }
 
+/** The line surface {@link priceStatedTotalLine} reads. */
+export interface StatedTotalLine {
+  uid: string;
+  quantity: number;
+  amount_cents: number | null;
+  price: {
+    price_formula: { basis: string; name: string };
+    discount: DiscountType | null;
+    taxes: readonly PriceModifierType[];
+  };
+}
+
+/**
+ * **The stated-total arm: a payable line's money is its stated amount.**
+ *
+ * - `subtotal_discounted_cents` = `amount_cents`, the net CFS pays;
+ * - `subtotal_cents` = net + `discount.amount_cents` — the operator's gross, the
+ *   discount being DECLARED on a payable line (what came off), not derived;
+ * - `taxes` re-amounted on the net from each tax's own rate and type
+ *   (`computeItemTaxAmountCents`, the one tax-amount author) — `[]` on an exempt
+ *   side;
+ * - `total_cents` = net + Σ taxes.
+ *
+ * The twin of stage 4's fee arm: a declared amount stored as the line's money,
+ * not re-derived from rates. Exported for the projectors that default a bill
+ * or credit line from its purchase line before the writer prices the document.
+ *
+ * @throws PriceRefusalError on a time-priced line (refused until
+ *   one-document-model Phase 3 meters it from its pair's windows) and on a line
+ *   that states no amount.
+ */
+export function priceStatedTotalLine(line: StatedTotalLine): LinePriceMoney {
+  if (line.price.price_formula.basis !== "flat") {
+    throw new PriceRefusalError(
+      `Line ${line.uid} is priced "${line.price.price_formula.name}", by time; a payable line is priced flat until ` +
+        "it can meter its destination pair's windows (one-document-model Phase 3)",
+    );
+  }
+  const amount = line.amount_cents;
+  if (amount === null) throw new PriceRefusalError(`Line ${line.uid} states no amount`);
+  const discount = line.price.discount === null ? null : { ...line.price.discount };
+  const taxes = line.price.taxes.map((t) => ({
+    uid: t.uid,
+    name: t.name,
+    rate: t.rate,
+    type: t.type,
+    amount_cents: computeItemTaxAmountCents(t, amount, line.quantity),
+  }));
+  let taxSum = 0;
+  for (const t of taxes) taxSum += t.amount_cents;
+  return {
+    subtotal_cents: amount + (discount?.amount_cents ?? 0),
+    subtotal_discounted_cents: amount,
+    discount,
+    taxes,
+    total_cents: amount + taxSum,
+  };
+}
+
+/**
+ * **A payable line's declared price, with its stated-total money added** —
+ * {@link priceStatedTotalLine}'s three money keys spread onto the declared
+ * half, and its `taxes` re-amounted on the net. For a writer BUILDING a line
+ * (a projector, a charge line, a credit line) so that the line parses before
+ * the document is priced; the writer still runs `priceDocument` over the whole
+ * document, which states the same money and the line's `taxes_base`.
+ *
+ * @throws PriceRefusalError as {@link priceStatedTotalLine} does.
+ */
+export function withStatedTotalMoney<P extends StatedTotalLine["price"]>(
+  declared: P,
+  line: Omit<StatedTotalLine, "price">,
+): P & { taxes: PriceModifierType[]; subtotal_cents: number; subtotal_discounted_cents: number; total_cents: number } {
+  const money = priceStatedTotalLine({ ...line, price: declared });
+  return {
+    ...declared,
+    taxes: money.taxes,
+    subtotal_cents: money.subtotal_cents,
+    subtotal_discounted_cents: money.subtotal_discounted_cents,
+    total_cents: money.total_cents,
+  };
+}
+
+/**
+ * **The one builder of a FLAT payable line's price** — the declared half
+ * (`price_formula`, `rates: []`, the discount record, the tax modifiers, and
+ * `counts: []` on a bill or credit line) plus the stated-total money
+ * ({@link withStatedTotalMoney}). Every payable line builder calls it: the
+ * purchase-line writer, the bill-line projector, a bill's charge line, a credit
+ * line. A hand-spelled declared literal per builder is how a key gets dropped
+ * from one of them (`ORDER_DECLARED_PRICE_KEYS`' docblock, api-cloudrun#984).
+ *
+ * @throws PriceRefusalError on a time formula (refused until one-document-model
+ *   Phase 3).
+ */
+export function flatPayablePrice<C extends boolean>(args: {
+  uid: string;
+  quantity: number;
+  amount_cents: number;
+  price_formula: PriceFormulaRef;
+  discount: DiscountType | null;
+  /** The purchase line's tax modifiers, re-amounted on the net — `[]` on the exempt side. */
+  taxes?: readonly PriceModifierType[];
+  /** The class's pre-exemption rates, carried as the source line states them. */
+  taxes_base?: readonly TaxRefType[];
+  /** `true` on a bill or credit line, which carries `counts: []`; a purchase line has no `counts` key. */
+  counts: C;
+}): FlatPayablePrice & (C extends true ? { counts: never[] } : unknown) {
+  const declared = {
+    price_formula: { ...args.price_formula },
+    rates: [] as never[],
+    discount: args.discount === null ? null : { ...args.discount },
+    taxes: (args.taxes ?? []).map((t) => ({ ...t })),
+    ...(args.taxes_base !== undefined ? { taxes_base: args.taxes_base.map((t) => ({ ...t })) } : {}),
+    ...(args.counts ? { counts: [] as never[] } : {}),
+  };
+  return withStatedTotalMoney(declared, { uid: args.uid, quantity: args.quantity, amount_cents: args.amount_cents }) as
+    & FlatPayablePrice
+    & (C extends true ? { counts: never[] } : unknown);
+}
+
+/** What {@link flatPayablePrice} returns: a flat payable line price, money stated. */
+export interface FlatPayablePrice {
+  price_formula: PriceFormulaRef;
+  rates: never[];
+  discount: DiscountType | null;
+  taxes: PriceModifierType[];
+  taxes_base?: TaxRefType[];
+  subtotal_cents: number;
+  subtotal_discounted_cents: number;
+  total_cents: number;
+}
+
+/** The tax context a payable document prices under — the side's rule, no destinations. */
+function payableTaxContext(tax: PayablePriceDocumentContext["tax"]): DocumentTaxContext {
+  return {
+    destinations: [],
+    origin: tax.origin,
+    exempt: SIDE_CONTRACTS.payable.tax === "exempt",
+    catalog: tax.catalog,
+    asOf: tax.asOf,
+    side: "payable",
+  };
+}
+
+function isPayableContext(
+  ctx: PriceDocumentContext | PayablePriceDocumentContext,
+): ctx is PayablePriceDocumentContext {
+  return ctx.document.kind === "purchase" || ctx.document.kind === "purchase_bill" ||
+    ctx.document.kind === "purchase_credit";
+}
+
 /** Split a stored price into its declared half (everything that is not money or `taxes_base`). */
 function declaredHalf(price: PriceObject): Record<string, unknown> {
   const {
@@ -587,14 +797,24 @@ function declaredHalf(price: PriceObject): Record<string, unknown> {
  *   identities. PriceRefusalError on a line whose counts cannot be derived
  *   ({@link lineCounts}).
  */
-export function priceDocument<T extends LineItem>(
+export function priceDocument<T extends LineItem>(items: readonly T[], ctx: PriceDocumentContext): PricedDocument<T>;
+export function priceDocument<T extends PayableLine>(
   items: readonly T[],
-  ctx: PriceDocumentContext,
+  ctx: PayablePriceDocumentContext,
+): PricedDocument<T>;
+export function priceDocument<T extends LineItem | PayableLine>(
+  input: readonly T[],
+  ctx: PriceDocumentContext | PayablePriceDocumentContext,
 ): PricedDocument<T> {
-  assertRepriceable(ctx.document);
+  const payable = isPayableContext(ctx);
+  if (!payable) assertRepriceable(ctx.document);
+  // A payable line enters the shared stages as a line item: it carries the
+  // `type`, `quantity`, `price` and tax-class keys they read, and its price the
+  // same money keys once priced. The cast is on the way IN; the return is `T`.
+  const items = input as unknown as readonly LineItem[];
 
   // Copies, so the stages below can write prices without touching the caller's items.
-  const out: T[] = items.map((item) =>
+  const out: LineItem[] = items.map((item) =>
     item.price ? { ...item, price: { ...item.price, taxes: [...(item.price.taxes ?? [])] } } : { ...item }
   );
 
@@ -603,7 +823,7 @@ export function priceDocument<T extends LineItem>(
   // (`applied_from` / `applied_to`) are what date a document's tax, so an issued
   // invoice or a completed order needs no stored-version freeze (owner,
   // 2026-09-15, superseding #997 decision (a)).
-  const warnings = assignLineTaxes(out, ctx.tax);
+  const warnings = assignLineTaxes(out, payable ? payableTaxContext(ctx.tax) : ctx.tax);
   const pricing = pricingTaxesOf(ctx.tax.catalog);
 
   // ── Stages 2 + 3: per-line counts and money, assembled ──
@@ -611,9 +831,23 @@ export function priceDocument<T extends LineItem>(
   // own formula (ruling 8), and its `price_formula` snapshot is re-stamped from
   // the formula document — the formula is immutable once referenced, so this
   // only ever fills `name`/`basis` on a line a writer built from a uid.
-  const carried = carriedLines(out, ctx.document);
+  const carried = payable ? new Map() : carriedLines(out, ctx.document);
   for (const item of out) {
     if (!isPriceableItem(item)) continue;
+    if (payable) {
+      // The stated-total arm: no formula to re-stamp and no windows to meter —
+      // the line's declared amount is its money.
+      const price = item.price;
+      const money = priceStatedTotalLine(item as unknown as StatedTotalLine);
+      const taxesBase = (price as { taxes_base?: TaxRefType[] }).taxes_base;
+      item.price = assembleLinePrice(
+        declaredHalf(price),
+        money,
+        item,
+        taxesBase === undefined ? undefined : { taxesBase },
+      ) as unknown as PriceObject;
+      continue;
+    }
     const extension = extensionFor(item, ctx.extensions);
     const formulaRef = item.price.price_formula == null ? null : priceFormulaRefOf(formulaOf(item, ctx.formulas));
     item.price = { ...item.price, price_formula: formulaRef, counts: lineCounts(item, ctx, carried) };
@@ -658,7 +892,7 @@ export function priceDocument<T extends LineItem>(
 
   // ── Stage 5: totals are a sum of what is stored ──
   return {
-    items: out,
+    items: out as unknown as T[],
     totals: sumPricedLines(out),
     replacement_total_cents: ctx.document.kind === "order"
       ? calculateReplacementTotals(out, pricing).total_cents

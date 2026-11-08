@@ -30,6 +30,8 @@
 import { compareAsc, parseISO } from "date-fns";
 import {
   type JurisdictionType,
+  type Side,
+  SIDE_CONTRACTS,
   type TaxJurisdictionType,
   toUsStateCode,
 } from "../schemas/mod.ts";
@@ -526,6 +528,14 @@ export interface DocumentTaxContext {
    */
   catalog: TaxCatalog;
   /**
+   * The side of the business the document is on — absent on every receivable
+   * caller, which predates the payable side. A side whose `SIDE_CONTRACTS` tax
+   * entry is `exempt` exempts every line, `replacement` included: without this
+   * gate a supplier's lost-unit line would take Chicago sales tax (api-cloudrun
+   * `one-document-model` plan, § One line model).
+   */
+  side?: Side;
+  /**
    * The instant the catalog resolves at: an order's earliest delivery start
    * ({@link deriveOrderTaxAsOf}), an invoice's own `date`.
    */
@@ -756,7 +766,8 @@ export function resolveLineTax(
   };
 
   const { jurisdiction, level } = jurisdictionOf();
-  const exempt = isReplacement ? false : ctx.exempt;
+  // The side's rule first: an `exempt` side exempts the replacement line too.
+  const exempt = SIDE_CONTRACTS[ctx.side ?? "receivable"].tax === "exempt" ? true : isReplacement ? false : ctx.exempt;
   const uidTaxClass = deriveLineTaxClass(item, ctx.catalog);
   const resolved = resolveClassTaxes(uidTaxClass, jurisdiction, exempt, ctx.asOf, ctx.catalog);
 

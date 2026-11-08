@@ -75,6 +75,7 @@ import { FirestoreId, ItemUid, OutOfServiceId, ThreadId, UnitId } from "./_uid.t
 import { chicagoInstant, chicagoStartOfDay } from "./_datetime.ts";
 import { COACode, type COACodeType } from "./chart-of-accounts.ts";
 import {
+  PayablePriceMoneyCore,
   payablePostingIssues,
   PURCHASE_PRODUCT_ITEM_TYPES,
   type PurchaseLinePrice,
@@ -92,7 +93,6 @@ import {
 } from "./order.ts";
 import { LedgerPostingCore, LineItemCore, LineTaxCore } from "./_items.ts";
 import { PriceFormulaRefSchema, RateKey, RateSnapshotSchema, TierCountSchema, type TierCountType } from "./price-formula.ts";
-import { formulaMoneyMismatch } from "./_line-money.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -132,17 +132,13 @@ export const PurchaseBillXeroDocumentEnum: z.ZodType<PurchaseBillXeroDocumentTyp
 /**
  * How a bill or credit line is priced: the purchase line's {@link PurchaseLinePrice}
  * (formula snapshot, rates, discount — each `propagate: true` there, so an
- * un-overridden bill line follows its purchase line; and the exempt tax keys)
- * plus the line's frozen metered `counts` (ruling 8).
+ * un-overridden bill line follows its purchase line; the exempt tax keys; and
+ * the computed money `priceDocument` writes from the line's stated
+ * `amount_cents`) plus the line's metered `counts`, always `[]` while every
+ * payable line is flat (time lines return in one-document-model Phase 3).
  *
- * - **flat** — `rates: []`, `counts: []`; `amount_cents` is the stated net share.
- * - **time** — `rates` ≥ 1, and `counts` are the UNIT-periods the line bills:
- *   the engine's tier counts summed over every unit's windows, so the line's
- *   money is `priceFromFormula(rates, counts, 1, discount)` — quantity is
- *   folded into the counts, because each unit meters its own windows and a
- *   per-unit count does not factor out. On a PUSHED document the refine
- *   asserts `amount_cents` equals exactly that; a LINKED document's money is
- *   Xero's and is diffed, never refused.
+ * A LINKED document's `amount_cents` is Xero's money, stamped by the link
+ * writer; the computed money follows from it like any other stated total.
  */
 export interface PurchaseDocumentLinePrice extends PurchaseLinePrice {
   counts: TierCountType[];
@@ -156,6 +152,7 @@ export const PurchaseDocumentLinePriceSchema: z.ZodType<PurchaseDocumentLinePric
   taxes: z.array(PriceModifier).meta({ label: "Tax", derived: true }),
   taxes_base: z.array(TaxRef).optional().meta({ label: "Base Tax", derived: true }),
   counts: z.array(TierCountSchema).meta({ derived: true }),
+  ...PayablePriceMoneyCore,
 });
 
 /**
@@ -305,40 +302,24 @@ const docItemShape = {
 };
 
 /**
- * A line's own shape rules — the purchase line's flat/time rule
- * (`purchaseLineMoneyIssues`), the type's posting class
- * (`payablePostingIssues`), and the bill line's: a flat line meters nothing
- * (no counts, no units), a unit appears once, and on a PUSHED document a time
- * line's money is exactly what its own snapshot reproduces.
+ * A line's own shape rules — the purchase line's flat rule and stated-total
+ * money (`purchaseLineMoneyIssues`), the type's posting class
+ * (`payablePostingIssues`), and the bill line's: a flat line meters nothing (no
+ * counts, no units), and a unit appears once.
+ *
+ * `origin` is kept for the rules that differ by authorship; none do while
+ * every line is flat, because a linked line's computed money follows from its
+ * stamped `amount_cents` exactly as a pushed one's does.
  */
 function documentLineIssues(
   item: PurchaseDocumentItem,
-  origin: PurchaseDocumentOriginType,
+  _origin: PurchaseDocumentOriginType,
 ): { path: (string | number)[]; message: string }[] {
-  const basis = item.price?.price_formula.basis ?? "flat";
-  // The purchase rule's rates half binds here too; its amount half does not —
-  // a bill's time line carries the money it BILLS, which the purchase line
-  // cannot know, so only the flat half of the amount rule is asked.
-  const issues = purchaseLineMoneyIssues({
-    price: item.price,
-    amount_cents: basis === "time" ? null : item.amount_cents,
-  });
+  const issues = purchaseLineMoneyIssues({ price: item.price, amount_cents: item.amount_cents });
   issues.push(...payablePostingIssues(item.type, item.ledger_account));
   const units = item.units ?? [];
-  if (basis === "flat") {
-    if ((item.price?.counts.length ?? 0) > 0) issues.push({ path: ["price", "counts"], message: "a flat line meters no counts" });
-    if (units.length > 0) issues.push({ path: ["units"], message: "a flat line bills no unit windows" });
-  } else if (origin === "pushed" && item.price) {
-    const expected = formulaMoneyMismatch(item.price, 1, item.amount_cents);
-    if (expected !== null) {
-      issues.push({
-        path: ["amount_cents"],
-        message: Number.isNaN(expected)
-          ? "a count names a rate key the line's rates do not carry"
-          : `a pushed time line's amount ${item.amount_cents} must equal its rates × counts: ${expected}`,
-      });
-    }
-  }
+  if ((item.price?.counts.length ?? 0) > 0) issues.push({ path: ["price", "counts"], message: "a flat line meters no counts" });
+  if (units.length > 0) issues.push({ path: ["units"], message: "a flat line bills no unit windows" });
   const seen = new Set<string>();
   units.forEach((u, k) => {
     if (seen.has(u.uid_unit)) issues.push({ path: ["units", k, "uid_unit"], message: "a unit appears once per line" });
@@ -437,9 +418,10 @@ function documentItemsIssues(
   if (doc.items.length === 0 && total > 0) {
     ctx.addIssue({ code: "custom", path: ["items"], message: "a document with value names at least one item" });
   }
-  // A linked document's total is Xero's and is exempt (module docblock).
+  // A linked document's total is Xero's and is exempt (module docblock). The
+  // sum reads the PRICED money, as `priceDocument`'s stage 5 totals it.
   if (doc.origin === "pushed") {
-    const sum = doc.items.reduce((s, item) => s + item.amount_cents, 0);
+    const sum = doc.items.reduce((s, item) => s + item.price.total_cents, 0);
     if (sum !== total) {
       ctx.addIssue({
         code: "custom",
@@ -848,14 +830,10 @@ export const PurchaseDocumentItemInput: z.ZodType<PurchaseDocumentItemInputType>
  *
  * - **flat** — `quantity` units, priced at the item's cumulative share of the
  *   range they un-bill (`cumulativeShareCents`). `units` and `dates` are refused.
- * - **time** — the TIME it un-bills, never units of an amount: `units` names each
- *   unit's credited windows, `dates` the credited span of a span-metered line
- *   (Verizon). Every credited piece must already be billed and not credited
- *   (`billedUnitCoverage`), and the line is priced as what those windows
- *   contributed: `meter(coverage) − meter(coverage − credited)`, at the purchase
- *   line's snapshotted rates (`projectPurchaseLineToCreditLine`,
- *   `@cfs/core/utils/purchase-documents`). `quantity` is the count of units
- *   credited, or of the span's units on a unit-less span line.
+ * - **time** — refused: every payable line is priced flat until api-cloudrun's
+ *   `one-document-model` Phase 3, whose pair-window coverage credits time by
+ *   counts as an AR credit note does (0b ruling 3). `units` and `dates` stay
+ *   declared here until that phase reshapes this input; nothing accepts them.
  */
 export interface PurchaseCreditItemInputType extends PurchaseDocumentItemInputType {
   units?: PurchaseDocumentLineUnit[];

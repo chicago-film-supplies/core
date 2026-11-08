@@ -27,15 +27,16 @@ import {
   type PurchaseItem,
 } from "../src/schemas/mod.ts";
 import { priceFormulaRefOf } from "../src/utils/price-formulas.ts";
-import { FIXED, FORMULAS, VISION } from "./helpers/formulas.ts";
+import { FIXED, VISION } from "./helpers/formulas.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
+import { payablePrice } from "./helpers/payable.ts";
 
-const FIXED_PRICE = { price_formula: priceFormulaRefOf(FIXED), rates: [], discount: null, taxes: [] };
+const FIXED_PRICE = payablePrice(0, { formula: priceFormulaRefOf(FIXED) });
+// A TIME-shaped line: refused by the schemas until one-document-model Phase 3,
+// still read by the ruleset's time branches, which these cases keep covered.
 const TIME_PRICE = {
-  price_formula: priceFormulaRefOf(VISION),
+  ...payablePrice(0, { formula: priceFormulaRefOf(VISION) }),
   rates: [{ rate_key: "month", amount_cents: 15750 }, { rate_key: "week", amount_cents: 4500 }],
-  discount: null,
-  taxes: [],
 };
 
 const buy = (o: Record<string, unknown> = {}) => ({
@@ -134,32 +135,13 @@ Deno.test("bill_item: a flat line's remaining units; an over-billed line offers 
   assertEquals(offer(purchaseActionsFor(po([buy()], "canceled")), "bill_item:b"), undefined);
 });
 
-Deno.test("bill_item: a time line unprobed offers its open units; probed, a fully billed one offers nothing", () => {
+Deno.test("bill_item: a time line offers its open units — nothing is metered until Phase 3", () => {
   const line = {
     ...subrent({ uid: "t", path: ["t"], price: TIME_PRICE, quantity_billed: null, quantity: 1, quantity_received: 1, quantity_returned: 1 }),
     uid_units: ["unit-1"],
     dates: null,
   } as unknown as PurchaseActionItem;
   assertEquals(offer(purchaseActionsFor(po([line])), "bill_item:t")?.max_quantity, 1);
-
-  const window = { start: "2026-01-01T00:00:00.000-06:00", end: "2026-01-08T00:00:00.000-06:00" };
-  const units = [{ uid: "unit-1", charge_windows: [{ ...window, uid: "w", uid_order: null, uid_price_formula: VISION.uid, notes: "", changed_by: { uid: "u", name: "u" } }] }];
-  const pricing = { formulas: new Map([...FORMULAS, [VISION.uid, VISION]]), holidays: [] };
-  const through = "2026-02-01T00:00:00.000-06:00";
-  const open = { through, units, billed: { bills: [], credits: [] }, pricing };
-  assertEquals(offer(purchaseActionsFor(po([line]), { billing: open }), "bill_item:t")?.max_quantity, 1);
-
-  const billed = {
-    totals: { amount_void_cents: 0 },
-    number: 1,
-    items: [{ path_purchase_item: ["t"], units: [{ uid_unit: "unit-1", charge_windows: [window] }], dates: null }],
-  } as unknown as PurchaseBill;
-  const done = { ...open, billed: { bills: [billed], credits: [] } };
-  assertEquals(offer(purchaseActionsFor(po([line]), { billing: done }), "bill_item:t"), undefined);
-
-  // Fail closed: a formula the context does not hold throws in the projector, and is not offered.
-  const blind = { ...open, pricing: { formulas: new Map(), holidays: [] } };
-  assertEquals(offer(purchaseActionsFor(po([line]), { billing: blind }), "bill_item:t"), undefined);
 });
 
 Deno.test("remove_item and change_basis: only an untouched line, a billed time line included", () => {

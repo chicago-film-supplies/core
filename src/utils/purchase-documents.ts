@@ -1,7 +1,7 @@
 /**
- * Purchase → bill: the projector, the unbilled windows, the bill pricer and the
- * purchase → bill three-way sync (purchases-as-documents D5, D7; Phase 2
- * rulings 1, 3, 4, 7, 8).
+ * Purchase → bill: the projector, unit coverage and the purchase → bill
+ * three-way sync (purchases-as-documents D5, D7; api-cloudrun
+ * `one-document-model` Phase 2).
  *
  * The supplier side's twin of the order → invoice machinery, built from the
  * same parts:
@@ -9,40 +9,24 @@
  * | customer side | here |
  * |---|---|
  * | `projectOrderItemToInvoiceItem` | {@link projectPurchaseLineToBillLine} |
- * | `buildRemainingInvoice`'s "what is not yet billed" | {@link unbilledUnitWindows} |
- * | `priceDocument` / `priceCreditNote` | {@link pricePurchaseDocument} — an ASSEMBLER, not a second money author |
  * | `syncOrderToInvoiceSelective` | {@link syncPurchaseToBills} |
+ * | `priceDocument` | `priceDocument` itself — its payable arm (`./price-document.ts`) |
  *
- * ## One money step
+ * ## One pricer
  *
- * `priceFromFormula` (`schemas/_line-money.ts`) is the only place a time line's
- * counts become cents, for customer and supplier lines alike (ruling 3). A flat
- * line states its amount: its k-th bill is priced by `cumulativeShareCents`,
+ * A payable line's money is written by `priceDocument`'s stated-total arm
+ * (`priceStatedTotalLine`): the line states its net in `amount_cents`, and its
+ * k-th bill is defaulted by `cumulativeShareCents` (via {@link flatShareCents}),
  * exactly as its receipts are, so the bills of a fully billed line sum to the
  * line's `amount_cents`.
  *
- * ## Counts are DELTAS of a cumulative meter
- *
- * A time bill line's `price.counts` are the UNIT-periods it bills, summed over
- * its units. For each unit they are
- *
- * ```
- * meter(billed ∪ new) − meter(billed)
- * ```
- *
- * where `billed` is the unit's coverage on the purchase line's EARLIER live
- * bills (net of live credits) and `new` the pieces this bill adds. Metering the
- * difference rather than the new pieces alone is what keeps a window billed in
- * two halves on ONE anchor: Vision's month runs from the switch-on, so a window
- * billed at day 10 and again at day 40 must bill a month and two weeks in all,
- * not two weeks and then a fresh month and a week. The deltas telescope: the
- * counts of every bill of a window sum to the meter of the whole window.
- *
- * ⚠️ **Pieces are unioned only INSIDE one unit window**, so two unit windows
- * that touch (one ends at the instant the next starts, which the unit refine
- * allows) never merge into one and the per-window anchor restart survives. A
- * single delta may carry a negative tier (a week becomes part of a month); the
- * line's money is still the delta of two non-negative amounts.
+ * ⚠️ **Every payable line is priced FLAT until one-document-model Phase 3.**
+ * The per-unit time metering that lived here (`meterBillLine`, the unbilled-window
+ * projector, time credits) was deleted with `pricePurchaseDocument`: neither
+ * environment stores a time purchase line (Phase 0b census), and Phase 3 meters
+ * time lines from their destination pair's windows, as an order line is
+ * metered. The unit-window READERS below (`unitWindowsForLine`, the coverage
+ * helpers, `seedPurchaseLinesForWindows`) retire in that phase too.
  *
  * ## Sync never touches windows or quantities
  *
@@ -67,46 +51,26 @@ import {
   type PurchaseCredit,
   type PurchaseDocumentItem,
   type PurchaseDocumentLinePrice,
-  type PurchaseDocumentLineUnit,
   type CogsActivationEntryType,
   type COACostType,
   type Product,
   type PurchaseItem,
-  type PurchaseLinePrice,
   purchaseItemBasis,
   purchaseItemCanceled,
   PurchaseSchema,
   type UidNameRefType,
   type UnitType,
 } from "../schemas/mod.ts";
-import {
-  catalogRateSnapshot,
-  combineTierCounts,
-  type MeterRate,
-  meterUnits,
-  priceFromFormula,
-  type PricingFormula,
-  type PricingFormulas,
-  type TierCount,
-} from "./price-formulas.ts";
+import { catalogRateSnapshot } from "./price-formulas.ts";
 import { cumulativeShareCents } from "./purchases.ts";
 import { roundDivHalfUp } from "./money.ts";
 import { classifySharedFields, fieldsUnder, mergeSharedFields, type SharedField } from "./shared-fields.ts";
 import { purchaseBillIsFrozen, purchaseBillIsLive } from "./invoices.ts";
+import { flatPayablePrice, type PayablePriceDocumentContext, priceDocument } from "./price-document.ts";
 
 export { purchaseBillIsLive };
 
 // ── Context ─────────────────────────────────────────────────────
-
-/**
- * What metering needs: every formula the purchase's lines name (retired ones
- * included — a billed line keeps the formula it priced by) and the holiday
- * list. The customer side's `AccountingContext`.
- */
-export interface PurchaseDocumentContext {
-  formulas: PricingFormulas;
-  holidays: readonly string[];
-}
 
 /**
  * The purchase's existing bills and credits, as the "already billed" readers
@@ -607,185 +571,7 @@ export function recomputePurchaseQuantityBilled(
   );
 }
 
-/**
- * **The latest end a span-metered line has been billed to** — the max `dates.end`
- * over the live bills projecting `path` (before `before`, if given), or `null`
- * when none has. A span line (Verizon) bills its span forward in contiguous
- * periods, so the next period starts there.
- */
-export function billedSpanEnd(
-  documents: PurchaseBilledDocuments,
-  path: readonly string[],
-  before?: number,
-): string | null {
-  let best: string | null = null;
-  for (const bill of documents.bills) {
-    if (!purchaseBillIsLive(bill) || (before !== undefined && bill.number >= before)) continue;
-    for (const line of linesFor(bill.items, path)) {
-      const end = line.dates?.end;
-      if (end && (best === null || Date.parse(end) > Date.parse(best))) best = end;
-    }
-  }
-  return best;
-}
-
-/**
- * **The windows a time line's units have recorded and no live bill covers** —
- * what a new bill defaults to (D5, the `buildRemainingInvoice` rule). Per unit,
- * its recorded windows (closed at `through`) less its billed coverage. A unit
- * with nothing left is left out.
- */
-export function unbilledUnitWindows(
-  recorded: ReadonlyMap<string, readonly ChargeWindowType[]>,
-  billed: ReadonlyMap<string, readonly ChargeWindowType[]>,
-): PurchaseDocumentLineUnit[] {
-  const out: PurchaseDocumentLineUnit[] = [];
-  for (const [uid_unit, windows] of recorded) {
-    const covered = (billed.get(uid_unit) ?? []).map(toInterval);
-    const pieces: ChargeWindowType[] = [];
-    for (const w of windows.map(toInterval)) {
-      pieces.push(...subtractIntervals([w], covered).map(fromInterval));
-    }
-    if (pieces.length > 0) out.push({ uid_unit, charge_windows: pieces });
-  }
-  return out;
-}
-
-// ── Metering a bill line ───────────────────────────────────────
-
-function formulaFor(price: { price_formula: { uid: string; name: string } }, ctx: PurchaseDocumentContext): PricingFormula {
-  const formula = ctx.formulas.get(price.price_formula.uid);
-  if (!formula) {
-    throw new Error(`Price formula "${price.price_formula.name}" (${price.price_formula.uid}) is not loaded`);
-  }
-  return formula;
-}
-
-/**
- * **One unit's counts for the pieces a bill line adds**, as a delta of the
- * cumulative meter (module docblock). `recorded` is the unit's windows on the
- * purchase line — the frames inside which pieces are unioned; `billed` its
- * coverage before this bill; `added` the pieces this bill line carries.
- * Coverage outside every recorded window (time the supplier billed that no
- * window recorded) is metered as its own window, so an operator-entered piece
- * still prices.
- */
-function unitDeltaCounts(
-  formula: PricingFormula,
-  recorded: readonly ChargeWindowType[],
-  billed: readonly ChargeWindowType[],
-  added: readonly ChargeWindowType[],
-  holidays: readonly string[],
-  rates: readonly MeterRate[],
-): TierCount[] {
-  // The recorded windows themselves, NOT unioned: two that touch are two frames.
-  const frames = recorded.map(toInterval).filter((f) => f.e > f.s).sort((a, b) => a.s - b.s);
-  const before = billed.map(toInterval);
-  const after = [...before, ...added.map(toInterval)];
-  const framed = (list: readonly Interval[]): ChargeWindowType[] => {
-    const out: Interval[] = [];
-    for (const f of frames) out.push(...unionIntervals(intersectWindow(list, f)));
-    out.push(...unionIntervals(subtractIntervals(list, frames)));
-    return out.sort((a, b) => a.s - b.s).map(fromInterval);
-  };
-  const meter = (windows: ChargeWindowType[]) =>
-    windows.length === 0 ? [] : meterUnits(formula, { windows, span: null, holidays, rates }).tiers;
-  return combineTierCounts(meter(framed(after)), meter(framed(before)), -1);
-}
-
-/** Tier counts × an integer — a unit-less span line's counts for `quantity` units. */
-function scaleCounts(counts: readonly TierCount[], quantity: number): TierCount[] {
-  return counts.map((t) => ({ ...t, num: t.num * quantity }));
-}
-
-/** What {@link meterBillLine} needs about the bill line. */
-export interface BillLineMeterInput {
-  price: Pick<PurchaseDocumentLinePrice, "price_formula" | "rates">;
-  units: readonly PurchaseDocumentLineUnit[];
-  /** The span billed, for a span-metered formula. */
-  dates: ChargeWindowType | null;
-  /** The units billed, used only by a unit-less span line. */
-  quantity: number;
-}
-
-/** What {@link meterBillLine} needs about the purchase line and what is billed before it. */
-export interface BillLineMeterSource {
-  /** The purchase line's span — the start a span formula meters from. */
-  span: { start: string; end: string | null } | null;
-  /** Each unit's recorded windows on the purchase line (`unitWindowsForLine`). */
-  recorded: ReadonlyMap<string, readonly ChargeWindowType[]>;
-  /** Each unit's coverage on earlier bills (`billedUnitCoverage`). */
-  billed: ReadonlyMap<string, readonly ChargeWindowType[]>;
-  /** Where earlier bills left a span line (`billedSpanEnd`). */
-  billedSpanEnd: string | null;
-}
-
-/**
- * **A time bill line's frozen counts** — the unit-periods it bills, summed over
- * its units (ruling 8). Windows formulas meter each unit's delta (module
- * docblock); a span formula (`span_less_gaps`) meters each unit's span from the
- * purchase line's start to the bill's `dates.end`, less the same to where
- * earlier bills left it, with the unit's windows as the "on" time. A span line
- * with no units meters the span with no gaps, times `quantity`.
- *
- * @throws on a flat line, or a formula the context does not hold.
- */
-export function meterBillLine(
-  line: BillLineMeterInput,
-  source: BillLineMeterSource,
-  ctx: PurchaseDocumentContext,
-): TierCount[] {
-  if (line.price.price_formula.basis !== "time") {
-    throw new Error("A flat line meters no counts");
-  }
-  const formula = formulaFor(line.price, ctx);
-  if (formula.meter.source === "span_less_gaps") {
-    if (line.dates === null || source.span === null) {
-      throw new Error(`A "${formula.name}" line meters a span, and this one states none`);
-    }
-    const from = source.span.start;
-    const prior = source.billedSpanEnd;
-    const meterTo = (end: string, windows: readonly ChargeWindowType[]) =>
-      Date.parse(end) <= Date.parse(from)
-        ? []
-        : meterUnits(formula, {
-          windows,
-          span: { start: from, end },
-          holidays: ctx.holidays,
-          rates: line.price.rates,
-        }).tiers;
-    const delta = (windows: readonly ChargeWindowType[]) =>
-      combineTierCounts(meterTo(line.dates!.end, windows), prior === null ? [] : meterTo(prior, windows), -1);
-    if (line.units.length === 0) {
-      return scaleCounts(delta([{ start: from, end: line.dates.end }]), line.quantity);
-    }
-    return line.units.reduce<TierCount[]>(
-      (sum, u) => combineTierCounts(sum, delta(source.recorded.get(u.uid_unit) ?? u.charge_windows), 1),
-      [],
-    );
-  }
-  return line.units.reduce<TierCount[]>((sum, u) =>
-    combineTierCounts(
-      sum,
-      unitDeltaCounts(
-        formula,
-        source.recorded.get(u.uid_unit) ?? u.charge_windows,
-        source.billed.get(u.uid_unit) ?? [],
-        u.charge_windows,
-        ctx.holidays,
-        line.price.rates,
-      ),
-      1,
-    ), []);
-}
-
 // ── Money ───────────────────────────────────────────────────────
-
-/** A time line's money from its own snapshot: quantity is folded into the counts, so the money step runs at 1. */
-function timeLineMoney(price: PurchaseDocumentLinePrice): { amount_cents: number; discount_cents: number } {
-  const { subtotal_cents, subtotal_discounted_cents } = priceFromFormula(price.rates, price.counts, 1, price.discount);
-  return { amount_cents: subtotal_discounted_cents, discount_cents: subtotal_cents - subtotal_discounted_cents };
-}
 
 /**
  * A FLAT bill line's share of its purchase line's discount, for the record.
@@ -807,46 +593,6 @@ export function flatShareCents(amountCents: number, quantity: number, before: nu
   if (after <= quantity) return cumulativeShareCents(amountCents, quantity, before, after);
   const at = (k: number) => Number(roundDivHalfUp(BigInt(amountCents) * BigInt(k), BigInt(quantity)));
   return at(after) - at(before);
-}
-
-/** The result of {@link pricePurchaseDocument}. */
-export interface PricedPurchaseDocument {
-  items: PurchaseDocumentItem[];
-  /** Σ line money on a PUSHED document; `null` on a linked one, whose total stays Xero's. */
-  total_cents: number | null;
-}
-
-/**
- * **Price a bill or credit from its lines** (D7) — the assembler beside
- * `priceCreditNote`, with no tax, fee, carried-line or replacement stage.
- *
- * - **pushed** — each time line's `amount_cents` and `discount.amount_cents`
- *   are re-derived from its own `rates × counts` (the refine's rule, run as
- *   the writer); a flat line keeps its stated net. The total is the Σ.
- * - **linked** — returned untouched: Xero's money is never written (D5).
- *
- * Counts are NOT re-metered here; they are frozen on the line, and a writer
- * that moves a line's windows re-meters through {@link meterBillLine} first.
- */
-export function pricePurchaseDocument(
-  doc: { origin: "pushed" | "linked"; items: readonly PurchaseDocumentItem[] },
-): PricedPurchaseDocument {
-  if (doc.origin === "linked") return { items: doc.items.map((i) => structuredCloneLine(i)), total_cents: null };
-  const items = doc.items.map((item) => {
-    const line = structuredCloneLine(item);
-    if (line.price && line.price.price_formula.basis === "time") {
-      const { amount_cents, discount_cents } = timeLineMoney(line.price);
-      line.amount_cents = amount_cents;
-      if (line.price.discount) line.price.discount = { ...line.price.discount, amount_cents: discount_cents };
-    }
-    return line;
-  });
-  return { items, total_cents: items.reduce((sum, i) => sum + i.amount_cents, 0) };
-}
-
-/** A deep copy of a line's plain data (no Timestamps live on a line). */
-function structuredCloneLine<T extends PurchaseDocumentItem>(line: T): T {
-  return JSON.parse(JSON.stringify(line)) as T;
 }
 
 // ── The projector ───────────────────────────────────────────────
@@ -896,257 +642,61 @@ function attributionOf(item: PurchaseItem): { uid_product?: string; uid_out_of_s
   }
 }
 
-/** The purchase line's exempt tax keys, copied onto a bill or credit line's price. */
-function priceTaxesOf(price: PurchaseLinePrice): Pick<PurchaseLinePrice, "taxes" | "taxes_base"> {
-  return {
-    taxes: price.taxes.map((t) => ({ ...t })),
-    ...(price.taxes_base !== undefined ? { taxes_base: price.taxes_base.map((t) => ({ ...t })) } : {}),
-  };
-}
-
 /** {@link projectPurchaseLineToBillLine}'s inputs beside the purchase line. */
 export interface ProjectBillLineOptions {
   /** The new bill line's row identity, minted by the writer. */
   uid: string;
   /** The purchase the line is on. */
   uid_purchase: string;
-  /**
-   * The units billed, on a FLAT line (the operator's input). Ignored on a time
-   * line, whose quantity is the count of units it bills.
-   */
+  /** The units billed (the operator's input). */
   quantity: number;
-  /** The billing cut-off: open windows and a span bill up to here. A Chicago instant. */
-  through: string;
-  /** The units whose windows name the line — every unit doc that may. */
-  units: readonly Pick<UnitType, "uid" | "charge_windows">[];
-  /** The purchase's existing bills and credits. */
-  billed: PurchaseBilledDocuments;
 }
 
 /**
- * **Default a bill line from its purchase line** (D5). Name, formula, rates,
- * discount terms, posting and attribution are the purchase line's (each then
- * overridable on the bill until it settles); the money depends on the basis:
+ * **Default a bill line from its purchase line** (D5). Name, formula, discount
+ * terms, posting and attribution are the purchase line's (each then
+ * overridable on the bill until it settles). The amount is `quantity` units at
+ * the line's cumulative share from where its `quantity_billed` stands
+ * ({@link flatShareCents}, extended past the ordered count because
+ * over-billing is legal), so the bills of a line sum to its `amount_cents`; the
+ * discount record is the same share of the purchase line's.
  *
- * - **flat** — `quantity` units at the line's cumulative share from where its
- *   `quantity_billed` stands (`cumulativeShareCents`, extended past the
- *   ordered count because over-billing is legal), so the bills of a line sum to
- *   its `amount_cents`.
- * - **time** — the units' UNBILLED windows up to `through`
- *   ({@link unbilledUnitWindows}), metered as deltas ({@link meterBillLine})
- *   and priced by the one money step. A span line (Verizon) bills from where
- *   its earlier bills left off to `through` (or the line's end, if sooner).
+ * The line's price is built by `flatPayablePrice` (the stated-total arm), so
+ * the projection parses on its own; the writer prices the whole document with
+ * `priceDocument`, which states the same money and the line's `taxes_base`.
  *
- * Returns `null` when a time line has nothing to bill — no unbilled windows, or
- * a span already billed through `through` (the poll's `nothing_to_bill`). A
- * flat line always projects: what to bill is the operator's call.
- *
- * @throws on a time line whose formula the context does not hold, or a span
- *   formula on a line with no span.
+ * @throws PriceRefusalError on a time-priced purchase line — refused until
+ *   one-document-model Phase 3 meters it from its pair's windows.
  */
 export function projectPurchaseLineToBillLine(
   item: PurchaseItem,
   opts: ProjectBillLineOptions,
-  ctx: PurchaseDocumentContext,
-): PurchaseDocumentItem | null {
-  const head = projectedLineHead(item, opts.uid);
-  const attribution = attributionOf(item);
-
-  if (purchaseItemBasis(item) === "flat") {
-    const amount = item.amount_cents ?? 0;
-    const before = item.quantity_billed ?? 0;
-    const amount_cents = flatShareCents(amount, item.quantity, before, before + opts.quantity);
-    const price: PurchaseDocumentLinePrice | undefined = item.price
-      ? {
-        price_formula: { ...item.price.price_formula },
-        rates: [],
-        discount: item.price.discount
-          ? { ...item.price.discount, amount_cents: flatDiscountShare(item.price.discount, opts.quantity, item.quantity) }
-          : null,
-        ...priceTaxesOf(item.price),
-        counts: [],
-      }
-      : undefined;
-    const line = {
-      type: item.type,
-      ...head,
-      ...attribution,
-      quantity: opts.quantity,
-      amount_cents,
-      ...(price ? { price } : {}),
-      // A flat line meters nothing: no units, no span (api-cloudrun#1425).
-      units: [],
-      dates: null,
-    };
-    return line as PurchaseDocumentItem;
-  }
-
-  // A time line: item.price is required on subrent and charge.
-  const itemPrice = item.price!;
-  const formula = formulaFor(itemPrice, ctx);
-  const recorded = unitWindowsForLine(opts.units, coverageOf(item) ?? { uid_units: [], dates: null }, opts.through);
-  const billed = billedUnitCoverage(opts.billed, item.path);
-  const itemSpan = item.type === "sale" ? null : item.dates;
-  const source: BillLineMeterSource = {
-    span: itemSpan,
-    recorded,
-    billed,
-    billedSpanEnd: billedSpanEnd(opts.billed, item.path),
-  };
-
-  let units: PurchaseDocumentLineUnit[];
-  let dates: ChargeWindowType | null = null;
-  if (formula.meter.source === "span_less_gaps") {
-    if (itemSpan === null) throw new Error(`A "${formula.name}" line meters a span, and this one states none`);
-    const start = source.billedSpanEnd ?? itemSpan.start;
-    const lineEnd = itemSpan.end;
-    const end = lineEnd !== null && Date.parse(lineEnd) < Date.parse(opts.through) ? lineEnd : opts.through;
-    if (Date.parse(end) <= Date.parse(start)) return null;
-    dates = { start, end };
-    const period = toInterval(dates);
-    units = [...recorded].flatMap(([uid_unit, windows]) => {
-      const inside = unionIntervals(intersectWindow(windows.map(toInterval), period));
-      return inside.length > 0 ? [{ uid_unit, charge_windows: inside.map(fromInterval) }] : [];
-    });
-  } else {
-    units = unbilledUnitWindows(recorded, billed);
-    if (units.length === 0) return null;
-  }
-
-  const quantity = units.length > 0 ? units.length : item.quantity - item.quantity_canceled;
-  if (quantity < 1) return null;
-  const counts = meterBillLine({ price: itemPrice, units, dates, quantity }, source, ctx);
-  const price: PurchaseDocumentLinePrice = {
-    price_formula: { ...itemPrice.price_formula },
-    rates: itemPrice.rates.map((r) => ({ ...r })),
-    discount: itemPrice.discount ? { ...itemPrice.discount } : null,
-    ...priceTaxesOf(itemPrice),
-    counts,
-  };
-  const { amount_cents, discount_cents } = timeLineMoney(price);
-  if (price.discount) price.discount.amount_cents = discount_cents;
-  return {
-    type: item.type,
-    ...head,
-    ...attribution,
-    quantity,
-    amount_cents,
-    price,
-    units,
-    dates,
-  } as PurchaseDocumentItem;
-}
-
-/** {@link projectPurchaseLineToCreditLine}'s inputs beside the purchase line. */
-export interface ProjectCreditLineOptions {
-  /** The new credit line's row identity, minted by the writer. */
-  uid: string;
-  /** The units it credits, each with the windows it un-bills. */
-  units: readonly PurchaseDocumentLineUnit[];
-  /** The span it un-bills, on a span-metered line. */
-  dates: ChargeWindowType | null;
-  /** The units credited on a unit-less span line; otherwise the count of `units`. */
-  quantity: number;
-  /** The purchase's existing bills and credits. */
-  billed: PurchaseBilledDocuments;
-}
-
-/**
- * **A TIME credit line** — what un-billing some of a time line's billed time is
- * worth (`PurchaseCreditItemInput`'s docblock).
- *
- * Every credited piece must sit inside what is billed and not yet credited
- * (`billedUnitCoverage`; for a span line, between the line's start and where
- * its bills left it), or this throws: a credit cannot un-bill time nobody billed.
- * The counts are the meter's delta — the credited windows metered on top of what
- * stays billed — so a credit of a whole bill reverses it exactly, and a credit of
- * a window's tail inside a capped month credits the weeks the month still covers
- * (Q14), never the month. The money is the one money step at the purchase line's
- * snapshotted rates and discount; the account, category and attribution are the
- * purchase line's.
- *
- * @throws on a flat line, an unknown formula, or a piece outside the billed time.
- */
-export function projectPurchaseLineToCreditLine(
-  item: PurchaseItem,
-  opts: ProjectCreditLineOptions,
-  ctx: PurchaseDocumentContext,
 ): PurchaseDocumentItem {
-  if (purchaseItemBasis(item) !== "time" || item.type === "sale") {
-    throw new Error(`${item.name} is billed by quantity; credit it in units`);
-  }
-  const itemPrice = item.price!;
-  const formula = formulaFor(itemPrice, ctx);
-  const coverage = billedUnitCoverage(opts.billed, item.path);
-  const remainder = new Map<string, ChargeWindowType[]>();
-  for (const [uid, windows] of coverage) remainder.set(uid, windows);
-  const units = opts.units.map((u) => ({
-    uid_unit: u.uid_unit,
-    charge_windows: unionIntervals(u.charge_windows.map(toInterval)).map(fromInterval),
-  }));
-  for (const u of units) {
-    const covered = (coverage.get(u.uid_unit) ?? []).map(toInterval);
-    const outside = subtractIntervals(u.charge_windows.map(toInterval), covered);
-    if (outside.length > 0) {
-      throw new Error(`Unit ${u.uid_unit} is not billed for ${outside.map(fromInterval).map((w) => `${w.start}–${w.end}`).join(", ")}`);
-    }
-    const left = subtractIntervals(covered, u.charge_windows.map(toInterval)).map(fromInterval);
-    if (left.length > 0) remainder.set(u.uid_unit, left);
-    else remainder.delete(u.uid_unit);
-  }
-
-  let dates: ChargeWindowType | null = null;
-  let billedSpanEndAt: string | null = null;
-  if (formula.meter.source === "span_less_gaps") {
-    if (opts.dates === null || item.dates === null) {
-      throw new Error(`A "${formula.name}" line credits a span, and this credit states none`);
-    }
-    const billedTo = billedSpanEnd(opts.billed, item.path);
-    const from = Date.parse(opts.dates.start);
-    const to = Date.parse(opts.dates.end);
-    if (billedTo === null || from < Date.parse(item.dates.start) || to > Date.parse(billedTo) || to <= from) {
-      throw new Error(`The credited span ${opts.dates.start}–${opts.dates.end} is not inside the span billed`);
-    }
-    // A span credit names no unit windows, so coverage cannot net it: refuse a
-    // span an earlier live credit already un-billed.
-    for (const credit of opts.billed.credits) {
-      if (!purchaseCreditIsLive(credit)) continue;
-      for (const line of linesFor(credit.items, item.path)) {
-        if (line.dates && Date.parse(line.dates.start) < to && Date.parse(line.dates.end) > from) {
-          throw new Error(`The span ${opts.dates.start}–${opts.dates.end} overlaps one already credited`);
-        }
-      }
-    }
-    dates = { start: opts.dates.start, end: opts.dates.end };
-    billedSpanEndAt = opts.dates.start;
-  } else if (units.length === 0) {
-    throw new Error(`A credit of ${item.name} names the units and windows it un-bills`);
-  }
-
-  const quantity = units.length > 0 ? units.length : opts.quantity;
-  const counts = meterBillLine(
-    { price: itemPrice, units, dates, quantity },
-    { span: item.dates, recorded: coverage, billed: remainder, billedSpanEnd: billedSpanEndAt },
-    ctx,
-  );
-  const price: PurchaseDocumentLinePrice = {
-    price_formula: { ...itemPrice.price_formula },
-    rates: itemPrice.rates.map((r) => ({ ...r })),
-    discount: itemPrice.discount ? { ...itemPrice.discount } : null,
-    ...priceTaxesOf(itemPrice),
-    counts,
-  };
-  const { amount_cents, discount_cents } = timeLineMoney(price);
-  if (price.discount) price.discount.amount_cents = discount_cents;
+  const amount = item.amount_cents ?? 0;
+  const before = item.quantity_billed ?? 0;
+  const amount_cents = flatShareCents(amount, item.quantity, before, before + opts.quantity);
+  const price: PurchaseDocumentLinePrice = flatPayablePrice({
+    uid: opts.uid,
+    quantity: opts.quantity,
+    amount_cents,
+    price_formula: item.price.price_formula,
+    discount: item.price.discount
+      ? { ...item.price.discount, amount_cents: flatDiscountShare(item.price.discount, opts.quantity, item.quantity) }
+      : null,
+    taxes: item.price.taxes,
+    taxes_base: item.price.taxes_base,
+    counts: true,
+  });
   return {
     type: item.type,
     ...projectedLineHead(item, opts.uid),
     ...attributionOf(item),
-    quantity,
+    quantity: opts.quantity,
     amount_cents,
     price,
-    units,
-    dates,
+    // A flat line meters nothing: no units, no span (api-cloudrun#1425).
+    units: [],
+    dates: null,
   } as PurchaseDocumentItem;
 }
 
@@ -1175,8 +725,13 @@ export function purchaseBillSharedLineFields(): readonly SharedField[] {
  * **A purchase line in a BILL line's shape, over the shared keys only** — the
  * merge's three arguments must all be in the downstream shape (core#52), and
  * the purchase↔bill diff compares exactly what the merge follows.
+ *
+ * `quantity` is the units the bill line bills: the discount record is that
+ * share of the purchase line's ({@link projectPurchaseLineToBillLine}'s rule),
+ * so an untouched bill line compares equal to its projection and follows it,
+ * and a followed discount lands as the bill's share rather than the whole.
  */
-export function projectPurchaseLineForBill(item: PurchaseItem): Record<string, unknown> {
+export function projectPurchaseLineForBill(item: PurchaseItem, quantity: number): Record<string, unknown> {
   return {
     type: item.type,
     name: item.name,
@@ -1187,15 +742,13 @@ export function projectPurchaseLineForBill(item: PurchaseItem): Record<string, u
     uid_tracking_category: item.uid_tracking_category,
     uid_tax_class: item.uid_tax_class,
     ...(item.uid_tax_class_override !== undefined ? { uid_tax_class_override: item.uid_tax_class_override } : {}),
-    ...(item.price
-      ? {
-        price: {
-          price_formula: item.price.price_formula,
-          rates: item.price.rates,
-          discount: item.price.discount,
-        },
-      }
-      : {}),
+    price: {
+      price_formula: item.price.price_formula,
+      rates: item.price.rates,
+      discount: item.price.discount
+        ? { ...item.price.discount, amount_cents: flatDiscountShare(item.price.discount, quantity, item.quantity) }
+        : null,
+    },
     ...attributionOf(item),
   };
 }
@@ -1216,8 +769,8 @@ export interface SyncPurchaseToBillsArgs {
   next: Purchase;
   /** Every bill of the purchase (the writer point-gets `query_by_bills`). */
   bills: readonly PurchaseBill[];
-  /** Every credit of the purchase, for the coverage a re-meter reads. */
-  credits: readonly Pick<PurchaseCredit, "status" | "items">[];
+  /** The tax inputs each touched bill is priced under, at its own date. */
+  tax: Omit<PayablePriceDocumentContext["tax"], "asOf">;
 }
 
 /**
@@ -1227,12 +780,11 @@ export interface SyncPurchaseToBillsArgs {
  * purchase's value. Pure; the writer stores the `changed` bills in the purchase
  * writer's transaction.
  *
- * After the merge each touched line is re-derived: a time line whose FORMULA
- * or RATES changed is re-metered from its own windows against the coverage of
- * the purchase's earlier bills, and every time line's money is re-priced from
- * its rates and counts; the bill's total is the Σ. A flat line's net amount is a
- * homonym and never follows (its share was fixed when billed); its discount
- * record is re-derived.
+ * A changed bill is re-priced whole by `priceDocument` (its stated-total arm,
+ * at the bill's own date), and its total is the Σ. A line's net amount is a
+ * homonym and never follows (its share was fixed when billed); a followed
+ * discount arrives as the bill line's share of it
+ * ({@link projectPurchaseLineForBill}).
  *
  * Skipped whole: a linked bill (Xero is authoritative), a frozen one
  * (`purchaseBillIsFrozen`), a voided one.
@@ -1241,11 +793,10 @@ export interface SyncPurchaseToBillsArgs {
  * money settlement, so the identity holds with what is due); a writer that
  * also holds the settlement rows may refold with `recomputePurchaseBillTotals`.
  */
-export function syncPurchaseToBills(args: SyncPurchaseToBillsArgs, ctx: PurchaseDocumentContext): PurchaseBillSync[] {
+export function syncPurchaseToBills(args: SyncPurchaseToBillsArgs): PurchaseBillSync[] {
   const fields = purchaseBillSharedLineFields();
   const prevByPath = new Map(args.prev.items.map((i) => [i.path.join("/"), i]));
   const nextByPath = new Map(args.next.items.map((i) => [i.path.join("/"), i]));
-  const documents: PurchaseBilledDocuments = { bills: args.bills, credits: args.credits };
 
   return args.bills.map((bill) => {
     const untouched = { uid: bill.uid, bill, overridden: [], changed: false };
@@ -1261,20 +812,19 @@ export function syncPurchaseToBills(args: SyncPurchaseToBillsArgs, ctx: Purchase
       if (!prevItem || !nextItem) return line;
       const { merged, overridden: kept } = mergeSharedFields(
         fields,
-        projectPurchaseLineForBill(prevItem) as unknown as PurchaseDocumentItem,
-        projectPurchaseLineForBill(nextItem) as unknown as PurchaseDocumentItem,
+        projectPurchaseLineForBill(prevItem, line.quantity) as unknown as PurchaseDocumentItem,
+        projectPurchaseLineForBill(nextItem, line.quantity) as unknown as PurchaseDocumentItem,
         line,
       );
       overridden.push(...kept.map((f) => `items[${k}].${f}`));
-      const rederived = rederiveLine(merged, line, nextItem, bill.number, documents, ctx);
-      if (JSON.stringify(rederived) !== JSON.stringify(line)) changed = true;
-      return rederived;
+      if (JSON.stringify(merged) !== JSON.stringify(line)) changed = true;
+      return merged;
     });
     if (!changed) return { ...untouched, overridden };
-    const priced = pricePurchaseDocument({ origin: "pushed", items });
+    const priced = priceDocument(items, { document: { kind: "purchase_bill" }, tax: { ...args.tax, asOf: bill.date } });
     return {
       uid: bill.uid,
-      bill: { ...bill, items: priced.items, totals: withTotal(bill.totals, priced.total_cents!) },
+      bill: { ...bill, items: priced.items, totals: withTotal(bill.totals, priced.totals.total_cents) },
       overridden,
       changed: true,
     };
@@ -1288,46 +838,4 @@ export function syncPurchaseToBills(args: SyncPurchaseToBillsArgs, ctx: Purchase
 function withTotal(totals: PurchaseBill["totals"], total: number): PurchaseBill["totals"] {
   const settled = totals.amount_paid_cents + totals.amount_credited_cents + totals.amount_void_cents;
   return { ...totals, total_cents: total, amount_due_cents: total - settled };
-}
-
-/** Re-derive a merged line's derived keys: counts on a formula or rate change, the flat discount record. */
-function rederiveLine(
-  merged: PurchaseDocumentItem,
-  stored: PurchaseDocumentItem,
-  item: PurchaseItem,
-  billNumber: number,
-  documents: PurchaseBilledDocuments,
-  ctx: PurchaseDocumentContext,
-): PurchaseDocumentItem {
-  const price = merged.price;
-  if (!price) return merged;
-  const out = structuredCloneLine(merged);
-  const outPrice = out.price!;
-  if (price.price_formula.basis === "flat") {
-    outPrice.rates = [];
-    outPrice.counts = [];
-    if (outPrice.discount) {
-      outPrice.discount.amount_cents = flatDiscountShare(outPrice.discount, out.quantity, item.quantity);
-    }
-    return out;
-  }
-  const formulaMoved = stored.price?.price_formula.uid !== price.price_formula.uid || stored.price?.price_formula.basis !== "time";
-  // A capped segment decides on the rates (Q14), so a rate change can move the
-  // counts as well as the money. A bill edit re-meters on one too; the two
-  // writers must agree on what a line's counts are.
-  const ratesMoved = JSON.stringify(stored.price?.rates) !== JSON.stringify(price.rates);
-  if (formulaMoved || ratesMoved) {
-    const span = item.type === "sale" ? null : item.dates;
-    outPrice.counts = meterBillLine(
-      { price, units: out.units ?? [], dates: out.dates ?? null, quantity: out.quantity },
-      {
-        span,
-        recorded: new Map(),
-        billed: billedUnitCoverage(documents, item.path, billNumber),
-        billedSpanEnd: billedSpanEnd(documents, item.path, billNumber),
-      },
-      ctx,
-    );
-  }
-  return out;
 }

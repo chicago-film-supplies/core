@@ -81,9 +81,13 @@
  *   stored per-unit rate: measured on prod, most buys cost a total that does
  *   not divide by their quantity, and no reader needs one (`perUnitCostAt4dp`
  *   derives the display rate).
- * - **time** — `amount_cents: null` and `price.rates` holds the rates in force
- *   when the line was raised. What it costs is decided by its bills, priced
- *   from the units' charge windows (`pricePurchaseDocument`).
+ * - **time** — REFUSED until api-cloudrun's `one-document-model` Phase 3, which
+ *   meters a time line from its destination pair's charge windows as an order
+ *   line is metered. The per-unit metering it used was deleted in Phase 2;
+ *   neither environment stores a time purchase line.
+ *
+ * Either way the line's `price` carries the money `priceDocument` computes —
+ * see {@link PurchaseLinePrice}.
  *
  * A per-line REFINE ({@link purchaseLineMoneyIssues}) rather than union arms,
  * because `basis` cuts across all three types; arms would split each in two.
@@ -238,25 +242,29 @@ export const PurchaseItemDatesSchema: z.ZodType<PurchaseItemDates> = z.strictObj
 
 /**
  * How a purchase line is priced (purchases-as-documents Phase 2 rulings 1, 2,
- * 7): the formula it is priced by, the rates it snapshots, and a supplier
- * discount.
+ * 7): the formula it is priced by, the rates it snapshots, a supplier
+ * discount, and the money `priceDocument` computes from them.
  *
- * - A **flat** line (`price_formula.basis === "flat"`: a buy, a fixed-cost
- *   subrent, freight or a fee) states its WHOLE cost in the line's
- *   `amount_cents` and carries `rates: []`. Measured: most stored buys cost a
- *   total that does not divide by their quantity, and every reader slices the
- *   total with `cumulativeShareCents`, so no per-unit rate is stored.
- * - A **time** line (Vision's "weekly while on", Verizon's "monthly unless
- *   suspended") has `amount_cents: null` and the rates in force when it was
- *   raised (Q13); what it costs is decided by the bills, priced from the
- *   units' charge windows.
+ * - A line states its WHOLE net cost in the line's `amount_cents` (the DECLARED
+ *   stated total: a buy, a fixed-cost subrent, freight or a fee) and carries
+ *   `rates: []`. Measured: most stored buys cost a total that does not divide
+ *   by their quantity, and every reader slices the total with
+ *   `cumulativeShareCents`, so no per-unit rate is stored.
+ * - The COMPUTED half is the receivable line's money (`subtotal_cents`,
+ *   `subtotal_discounted_cents`, `taxes`, `total_cents`), written by
+ *   `priceDocument`'s stated-total arm (one-document-model Phase 2): subtotal =
+ *   `amount_cents + discount.amount_cents` (the operator's gross),
+ *   discounted = `amount_cents`, total = discounted + Σ taxes. Every money
+ *   reader reads it, as on an order line; `amount_cents` is the input.
  *
- * `discount` is core's `Discount`. On a time line the engine applies it; on a
- * flat line it records what came off the operator's GROSS, and `amount_cents`
- * is the NET — what CFS pays, which receipts, basis and bills slice.
+ * ⚠️ **A TIME-priced payable line is refused until one-document-model Phase 3**,
+ * which meters a time line from its destination pair's charge windows as an
+ * order line is metered. Neither environment stores one (Phase 0b census).
  *
- * There is no subtotal/discounted/total triple, and gross =
- * `amount_cents + discount.amount_cents`.
+ * `discount` is core's `Discount`. On a payable line it records what came off
+ * the operator's GROSS, so `discount.amount_cents` is declared, not derived;
+ * `amount_cents` is the NET — what CFS pays, which receipts, basis and bills
+ * slice.
  *
  * **Tax is EXEMPTION, not absence** (api-cloudrun's `one-document-model` plan):
  * a payable line is stamped with its type's default tax class like any other
@@ -274,7 +282,33 @@ export interface PurchaseLinePrice {
   taxes: PriceModifierType[];
   /** The class's taxes before the exemption; the order line's key. */
   taxes_base?: TaxRefType[];
+  /** The gross: `amount_cents + discount.amount_cents`. Computed by `priceDocument`. */
+  subtotal_cents: number;
+  /** The net: equal to the line's `amount_cents`. Computed by `priceDocument`. */
+  subtotal_discounted_cents: number;
+  /** The net plus Σ `taxes`. Computed by `priceDocument`. */
+  total_cents: number;
 }
+
+/**
+ * The computed money keys every payable line price carries — ONE instance per
+ * key, spread by the purchase line and the bill/credit line alike, so the two
+ * cannot drift (`tests/item-shape-parity.test.ts` asserts the identity).
+ * Derived, so the purchase → bill merge never carries them: the pricer
+ * re-derives them on every grain.
+ *
+ * ⚠️ Not on the `@cfs/core/schemas` barrel, like `TotalsCore`: no consumer
+ * assembles a price from parts.
+ */
+export const PayablePriceMoneyCore: {
+  subtotal_cents: z.ZodType<number>;
+  subtotal_discounted_cents: z.ZodType<number>;
+  total_cents: z.ZodType<number>;
+} = {
+  subtotal_cents: z.int().meta({ derived: true }),
+  subtotal_discounted_cents: z.int().meta({ derived: true }),
+  total_cents: z.int().meta({ derived: true }),
+};
 
 /** Zod schema for {@link PurchaseLinePrice}. */
 export const PurchaseLinePriceSchema: z.ZodType<PurchaseLinePrice> = z.strictObject({
@@ -287,14 +321,15 @@ export const PurchaseLinePriceSchema: z.ZodType<PurchaseLinePrice> = z.strictObj
   // declarations (`schemas/order.ts`, `ItemPrice`).
   taxes: z.array(PriceModifier).meta({ label: "Tax", derived: true }),
   taxes_base: z.array(TaxRef).optional().meta({ label: "Base Tax", derived: true }),
+  ...PayablePriceMoneyCore,
 });
 
 /**
  * The single-document money rule (ruling 1), shared by every arm and by the
- * bill line: a flat line states an amount and no rates, a time line states
- * rates and — on a purchase — no amount. A refine rather than a union arm
- * because `basis` cuts across all three line types; arms would split each in
- * two.
+ * bill line: a payable line is priced FLAT (time lines return in
+ * one-document-model Phase 3), states its amount and no rates, and its computed
+ * money is what `priceDocument`'s stated-total arm derives from that amount.
+ * A refine rather than a union arm because it cuts across all four line types.
  */
 export function purchaseLineMoneyIssues(
   item: { price?: PurchaseLinePrice; amount_cents: number | null; quantity_billed?: number | null },
@@ -302,20 +337,52 @@ export function purchaseLineMoneyIssues(
   const issues: { path: (string | number)[]; message: string }[] = [];
   const basis = item.price?.price_formula.basis ?? "flat";
   const rates = item.price?.rates ?? [];
-  if (basis === "flat") {
-    if (item.amount_cents === null) issues.push({ path: ["amount_cents"], message: "a flat line states its amount" });
-    if (rates.length > 0) issues.push({ path: ["price", "rates"], message: "a flat line carries no rates" });
-    if (item.quantity_billed === null) {
-      issues.push({ path: ["quantity_billed"], message: "a flat line counts what is billed" });
-    }
-  } else {
-    if (item.amount_cents !== null) {
-      issues.push({ path: ["amount_cents"], message: "a time line's cost is decided by its bills; amount_cents is null" });
-    }
-    if (rates.length === 0) issues.push({ path: ["price", "rates"], message: "a time line snapshots its rates" });
-    if (item.quantity_billed !== undefined && item.quantity_billed !== null) {
-      issues.push({ path: ["quantity_billed"], message: "a time line resolves on custody, not on a billed count; quantity_billed is null" });
-    }
+  if (basis !== "flat") {
+    issues.push({
+      path: ["price", "price_formula", "basis"],
+      message: "a payable line is priced flat; time lines return when they meter their pair's windows (one-document-model Phase 3)",
+    });
+    return issues;
+  }
+  if (item.amount_cents === null) issues.push({ path: ["amount_cents"], message: "a flat line states its amount" });
+  if (rates.length > 0) issues.push({ path: ["price", "rates"], message: "a flat line carries no rates" });
+  if (item.quantity_billed === null) {
+    issues.push({ path: ["quantity_billed"], message: "a flat line counts what is billed" });
+  }
+  if (item.price && item.amount_cents !== null) issues.push(...statedTotalMoneyIssues(item.price, item.amount_cents));
+  return issues;
+}
+
+/**
+ * The stated-total identities: the computed money is exactly what the declared
+ * amount and discount give (`priceDocument`'s stated-total arm is the author;
+ * this is the value assertion beside it).
+ */
+function statedTotalMoneyIssues(
+  price: PurchaseLinePrice,
+  amountCents: number,
+): { path: (string | number)[]; message: string }[] {
+  const issues: { path: (string | number)[]; message: string }[] = [];
+  const gross = amountCents + (price.discount?.amount_cents ?? 0);
+  if (price.subtotal_discounted_cents !== amountCents) {
+    issues.push({
+      path: ["price", "subtotal_discounted_cents"],
+      message: `price.subtotal_discounted_cents ${price.subtotal_discounted_cents} must equal the stated amount ${amountCents}`,
+    });
+  }
+  if (price.subtotal_cents !== gross) {
+    issues.push({
+      path: ["price", "subtotal_cents"],
+      message: `price.subtotal_cents ${price.subtotal_cents} must equal amount + discount: ${gross}`,
+    });
+  }
+  // From the DECLARED amount, like the two above, so one wrong key is one issue.
+  const total = price.taxes.reduce((sum, t) => sum + t.amount_cents, amountCents);
+  if (price.total_cents !== total) {
+    issues.push({
+      path: ["price", "total_cents"],
+      message: `price.total_cents ${price.total_cents} must equal the stated amount + Σ taxes: ${total}`,
+    });
   }
   return issues;
 }
@@ -649,9 +716,6 @@ const SaleItemInner = z.strictObject({
   bucketIssues(item, ctx);
   addIssues(purchaseLineMoneyIssues(item), ctx);
   addIssues(payablePostingIssues(item.type, item.ledger_account), ctx);
-  if (purchaseItemBasis(item) !== "flat") {
-    ctx.addIssue({ code: "custom", path: ["price", "price_formula", "basis"], message: "a buy is priced flat" });
-  }
   const entryUids = new Set<string>();
   item.landed_costs.forEach((entry, k) => {
     if (entryUids.has(entry.uid)) {
