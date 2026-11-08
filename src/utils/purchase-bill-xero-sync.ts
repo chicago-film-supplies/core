@@ -17,7 +17,7 @@
  *
  * @module
  */
-import type { PurchaseBill, XeroSyncState } from "../schemas/mod.ts";
+import { type PurchaseBill, purchaseDocumentLines, type XeroSyncState } from "../schemas/mod.ts";
 import { canonicalJson, hash48 } from "./contentHash.ts";
 import { purchaseBillIsLive } from "./invoices.ts";
 
@@ -39,7 +39,10 @@ export type PurchaseBillXeroFields = Pick<PurchaseBill, "items" | "date" | "due_
  */
 export function purchaseBillXeroProjection(bill: PurchaseBillXeroFields): unknown {
   return {
-    items: bill.items.map((item) => ({
+    // Lines only: a divider is never a Xero line, so the hash reads what Xero
+    // holds and stays where it stood before dividers existed (one-document-model
+    // Phase 3; the `invoiceXeroProjection` filter is the precedent).
+    items: purchaseDocumentLines(bill.items).map((item) => ({
       type: item.type,
       uid_product: item.uid_product ?? null,
       name: item.name,

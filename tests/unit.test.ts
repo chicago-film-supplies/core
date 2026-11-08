@@ -21,8 +21,6 @@ import {
   UnitSchema,
   UnitSet,
   UpdateOutOfServiceInput,
-  OpenUnitChargeWindowInput,
-  UpdateUnitChargeWindowInput,
   UpdateUnitInput,
 } from "../src/schemas/mod.ts";
 import { getTestDoc, type TestDocOptionsWithNow } from "../src/schemas/testing.ts";
@@ -78,7 +76,6 @@ function activeUnit() {
       changed_by: ACTOR,
     }],
     status: "active",
-    charge_windows: [] as unknown[],
     uuid_session: null,
     version: 0,
     created_by: ACTOR,
@@ -117,24 +114,9 @@ Deno.test("Unit: a vacant number carries no serial and no open entry", () => {
   assertEquals(issues(UnitSchema.safeParse({ ...closed, serial_number: null, status: "vacant" })), []);
 });
 
-// ── Spells and charge windows (serialized-subrent § 1; purchases-as-documents D2) ──
+// ── Spells (serialized-subrent § 1) ──
 
 const SUPPLIER = { uid: "VisionComms000000000", name: "Vision Communications" };
-const FORMULA_UID = "VisionWeeklyFormula0";
-
-function span(start: string, end: string | null, over: Record<string, unknown> = {}) {
-  return {
-    uid: crypto.randomUUID(),
-    start,
-    end,
-    uid_order: null,
-    uid_price_formula: FORMULA_UID,
-    notes: "",
-    changed_by: ACTOR,
-    ...over,
-  };
-}
-
 Deno.test("Unit: a serial-less open spell is legal — a tent, or a radio whose serial is not typed in yet", () => {
   const u = activeUnit();
   u.serial_history[0].serial_number = null as unknown as string;
@@ -161,71 +143,12 @@ Deno.test("UpdateUnitInput: an operator never sends `subrented` — only a subre
   assert(!UpdateUnitInput.safeParse({ version: 0, serial: { serial_number: "SN", reason: "subrented", notes: "" } }).success);
 });
 
-Deno.test("Unit: charge windows are required, and an empty list parses", () => {
-  assertEquals(issues(UnitSchema.safeParse({ ...activeUnit(), charge_windows: [] })), []);
-  const { charge_windows: _, ...bare } = activeUnit();
-  assertRefused(UnitSchema.safeParse(bare), "charge_windows");
-  const spans = [
-    span("2026-10-01T09:00:00.000-05:00", "2026-10-05T09:00:00.000-05:00"),
-    span("2026-10-05T09:00:00.000-05:00", null, {
-      uid_order: fid("order1"),
-    }),
-  ];
-  assertEquals(issues(UnitSchema.safeParse({ ...activeUnit(), charge_windows: spans })), [], "back-to-back is not an overlap");
+Deno.test("Unit: the retired charge_windows key is refused — unit windows retired (one-document-model Phase 3)", () => {
+  assertRefused(UnitSchema.safeParse({ ...activeUnit(), charge_windows: [] }), "charge_windows");
 });
 
 Deno.test("Unit: the retired activations key is refused — a hard cutover (Phase 2 ruling 5)", () => {
   assertRefused(UnitSchema.safeParse({ ...activeUnit(), activations: [] }), "activations");
-});
-
-Deno.test("Unit: charge windows ascend by start", () => {
-  const spans = [
-    span("2026-10-05T09:00:00.000-05:00", "2026-10-06T09:00:00.000-05:00"),
-    span("2026-10-01T09:00:00.000-05:00", "2026-10-02T09:00:00.000-05:00"),
-  ];
-  assertRefused(UnitSchema.safeParse({ ...activeUnit(), charge_windows: spans }), "ascend by start");
-});
-
-Deno.test("Unit: charge windows never overlap, only the last may be open, and a uid appears once", () => {
-  const overlap = [
-    span("2026-10-01T09:00:00.000-05:00", "2026-10-06T09:00:00.000-05:00"),
-    span("2026-10-05T09:00:00.000-05:00", null),
-  ];
-  assertRefused(UnitSchema.safeParse({ ...activeUnit(), charge_windows: overlap }), "must not overlap");
-  const twoOpen = [span("2026-10-01T09:00:00.000-05:00", null), span("2026-10-05T09:00:00.000-05:00", null)];
-  assertRefused(UnitSchema.safeParse({ ...activeUnit(), charge_windows: twoOpen }), "must not overlap");
-  const a = span("2026-10-01T09:00:00.000-05:00", "2026-10-02T09:00:00.000-05:00");
-  const twin = { ...span("2026-10-03T09:00:00.000-05:00", null), uid: a.uid };
-  assertRefused(UnitSchema.safeParse({ ...activeUnit(), charge_windows: [a, twin] }), "uid appears once");
-});
-
-Deno.test("Unit: a number that is not active has no line switched on", () => {
-  const closed = activeUnit();
-  closed.serial_history[0].end = "2026-10-04T09:00:00.000-05:00";
-  const vacant = { ...closed, serial_number: null, status: "vacant" };
-  assertEquals(
-    issues(UnitSchema.safeParse({ ...vacant, charge_windows: [span("2026-10-01T09:00:00.000-05:00", "2026-10-03T09:00:00.000-05:00")] })),
-    [],
-  );
-  assertRefused(
-    UnitSchema.safeParse({ ...vacant, charge_windows: [span("2026-10-01T09:00:00.000-05:00", null)] }),
-    "end its open charge window first",
-  );
-});
-
-Deno.test("UnitChargeWindow: ends at or after it starts; names a formula and, when billed, a purchase line", () => {
-  assertRefused(
-    UnitSchema.safeParse({ ...activeUnit(), charge_windows: [span("2026-10-05T09:00:00.000-05:00", "2026-10-01T09:00:00.000-05:00")] }),
-    "a charge window ends at or after it starts",
-  );
-  const open = span("2026-10-01T09:00:00.000-05:00", null);
-  assert(!UnitSchema.safeParse({ ...activeUnit(), charge_windows: [{ ...open, uid_price_formula: "short" }] }).success);
-  assert(
-    !UnitSchema.safeParse({ ...activeUnit(), charge_windows: [{ ...open, line: { uid_purchase: fid("p"), path: [UUID] } }] }).success,
-    "a window names no purchase line — the line names the unit (D10 item 10)",
-  );
-  assert(!UnitSchema.safeParse({ ...activeUnit(), query_by_purchases: [] }).success, "query_by_purchases retired with the window's line");
-  assert(!UnitSchema.safeParse({ ...activeUnit(), charge_windows: [{ ...open, provider_confirmed: null }] }).success, "provider_confirmed retired");
 });
 
 Deno.test("Unit: the id is unit-{number} with no zero and no leading zero", () => {
@@ -436,41 +359,4 @@ Deno.test("MovementAllocationInput / StoreTransferLineInput: units are exactly `
   const line = { from: L1, to: L2, quantity: 2, oos: null };
   assert(StoreTransferLineInput.safeParse({ ...line, units: [1001, 1002] }).success);
   assertRefused(StoreTransferLineInput.safeParse({ ...line, units: [1001] }), "exactly `quantity`");
-});
-
-Deno.test("OpenUnitChargeWindowInput: strips unknown keys, canonicalizes start, takes an optional line", () => {
-  const ok = OpenUnitChargeWindowInput.safeParse({
-    version: 0,
-    start: "2026-10-29T15:00:00.000Z",
-    uid_order: null,
-    uid_price_formula: FORMULA_UID,
-    notes: "",
-    end: "2026-10-30T15:00:00.000Z",
-  });
-  assert(ok.success);
-  assertEquals(ok.data.start, "2026-10-29T10:00:00.000-05:00");
-  assert(!("end" in ok.data), "an open takes no end: the key is stripped, not stored");
-  assert(!("line" in ok.data), "absent line asks the server to resolve it");
-  assert(
-    !OpenUnitChargeWindowInput.safeParse({ version: 0, start: "2026-10-29", uid_order: null, uid_price_formula: FORMULA_UID, notes: "" })
-      .success,
-    "a bare date is not an instant",
-  );
-  assert(
-    OpenUnitChargeWindowInput.safeParse({
-      version: 0,
-      start: "2026-10-29T15:00:00.000Z",
-      uid_order: null,
-      uid_price_formula: FORMULA_UID,
-      notes: "",
-    }).success,
-    "a window opens naming no purchase line",
-  );
-});
-
-Deno.test("UpdateUnitChargeWindowInput: needs a field beyond version; end may be null to re-open", () => {
-  assertRefused(UpdateUnitChargeWindowInput.safeParse({ version: 1 }), "at least one charge window field");
-  assert(UpdateUnitChargeWindowInput.safeParse({ version: 1, end: null }).success);
-  assert(UpdateUnitChargeWindowInput.safeParse({ version: 1, end: "2026-10-30T15:00:00.000Z" }).success);
-  assertRefused(UpdateUnitChargeWindowInput.safeParse({ version: 1, line: null }), "at least one charge window field");
 });

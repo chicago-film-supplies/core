@@ -335,17 +335,20 @@ Deno.test("pickLinePostingFields: both keys are always stated, `null` included",
 // ── The PAYABLE grains (api-cloudrun's one-document-model plan, Phase 1) ─────
 //
 // Purchase, bill and supplier-credit lines spread the same head, posting and tax
-// cores. Their unions have no divider arm yet, so EVERY arm is a line arm.
+// cores. Since Phase 3 their unions also carry divider arms (`destination`,
+// `group`, and `purchase` on a bill or credit), which the walk below skips.
 
 const PAYABLE_GRAINS = ["purchases", "purchase-bills", "purchase-credits"] as const;
 
 /**
- * 🔴 The one shared key a payable line still declares for itself, until the
- * plan's Phase 3 turns on the full three-way sync with `{quantity, amount_cents}`
- * as one atom. A purchase's `quantity` is what was ORDERED and a bill's is what
- * it BILLS; spreading `LineItemCore.quantity` (tagged `propagate: true`) now
- * would make the purchase → bill merge overwrite a billed count. The exemption is
- * asserted below to still be a homonym, so it cannot outlive its reason.
+ * 🔴 The one shared key a payable line still declares for itself — and since
+ * Phase 3 for a different reason than before. It used to be a homonym (ordered
+ * vs billed). Now it PROPAGATES, but as one member of the `flat_money` merge
+ * group with `amount_cents` (`shared_group`, `utils/shared-fields.ts`): a flat
+ * payable line's amount is a stated total, so the two follow or stay together.
+ * `LineItemCore.quantity` serves the receivable grains too, so it cannot carry
+ * that payable-only group; the payable declaration does. Asserted below to be
+ * the group member, so the exemption cannot outlive its reason.
  */
 const PAYABLE_OWN_QUANTITY = "quantity";
 
@@ -358,8 +361,15 @@ function payableArmShapes(collection: (typeof PAYABLE_GRAINS)[number]): Record<s
   assertEquals(arr._zod.def.type, "array", `${collection}: items is not an array`);
   const union = arr._zod.def.element;
   assertEquals(union._zod.def.type, "union", `${collection}: items element is not a union`);
+  const DIVIDERS = new Set(["destination", "group", "purchase"]);
   // deno-lint-ignore no-explicit-any
-  return (union._zod.def.options as any[]).map((o) => o._zod.def.shape);
+  const shapes = (union._zod.def.options as any[]).map((o) => o._zod.def.shape);
+  // The LINE arms: a divider arm's `type` literal is a divider type.
+  // deno-lint-ignore no-explicit-any
+  return shapes.filter((shape: any) => {
+    const values: string[] = shape.type._zod.def.values ?? Object.values(shape.type._zod.def.entries ?? {});
+    return !(values.length > 0 && values.every((v) => DIVIDERS.has(v)));
+  });
 }
 
 Deno.test("payable grains: every shared head, posting and tax field is the SAME INSTANCE on every arm", () => {
@@ -374,7 +384,7 @@ Deno.test("payable grains: every shared head, posting and tax field is the SAME 
         if (!(key in shape)) {
           drifted.push(`${grain}.items[${type}].${key} — absent`);
         } else if (key === PAYABLE_OWN_QUANTITY) {
-          if (shape[key] === canonical) drifted.push(`${grain}.items[${type}].quantity — spread before Phase 3`);
+          if (shape[key] === canonical) drifted.push(`${grain}.items[${type}].quantity — the shared instance cannot carry the payable group`);
         } else if (shape[key] !== canonical) {
           drifted.push(`${grain}.items[${type}].${key} — re-declared instead of referencing the shared core`);
         }
@@ -421,13 +431,13 @@ Deno.test("payable grains: the posting key is `ledger_account`, and neither reti
   assert(LedgerPostingCore.uid_tracking_category === LinePostingCore.uid_tracking_category);
 });
 
-Deno.test("payable grains: the PURCHASE ↔ BILL `quantity` is still a homonym, so the exemption is still owed", () => {
-  // If this flips to `propagated`, Phase 3 has turned on the sync and
-  // PAYABLE_OWN_QUANTITY must go — spread the shared instance instead.
-  const kinds = Object.fromEntries(
-    classifySharedFields(schemas.purchases, schemas["purchase-bills"]).fields.map((f) => [f.path, f.kind]),
-  );
-  assertEquals(kinds["items[].quantity"], "homonym");
+Deno.test("payable grains: the PURCHASE ↔ BILL `quantity` is the `flat_money` group member, so the exemption is still owed", () => {
+  // If the group goes, PAYABLE_OWN_QUANTITY must go too — spread the shared instance instead.
+  const fields = classifySharedFields(schemas.purchases, schemas["purchase-bills"]).fields;
+  const kinds = Object.fromEntries(fields.map((f) => [f.path, f.kind]));
+  assertEquals(kinds["items[].quantity"], "propagated");
+  assertEquals(fields.find((f) => f.path === "items[].quantity")?.group, "flat_money");
+  assertEquals(fields.find((f) => f.path === "items[].amount_cents")?.group, "flat_money");
   // And the shared head the payable lines DO spread is followed by the merge.
   for (const key of ["name", "description", "ledger_account", "uid_tracking_category", "uid_tax_class"]) {
     assertEquals(kinds[`items[].${key}`], "propagated", key);

@@ -10,7 +10,7 @@ import {
   purchaseCardDue,
 } from "../src/utils/cards.ts";
 import type { PurchaseSaleItem, PurchaseRentalItem } from "../src/schemas/purchase.ts";
-import { payablePrice } from "./helpers/payable.ts";
+import { payablePrice, purchasePair } from "./helpers/payable.ts";
 
 /**
  * A genuine ORDER-DERIVED EVENT CARD — `sources` names an order, so
@@ -473,12 +473,15 @@ Deno.test("purchase card: a purchase action sits only on a purchase card, and a 
   assertEquals(cardPaths({ ...purchaseCard(), action: null }), []);
 });
 
+/** The one destination pair every line below sits under unless a test says otherwise. */
+const PAIR = "9a1b2c3d-0000-4000-8000-0000000000d1";
+
 const pline = (over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem => {
   const uid = over.uid ?? "9a1b2c3d-0000-4000-8000-000000000002";
   return {
     type: "rental",
     uid,
-    path: [uid],
+    path: [PAIR, uid],
     description: "",
     zero_priced: null,
     uid_product: "testprod100000000000",
@@ -489,11 +492,9 @@ const pline = (over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem => {
     uid_tax_class: "TaxClassResale000000",
     amount_cents: 50_000,
     price: payablePrice(50_000),
-    auto_link: false,
     quantity_received: 0,
     quantity_billed: 0,
     quantity_canceled: 0,
-    dates: { start: "2026-10-18T09:00:00.000-05:00", end: "2026-10-25T17:00:00.000-05:00" },
     quantity_returned: 0,
     uid_orders: [],
     uid_units: [],
@@ -505,7 +506,7 @@ const pline = (over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem => {
 const bline: PurchaseSaleItem = {
   type: "sale",
   uid: "9a1b2c3d-0000-4000-8000-000000000001",
-  path: ["9a1b2c3d-0000-4000-8000-000000000001"],
+  path: [PAIR, "9a1b2c3d-0000-4000-8000-000000000001"],
   description: "",
   zero_priced: null,
   uid_product: "testprod200000000000",
@@ -547,11 +548,15 @@ Deno.test("computeCardStatusFromPurchase / computeCardActionFromPurchase — the
 Deno.test("purchaseCardDue: the earliest due-back among OPEN subrent items, else among all; null when none is due", () => {
   const early = "2026-10-22T17:00:00.000-05:00";
   const late = "2026-10-25T17:00:00.000-05:00";
-  const a = pline({ uid: "9a1b2c3d-0000-4000-8000-00000000000a", dates: { start: early, end: early }, quantity_received: 3, quantity_returned: 3, quantity_canceled: 7 });
-  const b = pline({ uid: "9a1b2c3d-0000-4000-8000-00000000000b", dates: { start: early, end: late }, quantity_received: 10 });
-  assertEquals(purchaseCardDue({ items: [a, b] }), late, "a is settled, so b's date leads");
-  assertEquals(purchaseCardDue({ items: [a, { ...b, quantity_returned: 10 }] }), early, "nothing open: the earliest of all");
+  // The due-back is each line's PAIR's collection_end (one-document-model Phase 3).
+  const PA = "9a1b2c3d-0000-4000-8000-0000000000da";
+  const PB = "9a1b2c3d-0000-4000-8000-0000000000db";
+  const destinations = [purchasePair(PA, { start: early, end: early }), purchasePair(PB, { start: early, end: late })];
+  const a = pline({ uid: "9a1b2c3d-0000-4000-8000-00000000000a", path: [PA, "9a1b2c3d-0000-4000-8000-00000000000a"], quantity_received: 3, quantity_returned: 3, quantity_canceled: 7 });
+  const b = pline({ uid: "9a1b2c3d-0000-4000-8000-00000000000b", path: [PB, "9a1b2c3d-0000-4000-8000-00000000000b"], quantity_received: 10 });
+  assertEquals(purchaseCardDue({ items: [a, b], destinations }), late, "a is settled, so b's date leads");
+  assertEquals(purchaseCardDue({ items: [a, { ...b, quantity_returned: 10 }], destinations }), early, "nothing open: the earliest of all");
   // A standing subrent is due back on nothing; a buy item never enters.
-  assertEquals(purchaseCardDue({ items: [pline({ dates: { start: early, end: null } }), bline] }), null);
-  assertEquals(purchaseCardDue({ items: [bline] }), null);
+  assertEquals(purchaseCardDue({ items: [pline(), bline], destinations: [purchasePair(PAIR, { start: early, end: null })] }), null);
+  assertEquals(purchaseCardDue({ items: [bline], destinations: [purchasePair(PAIR)] }), null);
 });

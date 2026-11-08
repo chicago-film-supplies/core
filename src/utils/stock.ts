@@ -437,7 +437,11 @@ export function unavailableFromOOS(o: StockOOSSource): StockUnavailableEntry | n
  * `quantity_received` and `expected_date` are REQUIRED on the buy arm, as they
  * are on a stored item, because a buy's inbound reads them: a caller that builds
  * its own rows and leaves them out must fail to compile rather than count every
- * received unit as still inbound. A stored `PurchaseItem` is assignable as is.
+ * received unit as still inbound. A stored `PurchaseRow` is assignable as is.
+ *
+ * A subrent's hire window is not on the line: it is the line's PAIR's
+ * `delivery_start` → `collection_end`, read through `path[0]`
+ * (one-document-model Phase 3).
  */
 export type StockPurchaseItemSource =
   | {
@@ -454,14 +458,16 @@ export type StockPurchaseItemSource =
     quantity: number;
     quantity_canceled: number;
     quantity_returned: number;
-    dates: { start: string; end: string | null };
+    path: readonly string[];
   }
-  | { type: "service" | "replacement" };
+  | { type: "service" | "replacement" | "destination" | "group" };
 
 /** Just enough of a purchase to reduce it to the supply it adds. */
 export interface StockPurchaseSource {
   status: PurchaseStatusType;
   items: readonly StockPurchaseItemSource[];
+  /** The pairs a subrent line's hire window is read off. */
+  destinations: readonly { uid: string; dates: { delivery_start: string | null; collection_end: string | null } }[];
 }
 
 /**
@@ -472,7 +478,7 @@ export interface StockPurchaseSource {
  *
  * | item | entry | quantity |
  * |---|---|---|
- * | `rental` (Subrent) | `[dates.start, dates.end]` (`end: null` is +∞), kind `subrent` | `quantity − canceled − returned` |
+ * | `rental` (Subrent) | its pair's `[delivery_start, collection_end]` (`end: null` is +∞), kind `subrent` | `quantity − canceled − returned` |
  * | `sale` (Buy) | `[expected_date, +∞)`, kind `inbound` | `quantity − canceled − received` |
  * | `service` / `replacement` | none — they bring no unit into custody | — |
  *
@@ -507,7 +513,12 @@ export function supplyFromPurchase(p: StockPurchaseSource, uidProduct: string): 
       case "rental": {
         if (item.uid_product !== uidProduct) break;
         const quantity = item.quantity - item.quantity_canceled - item.quantity_returned;
-        if (quantity > 0) entries.push({ start: item.dates.start, end: item.dates.end, quantity, kind: "subrent" });
+        if (quantity <= 0) break;
+        const pair = p.destinations.find((d) => d.uid === item.path[0]);
+        const start = pair?.dates.delivery_start ?? null;
+        // A subrent pair always states its hire start; one that does not supplies
+        // nothing, as a buy with no expected date does, rather than inventing one.
+        if (start !== null) entries.push({ start, end: pair?.dates.collection_end ?? null, quantity, kind: "subrent" });
         break;
       }
       case "sale": {
@@ -518,6 +529,8 @@ export function supplyFromPurchase(p: StockPurchaseSource, uidProduct: string): 
       }
       case "service":
       case "replacement":
+      case "destination":
+      case "group":
         break;
       default: {
         const unreachable: never = item;

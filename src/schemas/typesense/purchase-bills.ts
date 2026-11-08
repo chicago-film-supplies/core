@@ -11,9 +11,12 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  * `items.type` is a facet and `items.name` is searchable. Every `items.*` field
  * is `optional: true`: a direct item may name no product.
  *
- * `uid_purchase` is indexed but not faceted: a purchase's own bills are a
- * Firestore `where`, not a search, and this field exists so a search can
- * still be narrowed by it.
+ * v3 (one-document-model Phase 3): `uid_purchase` → `number_purchases`, the
+ * invoice's `number_orders` twin, because one bill may now bill several
+ * purchases. `query_by_purchases` is NOT indexed, as `query_by_orders` is not:
+ * the indexer strips every `query_by_*` mirror, and a purchase's own bills are
+ * a Firestore `array-contains`, not a search. `items.type` now also carries the divider
+ * types (`purchase`, `destination`, `group`), as an invoice's does.
  *
  * `supplier.name` stays `facet: false` — see `typesense/suppliers.ts`.
  * `xero_id` and `reference` are `optional: true` because their Zod leaves are
@@ -21,18 +24,18 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  */
 export const purchaseBills: TypesenseCollectionConfig = {
   alias: "purchase-bills",
-  version: 2,
+  version: 3,
   firestoreCollection: "purchase-bills",
-  collectionName: "purchase-bills_v2",
+  collectionName: "purchase-bills_v3",
   enabled: true,
   schema: {
-    name: "purchase-bills_v2",
+    name: "purchase-bills_v3",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
       { name: "number", type: "int64", sort: true, index: true, facet: false },
       { name: "number_str", type: "string", index: true, sort: false, facet: false, optional: true },
-      { name: "uid_purchase", type: "string", index: true, facet: false },
+      { name: "number_purchases", type: "int64[]", index: true, facet: false },
       { name: "supplier", type: "object" },
       { name: "supplier.uid", type: "string", facet: false, optional: true },
       { name: "supplier.name", type: "string", sort: true, stem: true, facet: false },

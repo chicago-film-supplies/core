@@ -64,8 +64,8 @@ import {
   type OrderStatusType,
   type PriceFormulaRef,
   type PriceModifierType,
-  type PurchaseDocumentItem,
-  type PurchaseItem,
+  type PurchaseDocumentRow,
+  type PurchaseRow,
   SIDE_CONTRACTS,
   type TaxRefType,
   TERMINAL_ORDER_STATUSES,
@@ -291,8 +291,11 @@ export interface PriceDocumentContext {
   holidays: readonly string[];
 }
 
-/** A line on a payable document: a purchase line, or a bill or credit line. */
-export type PayableLine = PurchaseItem | PurchaseDocumentItem;
+/**
+ * A row of a payable document: a purchase, bill or credit line, or one of its
+ * dividers, which every stage passes over as an invoice's dividers are.
+ */
+export type PayableLine = PurchaseRow | PurchaseDocumentRow;
 
 /**
  * How a payable document is priced. There is no destination, organization,

@@ -1016,8 +1016,13 @@ const ITEM_TYPES = [
   "surcharge",
   "transaction_fee",
   "order",
+  "purchase",
 ] as const;
-/** Union of every order/invoice/fulfillment item type. */
+/**
+ * Union of every item type on either side. `purchase` is the payable twin of
+ * the `order` divider: it scopes a bill's or supplier credit's lines to their
+ * purchase (one-document-model Phase 3), and no receivable union carries it.
+ */
 export type ItemTypeType = typeof ITEM_TYPES[number];
 /** Zod schema for {@link ItemTypeType}. */
 export const ItemTypeEnum: z.ZodType<ItemTypeType> = z.enum(ITEM_TYPES);
@@ -1027,7 +1032,7 @@ export const ItemTypeEnum: z.ZodType<ItemTypeType> = z.enum(ITEM_TYPES);
 // `DOC_ITEM_TYPES` member fails the first; inventing a member here fails the
 // second. Same shape as `_lineParity` below — both compare two lists neither of
 // which is typed on the other, which is what makes them capable of failing.
-type _DerivedItemTypeType = DocItemTypeType | "order";
+type _DerivedItemTypeType = DocItemTypeType | "order" | "purchase";
 type _ItemTypesCoverDerived = Exclude<_DerivedItemTypeType, ItemTypeType> extends never ? true : never;
 type _DerivedCoversItemTypes = Exclude<ItemTypeType, _DerivedItemTypeType> extends never ? true : never;
 const _itemTypeParity: [_ItemTypesCoverDerived, _DerivedCoversItemTypes] = [true, true];
@@ -1116,9 +1121,9 @@ export interface ItemContract {
 // fee is a document-level charge, so it neither nests under a product nor
 // carries components of its own.
 const LINE_PARENTS: readonly ItemTypeType[] = [
-  "order", "destination", "group", "rental", "replacement", "sale", "service", "surcharge",
+  "order", "purchase", "destination", "group", "rental", "replacement", "sale", "service", "surcharge",
 ];
-const DIVIDER_PARENTS: readonly ItemTypeType[] = ["order", "destination", "group"];
+const DIVIDER_PARENTS: readonly ItemTypeType[] = ["order", "purchase", "destination", "group"];
 
 /**
  * The literal half of the contract table.
@@ -1150,6 +1155,8 @@ const DIVIDER_PARENTS: readonly ItemTypeType[] = ["order", "destination", "group
 const ITEM_CONTRACTS_INNER = {
   // ── dividers ──
   order: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false, substitutable: false },
+  // The payable twin of `order`: a bill's or supplier credit's scope divider.
+  purchase: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false, substitutable: false },
   destination: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false, substitutable: false },
   group: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false, substitutable: false },
   // ── lines ──
@@ -1177,7 +1184,8 @@ const ITEM_CONTRACTS_INNER = {
  */
 export const ITEM_CONTRACTS: Readonly<Record<ItemTypeType, ItemContract>> = {
   order: { ...ITEM_CONTRACTS_INNER.order, parentable_by: [] },
-  destination: { ...ITEM_CONTRACTS_INNER.destination, parentable_by: ["order"] },
+  purchase: { ...ITEM_CONTRACTS_INNER.purchase, parentable_by: [] },
+  destination: { ...ITEM_CONTRACTS_INNER.destination, parentable_by: ["order", "purchase"] },
   group: { ...ITEM_CONTRACTS_INNER.group, parentable_by: ["destination"] },
   rental: { ...ITEM_CONTRACTS_INNER.rental, parentable_by: LINE_PARENTS },
   replacement: { ...ITEM_CONTRACTS_INNER.replacement, parentable_by: LINE_PARENTS },

@@ -29,11 +29,16 @@
  * @module
  */
 import {
+  isPurchaseLine,
+  type PayableDividerType,
   type Purchase,
   type PurchaseActionId,
   type PurchaseBill,
   type PurchaseCredit,
+  type PurchaseDocumentItem,
   purchaseItemBasis,
+  purchaseLineKeyOf,
+  purchaseLines,
   type PurchaseRentalItem,
   type PurchaseReplacementItem,
   type PurchaseSaleItem,
@@ -85,11 +90,23 @@ export interface PurchaseOfferContext {
   billed_paths?: ReadonlySet<string>;
 }
 
-/** The paths of the purchase lines a LIVE bill names, each joined with `/`. */
-export function purchaseBilledPaths(bills: readonly Pick<PurchaseBill, "totals" | "items" | "voided_at">[]): Set<string> {
+/**
+ * The paths of the lines of purchase `uidPurchase` that a LIVE bill bills,
+ * each joined with `/` — relative to that purchase, so they compare with its
+ * own `item.path`. A bill may bill several purchases, hence the scope.
+ */
+export function purchaseBilledPaths(
+  bills: readonly Pick<PurchaseBill, "totals" | "items" | "voided_at">[],
+  uidPurchase: string,
+): Set<string> {
+  const prefix = `${uidPurchase}/`;
   return new Set(
     bills.filter(purchaseBillIsLive).flatMap((b) =>
-      b.items.flatMap((l) => (l.path_purchase_item === undefined ? [] : [l.path_purchase_item.join("/")]))
+      b.items.flatMap((row) => {
+        if (!isPurchaseLine(row)) return [];
+        const key = purchaseLineKeyOf(row as PurchaseDocumentItem);
+        return key !== null && key.startsWith(prefix) ? [key.slice(prefix.length)] : [];
+      })
     ),
   );
 }
@@ -168,11 +185,14 @@ function billableQuantity(item: PurchaseActionItem): number {
  * close.
  */
 export function purchaseActionsFor(
-  purchase: Pick<Purchase, "status" | "query_by_bills"> & { items: readonly PurchaseActionItem[] },
+  purchase: Pick<Purchase, "status" | "query_by_bills"> & {
+    items: readonly (PurchaseActionItem | { type: PayableDividerType })[];
+  },
   ctx: PurchaseOfferContext = {},
 ): PurchaseActionOffer[] {
   const offers: PurchaseActionOffer[] = [];
-  const { items, status } = purchase;
+  const { status } = purchase;
+  const items = purchase.items.filter((i): i is PurchaseActionItem => isPurchaseLine(i));
   const active = status === "active";
   const unitsOut = items.some((i) => i.type === "rental" && remainingToReturn(i) > 0);
   if (active && !unitsOut && items.some(purchaseItemClosable)) {
@@ -242,9 +262,9 @@ export function purchaseBillVoidRefusal(bill: PurchaseBillActionBill, ctx: Purch
   if (bill.totals.amount_paid_cents > 0 || bill.totals.amount_credited_cents > 0) {
     return `Cannot void bill ${bill.number}: payments or supplier credits are applied to it. Remove them first.`;
   }
-  const others = { bills: ctx.bills.filter((b) => b.uid !== bill.uid), credits: ctx.credits };
-  const named = purchaseBilledPaths([bill]);
-  const stranded = ctx.purchase.items.filter((item) =>
+  const others = { uid_purchase: ctx.uid_purchase, bills: ctx.bills.filter((b) => b.uid !== bill.uid), credits: ctx.credits };
+  const named = purchaseBilledPaths([bill], ctx.uid_purchase);
+  const stranded = purchaseLines(ctx.purchase.items).filter((item) =>
     purchaseItemBasis(item) === "flat" && named.has(item.path.join("/")) &&
     purchaseLineBilledNet(item.path, others).quantity < 0
   );

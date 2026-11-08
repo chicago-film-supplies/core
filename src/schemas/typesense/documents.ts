@@ -1177,7 +1177,7 @@ export interface PurchaseBillDocument {
   uid: string;
   number: number;
   number_str?: string;
-  uid_purchase: string;
+  number_purchases: number[];
   supplier: { uid?: string; name: string };
   origin: string;
   xero_document: string;

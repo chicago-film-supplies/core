@@ -1161,6 +1161,10 @@ export function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: s
     if (item.type === "destination") {
       return buildInvoiceDestinationDivider(item, path);
     }
+    // A `purchase` divider is payable-only: no order carries one.
+    if (item.type === "purchase") {
+      throw new Error(`projectOrderItemToInvoiceItem: an order item cannot be a purchase divider (${item.uid})`);
+    }
     return {
       uid: item.uid,
       type: item.type,
@@ -1913,25 +1917,67 @@ export interface OrderInvoiceFieldSync {
   holidays: readonly string[];
 }
 
-/** Is any shared field of this invoice row different from the previous order row? */
-function lineOverridden(prevOrderItem: LineItem, invoiceItem: InvoiceDocItemType, orderDividerUid: string): boolean {
-  const prev = projectOrderItemToInvoiceItem(prevOrderItem, orderDividerUid);
-  return mergeSharedFields(orderInvoiceSharedFields().line, prev, prev, invoiceItem).overridden.length > 0;
+/**
+ * **What the scoped initiator → billing sync needs to know about a SIDE**
+ * (one-document-model Phase 3). The order → invoice sync and the purchase →
+ * bill sync are one engine, {@link syncOrderToInvoiceSelective}'s body; this is
+ * the whole of what differs between them, so neither side branches on a
+ * collection.
+ *
+ * Every receivable-only arm of the engine — substitutions (`substituted_for`),
+ * date-extension sections (`path_extension_for`) — keys on a field no payable
+ * row carries, so on a bill it finds nothing and changes nothing. The
+ * lost/damaged arm (`uid_out_of_service`) applies to both sides as written: a
+ * line billing a record is the billing document's own row.
+ */
+export interface ScopedSyncSide {
+  /** The scope divider's type: `order` on an invoice, `purchase` on a bill or credit. */
+  scopeType: "order" | "purchase";
+  /** The move pointer a billing row carries: `path_order_item` / `path_purchase_item`. */
+  pointerKey: "path_order_item" | "path_purchase_item";
+  /** An initiator row (line or divider) in the billing document's shape, under the scope divider. */
+  project(item: LineItem, scopeUid: string): InvoiceDocItemType;
+  /** The shared LINE fields, read off the two schemas (`fieldsUnder(…, "items[]")`). */
+  lineFields(): readonly SharedField[];
 }
 
-/** The three-way rule on one matched invoice row. Invoice-only keys are kept by construction. */
-function mergeLine(
-  prevOrderItem: LineItem,
-  newOrderItem: LineItem,
-  invoiceItem: InvoiceDocItemType,
-  orderDividerUid: string,
+/** The receivable side: order → invoice. */
+export const RECEIVABLE_SCOPED_SYNC: ScopedSyncSide = {
+  scopeType: "order",
+  pointerKey: "path_order_item",
+  project: (item, scopeUid) => projectOrderItemToInvoiceItem(item, scopeUid),
+  lineFields: () => orderInvoiceSharedFields().line,
+};
+
+function scopedLineOverridden(side: ScopedSyncSide, prev: LineItem, row: InvoiceDocItemType, scopeUid: string): boolean {
+  const p = side.project(prev, scopeUid);
+  return mergeSharedFields(side.lineFields(), p, p, row).overridden.length > 0;
+}
+
+function mergeScopedLine(
+  side: ScopedSyncSide,
+  prev: LineItem,
+  next: LineItem,
+  row: InvoiceDocItemType,
+  scopeUid: string,
 ): InvoiceDocItemType {
-  return mergeSharedFields(
-    orderInvoiceSharedFields().line,
-    projectOrderItemToInvoiceItem(prevOrderItem, orderDividerUid),
-    projectOrderItemToInvoiceItem(newOrderItem, orderDividerUid),
-    invoiceItem,
-  ).merged;
+  return mergeSharedFields(side.lineFields(), side.project(prev, scopeUid), side.project(next, scopeUid), row).merged;
+}
+
+/**
+ * {@link syncOrderToInvoiceSelective} for any side: the scoped three-way sync of
+ * one initiator's block on one billing document. `side` says which pointer,
+ * projector and field set apply; the rules are the order → invoice sync's,
+ * unchanged.
+ */
+export function syncScopedBillingItems(
+  prevItems: LineItem[],
+  nextItems: LineItem[],
+  currentItems: InvoiceDocItemType[],
+  scopeUid: string,
+  side: ScopedSyncSide,
+): InvoiceDocItemType[] {
+  return syncScopedItems(prevItems, nextItems, currentItems, scopeUid, side).items;
 }
 
 /** Is any shared field of this invoice pair different from the previous order pair? */
@@ -2129,7 +2175,12 @@ function syncScopedItems(
   newOrderItems: LineItem[],
   storedInvoiceItems: InvoiceDocItemType[],
   orderDividerUid: string,
+  side: ScopedSyncSide = RECEIVABLE_SCOPED_SYNC,
 ): { items: InvoiceDocItemType[] } {
+  const mergeLine = (prev: LineItem, next: LineItem, row: InvoiceDocItemType, uid: string) =>
+    mergeScopedLine(side, prev, next, row, uid);
+  const lineOverridden = (prev: LineItem, row: InvoiceDocItemType, uid: string) =>
+    scopedLineOverridden(side, prev, row, uid);
   const emit = (row: InvoiceDocItemType) => {
     result.push(row);
   };
@@ -2196,6 +2247,7 @@ function syncScopedItems(
   const claims = orderLineClaims(
     currentInvoiceItems.filter((it) => !isInExtensionSection(it.path, orderDividerUid, extensionTargets)) as InvoiceItem[],
     orderDividerUid,
+    side.pointerKey,
   );
   const newByPath = new Map<string, LineItem>();
   for (const item of newOrderItems) newByPath.set(itemPathKey(item.path), item);
@@ -2204,13 +2256,13 @@ function syncScopedItems(
     const x = claims.get(relKey);
     if (x === undefined) return undefined;
     // Only the root states the pointer; a component follows it by suffix.
-    const isRoot = ((row as InvoiceItem).path_order_item?.length ?? 0) > 0;
+    const isRoot = (((row as unknown as Record<string, unknown>)[side.pointerKey] as string[] | undefined)?.length ?? 0) > 0;
     const pointing = (r: InvoiceDocItemType, to: readonly string[] | undefined): InvoiceDocItemType => {
       if (!isRoot) return r;
-      const out = { ...r } as InvoiceDocItemType & { path_order_item?: string[] };
+      const out = { ...r } as InvoiceDocItemType & Record<string, unknown>;
       // A pointer at the row's own path is no claim: moving back clears it.
-      if (to !== undefined && itemPathKey(to) !== relKey) out.path_order_item = [...to];
-      else delete out.path_order_item;
+      if (to !== undefined && itemPathKey(to) !== relKey) out[side.pointerKey] = [...to];
+      else delete out[side.pointerKey];
       return out;
     };
     const prevX = prevByPath.get(itemPathKey(x));
@@ -2314,7 +2366,7 @@ function syncScopedItems(
         }
       }
       // New item — project to invoice shape, scoped under the order divider.
-      const projected = projectOrderItemToInvoiceItem(newItem, orderDividerUid);
+      const projected = side.project(newItem, orderDividerUid);
       // A DIVIDER the previous order already had is decided like a line: the
       // invoice declined it. It is emitted here only so a row projected beneath
       // it (a new order line) can re-open it in place; the pass below drops it
@@ -2345,7 +2397,7 @@ function syncScopedItems(
   const droppedClaims: string[][] = [];
   for (const [pathKey, invoiceItem] of invoiceByPath) {
     if (processedInvoicePaths.has(pathKey) || emittedSubstituted.has(pathKey)) continue;
-    if (invoiceItem.type === "order") continue; // the scope's own divider is the caller's
+    if (invoiceItem.type === side.scopeType) continue; // the scope's own divider is the caller's
 
     // A row billing order line X from elsewhere is decided against X, never by
     // its own path — which no order carries, so the next arm would keep it
@@ -2508,6 +2560,33 @@ export function computeInvoiceItemPaths<T extends InvoiceItem>(items: T[]): T[] 
  */
 export function validateInvoiceItemPaths<T extends InvoiceItem>(items: T[]): ItemPathIssue[] {
   return validatePathsAgainst(items, computeInvoiceItemPaths);
+}
+
+// ── Payable billing-document paths ──────────────────────────────
+
+/**
+ * The divider hierarchy of a BILL's or SUPPLIER CREDIT's items, outermost
+ * first: the invoice's, with a `purchase` divider in the `order` divider's
+ * slot, because one bill can bill several purchases (a supplier's monthly
+ * statement) as one invoice bills several orders (one-document-model Phase 3).
+ * A purchase's own items use {@link ORDER_ITEM_LEVELS}, as an order's do.
+ */
+export const PURCHASE_DOCUMENT_ITEM_LEVELS = ["purchase", "destination", "group"] as const;
+
+/**
+ * Compute paths for a bill's or supplier credit's items — `computeItemPaths`
+ * at {@link PURCHASE_DOCUMENT_ITEM_LEVELS}, and nothing else. Named for the
+ * same reason as {@link computeInvoiceItemPaths}: handing these items the
+ * order hierarchy would treat every `purchase` divider as a line and drop it
+ * out of every path. Pure; generic in `T`.
+ */
+export function computePurchaseDocumentItemPaths<T extends InvoiceItem>(items: T[]): T[] {
+  return computeItemPaths(items, PURCHASE_DOCUMENT_ITEM_LEVELS);
+}
+
+/** {@link validateInvoiceItemPaths}' twin at {@link PURCHASE_DOCUMENT_ITEM_LEVELS}. */
+export function validatePurchaseDocumentItemPaths<T extends InvoiceItem>(items: T[]): ItemPathIssue[] {
+  return validatePathsAgainst(items, computePurchaseDocumentItemPaths);
 }
 
 /**
@@ -2957,15 +3036,18 @@ export function invoiceAuthoredSubtrees(
  *
  * @param scopedInvoiceItems - Items of one order scope (the order divider may be included)
  * @param orderDividerUid - The order divider's uid
+ * @param pointerKey - The move pointer to read: `path_order_item` on an invoice,
+ *   `path_purchase_item` on a bill or credit (one-document-model Phase 3).
  */
 export function orderLineClaims(
   scopedInvoiceItems: readonly InvoiceItem[],
   orderDividerUid: string,
+  pointerKey: "path_order_item" | "path_purchase_item" = "path_order_item",
 ): Map<string, string[]> {
   const claims = new Map<string, string[]>();
   const roots: Array<{ rel: string[]; x: readonly string[] }> = [];
   for (const it of scopedInvoiceItems) {
-    const x = it.path_order_item;
+    const x = (it as unknown as Record<string, string[] | undefined>)[pointerKey];
     const path = it.path ?? [];
     if (!x?.length || !isLineItemType(it.type) || path[0] !== orderDividerUid) continue;
     const rel = path.slice(1);

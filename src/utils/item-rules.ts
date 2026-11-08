@@ -46,13 +46,15 @@ import {
 } from "./orders.ts";
 import {
   computeInvoiceItemPaths,
+  computePurchaseDocumentItemPaths,
   type InvoiceItem,
   validateInvoiceItemPaths,
   validateInvoiceItemUniqueness,
+  validatePurchaseDocumentItemPaths,
 } from "./invoices.ts";
 
 /** Which document an items array belongs to. Each grain has its own rule set. */
-export type ItemArrayGrain = "order" | "invoice" | "fulfillment";
+export type ItemArrayGrain = "order" | "invoice" | "fulfillment" | "purchase" | "purchase_document";
 
 /** The document fields {@link itemArrayIssues} reads. */
 export interface ItemArrayDoc {
@@ -61,6 +63,10 @@ export interface ItemArrayDoc {
   destinations?: ReadonlyArray<{ uid: string; exchange?: DestinationExchangeType | null }>;
   /** An invoice's source orders; non-empty ⇒ it must lead with an `order` divider. */
   query_by_orders?: readonly string[];
+  /** A bill's purchases; non-empty ⇒ it must lead with a `purchase` divider. */
+  query_by_purchases?: readonly string[];
+  /** A supplier credit's purchase; present ⇒ it must lead with a `purchase` divider. */
+  uid_purchase?: string;
 }
 
 /** Options for {@link itemArrayIssues}. */
@@ -102,7 +108,7 @@ export type ItemArrayRule = ItemArrayIssue["rule"];
  *
  * | rule | built from | grains |
  * |---|---|---|
- * | `leading_divider` | `leadingDividerViolations` (`linked` = `query_by_orders` non-empty) | all |
+ * | `leading_divider` | `leadingDividerViolations` (`linked` = `query_by_orders` / `query_by_purchases` non-empty, or `uid_purchase`) | all |
  * | `destination_join` | `destinationJoinViolations` | all (needs `destinations`) |
  * | `parentage` | `validateItemParentage` | all |
  * | `uniqueness` | `validateItemUniqueness` / `validateInvoiceItemUniqueness` | all |
@@ -138,10 +144,13 @@ export function itemArrayIssues(
     ? raw
     : grain === "invoice"
     ? computeInvoiceItemPaths(raw as InvoiceItem[])
+    : grain === "purchase_document"
+    ? computePurchaseDocumentItemPaths(raw as InvoiceItem[])
     : computeItemPaths(raw);
   const issues: ItemArrayIssue[] = [];
 
-  const linked = (doc.query_by_orders?.length ?? 0) > 0;
+  const linked = (doc.query_by_orders?.length ?? 0) > 0 || (doc.query_by_purchases?.length ?? 0) > 0 ||
+    doc.uid_purchase !== undefined;
   for (const v of leadingDividerViolations(items, grain, linked)) issues.push({ rule: "leading_divider", ...v });
   if (doc.destinations) {
     for (const v of destinationJoinViolations(items, doc.destinations)) {
@@ -149,7 +158,7 @@ export function itemArrayIssues(
     }
   }
   for (const v of validateItemParentage(items)) issues.push({ rule: "parentage", ...v });
-  const uniqueness = grain === "invoice"
+  const uniqueness = grain === "invoice" || grain === "purchase_document"
     ? validateInvoiceItemUniqueness(items as InvoiceItem[])
     : validateItemUniqueness(items);
   for (const v of uniqueness) issues.push({ rule: "uniqueness", ...v });
@@ -159,7 +168,11 @@ export function itemArrayIssues(
     if (!Array.isArray(path) || path.length === 0) issues.push({ rule: "path_empty", index, uid: it?.uid });
     else if (path.at(-1) !== it.uid) issues.push({ rule: "path_not_self", index, uid: it.uid, path });
   });
-  const fixedPoint = grain === "invoice" ? validateInvoiceItemPaths(items as InvoiceItem[]) : validateItemPaths(items);
+  const fixedPoint = grain === "invoice"
+    ? validateInvoiceItemPaths(items as InvoiceItem[])
+    : grain === "purchase_document"
+    ? validatePurchaseDocumentItemPaths(items as InvoiceItem[])
+    : validateItemPaths(items);
   for (const v of fixedPoint) issues.push({ rule: "path_fixed_point", ...v });
 
   for (const v of zeroPricedFlaggedNonComponents(items)) issues.push({ rule: "zero_priced_non_component", ...v });
@@ -169,7 +182,8 @@ export function itemArrayIssues(
     for (const v of zeroQuantityComponents(items)) issues.push({ rule: "zero_quantity_component", ...v });
     for (const v of mixedBookingGrains(items)) issues.push({ rule: "mixed_booking_grain", ...v });
   }
-  if (grain !== "invoice" && doc.destinations) {
+  // Exchange legs are receivable-only (a payable pair carries no `exchange`).
+  if ((grain === "order" || grain === "fulfillment") && doc.destinations) {
     for (const v of exchangedForViolations({ destinations: doc.destinations, items })) {
       issues.push({ rule: "exchanged_for", ...v });
     }

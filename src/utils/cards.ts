@@ -21,6 +21,7 @@ import {
   isPurchaseCard,
   ownsKey,
   type Purchase,
+  purchaseHireWindow,
   type PurchaseRentalItem,
 } from "../schemas/mod.ts";
 import { sumBreakdownKeys, terminalQuantity } from "./bookings.ts";
@@ -352,8 +353,8 @@ export function computeCardActionFromPurchase(purchase: Pick<Purchase, "items">)
 }
 
 /**
- * The instant a subrent return card is dated at: the EARLIEST due-back
- * (`dates.end`) among subrent items still OPEN — units in custody, or units
+ * The instant a subrent return card is dated at: the EARLIEST due-back (its
+ * pair's `dates.collection_end`) among subrent items still OPEN — units in custody, or units
  * still to arrive — or, once nothing is open, the earliest due-back of any
  * subrent item, so a completed card keeps a stable date.
  *
@@ -361,12 +362,14 @@ export function computeCardActionFromPurchase(purchase: Pick<Purchase, "items">)
  * item, or one whose subrents are all STANDING (`dates.end: null`), which are
  * due back on nothing.
  */
-export function purchaseCardDue(purchase: Pick<Purchase, "items">): string | null {
+export function purchaseCardDue(purchase: Pick<Purchase, "items" | "destinations">): string | null {
   const items = subrentItems(purchase);
   const open = items.filter((i) =>
     i.quantity_received > i.quantity_returned || i.quantity_received + i.quantity_canceled < i.quantity
   );
-  const pool = (open.length > 0 ? open : items).map((i) => i.dates.end).filter((d): d is string => d !== null);
+  // The due-back is the hire window's end, on the line's PAIR (one-document-model Phase 3).
+  const pool = (open.length > 0 ? open : items).map((i) => purchaseHireWindow(purchase, i)?.end ?? null)
+    .filter((d): d is string => d !== null);
   if (pool.length === 0) return null;
   return pool.reduce((a, b) => (Date.parse(b) < Date.parse(a) ? b : a));
 }

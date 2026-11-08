@@ -127,16 +127,24 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
   // ⚠️ **Seventh entry, added when the purchase mirrors became required** (the
   // subrent plan's beta B). `query_by_products` and `query_by_item_types` are
   // cross-field equalities over the items; `query_by_orders` stays `[]`, which a
-  // buy item derives. Since api-cloudrun#1407 the ITEM also carries one — its
-  // `path` is `[uid]` — and arrays are replaced wholesale, so the whole minimal
-  // buy item is stated (with its `price`, required since beta B). Still one entry.
+  // buy item derives. Since one-document-model Phase 3 the line sits under a
+  // destination divider its pair answers — the walker's pair uid is the zero
+  // UUID, so the divider takes it — and arrays are replaced wholesale, so the
+  // divider and the whole minimal buy item are stated (with its `price`,
+  // required since beta B). Still one entry.
   purchase: {
     query_by_products: ["AAAAAAAAAAAAAAAAAAAA"],
     query_by_item_types: ["sale"],
     items: [{
+      uid: "00000000-0000-4000-8000-000000000000",
+      type: "destination",
+      name: "A",
+      path: ["00000000-0000-4000-8000-000000000000"],
+      description: "",
+    }, {
       type: "sale",
       uid: "AAAAAAAAAAAAAAAAAAAA",
-      path: ["AAAAAAAAAAAAAAAAAAAA"],
+      path: ["00000000-0000-4000-8000-000000000000", "AAAAAAAAAAAAAAAAAAAA"],
       name: "A",
       description: "",
       zero_priced: null,
@@ -163,15 +171,25 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
       landed_costs: [],
     }],
   },
-  // ⚠️ **Eighth entry, added when a bill's lines became items** (api-cloudrun#1407):
-  // an item's `path` is `[uid]`, the same cross-field class — the walker
-  // generates a uid and a path independently. A credit needs none: its `items`
-  // may be empty, which is what the walker builds.
+  // ⚠️ **Eighth entry, added when a bill's lines became items** (api-cloudrun#1407).
+  // Since one-document-model Phase 3 a line sits under its purchase divider, and
+  // `query_by_purchases` must name that divider — the same cross-field class. A credit needs none: its `items` may
+  // be empty, which is what the walker builds.
   "purchase-bill": {
+    query_by_purchases: ["AAAAAAAAAAAAAAAAAAAA"],
+    number_purchases: [1],
     items: [{
-      type: "sale",
       uid: "AAAAAAAAAAAAAAAAAAAA",
+      type: "purchase",
+      name: "PO-1",
       path: ["AAAAAAAAAAAAAAAAAAAA"],
+      description: "",
+    }, {
+      // Directly under the purchase divider: a bill's `destinations` has no
+      // minimum, so the walker builds none, and a line needs no pair to sit here.
+      type: "sale",
+      uid: "AAAAAAAAAAAAAAAAAAAB",
+      path: ["AAAAAAAAAAAAAAAAAAAA", "AAAAAAAAAAAAAAAAAAAB"],
       name: "A",
       description: "",
       zero_priced: null,
@@ -189,11 +207,8 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
         subtotal_discounted_cents: 0,
         total_cents: 0,
       },
-      units: [],
-      dates: null,
       ledger_account: 1999,
       uid_tracking_category: null,
-      path_purchase_item: ["AAAAAAAAAAAAAAAAAAAA"],
     }],
   },
 };

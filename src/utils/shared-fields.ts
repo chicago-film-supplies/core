@@ -96,6 +96,16 @@ export interface SharedField {
    * downstream shape first); a comparator over raw documents does.
    */
   keys?: readonly string[];
+  /**
+   * Set on a field declared `.meta({ shared_group: "<name>" })`: the field is
+   * one MEMBER of a group of sibling leaves the merge decides as ONE unit —
+   * every member follows the source, or (when the downstream overrode any of
+   * them) every member is kept. The payable flat line's `{quantity,
+   * amount_cents}` is the case: its amount is a stated TOTAL with no rate to
+   * re-derive from, so a quantity that followed beside an amount that stayed
+   * would change the implied unit price silently (one-document-model Phase 3).
+   */
+  group?: string;
 }
 
 /** Result of {@link classifySharedFields}. */
@@ -136,6 +146,12 @@ export const PROPAGATE_META_KEY = "propagate";
  * no identity apart from their position, so the array is taken or kept as a unit.
  */
 export const SHARED_META_KEY = "shared";
+/**
+ * The meta key that puts a shared scalar in a merge GROUP:
+ * `.meta({ propagate: true, shared_group: "flat_money" })`. Every member of a
+ * group sits in the same row; see {@link SharedField.group}.
+ */
+export const SHARED_GROUP_META_KEY = "shared_group";
 
 /** Keys that identify a row rather than describing it. */
 const ROW_IDENTITY_KEYS: ReadonlySet<string> = new Set(["uid", "path"]);
@@ -309,7 +325,9 @@ export function classifySharedFields(
       return;
     }
     if (ra.kind === "scalar" && rb.kind === "scalar") {
+      const group = metaOf(both, SHARED_GROUP_META_KEY);
       if (!declared) undeclared.push(path);
+      else if (typeof group === "string") fields.push({ path, kind: "propagated", group });
       else fields.push({ path, kind: "propagated" });
       return;
     }
@@ -471,6 +489,39 @@ export function mergeSharedFields<T>(
     }
     return v;
   };
+
+  // A GROUP is decided before the per-field loop, as one unit: it follows
+  // only when the downstream holds the previous source value on EVERY member.
+  const groups = new Map<string, SharedField[]>();
+  for (const field of fields) {
+    if (field.group === undefined || field.kind !== "propagated") continue;
+    const list = groups.get(field.group) ?? [];
+    list.push(field);
+    groups.set(field.group, list);
+  }
+  for (const members of groups.values()) {
+    const segsOf = (f: SharedField) => f.path.split(".");
+    const held = members.every((f) => sameSharedValue(at(downstream, segsOf(f)), at(prev, segsOf(f))));
+    for (const f of members) {
+      done.add(f.path);
+      if (!held) {
+        // Report only the members that actually differ — the diff names those.
+        if (!sameSharedValue(at(downstream, segsOf(f)), at(prev, segsOf(f)))) overridden.add(f.path);
+        continue;
+      }
+      const segs = segsOf(f);
+      const n = at(next, segs);
+      if (sameSharedValue(at(downstream, segs), n)) continue;
+      const parent = segs.slice(0, -1).reduce<Record<string, unknown> | undefined>(
+        (o, s) => (isPlainObject(o) ? o[s] as Record<string, unknown> : undefined),
+        merged,
+      );
+      if (!isPlainObject(parent)) continue;
+      const key = segs[segs.length - 1];
+      if (n === undefined) delete parent[key];
+      else parent[key] = copyPlain(n);
+    }
+  }
 
   for (const field of fields) {
     if (field.kind === "derived" || field.kind === "homonym") continue;

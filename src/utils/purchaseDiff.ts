@@ -9,8 +9,9 @@
  * the customer side, so the manager reuses the presentational pieces with a
  * purchase-side row host.
  *
- * - **The join is the bill line's `path_purchase_item`**, a flat key (purchase
- *   items are flat, `path = [uid]`). No ancestry walk, no divider levels.
+ * - **The join is the purchase line key** (`purchaseLineKeyOf`): a bill line
+ *   sits at `[purchase uid, ...its purchase line's path]`, or names another
+ *   line by its move pointer (one-document-model Phase 3).
  * - **What is compared is what the sync MERGES** — the shared line fields read
  *   off the two schemas (`purchaseBillSharedLineFields`), projected to the bill's
  *   shape (`projectPurchaseLineForBill`), each compared canonically (absent ≡
@@ -19,10 +20,9 @@
  * - **Billed is SUMMED over the purchase's live bills, net of live credits** —
  *   a line is routinely billed across several. On a FLAT line the entry states
  *   ordered, received and billed units, and billed cents against what the
- *   line's cumulative share says those units cost. On a TIME line it states,
- *   per unit, the time recorded and not billed and the time billed and not
- *   recorded — COVERAGE, not counts, because two bills may meter one window
- *   differently and still cover it once.
+ *   line's cumulative share says those units cost. A TIME line is billed by
+ *   COUNTS against its pair's windows (0b ruling 3); its entry arrives with the
+ *   shared diff (one-document-model Phase 4), and nothing stores one today.
  * - **Money is compared where the line can state it alone**: a LINKED time
  *   line's Xero amount against its own `rates × counts` (a pushed one is refined
  *   to agree, so it cannot differ).
@@ -33,27 +33,17 @@
  *
  * @module
  */
-import type {
-  ChargeWindowType,
-  Purchase,
-  PurchaseBill,
-  PurchaseCredit,
-  PurchaseDocumentItem,
-  PurchaseItem,
-  UnitType,
-} from "../schemas/mod.ts";
-import { purchaseItemBasis } from "../schemas/mod.ts";
+import type { Purchase, PurchaseBill, PurchaseCredit, PurchaseDocumentItem, PurchaseItem } from "../schemas/mod.ts";
+import { purchaseDocumentLines, purchaseItemBasis, purchaseLineKeyOf, purchaseLines } from "../schemas/mod.ts";
 import { canonicalizePayload } from "./invoices.ts";
 import type { DocumentDiffField } from "./documentDiff.ts";
 import {
-  billedUnitCoverage,
   projectPurchaseLineForBill,
   purchaseBillIsLive,
   purchaseBillSharedLineFields,
   purchaseCreditIsLive,
   purchaseLineBilledNet,
-  subtractChargeWindows,
-  unitWindowsForLine,
+  purchaseLineKey,
 } from "./purchase-documents.ts";
 import { priceFromFormula } from "./price-formulas.ts";
 import { roundDivHalfUp } from "./money.ts";
@@ -110,22 +100,8 @@ export interface PurchaseBilledEntry {
   expected_cents: number;
 }
 
-/**
- * One unit's charge-window COVERAGE on a TIME purchase line: what its windows
- * recorded (up to the diff's `through`) and no live bill covers, and what live
- * bills cover that no window recorded. Emitted when either is non-empty, and
- * only when a live bill bills the line or `through` is given.
- */
-export interface PurchaseCoverageEntry {
-  kind: "coverage";
-  bills: PurchaseDocumentRef[];
-  uid_unit: string;
-  recorded_not_billed: ChargeWindowType[];
-  billed_not_recorded: ChargeWindowType[];
-}
-
 /** One entry at one line of the viewed document. Discriminated on `kind`. */
-export type PurchaseDiffEntry = PurchaseSourceDiffEntry | PurchaseBilledEntry | PurchaseCoverageEntry;
+export type PurchaseDiffEntry = PurchaseSourceDiffEntry | PurchaseBilledEntry;
 
 /**
  * The answer for one viewed document. Keys are the VIEWED document's own line
@@ -142,10 +118,6 @@ export interface PurchaseDiffSources {
   /** Every bill of the purchase — sibling bills are what "billed" sums over. */
   bills: readonly PurchaseBill[];
   credits: readonly PurchaseCredit[];
-  /** The units whose windows may name the purchase's time lines; absent skips coverage. */
-  units?: readonly Pick<UnitType, "uid" | "charge_windows">[];
-  /** Coverage cut-off — open windows read up to here. Required for coverage. A Chicago instant. */
-  through?: string;
 }
 
 /** Which document is being viewed. */
@@ -182,6 +154,10 @@ function lineFieldDiffs(line: PurchaseDocumentItem, item: PurchaseItem): Documen
   const seen = new Set<string>();
   for (const f of purchaseBillSharedLineFields()) {
     if (f.kind === "derived" || f.kind === "homonym") continue;
+    // `{quantity, amount_cents}` (the `flat_money` group) is what the `billed`
+    // entry states, summed over every bill; a per-bill field entry would report
+    // every partial bill as a difference.
+    if (f.group !== undefined) continue;
     const segs = f.path.split(".");
     let unit = f.path;
     for (let i = 1; i < segs.length; i++) {
@@ -221,16 +197,21 @@ function shareCents(amountCents: number, quantity: number, units: number): numbe
 }
 
 function billedEntry(
+  uidPurchase: string,
   item: PurchaseItem,
   liveBills: readonly PurchaseBill[],
   liveCredits: readonly PurchaseCredit[],
 ): PurchaseBilledEntry | null {
-  const lines = (items: readonly PurchaseDocumentItem[]) =>
-    items.filter((l) => l.path_purchase_item !== undefined && key(l.path_purchase_item) === key(item.path));
-  const bills = liveBills.filter((b) => lines(b.items).length > 0);
-  const credits = liveCredits.filter((c) => lines(c.items).length > 0);
+  const k = purchaseLineKey(uidPurchase, item.path);
+  const named = (rows: PurchaseBill["items"]) => purchaseDocumentLines(rows).some((l) => purchaseLineKeyOf(l) === k);
+  const bills = liveBills.filter((b) => named(b.items));
+  const credits = liveCredits.filter((c) => named(c.items));
   if (bills.length === 0 && credits.length === 0) return null;
-  const { quantity: billed, amount_cents: billed_cents } = purchaseLineBilledNet(item.path, { bills, credits });
+  const { quantity: billed, amount_cents: billed_cents } = purchaseLineBilledNet(item.path, {
+    uid_purchase: uidPurchase,
+    bills,
+    credits,
+  });
   const ordered = item.quantity - item.quantity_canceled;
   const received = item.type === "service" || item.type === "replacement" ? null : item.quantity_received;
   const expected_cents = shareCents(item.amount_cents ?? 0, item.quantity, billed);
@@ -239,33 +220,6 @@ function billedEntry(
   // past what was received then reads as billed ≠ ordered.
   if (billed === ordered && billed_cents === expected_cents) return null;
   return { kind: "billed", bills: bills.map(refOfBill), credits: credits.map(refOfCredit), ordered, received, billed, billed_cents, expected_cents };
-}
-
-function coverageEntries(
-  item: PurchaseItem,
-  sources: PurchaseDiffSources,
-  liveBills: readonly PurchaseBill[],
-): PurchaseCoverageEntry[] {
-  if (!sources.units || !sources.through) return [];
-  const bills = liveBills.filter((b) =>
-    b.items.some((l) => l.path_purchase_item !== undefined && key(l.path_purchase_item) === key(item.path))
-  );
-  const recorded = item.type === "sale"
-    ? new Map<string, ChargeWindowType[]>()
-    : unitWindowsForLine(sources.units, item, sources.through);
-  const billed = billedUnitCoverage({ bills: sources.bills, credits: sources.credits }, item.path);
-  const units = [...new Set([...recorded.keys(), ...billed.keys()])].sort();
-  const out: PurchaseCoverageEntry[] = [];
-  for (const uid_unit of units) {
-    const r = recorded.get(uid_unit) ?? [];
-    const b = billed.get(uid_unit) ?? [];
-    const recorded_not_billed = subtractChargeWindows(r, b);
-    const billed_not_recorded = subtractChargeWindows(b, r);
-    if (recorded_not_billed.length > 0 || billed_not_recorded.length > 0) {
-      out.push({ kind: "coverage", bills: bills.map(refOfBill), uid_unit, recorded_not_billed, billed_not_recorded });
-    }
-  }
-  return out;
 }
 
 function push(map: Map<string, PurchaseDiffEntry[]>, k: string, entry: PurchaseDiffEntry): void {
@@ -278,8 +232,7 @@ function push(map: Map<string, PurchaseDiffEntry[]>, k: string, entry: PurchaseD
  * **The purchase ↔ bill diff for one viewed document** (D6). Pure.
  *
  * - **Purchase view** — at each purchase line: a `differs` entry per live bill
- *   whose line overrides a shared field, then the line's `billed` entry (flat)
- *   or `coverage` entries (time).
+ *   whose line overrides a shared field, then the line's `billed` entry (flat).
  * - **Bill view** — at each of the bill's lines: `differs` against the purchase
  *   (shared fields, plus a linked time line's money against its own snapshot),
  *   `not_on_source` for a document-only line or one whose purchase line is
@@ -291,24 +244,25 @@ function push(map: Map<string, PurchaseDiffEntry[]>, k: string, entry: PurchaseD
 export function computePurchaseBillDiffs(view: PurchaseDiffView, sources: PurchaseDiffSources): PurchaseDiffMap {
   const lines = new Map<string, PurchaseDiffEntry[]>();
   const purchaseRef = refOfPurchase(sources.purchase);
-  const byPath = new Map(sources.purchase.items.map((i) => [key(i.path), i]));
+  const uidPurchase = sources.purchase.uid;
+  const poLines = purchaseLines(sources.purchase.items);
+  const byKey = new Map(poLines.map((i) => [purchaseLineKey(uidPurchase, i.path), i]));
   const liveBills = sources.bills.filter(purchaseBillIsLive);
   const liveCredits = sources.credits.filter(purchaseCreditIsLive);
 
   const summed = (item: PurchaseItem): PurchaseDiffEntry[] => {
-    if (purchaseItemBasis(item) === "flat") {
-      const e = billedEntry(item, liveBills, liveCredits);
-      return e ? [e] : [];
-    }
-    return coverageEntries(item, sources, liveBills);
+    if (purchaseItemBasis(item) !== "flat") return [];
+    const e = billedEntry(uidPurchase, item, liveBills, liveCredits);
+    return e ? [e] : [];
   };
 
   if (view.kind === "purchase") {
-    for (const item of sources.purchase.items) {
+    for (const item of poLines) {
       const k = key(item.path);
+      const lineKey = purchaseLineKey(uidPurchase, item.path);
       for (const bill of liveBills) {
-        for (const line of bill.items) {
-          if (line.path_purchase_item === undefined || key(line.path_purchase_item) !== k) continue;
+        for (const line of purchaseDocumentLines(bill.items)) {
+          if (purchaseLineKeyOf(line) !== lineKey) continue;
           // `here` is the purchase line on this view, `there` the bill's.
           const fields = [...lineFieldDiffs(line, item), ...linkedMoneyDiff(line, bill.origin)]
             .map((f) => ({ field: f.field, here: f.there, there: f.here }));
@@ -322,9 +276,10 @@ export function computePurchaseBillDiffs(view: PurchaseDiffView, sources: Purcha
 
   const bill = sources.bills.find((b) => b.uid === view.uid);
   if (!bill) throw new Error(`Bill ${view.uid} is not among the purchase's bills`);
-  for (const line of bill.items) {
+  for (const line of purchaseDocumentLines(bill.items)) {
     const k = key(line.path);
-    const item = line.path_purchase_item === undefined ? undefined : byPath.get(key(line.path_purchase_item));
+    const lineKey = purchaseLineKeyOf(line);
+    const item = lineKey === null ? undefined : byKey.get(lineKey);
     if (!item) {
       push(lines, k, { kind: "not_on_source", source: purchaseRef, fields: [] });
       continue;

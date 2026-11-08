@@ -211,50 +211,6 @@ export interface UnitSerialHistoryEntryType {
   changed_by: ActorRefType;
 }
 
-/**
- * One span during which a unit's service line was switched ON — a hotspot's or
- * router's data line — billed by its provider under a price formula
- * (purchases-as-documents D2; Phase 2 rulings 4 and 8).
- *
- * The `{ start, end }` of an order pair's `ChargeWindow`, plus what a LIVE
- * switch-on needs: `end: null` while the line is on, a `uid` because routes
- * edit one window at a time, and the facts a window is billed by. It carries no
- * day count: counts are a LINE's (`price.counts`), metered under that line's
- * formula when a purchase or bill line is priced from these windows.
- *
- * RECORDED, never derived from custody: a device can sit on the shelf switched
- * on (an idle, still-billed span) or go out switched off. Present on every
- * unit, owned or rented, because CFS's own devices carry provider lines too.
- * What the provider billed is the BILL line's own windows, diffed against these
- * — not a field here.
- *
- * ⭐ **A window names no purchase line.** The line names the UNIT
- * (`SubrentItem.uid_units` / `ChargeItem.uid_units`), exactly as an invoice
- * line names the out-of-service record it bills (`uid_out_of_service`) and the
- * record names nothing back. So which line covers a window is DERIVED
- * (`coversForUnit`), a window no live line covers is an OFFER
- * (`seedPurchaseLinesForWindows`), and creating the purchase for it writes the
- * purchase alone (api-cloudrun purchases-as-documents D10 item 10).
- */
-export interface UnitChargeWindowType {
-  /** An array-member uid (`crypto.randomUUID()`). */
-  uid: string;
-  /** When CFS asked the provider to switch the line on. A Chicago instant. */
-  start: string;
-  /** When it was switched off; `null` while still on. A Chicago instant. */
-  end: string | null;
-  /** The order it was switched on for, or `null` for an idle or test window. */
-  uid_order: string | null;
-  /**
-   * The `price-formulas/{uid}` the window is metered under when it is offered
-   * as a new purchase line. A line that covers the window prices it by the
-   * LINE's own formula snapshot, never this.
-   */
-  uid_price_formula: string;
-  notes: string;
-  changed_by: ActorRefType;
-}
-
 /** A unit number, its current serial and its history. */
 export interface UnitType {
   /** `unit-{number}` — derived, see `UnitId`. */
@@ -269,11 +225,6 @@ export interface UnitType {
   serial_number: string | null;
   serial_history: UnitSerialHistoryEntryType[];
   status: UnitStatusType;
-  /**
-   * The unit's service-line charge windows, ascending by `start`, never
-   * overlapping, at most one open, and none open unless `active`.
-   */
-  charge_windows: UnitChargeWindowType[];
   /**
    * The `POST /products/{uid}/units` request that minted this number — its
    * `uuid_session`, the create's idempotency key. A retried count-mode create
@@ -303,22 +254,6 @@ export const UnitSerialHistoryEntry: z.ZodType<UnitSerialHistoryEntryType> = z.s
   // `mask` — free text an operator writes about a unit, which can name a person.
   notes: z.string().max(500).meta({ pii: "mask" }),
   changed_by: ActorRef.meta({ label: "Changed By" }),
-});
-
-/** Zod schema for {@link UnitChargeWindowType}. */
-export const UnitChargeWindow: z.ZodType<UnitChargeWindowType> = z.strictObject({
-  uid: z.uuid(),
-  start: chicagoInstant().meta({ column: true, label: "On From" }),
-  end: chicagoInstant().nullable().meta({ column: true, label: "On Until" }),
-  uid_order: FirestoreId.nullable(),
-  uid_price_formula: FirestoreId,
-  // `mask` — free text an operator writes about a unit, which can name a person.
-  notes: z.string().max(500).meta({ pii: "mask" }),
-  changed_by: ActorRef.meta({ label: "Changed By" }),
-}).superRefine((w, ctx) => {
-  if (w.end !== null && Date.parse(w.end) < Date.parse(w.start)) {
-    ctx.addIssue({ code: "custom", path: ["end"], message: "a charge window ends at or after it starts" });
-  }
 });
 
 /**
@@ -370,41 +305,6 @@ function checkUnit(doc: UnitType, ctx: z.RefinementCtx): void {
       message: `a ${doc.status} number carries no serial; close its open history entry first`,
     });
   }
-  checkChargeWindows(doc, ctx);
-}
-
-function checkChargeWindows(doc: UnitType, ctx: z.RefinementCtx): void {
-  const spans = doc.charge_windows;
-  for (let i = 1; i < spans.length; i++) {
-    const prev = spans[i - 1];
-    if (Date.parse(spans[i].start) < Date.parse(prev.start)) {
-      ctx.addIssue({ code: "custom", path: ["charge_windows", i], message: "charge windows must ascend by start" });
-      return;
-    }
-    if (prev.end === null || Date.parse(prev.end) > Date.parse(spans[i].start)) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["charge_windows", i],
-        message: "charge windows must not overlap: a window starts only after the previous one has ended",
-      });
-      return;
-    }
-  }
-  const uids = new Set<string>();
-  spans.forEach((w, i) => {
-    if (uids.has(w.uid)) {
-      ctx.addIssue({ code: "custom", path: ["charge_windows", i, "uid"], message: "a charge window uid appears once" });
-    }
-    uids.add(w.uid);
-  });
-  const open = spans.filter((a) => a.end === null).length;
-  if (open > 0 && doc.status !== "active") {
-    ctx.addIssue({
-      code: "custom",
-      path: ["charge_windows"],
-      message: `a ${doc.status} number has no line switched on; end its open charge window first`,
-    });
-  }
 }
 
 /** Zod schema for {@link UnitType}. */
@@ -415,7 +315,6 @@ export const UnitSchema: z.ZodType<UnitType> = z.strictObject({
   serial_number: SerialNumber.nullable().meta({ column: true, label: "Serial" }),
   serial_history: z.array(UnitSerialHistoryEntry).meta({ label: "Serial History" }),
   status: UnitStatusEnum.meta({ column: true, label: "Status" }),
-  charge_windows: z.array(UnitChargeWindow).meta({ label: "Charge Windows" }),
   uuid_session: z.uuid().nullable(),
   // Plain, not `.default(0)`: every writer states it, and a stored default is
   // inert (`tests/stored-defaults.test.ts`).
@@ -508,57 +407,3 @@ export const UpdateUnitInput: z.ZodType<UpdateUnitInputType> = z.object({
   message: "send a serial change, a status change, or both",
 });
 
-/**
- * Body of `POST /units/{uid}/charge-windows`: switch a unit's service line ON.
- *
- * Opens a window with no `end` — the server refuses a unit that is not
- * `active` or that already has an open window. `start` is when CFS asked the
- * provider to switch the line on, which may be earlier than the request (the
- * call came first). It names no purchase line: a line names its units. A
- * stripping `z.object`, not the
- * stored strict node (`tests/input-strictness.test.ts`).
- */
-export interface OpenUnitChargeWindowInputType {
-  version: number;
-  start: string;
-  uid_order: string | null;
-  uid_price_formula: string;
-  notes: string;
-}
-
-/** Zod schema for {@link OpenUnitChargeWindowInputType}. */
-export const OpenUnitChargeWindowInput: z.ZodType<OpenUnitChargeWindowInputType> = z.object({
-  version: z.int().min(0),
-  start: chicagoInstant(),
-  uid_order: FirestoreId.nullable(),
-  uid_price_formula: FirestoreId,
-  // `mask` — free text an operator writes about a unit, which can name a person.
-  notes: z.string().max(500).meta({ pii: "mask" }),
-});
-
-/**
- * Body of `PUT /units/{uid}/charge-windows/{window_uid}`: close a window
- * (`end`) or correct any of its fields. An absent key keeps the stored value;
- * `end: null` re-opens the LAST window of an `active` unit (a switch-off
- * recorded in error).
- */
-export interface UpdateUnitChargeWindowInputType {
-  version: number;
-  start?: string;
-  end?: string | null;
-  uid_order?: string | null;
-  uid_price_formula?: string;
-  notes?: string;
-}
-
-/** Zod schema for {@link UpdateUnitChargeWindowInputType}. */
-export const UpdateUnitChargeWindowInput: z.ZodType<UpdateUnitChargeWindowInputType> = z.object({
-  version: z.int().min(0),
-  start: chicagoInstant().optional(),
-  end: chicagoInstant().nullable().optional(),
-  uid_order: FirestoreId.nullable().optional(),
-  uid_price_formula: FirestoreId.optional(),
-  notes: z.string().max(500).meta({ pii: "mask" }).optional(),
-}).refine((u) => Object.keys(u).some((k) => k !== "version"), {
-  message: "send at least one charge window field to change",
-});

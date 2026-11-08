@@ -31,6 +31,8 @@ import { FIXED, VISION } from "./helpers/formulas.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 import { payablePrice } from "./helpers/payable.ts";
 
+/** The purchase every fixture bill bills (one-document-model Phase 3). */
+const PU = "testpurch10000000000";
 const FIXED_PRICE = payablePrice(0, { formula: priceFormulaRefOf(FIXED) });
 // A TIME-shaped line: refused by the schemas until one-document-model Phase 3,
 // still read by the ruleset's time branches, which these cases keep covered.
@@ -85,12 +87,15 @@ Deno.test("purchaseItemTouched: buckets, and a time line a bill names", () => {
   assert(purchaseItemTouched(timeCharge(), new Set(["c"])), "a time line counts no quantity_billed");
 });
 
-Deno.test("purchaseBilledPaths: a voided bill names nothing", () => {
-  const line = { path_purchase_item: ["c"] } as PurchaseDocumentItem;
-  const direct = {} as PurchaseDocumentItem;
+Deno.test("purchaseBilledPaths: a voided bill names nothing; another purchase's lines are not this one's", () => {
+  // A bill line sits at `[purchase uid, ...its purchase line's path]` (one-document-model Phase 3).
+  const line = { type: "service", path: [PU, "c"] } as PurchaseDocumentItem;
+  const moved = { type: "service", path: [PU, "x"], path_purchase_item: ["d"] } as PurchaseDocumentItem;
+  const elsewhere = { type: "service", path: ["OtherPurchase0000000", "c"] } as PurchaseDocumentItem;
+  const divider = { type: "purchase", uid: PU, path: [PU] } as unknown as PurchaseDocumentItem;
   const totals = (amount_void_cents: number) => ({ amount_void_cents }) as PurchaseBill["totals"];
-  assertEquals([...purchaseBilledPaths([{ totals: totals(0), items: [line, direct] }])], ["c"]);
-  assertEquals([...purchaseBilledPaths([{ totals: totals(500), items: [line] }])], []);
+  assertEquals([...purchaseBilledPaths([{ totals: totals(0), items: [divider, line, moved, elsewhere] }], PU)].sort(), ["c", "d"]);
+  assertEquals([...purchaseBilledPaths([{ totals: totals(500), items: [line] }], PU)], []);
 });
 
 Deno.test("close: refused whole while a subrent has units out, even with another line open", () => {
@@ -163,14 +168,14 @@ const voidBill = (
     number: 7,
     origin: "pushed",
     xero_document: "invoice",
-    items: lines.map(([path, quantity]) => ({ path_purchase_item: [path], quantity, amount_cents: 100 * quantity })),
+    items: lines.map(([path, quantity]) => ({ type: "sale", path: [PU, path], quantity, amount_cents: 100 * quantity })),
     totals: { total_cents: 1000, amount_paid_cents: 0, amount_credited_cents: 0, amount_void_cents: 0, amount_due_cents: 1000, ...totals_over },
     ...rest,
   } as PurchaseBill;
 };
 const voidCredit = (lines: [string, number][], status: PurchaseCredit["status"] = "issued") =>
-  ({ status, items: lines.map(([path, quantity]) => ({ path_purchase_item: [path], quantity, amount_cents: 100 * quantity })) }) as PurchaseCredit;
-const noDocuments = { purchase: { items: [] }, bills: [], credits: [] };
+  ({ status, items: lines.map(([path, quantity]) => ({ type: "sale", path: [PU, path], quantity, amount_cents: 100 * quantity })) }) as PurchaseCredit;
+const noDocuments = { uid_purchase: PU, purchase: { items: [] }, bills: [], credits: [] };
 const asLines = (...items: PurchaseActionItem[]) => items as PurchaseItem[];
 
 Deno.test("purchaseBillActionsFor: a live ACCPAY with money due, capped at what is due", () => {
@@ -185,7 +190,7 @@ Deno.test("purchaseBillActionsFor: a live ACCPAY with money due, capped at what 
 
 Deno.test("purchaseBillVoidRefusal: one row per reason, and the offer follows it", () => {
   const items = asLines(buy());
-  const ctx = (bills: PurchaseBill[], credits: PurchaseCredit[] = []) => ({ purchase: { items }, bills, credits });
+  const ctx = (bills: PurchaseBill[], credits: PurchaseCredit[] = []) => ({ uid_purchase: PU, purchase: { items }, bills, credits });
   const refuse = (b: PurchaseBill, c: ReturnType<typeof ctx>, reason: string) => {
     assertEquals(purchaseBillVoidRefusal(b, c)?.includes(reason), true, purchaseBillVoidRefusal(b, c) ?? "no refusal");
     assertEquals(purchaseBillActionsFor(b, c).some((a) => a.action === "void_bill"), false);
@@ -218,7 +223,7 @@ Deno.test("purchaseBillVoidRefusal: refused only when the void leaves a credit w
   const a = voidBill("a", [["b", 5]]);
   const b = voidBill("b", [["b", 5]]);
   const refused = (bills: PurchaseBill[], credits: PurchaseCredit[]) =>
-    purchaseBillVoidRefusal(a, { purchase: { items }, bills, credits })?.includes("Void the credit first") === true;
+    purchaseBillVoidRefusal(a, { uid_purchase: PU, purchase: { items }, bills, credits })?.includes("Void the credit first") === true;
 
   assertEquals(refused([a], [voidCredit([["b", 2]])]), true, "bill 5, credit 2, nothing else billed: net −2");
   assertEquals(refused([a, b], [voidCredit([["b", 2]])]), false, "the other bill still covers it: net 3");
@@ -228,7 +233,7 @@ Deno.test("purchaseBillVoidRefusal: refused only when the void leaves a credit w
   assertEquals(refused([a, { ...b, voided_at: mockTimestamp }], [voidCredit([["b", 2]])]), true, "a void bill covers nothing");
   assertEquals(refused([a], [voidCredit([["other", 2]])]), false, "a line stranded already, which this bill does not name, is not its problem");
   assertEquals(
-    purchaseBillVoidRefusal(a, { purchase: { items }, bills: [], credits: [voidCredit([["b", 2]])] })?.includes("Void the credit first"),
+    purchaseBillVoidRefusal(a, { uid_purchase: PU, purchase: { items }, bills: [], credits: [voidCredit([["b", 2]])] })?.includes("Void the credit first"),
     true,
     "the bill itself need not be in the list",
   );
@@ -237,7 +242,7 @@ Deno.test("purchaseBillVoidRefusal: refused only when the void leaves a credit w
 Deno.test("purchaseBillVoidRefusal: a time line counts nothing, so its credit refuses nothing", () => {
   const bill = voidBill("a", [["c", 5]]);
   assertEquals(
-    purchaseBillVoidRefusal(bill, { purchase: { items: asLines(timeCharge()) }, bills: [bill], credits: [voidCredit([["c", 2]])] }),
+    purchaseBillVoidRefusal(bill, { uid_purchase: PU, purchase: { items: asLines(timeCharge()) }, bills: [bill], credits: [voidCredit([["c", 2]])] }),
     null,
   );
 });
@@ -301,4 +306,11 @@ Deno.test("purchaseBillPushRefusal: one row per reason, and the offer follows it
     assertEquals(purchaseBillPushRefusal(bill, "out_of_sync"), null);
     assertEquals(pushes(bill, "out_of_sync"), [{ key: "push_to_xero", action: "push_to_xero" }]);
   }
+});
+
+Deno.test("purchaseActionsFor: a divider row is no line — it offers nothing and changes no offer (one-document-model Phase 3)", () => {
+  const divider = { type: "destination" as const };
+  const lines = [buy({ quantity_billed: 1 }), timeCharge()];
+  const withDivider = { status: "active" as const, items: [divider, ...lines], query_by_bills: [] };
+  assertEquals(purchaseActionsFor(withDivider), purchaseActionsFor(po(lines)));
 });

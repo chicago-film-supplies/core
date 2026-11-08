@@ -806,6 +806,24 @@ Deno.test("supply: with no demand, availability is owned + supply over the hire,
   });
 });
 
+/**
+ * A purchase pair carrying a hire window — the subrent's window is the PAIR's
+ * `delivery_start` → `collection_end` (one-document-model Phase 3).
+ */
+const hire = (uid: string, start: string | null, end: string | null) => ({ uid, dates: { delivery_start: start, collection_end: end } });
+
+Deno.test("supplyFromPurchase: the hire window is read off the line's pair; a pair with no start supplies nothing", () => {
+  const sub = { type: "rental" as const, uid_product: "P", quantity: 2, quantity_canceled: 0, quantity_returned: 0, path: ["H", "1"] };
+  const other = { ...sub, path: ["K", "1"] };
+  const destinations = [hire("H", H_START, H_END), hire("K", "2026-11-01T00:00:00.000-05:00", null)];
+  assertEquals(supplyFromPurchase({ status: "active", items: [sub, other], destinations }, "P"), [
+    sup(H_START, H_END, 2),
+    { start: "2026-11-01T00:00:00.000-05:00", end: null, quantity: 2, kind: "subrent" },
+  ]);
+  assertEquals(supplyFromPurchase({ status: "active", items: [sub], destinations: [hire("H", null, null)] }, "P"), []);
+  assertEquals(supplyFromPurchase({ status: "active", items: [sub], destinations: [] }, "P"), [], "no pair, no window");
+});
+
 Deno.test("supplyFromPurchase: a live subrent item, net of canceled and returned; [] for anything else", () => {
   const item = {
     type: "rental" as const,
@@ -813,9 +831,9 @@ Deno.test("supplyFromPurchase: a live subrent item, net of canceled and returned
     quantity: 10,
     quantity_canceled: 0,
     quantity_returned: 0,
-    dates: { start: H_START, end: H_END },
+    path: ["H", "1"],
   };
-  const p = { status: "active" as const, items: [item, { ...item, uid_product: "Q" }] };
+  const p = { status: "active" as const, items: [item, { ...item, uid_product: "Q" }], destinations: [hire("H", H_START, H_END)] };
   assertEquals(supplyFromPurchase(p, "P"), [sup(H_START, H_END, 10)]);
   assertEquals(supplyFromPurchase({ ...p, items: [{ ...item, quantity_canceled: 4, quantity_returned: 3 }] }, "P"), [sup(H_START, H_END, 3)]);
   // Liveness and zero are ONE filter.
@@ -832,11 +850,12 @@ Deno.test("supplyFromPurchase: a STANDING subrent (end null) is +∞; a charge i
     quantity: 4,
     quantity_canceled: 0,
     quantity_returned: 0,
-    dates: { start: H_START, end: null },
+    path: ["H", "1"],
   };
   const p = {
     status: "active" as const,
-    items: [standing, { type: "service" as const }],
+    items: [{ type: "destination" as const }, standing, { type: "service" as const }],
+    destinations: [hire("H", H_START, null)],
   };
   assertEquals(supplyFromPurchase(p, "P"), [{ start: H_START, end: null, quantity: 4, kind: "subrent" }]);
   const far = computeStockAvailability(stock(0, [], supplyFromPurchase(p, "P")), win("2029-01-01", "2029-12-31"));
@@ -851,9 +870,10 @@ Deno.test("supplyFromPurchase: one product on TWO items gives two entries (D2)",
     quantity: 2,
     quantity_canceled: 0,
     quantity_returned: 0,
-    dates: { start: H_START, end: H_END },
+    path: ["H", "2"],
   };
-  assertEquals(supplyFromPurchase({ status: "active", items: [buy, sub, { ...buy, quantity: 5 }] }, "P"), [
+  const destinations = [hire("H", H_START, H_END)];
+  assertEquals(supplyFromPurchase({ status: "active", items: [buy, sub, { ...buy, quantity: 5 }], destinations }, "P"), [
     { start: EXPECTED_EARLY, end: null, quantity: 3, kind: "inbound" },
     sup(H_START, H_END, 2),
     { start: EXPECTED_EARLY, end: null, quantity: 5, kind: "inbound" },
@@ -879,7 +899,7 @@ Deno.test("supplyFromPurchase: a live buy item is open-ended inbound for its unr
     quantity_received: 0,
     expected_date: EXPECTED,
   };
-  const p = { status: "active" as const, items: [item, { ...item, uid_product: "Q" }] };
+  const p = { status: "active" as const, items: [item, { ...item, uid_product: "Q" }], destinations: [] };
   assertEquals(supplyFromPurchase(p, "P"), [inb(EXPECTED, 10)]);
   // A partial receipt moves units out of inbound (and into held).
   assertEquals(supplyFromPurchase({ ...p, items: [{ ...item, quantity_received: 4 }] }, "P"), [inb(EXPECTED, 6)]);
@@ -914,7 +934,7 @@ Deno.test("inbound: an open-ended entry counts in every window from its start on
 
 Deno.test("inbound: a partial receipt leaves held + inbound unchanged", () => {
   const item = { type: "sale" as const, uid_product: "P", quantity: 10, quantity_canceled: 0, quantity_received: 0, expected_date: EXPECTED };
-  const p = { status: "active" as const, items: [item] };
+  const p = { status: "active" as const, items: [item], destinations: [] };
   const w = win("2026-10-22", "2026-10-24");
   const ordered = stock(10, [iv(B_START, B_END, 15)], supplyFromPurchase(p, "P"));
   const received = stock(14, [iv(B_START, B_END, 15)], supplyFromPurchase({ ...p, items: [{ ...item, quantity_received: 4 }] }, "P"));

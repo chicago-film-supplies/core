@@ -345,6 +345,12 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "isTransactionFeePricingItem",
   ],
   invoices: [
+    // one-document-model Phase 3: the payable path author, its validator and the
+    // scoped initiator → billing sync — write-path; a template renders paths
+    // already written.
+    "computePurchaseDocumentItemPaths",
+    "syncScopedBillingItems",
+    "validatePurchaseDocumentItemPaths",
     // core#130 row 1: the status a balance write implies — write-path; a template
     // reads the STORED status.
     "deriveCreditNoteStatus",
@@ -744,27 +750,25 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "purchaseBillXeroProjectionHash",
     "purchaseBillXeroSyncStatus",
   ],
-  // Purchase → bill machinery (purchases-as-documents D5–D7): the projector, the
-  // window coverage and the purchase → bill sync. A template renders a bill whose lines already carry
+  // Purchase → bill machinery (purchases-as-documents D5–D7, one-document-model
+  // Phase 3): the projector, the scope builder, the billed-count readers and the
+  // purchase → bill sync. A template renders a bill whose lines already carry
   // their counts and money.
   "purchase-documents": [
-    "billedUnitCoverage",
-    "coversForUnit",
     "flatShareCents",
-    "overcoveredUnitWindows",
     "projectPurchaseLineForBill",
     "projectPurchaseLineToBillLine",
+    "projectPurchaseRowForBill",
     "purchaseBillIsLive",
     "purchaseCreditIsLive",
+    "purchaseDocumentScope",
     "purchaseLineBilledNet",
     "purchaseLineCovers",
+    "purchaseLineKey",
     "purchaseBillSharedLineFields",
+    "purchaseScopeDivider",
     "recomputePurchaseQuantityBilled",
-    "seedPurchaseLinesForWindows",
-    "subtractChargeWindows",
     "syncPurchaseToBills",
-    "uncoveredUnitWindows",
-    "unitWindowsForLine",
   ],
   // The purchase ↔ bill diff (D6) is a review surface for the manager, computed
   // from several documents a render context never holds together.

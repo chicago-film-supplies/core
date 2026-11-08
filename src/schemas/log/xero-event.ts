@@ -282,23 +282,6 @@ export const XERO_EVENT_MSGS = [
   // CFS invoices at all, by id or by number. Carries `xero_invoice_id` +
   // `xero_invoice_number` + `xero_status`.
   "xero_untracked_accpay",
-  // ── Linked usage bills (serialized-subrent § 7b, api-cloudrun#1396) ──
-  // A provider's usage bill is LINKED, never pushed: CFS reads the Xero
-  // document that already exists (an ACCPAY by webhook, a card SPEND by the
-  // daily poll) and records a bill on the provider's usage purchase.
-  //
-  // A provider's Xero document was not linked, correctly: already linked, no
-  // open purchase with an auto-link line, a CFS-authored number, or nothing
-  // unbilled. `info`. Carries `reason` +
-  // `uid_supplier` + `xero_invoice_id` or `xero_bank_transaction_id`.
-  "usage_bill_link_skipped",
-  // Linking a provider's Xero document failed. `error`, via `logError`; the
-  // next delivery or poll retries it. Same identity fields as `_skipped`.
-  "usage_bill_link_failed",
-  // One daily card-first poll ran — emitted on EVERY run, so an absence rule
-  // can tell a quiet day from a dead job. `info`. Carries `window_start` +
-  // `transactions_seen` + `bills_linked`.
-  "usage_bill_poll_completed",
   // The daily `sweep-xero-bills` job finished every arm — emitted on each run
   // that finishes, so an absence rule can tell a quiet day from a dead job, and
   // `deleted_spends: 0` from a read that came back with nothing. A run that
@@ -353,18 +336,12 @@ export interface XeroEventLogRecord {
   uid_purchase_credit?: string;
   /** `PurchaseCredit.number` — what `CFS-SCR-{number}` is keyed on. Never reused. */
   purchase_credit_number?: number;
-  /** The purchase a `usage_*` arm is about. Its uid IS the document id. */
+  /** The purchase an arm is about. Its uid IS the document id. */
   uid_purchase?: string;
-  /** The supplier (a usage provider) a `usage_*` arm is about. */
+  /** The supplier an arm is about. */
   uid_supplier?: string;
-  /** A card SPEND a `usage_*` arm is about — the poll's document. */
+  /** A card SPEND an arm is about. */
   xero_bank_transaction_id?: string;
-  /** `usage_bill_poll_completed` — the poll's `UpdatedDateUTC` lower bound (ISO). */
-  window_start?: string;
-  /** `usage_bill_poll_completed` — the providers' SPENDs Xero returned. */
-  transactions_seen?: number;
-  /** `usage_bill_poll_completed` — the bills this run linked. */
-  bills_linked?: number;
   /** `xero_bill_sweep_completed` — movements that should carry a bill link and do not. */
   movement_candidates?: number;
   /** `xero_bill_sweep_completed` — pushed purchase bills with no `xero_id`. */
@@ -493,9 +470,6 @@ export const XeroEventLogRecordSchema: z.ZodType<XeroEventLogRecord> = z.object(
   uid_purchase: z.string().optional(),
   uid_supplier: z.string().optional(),
   xero_bank_transaction_id: z.string().optional(),
-  window_start: z.string().optional(),
-  transactions_seen: z.int().optional(),
-  bills_linked: z.int().optional(),
   movement_candidates: z.int().optional(),
   purchase_bill_candidates: z.int().optional(),
   open_bill_candidates: z.int().optional(),

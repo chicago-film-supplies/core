@@ -215,23 +215,9 @@ const updateUnitTransaction: TransactionDefinition = {
   steps: [],
 };
 
-const openUnitChargeWindowTransaction: TransactionDefinition = {
-  id: "open-unit-charge-window",
-  description:
-    "POST /units/{uid}/charge-windows — records a unit's service line being switched ON, under `units.activate`, as an open window on the unit's own `charge_windows`, naming the purchase line it bills against (resolved when it opens) and the formula it is metered under. Cascades NOWHERE: a window is a billing fact the purchase and bill lines are priced from when they are written, never denormalized, and it is not custody, so no roster, booking or ledger moves.",
-  steps: [],
-};
-
-const updateUnitChargeWindowTransaction: TransactionDefinition = {
-  id: "update-unit-charge-window",
-  description:
-    "PUT /units/{uid}/charge-windows/{window_uid} — closes a window or corrects its fields, under `units.activate`. Cascades NOWHERE, for `open-unit-charge-window`'s reason: a bill already written owns its own windows and is diffed against these, never rewritten from them.",
-  steps: [],
-};
-
 // ── Module ──────────────────────────────────────────────────────────
 /** Everything `propagation/units.ts` contributes to the propagation catalog. */
 export const units: PropagationModule = {
   rules: [...sharedRules, createUnitsRule],
-  transactions: [createUnitsTransaction, updateUnitTransaction, openUnitChargeWindowTransaction, updateUnitChargeWindowTransaction],
+  transactions: [createUnitsTransaction, updateUnitTransaction],
 };

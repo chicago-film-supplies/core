@@ -20,19 +20,25 @@ type Row = any;
 
 /** A clean document of `grain`: one leg, one group, a kit and its component. */
 function clean(grain: ItemArrayGrain): ItemArrayDoc & { items: Row[] } {
-  const pre = grain === "invoice" ? [ORDER] : [];
+  const pre = grain === "invoice" || grain === "purchase_document" ? [ORDER] : [];
+  const scope = grain === "invoice" ? "order" : "purchase";
   const items: Row[] = [
-    ...(grain === "invoice" ? [{ uid: ORDER, type: "order", name: "Order", path: [ORDER] }] : []),
+    ...(pre.length > 0 ? [{ uid: ORDER, type: scope, name: "Scope", path: [ORDER] }] : []),
     { uid: D, type: "destination", name: "Leg", path: [...pre, D] },
     { uid: G, type: "group", name: "Group", path: [...pre, D, G] },
     { uid: KIT, type: "rental", name: "Kit", quantity: 1, zero_priced: null, path: [...pre, D, G, KIT] },
     { uid: LAMP, type: "rental", name: "Lamp", quantity: 2, zero_priced: true, path: [...pre, D, G, KIT, LAMP] },
   ];
-  return { items, destinations: [{ uid: D }], ...(grain === "invoice" ? { query_by_orders: [ORDER] } : {}) };
+  return {
+    items,
+    destinations: [{ uid: D }],
+    ...(grain === "invoice" ? { query_by_orders: [ORDER] } : {}),
+    ...(grain === "purchase_document" ? { query_by_purchases: [ORDER] } : {}),
+  };
 }
 
 const at = (doc: { items: Row[] }, uid: string) => doc.items.find((i) => i.uid === uid);
-const pre = (grain: ItemArrayGrain) => (grain === "invoice" ? [ORDER] : []);
+const pre = (grain: ItemArrayGrain) => (grain === "invoice" || grain === "purchase_document" ? [ORDER] : []);
 
 /** Each rule's plant: a minimal edit to a clean document that breaks that rule. */
 const PLANTS: Record<ItemArrayRule, (doc: ItemArrayDoc & { items: Row[] }, grain: ItemArrayGrain) => void> = {
@@ -92,9 +98,20 @@ const RULES_BY_GRAIN: Record<ItemArrayGrain, ItemArrayRule[]> = {
     "leading_divider", "destination_join", "parentage", "uniqueness", "path_empty", "path_not_self",
     "path_fixed_point", "zero_priced_non_component", "zero_priced_unstated",
   ],
+  // The payable grains (one-document-model Phase 3): a purchase at order depth, a
+  // bill or credit at invoice depth under a `purchase` divider. A payable pair
+  // carries no exchange leg, and no booking grain until Phase 7.
+  purchase: [
+    "leading_divider", "destination_join", "parentage", "uniqueness", "path_empty", "path_not_self",
+    "path_fixed_point", "zero_priced_non_component", "zero_priced_unstated",
+  ],
+  purchase_document: [
+    "leading_divider", "destination_join", "parentage", "uniqueness", "path_empty", "path_not_self",
+    "path_fixed_point", "zero_priced_non_component", "zero_priced_unstated",
+  ],
 };
 
-const GRAINS: ItemArrayGrain[] = ["order", "fulfillment", "invoice"];
+const GRAINS: ItemArrayGrain[] = ["order", "fulfillment", "invoice", "purchase", "purchase_document"];
 
 for (const grain of GRAINS) {
   Deno.test(`itemArrayIssues(${grain}): a clean document has no issues`, () => {

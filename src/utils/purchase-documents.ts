@@ -1,7 +1,7 @@
 /**
- * Purchase → bill: the projector, unit coverage and the purchase → bill
- * three-way sync (purchases-as-documents D5, D7; api-cloudrun
- * `one-document-model` Phase 2).
+ * Purchase → bill: the projector, the "already billed" readers and the
+ * purchase → bill three-way sync (purchases-as-documents D5, D7; api-cloudrun
+ * `one-document-model` Phases 2–3).
  *
  * The supplier side's twin of the order → invoice machinery, built from the
  * same parts:
@@ -12,6 +12,15 @@
  * | `syncOrderToInvoiceSelective` | {@link syncPurchaseToBills} |
  * | `priceDocument` | `priceDocument` itself — its payable arm (`./price-document.ts`) |
  *
+ * ## Rows join by path, as an invoice's do
+ *
+ * A bill or credit line sits at `[purchase uid, ...its purchase line's path]`
+ * under its purchase's `purchase` divider and takes the purchase line's uid,
+ * exactly as an invoice line sits under its order divider at its order line's
+ * path (one-document-model Phase 3). `path_purchase_item` survives only as a
+ * MOVE pointer. Every "which purchase line does this bill" question goes
+ * through `purchaseLineKeyOf` (`schemas/purchase-bill.ts`).
+ *
  * ## One pricer
  *
  * A payable line's money is written by `priceDocument`'s stated-total arm
@@ -20,52 +29,44 @@
  * exactly as its receipts are, so the bills of a fully billed line sum to the
  * line's `amount_cents`.
  *
- * ⚠️ **Every payable line is priced FLAT until one-document-model Phase 3.**
- * The per-unit time metering that lived here (`meterBillLine`, the unbilled-window
- * projector, time credits) was deleted with `pricePurchaseDocument`: neither
- * environment stores a time purchase line (Phase 0b census), and Phase 3 meters
- * time lines from their destination pair's windows, as an order line is
- * metered. The unit-window READERS below (`unitWindowsForLine`, the coverage
- * helpers, `seedPurchaseLinesForWindows`) retire in that phase too.
- *
- * ## Sync never touches windows or quantities
- *
- * The merge follows `price` (formula, rates, discount terms), `name`, `type`,
- * `description`, `ledger_account`, `uid_tracking_category`, the tax class and
- * the attribution keys onto every
- * UNSETTLED, PUSHED bill, three-way against the previous purchase — the
- * classification `classifySharedFields(PurchaseSchema, PurchaseBillSchema)`
- * reads off the two schemas. `quantity`, `amount_cents` and `dates` are
- * homonyms there, and `units` is bill-only, so a purchase-side extension can
- * never rewrite what the supplier already billed. A linked bill's money is
- * Xero's and is never written; a frozen (settled) bill is skipped whole.
+ * ⚠️ **There are no unit charge windows.** A time line meters its PAIR's
+ * `charge_windows`, as an order line does; the per-unit window machinery that
+ * lived here (`unitWindowsForLine`, `coversForUnit`, `billedUnitCoverage`,
+ * `seedPurchaseLinesForWindows`) retired in one-document-model Phase 3, unused
+ * in either environment (Phase 0b census).
  *
  * @module
  */
 import {
-  type ChargeWindowType,
   type DiscountType,
+  type InvoiceDocItemType,
   type Purchase,
   type PurchaseBill,
   PurchaseBillSchema,
   type PurchaseCredit,
+  type PurchaseDocDestination,
   type PurchaseDocumentItem,
   type PurchaseDocumentLinePrice,
-  type CogsActivationEntryType,
-  type COACostType,
-  type Product,
+  type PurchaseDocumentRow,
   type PurchaseItem,
   purchaseItemBasis,
+  purchaseLines,
   purchaseItemCanceled,
+  purchaseLineKeyOf,
+  type PurchaseRow,
   PurchaseSchema,
-  type UidNameRefType,
-  type UnitType,
 } from "../schemas/mod.ts";
-import { catalogRateSnapshot } from "./price-formulas.ts";
 import { cumulativeShareCents } from "./purchases.ts";
 import { roundDivHalfUp } from "./money.ts";
-import { classifySharedFields, fieldsUnder, mergeSharedFields, type SharedField } from "./shared-fields.ts";
-import { purchaseBillIsFrozen, purchaseBillIsLive } from "./invoices.ts";
+import { classifySharedFields, fieldsUnder, sameSharedValue, type SharedField } from "./shared-fields.ts";
+import {
+  computePurchaseDocumentItemPaths,
+  purchaseBillIsFrozen,
+  purchaseBillIsLive,
+  type ScopedSyncSide,
+  syncScopedBillingItems,
+} from "./invoices.ts";
+import type { LineItem } from "./orders.ts";
 import { flatPayablePrice, type PayablePriceDocumentContext, priceDocument } from "./price-document.ts";
 
 export { purchaseBillIsLive };
@@ -73,451 +74,47 @@ export { purchaseBillIsLive };
 // ── Context ─────────────────────────────────────────────────────
 
 /**
- * The purchase's existing bills and credits, as the "already billed" readers
+ * One purchase's existing bills and credits, as the "already billed" readers
  * see them. Pass EVERY bill and credit of the purchase; liveness is decided
- * here ({@link purchaseBillIsLive}, {@link purchaseCreditIsLive}).
+ * here ({@link purchaseBillIsLive}, {@link purchaseCreditIsLive}). A bill may
+ * bill several purchases, so `uid_purchase` says whose lines to read.
  */
 export interface PurchaseBilledDocuments {
+  uid_purchase: string;
   bills: readonly Pick<PurchaseBill, "uid" | "number" | "totals" | "items" | "voided_at">[];
   credits: readonly Pick<PurchaseCredit, "status" | "items">[];
 }
 
-// ── Intervals ───────────────────────────────────────────────────
-//
-// Every endpoint stays the ORIGINAL string it came from (a unit window's, a bill
-// window's, or the caller's `through`), so nothing here mints an instant and the
-// Chicago offset form survives (cfs-datetime). Comparison is by `Date.parse`.
-
-interface Interval {
-  s: number;
-  e: number;
-  start: string;
-  end: string;
-}
-
-const toInterval = (w: { start: string; end: string }): Interval => ({
-  s: Date.parse(w.start),
-  e: Date.parse(w.end),
-  start: w.start,
-  end: w.end,
-});
-
-const fromInterval = (i: Interval): ChargeWindowType => ({ start: i.start, end: i.end });
-
-/** Ascending, non-empty, with touching or overlapping intervals merged. */
-function unionIntervals(list: readonly Interval[]): Interval[] {
-  const sorted = list.filter((i) => i.e > i.s).sort((a, b) => a.s - b.s || a.e - b.e);
-  const out: Interval[] = [];
-  for (const i of sorted) {
-    const last = out[out.length - 1];
-    if (last && i.s <= last.e) {
-      if (i.e > last.e) out[out.length - 1] = { ...last, e: i.e, end: i.end };
-    } else {
-      out.push({ ...i });
-    }
-  }
-  return out;
-}
-
-/** `a − b`, each result interval's endpoints taken from whichever side cut it. */
-function subtractIntervals(a: readonly Interval[], b: readonly Interval[]): Interval[] {
-  let rest = unionIntervals(a);
-  for (const cut of unionIntervals(b)) {
-    const next: Interval[] = [];
-    for (const i of rest) {
-      if (cut.e <= i.s || cut.s >= i.e) {
-        next.push(i);
-        continue;
-      }
-      if (cut.s > i.s) next.push({ s: i.s, e: cut.s, start: i.start, end: cut.start });
-      if (cut.e < i.e) next.push({ s: cut.e, e: i.e, start: cut.end, end: i.end });
-    }
-    rest = next;
-  }
-  return rest;
-}
-
-/** `a ∩ w`, clipped to one window. */
-function intersectWindow(a: readonly Interval[], w: Interval): Interval[] {
-  const out: Interval[] = [];
-  for (const i of a) {
-    const s = Math.max(i.s, w.s);
-    const e = Math.min(i.e, w.e);
-    if (e > s) out.push({ s, e, start: s === i.s ? i.start : w.start, end: e === i.e ? i.end : w.end });
-  }
-  return out;
-}
-
-/**
- * **`a − b` over charge windows** — the time `a` covers that `b` does not,
- * ascending and merged. Endpoints are the inputs' own strings.
- */
-export function subtractChargeWindows(
-  a: readonly ChargeWindowType[],
-  b: readonly ChargeWindowType[],
-): ChargeWindowType[] {
-  return subtractIntervals(a.map(toInterval), b.map(toInterval)).map(fromInterval);
-}
-
-// ── Reading units and existing coverage ────────────────────────
-
-const samePath = (a: readonly string[], b: readonly string[]): boolean =>
-  a.length === b.length && a.every((s, k) => s === b[k]);
+// ── Reading existing coverage ──────────────────────────────────
 
 /** Is this credit live — not voided? Every "already billed" reader asks it. */
 export function purchaseCreditIsLive(credit: Pick<PurchaseCredit, "status">): boolean {
   return credit.status !== "void";
 }
 
-/** The lines of a document that project the purchase item at `path`. */
-function linesFor(items: readonly PurchaseDocumentItem[], path: readonly string[]): PurchaseDocumentItem[] {
-  return items.filter((l) => l.path_purchase_item !== undefined && samePath(l.path_purchase_item, path));
+/** A purchase line's join key — `uid_purchase/...path` — the twin of `purchaseLineKeyOf`. */
+export function purchaseLineKey(uidPurchase: string, path: readonly string[]): string {
+  return [uidPurchase, ...path].join("/");
 }
 
-/** The coverage-bearing half of a subrent or charge line: the units it names and the span it covers. */
-export interface PurchaseLineCoverage {
-  uid_units: readonly string[];
-  /** `null` covers all time (a charge line with no span). */
-  dates: { start: string; end: string | null } | null;
-}
-
-/** A buy covers no unit's windows — it is custody, not a service line. */
-function coverageOf(item: PurchaseItem): PurchaseLineCoverage | null {
-  return item.type === "sale" ? null : { uid_units: item.uid_units, dates: item.dates };
-}
-
-/** `w` clipped to the line's span and to `through`, or `null` when nothing of it is left. */
-function clipToLine(
-  w: { start: string; end: string | null },
-  dates: PurchaseLineCoverage["dates"],
-  through: string,
-): ChargeWindowType | null {
-  let s = Date.parse(w.start);
-  let start = w.start;
-  let e = w.end === null ? Date.parse(through) : Math.min(Date.parse(w.end), Date.parse(through));
-  let end = w.end === null || Date.parse(w.end) > Date.parse(through) ? through : w.end;
-  if (dates !== null) {
-    if (Date.parse(dates.start) > s) {
-      s = Date.parse(dates.start);
-      start = dates.start;
-    }
-    if (dates.end !== null && Date.parse(dates.end) < e) {
-      e = Date.parse(dates.end);
-      end = dates.end;
-    }
-  }
-  return e > s ? { start, end } : null;
-}
-
-/**
- * **The windows a purchase line covers, per unit**, closed at `through`: the
- * charge windows of every unit the line names (`uid_units`), clipped to the
- * line's `dates`. A window that opened after `through` is not yet billable; an
- * open window (`end: null`, the line still on) bills up to `through`.
- *
- * The LINE names the unit, so this reads the line and the units — nothing on a
- * unit says which line bills it (D10 item 10, the invoice ↔ out-of-service
- * direction).
- *
- * Keyed by unit, each list ascending — the unit's own order (the unit refine).
- */
-export function unitWindowsForLine(
-  units: readonly Pick<UnitType, "uid" | "charge_windows">[],
-  line: PurchaseLineCoverage,
-  through: string,
-): Map<string, ChargeWindowType[]> {
-  const named = new Set(line.uid_units);
-  const out = new Map<string, ChargeWindowType[]>();
-  for (const unit of units) {
-    if (!named.has(unit.uid)) continue;
-    const windows: ChargeWindowType[] = [];
-    for (const w of unit.charge_windows) {
-      const clipped = clipToLine(w, line.dates, through);
-      if (clipped !== null) windows.push(clipped);
-    }
-    if (windows.length > 0) out.set(unit.uid, windows);
+/** The lines of a document that bill the purchase line at `key` ({@link purchaseLineKey}). */
+function linesFor(rows: readonly PurchaseDocumentRow[], key: string): PurchaseDocumentItem[] {
+  const out: PurchaseDocumentItem[] = [];
+  for (const row of rows) {
+    if (row.type === "purchase" || row.type === "destination" || row.type === "group") continue;
+    if (purchaseLineKeyOf(row) === key) out.push(row);
   }
   return out;
 }
 
-// ── Coverage: which line covers a unit's window, and the offer for the rest ──
-
 /**
- * Does this purchase line COUNT for coverage? Its purchase was not canceled and
- * the line was not canceled in full with nothing billed (`purchaseItemCanceled`
- * — it never happened). A closed or completed line still covered the time it
- * covered.
+ * Does this purchase line COUNT for coverage — a subrent, charge or replacement
+ * line whose purchase was not canceled and which was not canceled in full with
+ * nothing billed (`purchaseItemCanceled`: it never happened)? A closed or
+ * completed line still covered what it covered.
  */
 export function purchaseLineCovers(purchase: Pick<Purchase, "status">, item: PurchaseItem): boolean {
   return purchase.status !== "canceled" && item.type !== "sale" && !purchaseItemCanceled(item);
-}
-
-/** One live line covering one unit — the covering line and its span. */
-export interface UnitCover {
-  uid_purchase: string;
-  path: string[];
-  dates: PurchaseLineCoverage["dates"];
-}
-
-/** Every live line naming `uid_unit` across `purchases` — what `query_by_units` array-contains returns. */
-export function coversForUnit(
-  uid_unit: string,
-  purchases: readonly Pick<Purchase, "uid" | "status" | "items">[],
-): UnitCover[] {
-  const out: UnitCover[] = [];
-  for (const p of purchases) {
-    for (const item of p.items) {
-      const c = coverageOf(item);
-      if (c === null || !c.uid_units.includes(uid_unit) || !purchaseLineCovers(p, item)) continue;
-      out.push({ uid_purchase: p.uid, path: [...item.path], dates: c.dates });
-    }
-  }
-  return out;
-}
-
-const ALL_TIME: Interval = { s: -8.64e15, e: 8.64e15, start: "", end: "" };
-
-function coverInterval(c: UnitCover): Interval {
-  if (c.dates === null) return ALL_TIME;
-  return {
-    s: Date.parse(c.dates.start),
-    e: c.dates.end === null ? ALL_TIME.e : Date.parse(c.dates.end),
-    start: c.dates.start,
-    end: c.dates.end ?? "",
-  };
-}
-
-/** A unit's windows closed at `through` (an open window bills up to `through`). */
-function closedWindows(unit: Pick<UnitType, "charge_windows">, through: string): Interval[] {
-  return unit.charge_windows.flatMap((w) => {
-    const c = clipToLine(w, null, through);
-    return c === null ? [] : [toInterval(c)];
-  });
-}
-
-/** An interval back to window strings — an `ALL_TIME` bound never survives an intersection with a window. */
-function fromCut(i: Interval): ChargeWindowType {
-  return { start: i.start, end: i.end };
-}
-
-/**
- * **The pieces of each unit's windows that NO live purchase line covers**,
- * closed at `through` — the supplier side's "not yet billed" offer source
- * (`seedReplacementLines`' twin). Keyed by unit; a fully covered unit is absent.
- */
-export function uncoveredUnitWindows(
-  units: readonly Pick<UnitType, "uid" | "charge_windows">[],
-  purchases: readonly Pick<Purchase, "uid" | "status" | "items">[],
-  through: string,
-): Map<string, ChargeWindowType[]> {
-  const out = new Map<string, ChargeWindowType[]>();
-  for (const unit of units) {
-    const covers = coversForUnit(unit.uid, purchases).map(coverInterval);
-    const rest = subtractIntervals(closedWindows(unit, through), covers).map(fromCut);
-    if (rest.length > 0) out.set(unit.uid, rest);
-  }
-  return out;
-}
-
-/**
- * **Window time covered by TWO OR MORE live lines** — one unit's time billed
- * twice over. ADVISORY, never a refusal (D5: what is billed is flagged), the
- * `overbilled_out_of_service` twin. Keyed by unit; each entry names the lines
- * that overlap there.
- */
-export function overcoveredUnitWindows(
-  units: readonly Pick<UnitType, "uid" | "charge_windows">[],
-  purchases: readonly Pick<Purchase, "uid" | "status" | "items">[],
-  through: string,
-): Map<string, { windows: ChargeWindowType[]; lines: UnitCover[] }> {
-  const out = new Map<string, { windows: ChargeWindowType[]; lines: UnitCover[] }>();
-  for (const unit of units) {
-    const covers = coversForUnit(unit.uid, purchases);
-    if (covers.length < 2) continue;
-    const windows = closedWindows(unit, through);
-    const doubled: Interval[] = [];
-    const lines = new Set<number>();
-    for (let a = 0; a < covers.length; a++) {
-      for (let b = a + 1; b < covers.length; b++) {
-        const ia = coverInterval(covers[a]);
-        const ib = coverInterval(covers[b]);
-        const lo = ia.s >= ib.s ? ia : ib;
-        const hi = ia.e <= ib.e ? ia : ib;
-        const both: Interval = { s: lo.s, e: hi.e, start: lo.start, end: hi.end };
-        if (both.e <= both.s) continue;
-        for (const w of windows) {
-          const pieces = intersectWindow([w], both);
-          if (pieces.length === 0) continue;
-          doubled.push(...pieces);
-          lines.add(a).add(b);
-        }
-      }
-    }
-    if (doubled.length === 0) continue;
-    out.set(unit.uid, {
-      windows: unionIntervals(doubled).map(fromCut),
-      lines: [...lines].sort((x, y) => x - y).map((k) => covers[k]),
-    });
-  }
-  return out;
-}
-
-/** What {@link seedPurchaseLinesForWindows} needs of a unit. */
-export type SeedSourceUnit = Pick<UnitType, "uid" | "number" | "uid_product" | "charge_windows">;
-/** What {@link seedPurchaseLinesForWindows} needs of a product. */
-export type SeedSourceProduct = Pick<Product, "uid" | "name" | "cogs">;
-
-/**
- * One offered purchase line for uncovered windows — the supplier twin of a
- * `ReplacementLineSeed`. Always a TIME `service` (Charge) line: a window is a service
- * line, not custody, and a supplier-owned unit's subrent line already names it
- * from its receipt.
- */
-export interface PurchaseLineSeed {
-  type: "service";
-  uid_product: string;
-  /** The product's name — the line's default `name`. */
-  name: string;
-  /** Ascending by unit number. */
-  uid_units: string[];
-  /** The formula the windows are metered under (`UnitChargeWindow.uid_price_formula`). */
-  uid_price_formula: string;
-  /**
-   * Who bills it — the product's activation cost entry on that formula, or
-   * `null` when the product names none (the operator picks the supplier).
-   */
-  provider: UidNameRefType | null;
-  /** The entry's rates in force at `dates.start`, or `[]` with no entry. */
-  rates: { rate_key: string; amount_cents: number }[];
-  /**
-   * The entry's Direct Costs account (the product's `coa_cost`, renamed in
-   * one-document-model Phase 8), or `null` with no entry.
-   */
-  ledger_account: COACostType | null;
-  /** From the earliest uncovered instant, open-ended: a carrier line accrues for as long as it lives. */
-  dates: { start: string; end: null };
-  /** The uncovered windows, per unit — what the offer is FOR, for display. */
-  windows: { uid_unit: string; number: number; windows: ChargeWindowType[] }[];
-  /** Why the seed is not plain (no cost entry, two entries on the formula), or `null`. */
-  warning: string | null;
-}
-
-/**
- * **Offer a purchase line for every window no live line covers** — the
- * supplier side of the lost-and-damaged offer (`seedReplacementLines`): core
- * decides WHAT to offer, the manager shows it, and accepting it is an ordinary
- * `POST /purchases` (or an amend) whose lines name the units. Nothing on a unit
- * is written, because a window names no line.
- *
- * Grouped by (product, formula): one seed per group, naming every unit in it.
- * The provider and rates come from the product's activation entry on that
- * formula; `null` / `[]` when the product has none, with a warning.
- */
-export function seedPurchaseLinesForWindows(
-  units: readonly SeedSourceUnit[],
-  purchases: readonly Pick<Purchase, "uid" | "status" | "items">[],
-  products: ReadonlyMap<string, SeedSourceProduct>,
-  through: string,
-): PurchaseLineSeed[] {
-  const uncovered = uncoveredUnitWindows(units, purchases, through);
-  const groups = new Map<string, { product: string; formula: string; units: SeedSourceUnit[] }>();
-  for (const unit of units) {
-    const pieces = uncovered.get(unit.uid);
-    if (!pieces) continue;
-    // A unit's pieces fall under the formula of the window they came from.
-    const formulas = new Set(
-      unit.charge_windows.filter((w) => pieces.some((p) => clipToLine(w, { start: p.start, end: p.end }, through) !== null))
-        .map((w) => w.uid_price_formula),
-    );
-    for (const formula of formulas) {
-      const key = `${unit.uid_product}|${formula}`;
-      const g = groups.get(key) ?? { product: unit.uid_product, formula, units: [] };
-      g.units.push(unit);
-      groups.set(key, g);
-    }
-  }
-
-  const seeds: PurchaseLineSeed[] = [];
-  for (const g of groups.values()) {
-    const product = products.get(g.product);
-    const entries = (product?.cogs ?? []).filter((e): e is CogsActivationEntryType =>
-      e.trigger === "activation" && e.uid_price_formula === g.formula
-    );
-    const entry = entries[0];
-    const sorted = [...g.units].sort((a, b) => a.number - b.number);
-    const windows = sorted.map((u) => ({
-      uid_unit: u.uid,
-      number: u.number,
-      windows: (uncovered.get(u.uid) ?? []).filter((p) =>
-        u.charge_windows.some((w) => w.uid_price_formula === g.formula && clipToLine(w, { start: p.start, end: p.end }, through) !== null)
-      ),
-    })).filter((u) => u.windows.length > 0);
-    if (windows.length === 0) continue;
-    const start = windows.flatMap((u) => u.windows).reduce(
-      (min, w) => (Date.parse(w.start) < Date.parse(min) ? w.start : min),
-      windows[0].windows[0].start,
-    );
-    seeds.push({
-      type: "service",
-      uid_product: g.product,
-      name: product?.name ?? g.product,
-      uid_units: windows.map((u) => u.uid_unit),
-      uid_price_formula: g.formula,
-      provider: entry?.provider ?? null,
-      rates: entry ? catalogRateSnapshot(entry.rates, start) : [],
-      ledger_account: entry?.coa_cost ?? null,
-      dates: { start, end: null },
-      windows,
-      warning: entry === undefined
-        ? "The product has no activation cost entry on this formula; choose the supplier and rates"
-        : entries.length > 1
-        ? `The product has ${entries.length} activation cost entries on this formula; the first (${entry.label}) was used`
-        : null,
-    });
-  }
-  return seeds.sort((a, b) => a.name.localeCompare(b.name) || a.uid_product.localeCompare(b.uid_product));
-}
-
-/**
- * **What one purchase line's units are already billed for**: per unit, the
- * union of the windows on live bills (those `before` the given bill number, if
- * one is given) less the union of the windows on live credits. A credit un-bills
- * time, so what it names is owed again.
- *
- * ⚠️ Credits are subtracted whatever their date: a credit names no bill, so
- * which bill it un-bills is not stored. On a re-meter of an older bill this can
- * read a credited span as unbilled; it only affects that default.
- */
-export function billedUnitCoverage(
-  documents: PurchaseBilledDocuments,
-  path: readonly string[],
-  before?: number,
-): Map<string, ChargeWindowType[]> {
-  const byUnit = (items: readonly PurchaseDocumentItem[], into: Map<string, Interval[]>) => {
-    for (const line of linesFor(items, path)) {
-      for (const u of line.units ?? []) {
-        const list = into.get(u.uid_unit) ?? [];
-        list.push(...u.charge_windows.map(toInterval));
-        into.set(u.uid_unit, list);
-      }
-    }
-  };
-  const billed = new Map<string, Interval[]>();
-  for (const bill of documents.bills) {
-    if (!purchaseBillIsLive(bill) || (before !== undefined && bill.number >= before)) continue;
-    byUnit(bill.items, billed);
-  }
-  const credited = new Map<string, Interval[]>();
-  for (const credit of documents.credits) {
-    if (!purchaseCreditIsLive(credit)) continue;
-    byUnit(credit.items, credited);
-  }
-  const out = new Map<string, ChargeWindowType[]>();
-  for (const [unit, list] of billed) {
-    const net = subtractIntervals(list, credited.get(unit) ?? []);
-    if (net.length > 0) out.set(unit, net.map(fromInterval));
-  }
-  return out;
 }
 
 /** What the live documents bill of one purchase line, net of credits. */
@@ -531,14 +128,15 @@ export interface PurchaseLineBilledNet {
 /**
  * **What the purchase line at `path` is billed, net of credits, UNFLOORED.** The
  * one sum behind {@link recomputePurchaseQuantityBilled} and the diff's `billed`
- * entry: lines join on the full path, because one product may sit on two lines.
- * A negative is a credit with no live bill left under it, which the diff has to
- * be able to show.
+ * entry: lines join on the full path under the purchase, because one product
+ * may sit on two lines. A negative is a credit with no live bill left under
+ * it, which the diff has to be able to show.
  */
 export function purchaseLineBilledNet(path: readonly string[], documents: PurchaseBilledDocuments): PurchaseLineBilledNet {
+  const key = purchaseLineKey(documents.uid_purchase, path);
   const net: PurchaseLineBilledNet = { quantity: 0, amount_cents: 0 };
-  const add = (items: readonly PurchaseDocumentItem[], sign: 1 | -1) => {
-    for (const line of linesFor(items, path)) {
+  const add = (rows: readonly PurchaseDocumentRow[], sign: 1 | -1) => {
+    for (const line of linesFor(rows, key)) {
       net.quantity += sign * line.quantity;
       net.amount_cents += sign * line.amount_cents;
     }
@@ -549,10 +147,11 @@ export function purchaseLineBilledNet(path: readonly string[], documents: Purcha
 }
 
 /**
- * **A purchase's lines with `quantity_billed` recounted** from its documents
- * (api-cloudrun#1441). A flat line's count is {@link purchaseLineBilledNet}
- * floored at 0, because the schema's bucket is `.min(0)`; the diff keeps the
- * unfloored number. A time line counts nothing and comes back as it went in.
+ * **A purchase's rows with each line's `quantity_billed` recounted** from its
+ * documents (api-cloudrun#1441). A flat line's count is
+ * {@link purchaseLineBilledNet} floored at 0, because the schema's bucket is
+ * `.min(0)`; the diff keeps the unfloored number. A time line and a divider
+ * come back as they went in.
  *
  * ⚠️ `quantity_billed` is unlike its sibling buckets. `quantity_received` and
  * `quantity_returned` are kept by delta, because a receipt's quantity never
@@ -563,12 +162,13 @@ export function purchaseLineBilledNet(path: readonly string[], documents: Purcha
 export function recomputePurchaseQuantityBilled(
   purchase: Pick<Purchase, "items">,
   documents: PurchaseBilledDocuments,
-): PurchaseItem[] {
-  return purchase.items.map((item) =>
-    purchaseItemBasis(item) === "flat"
-      ? { ...item, quantity_billed: Math.max(0, purchaseLineBilledNet(item.path, documents).quantity) }
-      : item
-  );
+): PurchaseRow[] {
+  return purchase.items.map((row) => {
+    if (row.type === "destination" || row.type === "group") return row;
+    return purchaseItemBasis(row) === "flat"
+      ? { ...row, quantity_billed: Math.max(0, purchaseLineBilledNet(row.path, documents).quantity) }
+      : row;
+  });
 }
 
 // ── Money ───────────────────────────────────────────────────────
@@ -600,22 +200,22 @@ export function flatShareCents(amountCents: number, quantity: number, before: nu
 /**
  * The shared keys a bill or credit line copies from the purchase line it
  * projects: the line head, posting and tax cores (one instance per key,
- * `schemas/_items.ts`) and the pointer back to the purchase line. `quantity` is
- * NOT here — it is the units the line bills, a homonym of the ordered quantity.
+ * `schemas/_items.ts`), at the purchase line's own path under its purchase
+ * divider and with its uid — the invoice line's convention. `quantity` is NOT
+ * here: it is the units the line bills.
  */
-function projectedLineHead(item: PurchaseItem, uid: string) {
+function projectedLineHead(item: PurchaseItem, uidPurchase: string) {
   return {
-    uid,
+    uid: item.uid,
     name: item.name,
     description: item.description,
-    path: [uid],
+    path: [uidPurchase, ...item.path],
     zero_priced: item.zero_priced,
     ...(item.quantity_per_parent !== undefined ? { quantity_per_parent: item.quantity_per_parent } : {}),
     ledger_account: item.ledger_account,
     uid_tracking_category: item.uid_tracking_category,
     uid_tax_class: item.uid_tax_class,
     ...(item.uid_tax_class_override !== undefined ? { uid_tax_class_override: item.uid_tax_class_override } : {}),
-    path_purchase_item: [...item.path],
   };
 }
 
@@ -644,12 +244,16 @@ function attributionOf(item: PurchaseItem): { uid_product?: string; uid_out_of_s
 
 /** {@link projectPurchaseLineToBillLine}'s inputs beside the purchase line. */
 export interface ProjectBillLineOptions {
-  /** The new bill line's row identity, minted by the writer. */
-  uid: string;
   /** The purchase the line is on. */
   uid_purchase: string;
   /** The units billed (the operator's input). */
   quantity: number;
+  /**
+   * The unit the share starts after — the line's `quantity_billed` by default
+   * (the next bill continues where the last stopped). The sync's projector
+   * passes `0`: it projects the WHOLE line, as an order line projects whole.
+   */
+  from?: number;
 }
 
 /**
@@ -673,10 +277,10 @@ export function projectPurchaseLineToBillLine(
   opts: ProjectBillLineOptions,
 ): PurchaseDocumentItem {
   const amount = item.amount_cents ?? 0;
-  const before = item.quantity_billed ?? 0;
+  const before = opts.from ?? item.quantity_billed ?? 0;
   const amount_cents = flatShareCents(amount, item.quantity, before, before + opts.quantity);
   const price: PurchaseDocumentLinePrice = flatPayablePrice({
-    uid: opts.uid,
+    uid: item.uid,
     quantity: opts.quantity,
     amount_cents,
     price_formula: item.price.price_formula,
@@ -689,15 +293,69 @@ export function projectPurchaseLineToBillLine(
   });
   return {
     type: item.type,
-    ...projectedLineHead(item, opts.uid),
+    ...projectedLineHead(item, opts.uid_purchase),
     ...attributionOf(item),
     quantity: opts.quantity,
     amount_cents,
     price,
-    // A flat line meters nothing: no units, no span (api-cloudrun#1425).
-    units: [],
-    dates: null,
   } as PurchaseDocumentItem;
+}
+
+/** A purchase's `purchase` divider on a bill or credit — named `PO-n`, its uid the purchase's. */
+export function purchaseScopeDivider(purchase: Pick<Purchase, "uid" | "number">): PurchaseDocumentRow {
+  return { uid: purchase.uid, type: "purchase", name: `PO-${purchase.number}`, path: [purchase.uid], description: "" };
+}
+
+/**
+ * **One purchase's block on a bill or credit**: its `purchase` divider, then
+ * every purchase divider (destination, group) that is an ancestor of a given
+ * line, then the lines — in the PURCHASE's row order, re-pathed by
+ * `computePurchaseDocumentItemPaths` — plus the pairs those destination
+ * dividers name, scoped by `uid_purchase`. The `adoptOrderDividerStructure`
+ * twin: the dividers keep the purchase's uids, so a bill line's path IS
+ * `[purchase uid, ...its purchase line's path]`.
+ *
+ * `lines` are bill or credit lines already at those paths ({@link
+ * projectPurchaseLineToBillLine}); a line at a path the purchase does not carry
+ * (a document-only charge, `[purchase uid, uid]`) sits directly under the
+ * purchase divider, ahead of the first destination, so contiguity holds.
+ */
+export function purchaseDocumentScope(
+  purchase: Pick<Purchase, "uid" | "number" | "items" | "destinations">,
+  lines: readonly PurchaseDocumentItem[],
+): { items: PurchaseDocumentRow[]; destinations: PurchaseDocDestination[] } {
+  const byLocal = new Map<string, PurchaseDocumentItem>();
+  const own: PurchaseDocumentItem[] = [];
+  for (const line of lines) {
+    if (line.path[0] !== purchase.uid) {
+      throw new Error(`purchaseDocumentScope: line ${line.uid} is not under purchase ${purchase.uid}`);
+    }
+    const local = line.path.slice(1).join("/");
+    const onPurchase = purchase.items.some((r) => r.path.join("/") === local);
+    if (onPurchase) byLocal.set(local, line);
+    else own.push(line);
+  }
+  // Every ancestor path of a billed line, so the dividers above it come along.
+  const wanted = new Set<string>();
+  for (const local of byLocal.keys()) {
+    const parts = local.split("/");
+    for (let k = 1; k < parts.length; k++) wanted.add(parts.slice(0, k).join("/"));
+  }
+  const rows: PurchaseDocumentRow[] = [purchaseScopeDivider(purchase), ...own];
+  for (const row of purchase.items) {
+    const local = row.path.join("/");
+    if (row.type === "destination" || row.type === "group") {
+      if (wanted.has(local)) rows.push({ ...row, path: [purchase.uid, ...row.path] });
+      continue;
+    }
+    const line = byLocal.get(local);
+    if (line) rows.push(line);
+  }
+  const dividers = new Set(rows.filter((r) => r.type === "destination").map((r) => r.uid));
+  return {
+    items: computePurchaseDocumentItemPaths(rows as never[]) as PurchaseDocumentRow[],
+    destinations: purchase.destinations.filter((d) => dividers.has(d.uid)).map((d) => ({ uid_purchase: purchase.uid, ...d })),
+  };
 }
 
 // ── The purchase → bill sync ───────────────────────────────────
@@ -753,13 +411,39 @@ export function projectPurchaseLineForBill(item: PurchaseItem, quantity: number)
   };
 }
 
+/**
+ * **A purchase row in a BILL's shape, under its purchase divider** — the
+ * payable `ScopedSyncSide.project`. A divider is the purchase's own, re-pathed;
+ * a line is the WHOLE line as a bill would bill it from nothing
+ * ({@link projectPurchaseLineToBillLine} at its full quantity, from unit 0), so
+ * an untouched bill line compares equal to it and follows it, exactly as an
+ * untouched invoice line follows its order line. A partial bill differs on
+ * `{quantity, amount_cents}` and keeps both (`shared_group: "flat_money"`).
+ */
+export function projectPurchaseRowForBill(row: PurchaseRow, uidPurchase: string): PurchaseDocumentRow {
+  if (row.type === "destination" || row.type === "group") return { ...row, path: [uidPurchase, ...row.path] };
+  return projectPurchaseLineToBillLine(row, { uid_purchase: uidPurchase, quantity: row.quantity, from: 0 });
+}
+
+/**
+ * The payable side of the scoped initiator → billing sync (`syncScopedBillingItems`,
+ * `@cfs/core/utils/invoices`): the purchase → bill sync IS the order → invoice
+ * sync, with a `purchase` scope divider, the `path_purchase_item` move pointer,
+ * this projector and the purchase ↔ bill field set (one-document-model Phase 3).
+ */
+export const PAYABLE_SCOPED_SYNC: ScopedSyncSide = {
+  scopeType: "purchase",
+  pointerKey: "path_purchase_item",
+  project: (item, scopeUid) =>
+    projectPurchaseRowForBill(item as unknown as PurchaseRow, scopeUid) as unknown as InvoiceDocItemType,
+  lineFields: () => purchaseBillSharedLineFields(),
+};
+
 /** One bill's outcome from {@link syncPurchaseToBills}. */
 export interface PurchaseBillSync {
   uid: string;
   /** The bill to store — the input object unchanged when `changed` is false. */
   bill: PurchaseBill;
-  /** `items[k].<field>` paths the bill kept because an operator overrode them. */
-  overridden: string[];
   changed: boolean;
 }
 
@@ -774,58 +458,115 @@ export interface SyncPurchaseToBillsArgs {
 }
 
 /**
- * **The purchase → bill three-way sync** (D5, the `stageOrderInvoiceSync`
- * shape): every PUSHED, unsettled, live bill's lines follow the purchase lines
- * they project, field by field, wherever the bill still holds the PREVIOUS
- * purchase's value. Pure; the writer stores the `changed` bills in the purchase
- * writer's transaction.
- *
- * A changed bill is re-priced whole by `priceDocument` (its stated-total arm,
- * at the bill's own date), and its total is the Σ. A line's net amount is a
- * homonym and never follows (its share was fixed when billed); a followed
- * discount arrives as the bill line's share of it
- * ({@link projectPurchaseLineForBill}).
+ * The bill's pairs for one purchase block after a purchase edit: a pair
+ * follows its destination divider (kept exactly when the divider is), and a
+ * kept pair follows the purchase's pair WHOLE when the bill still holds the
+ * previous purchase's pair, else keeps its own. Whole, not per leaf: a payable
+ * pair's `dates` carries derived `_fs` mirrors and day counts, and a per-leaf
+ * merge would need the receivable side's holiday-aware window resolution for
+ * pairs that are, today, almost all the store with no window. A deliberate
+ * simplification, stated here so it is not mistaken for the invoice's rule.
+ */
+function syncScopePairs(
+  prev: Purchase,
+  next: Purchase,
+  bill: PurchaseBill,
+  items: readonly PurchaseDocumentRow[],
+): PurchaseDocDestination[] {
+  const uidPurchase = next.uid;
+  const dividers = new Set(
+    items.filter((r) => r.type === "destination" && r.path[0] === uidPurchase).map((r) => r.uid),
+  );
+  const others = bill.destinations.filter((d) => d.uid_purchase !== uidPurchase);
+  const stored = new Map(bill.destinations.filter((d) => d.uid_purchase === uidPurchase).map((d) => [d.uid, d]));
+  const prevPairs = new Map(prev.destinations.map((d) => [d.uid, d]));
+  const nextPairs = new Map(next.destinations.map((d) => [d.uid, d]));
+  const mine: PurchaseDocDestination[] = [];
+  for (const uid of dividers) {
+    const own = stored.get(uid);
+    const p = prevPairs.get(uid);
+    const n = nextPairs.get(uid);
+    if (own === undefined) {
+      if (n !== undefined) mine.push({ uid_purchase: uidPurchase, ...n });
+      continue;
+    }
+    const { uid_purchase: _scope, ...ownPair } = own;
+    if (n !== undefined && p !== undefined && sameSharedValue(ownPair, p)) mine.push({ uid_purchase: uidPurchase, ...n });
+    else mine.push(own);
+  }
+  return [...others, ...mine];
+}
+
+/**
+ * A bill line's discount record is ITS SHARE of its purchase line's discount
+ * (`flatDiscountShare`, as {@link projectPurchaseLineToBillLine} writes it at
+ * create). The sync's projector projects the WHOLE line, so a discount that
+ * newly reaches a partial bill line arrives at the whole line's amount; this
+ * restates it as the line's share whenever its terms are the purchase line's.
+ * A line whose terms the operator changed keeps its own record. Money does not
+ * move: `amount_cents` is the stated NET, and the record is informational.
+ */
+function reshareDiscounts(rows: readonly PurchaseDocumentRow[], next: Purchase): PurchaseDocumentRow[] {
+  const byKey = new Map(purchaseLines(next.items).map((i) => [purchaseLineKey(next.uid, i.path), i]));
+  return rows.map((row) => {
+    if (row.type === "purchase" || row.type === "destination" || row.type === "group") return row;
+    const discount = row.price.discount;
+    const key = purchaseLineKeyOf(row);
+    const item = key === null ? undefined : byKey.get(key);
+    const source = item?.price.discount;
+    if (!discount || !item || !source || source.rate !== discount.rate || source.type !== discount.type) return row;
+    const amount_cents = flatDiscountShare(source, row.quantity, item.quantity);
+    if (amount_cents === discount.amount_cents) return row;
+    return { ...row, price: { ...row.price, discount: { ...discount, amount_cents } } };
+  });
+}
+
+/**
+ * **The purchase → bill three-way sync** (D5): the order → invoice sync's
+ * engine (`syncScopedBillingItems`) run on each bill's block for this purchase,
+ * with {@link PAYABLE_SCOPED_SYNC}. Every rule is the invoice's — synced,
+ * overridden, new, left out, removed, moved — so a purchase edit reaches an
+ * untouched bill line, leaves an overridden one alone, and adds a new purchase
+ * line to every bill it can (the New arm; billing it twice reads as billed >
+ * ordered, as on AR). Pure; the writer stores the `changed` bills in the
+ * purchase writer's transaction.
  *
  * Skipped whole: a linked bill (Xero is authoritative), a frozen one
- * (`purchaseBillIsFrozen`), a voided one.
+ * (`purchaseBillIsFrozen`), a voided one, and a bill with no block for this
+ * purchase. A changed bill is re-pathed and re-priced whole by `priceDocument`
+ * at its own date, and its total is the Σ.
  *
  * `total_cents` and `amount_due_cents` move together (an unfrozen bill has no
- * money settlement, so the identity holds with what is due); a writer that
- * also holds the settlement rows may refold with `recomputePurchaseBillTotals`.
+ * money settlement, so the identity holds with what is due).
  */
 export function syncPurchaseToBills(args: SyncPurchaseToBillsArgs): PurchaseBillSync[] {
-  const fields = purchaseBillSharedLineFields();
-  const prevByPath = new Map(args.prev.items.map((i) => [i.path.join("/"), i]));
-  const nextByPath = new Map(args.next.items.map((i) => [i.path.join("/"), i]));
-
+  const uidPurchase = args.next.uid;
   return args.bills.map((bill) => {
-    const untouched = { uid: bill.uid, bill, overridden: [], changed: false };
+    const untouched = { uid: bill.uid, bill, changed: false };
     if (bill.origin !== "pushed" || !purchaseBillIsLive(bill) || purchaseBillIsFrozen(bill)) return untouched;
-
-    const overridden: string[] = [];
-    let changed = false;
-    const items = bill.items.map((line, k) => {
-      if (line.path_purchase_item === undefined) return line;
-      const key = line.path_purchase_item.join("/");
-      const prevItem = prevByPath.get(key);
-      const nextItem = nextByPath.get(key);
-      if (!prevItem || !nextItem) return line;
-      const { merged, overridden: kept } = mergeSharedFields(
-        fields,
-        projectPurchaseLineForBill(prevItem, line.quantity) as unknown as PurchaseDocumentItem,
-        projectPurchaseLineForBill(nextItem, line.quantity) as unknown as PurchaseDocumentItem,
-        line,
-      );
-      overridden.push(...kept.map((f) => `items[${k}].${f}`));
-      if (JSON.stringify(merged) !== JSON.stringify(line)) changed = true;
-      return merged;
-    });
-    if (!changed) return { ...untouched, overridden };
-    const priced = priceDocument(items, { document: { kind: "purchase_bill" }, tax: { ...args.tax, asOf: bill.date } });
+    const start = bill.items.findIndex((r) => r.type === "purchase" && r.uid === uidPurchase);
+    if (start < 0) return untouched;
+    let end = start + 1;
+    while (end < bill.items.length && bill.items[end].path[0] === uidPurchase) end++;
+    const scoped = bill.items.slice(start + 1, end);
+    const synced = syncScopedBillingItems(
+      args.prev.items as unknown as LineItem[],
+      args.next.items as unknown as LineItem[],
+      scoped as unknown as InvoiceDocItemType[],
+      uidPurchase,
+      PAYABLE_SCOPED_SYNC,
+    ) as unknown as PurchaseDocumentRow[];
+    const rows = computePurchaseDocumentItemPaths([
+      ...bill.items.slice(0, start + 1),
+      ...reshareDiscounts(synced, args.next),
+      ...bill.items.slice(end),
+    ] as never[]) as PurchaseDocumentRow[];
+    const destinations = syncScopePairs(args.prev, args.next, bill, rows);
+    if (sameSharedValue(rows, bill.items) && sameSharedValue(destinations, bill.destinations)) return untouched;
+    const priced = priceDocument(rows, { document: { kind: "purchase_bill" }, tax: { ...args.tax, asOf: bill.date } });
     return {
       uid: bill.uid,
-      bill: { ...bill, items: priced.items, totals: withTotal(bill.totals, priced.totals.total_cents) },
-      overridden,
+      bill: { ...bill, items: priced.items, destinations, totals: withTotal(bill.totals, priced.totals.total_cents) },
       changed: true,
     };
   });

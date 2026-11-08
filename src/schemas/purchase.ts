@@ -137,8 +137,15 @@ import {
   type PriceModifierType,
   TaxRef,
   type TaxRefType,
+  checkDestinationJoin,
+  checkLeadingDivider,
+  type OrderDocDestinationItemType,
+  type OrderDocGroupItemType,
+  PairCore,
+  type PairCoreType,
 } from "./order.ts";
 import { LedgerPostingCore, LineItemCore, LineTaxCore } from "./_items.ts";
+import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import { SIDE_CONTRACTS, type SharedLineType } from "./side.ts";
 import {
   type PriceFormulaBasis,
@@ -481,7 +488,11 @@ interface PurchaseItemBase {
   description: string;
   /** Units ordered. `≥ 1` — refined on each arm. */
   quantity: number;
-  /** `[uid]` — self-inclusive and flat until a divider type exists. */
+  /**
+   * Self-inclusive, under its destination divider (and group, when there is
+   * one): `[destination uid, ...group uid, uid]`, authored by
+   * `computeItemPaths` at order depth (one-document-model Phase 3).
+   */
   path: string[];
   zero_priced: boolean | null;
   quantity_per_parent?: number | null;
@@ -532,7 +543,6 @@ export interface PurchaseRentalItem extends PurchaseItemBase {
   /** Net whole cost on a flat line; `null` on a time line (its bills decide it). */
   amount_cents: number | null;
   price: PurchaseLinePrice;
-  dates: PurchaseItemDates;
   quantity_received: number;
   /** Units billed on a flat line; `null` on a time line, which resolves on custody alone (Q7). */
   quantity_billed: number | null;
@@ -556,12 +566,6 @@ export interface PurchaseRentalItem extends PurchaseItemBase {
    */
   uid_orders: string[];
   /**
-   * May the supplier's Xero bills and card payments be LINKED to this line
-   * automatically (the poll and the ACCPAY webhook)? D5's auto-link predicate.
-   * Retires with the automatic linking (one-document-model Phase 5).
-   */
-  auto_link: boolean;
-  /**
    * The units this line covers (`units/{uid}`), each named once. The LINE names
    * the unit and the unit names nothing back — the invoice ↔ out-of-service
    * direction (`uid_out_of_service`). Mirrored on `Purchase.query_by_units`.
@@ -583,13 +587,10 @@ export interface PurchaseServiceItem extends PurchaseItemBase {
   /** Net whole cost on a flat line; `null` on a time line. */
   amount_cents: number | null;
   price: PurchaseLinePrice;
-  /** The span a span-metered formula reads, or `null`. */
-  dates: PurchaseItemDates | null;
   /** Units billed on a flat line; `null` on a time line. */
   quantity_billed: number | null;
   /** Units a close or cancel stopped. A time line resolves only once all are. */
   quantity_canceled: number;
-  auto_link: boolean;
   /** See {@link PurchaseRentalItem.uid_units} — a Verizon line names its device. `[]` for freight. */
   uid_units: string[];
   uid_product?: string;
@@ -608,8 +609,29 @@ export interface PurchaseReplacementItem extends Omit<PurchaseServiceItem, "type
   uid_out_of_service: string;
 }
 
-/** Union of every purchase item arm, discriminated on `type`. */
+/** Union of every purchase LINE arm, discriminated on `type`. */
 export type PurchaseItem = PurchaseSaleItem | PurchaseRentalItem | PurchaseServiceItem | PurchaseReplacementItem;
+
+/**
+ * Any row of a purchase's `items[]`: a line ({@link PurchaseItem}) or one of
+ * the order's two dividers. A purchase uses `ORDER_ITEM_LEVELS` — every line
+ * sits under a destination divider, which its pair in `destinations` answers
+ * (one-document-model Phase 3). Read lines through {@link purchaseLines}.
+ */
+export type PurchaseRow = PurchaseItem | OrderDocDestinationItemType | OrderDocGroupItemType;
+
+/** The divider row types on either payable grain. */
+export type PayableDividerType = "purchase" | "destination" | "group";
+
+/** Is this row a line (not a divider)? */
+export function isPurchaseLine<T extends { type: string }>(row: T): row is Exclude<T, { type: PayableDividerType }> {
+  return row.type !== "destination" && row.type !== "group" && row.type !== "purchase";
+}
+
+/** The lines of a purchase's rows, dividers dropped. */
+export function purchaseLines(rows: readonly PurchaseRow[]): PurchaseItem[] {
+  return rows.filter((r): r is PurchaseItem => isPurchaseLine(r));
+}
 
 // The shared head (one instance per key, `schemas/_items.ts`) — every key but
 // `quantity`, which stays this side's homonym until Phase 3 (see
@@ -627,16 +649,20 @@ const itemShape = {
   ...LineTaxCore,
 } as const;
 
-// The co-written buckets, each `propagate: false` — a bill item's `quantity` is
-// the units it BILLS, a homonym of the purchase item's ordered `quantity`, and
-// these buckets have no counterpart on a bill at all.
-const quantityKey = z.int().min(1).meta({ column: true, label: "Quantity", propagate: false });
-const amountKey = z.int().min(0).meta({ column: true, label: "Amount", propagate: false });
+// `quantity` and `amount_cents` follow the purchase onto its bills by the full
+// three-way rule, as an order line's do onto its invoices (owner, 2026-11-07),
+// and as ONE unit (`shared_group`): a flat line's amount is a stated TOTAL, so
+// an untouched bill line follows both, and a line where either was edited
+// keeps both (one-document-model Phase 3). A partial bill differs from its
+// purchase line on both, so it keeps both and a purchase edit never re-bills it.
+// The co-written buckets below have no counterpart on a bill at all.
+const flatMoney = { propagate: true, shared_group: "flat_money" } as const;
+const quantityKey = z.int().min(1).meta({ column: true, label: "Quantity", ...flatMoney });
+const amountKey = z.int().min(0).meta({ column: true, label: "Amount", ...flatMoney });
 const receivedKey = z.int().min(0).meta({ column: true, label: "Received" });
 const billedKey = z.int().min(0).meta({ column: true, label: "Billed" });
 const canceledKey = z.int().min(0).meta({ column: true, label: "Canceled" });
 const productKey = FirestoreId.meta({ propagate: true });
-const autoLinkKey = z.boolean().meta({ column: true, label: "Auto-link" });
 const unitsKey = z.array(UnitId);
 
 /**
@@ -745,16 +771,11 @@ const RentalItemInner = z.strictObject({
   uid_product: productKey,
   amount_cents: amountKey.nullable(),
   price: PurchaseLinePriceSchema,
-  // `propagate: false`: a bill line's `dates` is the span it BILLED, never the
-  // hire window — D5's "windows never merge" (a purchase extension must not
-  // rewrite what the supplier already billed).
-  dates: PurchaseItemDatesSchema.meta({ propagate: false }),
   quantity_received: receivedKey,
   quantity_billed: billedKey.nullable(),
   quantity_canceled: canceledKey,
   quantity_returned: z.int().min(0).meta({ column: true, label: "Returned" }),
   uid_orders: z.array(FirestoreId),
-  auto_link: autoLinkKey,
   uid_units: unitsKey,
 }).superRefine((item, ctx) => {
   bucketIssues(item, ctx);
@@ -769,9 +790,6 @@ const RentalItemInner = z.strictObject({
       message: `returned ${item.quantity_returned} exceeds the ${item.quantity_received} received`,
     });
   }
-  if (item.dates.end !== null && Date.parse(item.dates.end) < Date.parse(item.dates.start)) {
-    ctx.addIssue({ code: "custom", path: ["dates", "end"], message: "a hire ends at or after it starts" });
-  }
 });
 
 // The no-custody arms' shared keys; `replacement` adds a required record.
@@ -780,10 +798,8 @@ const noCustodyShape = {
   ...itemShape,
   amount_cents: amountKey.nullable(),
   price: PurchaseLinePriceSchema,
-  dates: PurchaseItemDatesSchema.nullable().meta({ propagate: false }),
   quantity_billed: billedKey.nullable(),
   quantity_canceled: canceledKey,
-  auto_link: autoLinkKey,
   uid_units: unitsKey,
   // Permanent `.optional()`: freight and fees attribute nothing (api-cloudrun#1360).
   uid_product: FirestoreId.optional().meta({ propagate: true }),
@@ -797,9 +813,6 @@ function noCustodyIssues(
   uniqueUnitsIssue(item.uid_units, ctx);
   addIssues(purchaseLineMoneyIssues(item), ctx);
   addIssues(payablePostingIssues(item.type, item.ledger_account), ctx);
-  if (item.dates !== null && item.dates.end !== null && Date.parse(item.dates.end) < Date.parse(item.dates.start)) {
-    ctx.addIssue({ code: "custom", path: ["dates", "end"], message: "a span ends at or after it starts" });
-  }
 }
 
 const ServiceItemInner = z.strictObject({
@@ -827,6 +840,16 @@ export const PurchaseReplacementItemSchema: z.ZodType<PurchaseReplacementItem> =
 
 /** Zod schema for any purchase item — discriminated on `type`. */
 export const PurchaseItemSchema: z.ZodType<PurchaseItem> = z.discriminatedUnion("type", [
+  SaleItemInner,
+  RentalItemInner,
+  ServiceItemInner,
+  ReplacementItemInner,
+]);
+
+/** Zod schema for any {@link PurchaseRow} — a line or a destination/group divider. */
+export const PurchaseRowSchema: z.ZodType<PurchaseRow> = z.discriminatedUnion("type", [
+  DestinationDividerArm,
+  GroupDividerArm,
   SaleItemInner,
   RentalItemInner,
   ServiceItemInner,
@@ -925,7 +948,7 @@ export function purchaseItemCommittedCents(item: PurchaseItem): number {
  * to show.
  */
 export function derivePurchaseStatus(purchase: Pick<Purchase, "items">): PurchaseStatusType {
-  const { items } = purchase;
+  const items = purchaseLines(purchase.items);
   if (items.length === 0) return "active";
   if (items.every(purchaseItemCanceled)) return "canceled";
   return items.every(purchaseItemResolved) ? "complete" : "active";
@@ -953,23 +976,23 @@ export function purchaseItemProduct(item: PurchaseItem): string | undefined {
  * appearance order. Attribution is not an order and is left out. The one author
  * of the mirror, called by every writer.
  */
-export function deriveQueryByProducts(items: readonly PurchaseItem[]): string[] {
-  return [...new Set(items.map(purchaseItemProduct).filter((u): u is string => u !== undefined))];
+export function deriveQueryByProducts(rows: readonly PurchaseRow[]): string[] {
+  return [...new Set(purchaseLines(rows).map(purchaseItemProduct).filter((u): u is string => u !== undefined))];
 }
 
 /** Derive `query_by_orders` — the distinct union of the rental items' `uid_orders`, in first-seen order. */
-export function deriveQueryByOrders(items: readonly PurchaseItem[]): string[] {
-  return [...new Set(items.flatMap((i) => (i.type === "rental" ? i.uid_orders : [])))];
+export function deriveQueryByOrders(rows: readonly PurchaseRow[]): string[] {
+  return [...new Set(purchaseLines(rows).flatMap((i) => (i.type === "rental" ? i.uid_orders : [])))];
 }
 
 /** Derive `query_by_units` — the distinct units the rental, service and replacement lines cover, sorted. */
-export function deriveQueryByUnits(items: readonly PurchaseItem[]): string[] {
-  return [...new Set(items.flatMap((i) => (i.type === "sale" ? [] : i.uid_units)))].sort();
+export function deriveQueryByUnits(rows: readonly PurchaseRow[]): string[] {
+  return [...new Set(purchaseLines(rows).flatMap((i) => (i.type === "sale" ? [] : i.uid_units)))].sort();
 }
 
-/** Derive `query_by_item_types` — the distinct item types, in first-seen order. */
-export function deriveQueryByItemTypes(items: readonly Pick<PurchaseItem, "type">[]): PurchaseItemTypeType[] {
-  return [...new Set(items.map((i) => i.type))];
+/** Derive `query_by_item_types` — the distinct LINE types, in first-seen order (dividers are not a type of purchase). */
+export function deriveQueryByItemTypes(rows: readonly Pick<PurchaseRow, "type">[]): PurchaseItemTypeType[] {
+  return [...new Set(rows.filter(isPurchaseLine).map((i) => i.type as PurchaseItemTypeType))];
 }
 
 /**
@@ -989,6 +1012,55 @@ export const PurchaseLineRefSchema: z.ZodType<PurchaseLineRef> = z.strictObject(
 });
 
 // ── Document ─────────────────────────────────────────────────────
+
+/**
+ * A purchase's destination pair — the side-neutral {@link PairCoreType}, with
+ * no customer flags, jurisdiction or exchange leg (one-document-model Phase 3).
+ *
+ * - `delivery` — where the goods come INTO CFS's hands: the store by default; a
+ *   customer's address on a drop ship; the supplier's when CFS collects.
+ * - `collection` — on a subrent, where they go BACK: the store by default, or
+ *   the supplier's when CFS returns them there. `null` when nothing goes back.
+ * - `dates` — a subrent's hire window is `delivery_start` → `collection_end`
+ *   (`null` end = open-ended, `+∞` in supply); every other date and
+ *   `charge_windows` are null until a time line meters them.
+ */
+export type PurchaseDestination = PairCoreType;
+
+/** Zod schema for {@link PurchaseDestination}. */
+export const PurchaseDestinationSchema: z.ZodType<PurchaseDestination> = z.strictObject({ ...PairCore }).superRefine(
+  (pair, ctx) => {
+    const start = pair.dates.delivery_start;
+    const end = pair.dates.collection_end;
+    if (start !== null && end !== null && Date.parse(end) < Date.parse(start)) {
+      ctx.addIssue({ code: "custom", path: ["dates", "collection_end"], message: "a hire ends at or after it starts" });
+    }
+  },
+);
+
+/**
+ * The pair a purchase line sits under — the destination divider at `path[0]`
+ * — or `undefined` when the document carries no such pair.
+ */
+export function purchaseLinePair(
+  purchase: Pick<Purchase, "destinations">,
+  item: Pick<PurchaseItem, "path">,
+): PurchaseDestination | undefined {
+  return purchase.destinations.find((d) => d.uid === item.path[0]);
+}
+
+/**
+ * A subrent line's hire window, read off its pair — `{start, end}` with a null
+ * `end` open-ended — or `null` when the pair states no start.
+ */
+export function purchaseHireWindow(
+  purchase: Pick<Purchase, "destinations">,
+  item: Pick<PurchaseItem, "path">,
+): PurchaseItemDates | null {
+  const pair = purchaseLinePair(purchase, item);
+  if (!pair || pair.dates.delivery_start === null) return null;
+  return { start: pair.dates.delivery_start, end: pair.dates.collection_end };
+}
 
 /** A purchase order placed with a supplier. */
 export interface Purchase {
@@ -1011,7 +1083,19 @@ export interface Purchase {
   reference: string | null;
   /** Internal note, or `null` for none. */
   notes: string | null;
-  items: PurchaseItem[];
+  /**
+   * The lines under their dividers ({@link PurchaseRow}). Every line sits under
+   * a destination divider, and each divider is answered by one pair in
+   * {@link Purchase.destinations} (one-document-model Phase 3).
+   */
+  items: PurchaseRow[];
+  /**
+   * The purchase's destination pairs ({@link PurchaseDestination}): where the
+   * goods arrive (`delivery`) and, for a subrent, where they go back
+   * (`collection`), with the hire window on `dates`. One per destination
+   * divider, joined by `uid`.
+   */
+  destinations: PurchaseDestination[];
   /** Σ {@link purchaseItemCommittedCents} — refined. */
   total_cents: number;
   /**
@@ -1063,20 +1147,27 @@ function sameMembers(mirror: readonly string[], derived: readonly string[]): boo
  * `path` exactly `[uid]` — non-empty, self-inclusive, flat.
  */
 function itemIdentityIssues(items: readonly { uid: string; path: readonly string[] }[], ctx: z.RefinementCtx): void {
-  const uids = new Set<string>();
+  const paths = new Set<string>();
   items.forEach((item, i) => {
-    if (uids.has(item.uid)) {
-      ctx.addIssue({ code: "custom", path: ["items", i, "uid"], message: "an item uid appears once per document" });
+    if (item.path.length === 0 || item.path.at(-1) !== item.uid) {
+      ctx.addIssue({ code: "custom", path: ["items", i, "path"], message: "an item's path is self-inclusive: it ends in its own uid" });
     }
-    uids.add(item.uid);
-    if (item.path.length !== 1 || item.path[0] !== item.uid) {
-      ctx.addIssue({ code: "custom", path: ["items", i, "path"], message: "an item's path is [uid] — flat, self-inclusive" });
+    const key = item.path.join("/");
+    if (paths.has(key)) {
+      ctx.addIssue({ code: "custom", path: ["items", i, "path"], message: "an item's path appears once per document" });
     }
+    paths.add(key);
   });
 }
 
 function checkPurchase(p: Purchase, ctx: z.RefinementCtx): void {
   itemIdentityIssues(p.items, ctx);
+  // Dividers alone order nothing: a purchase orders at least one LINE.
+  if (purchaseLines(p.items).length === 0) {
+    ctx.addIssue({ code: "custom", path: ["items"], message: "a purchase orders at least one item" });
+  }
+  checkLeadingDivider("purchase")(p, ctx);
+  checkDestinationJoin(p, ctx);
   const mirrors = [
     ["query_by_products", p.query_by_products, deriveQueryByProducts(p.items), "the products the items order"],
     ["query_by_orders", p.query_by_orders, deriveQueryByOrders(p.items), "the distinct uid_orders on the subrent items"],
@@ -1091,7 +1182,7 @@ function checkPurchase(p: Purchase, ctx: z.RefinementCtx): void {
     ctx.addIssue({ code: "custom", path: ["query_by_units"], message: "query_by_units must list exactly the units the lines cover" });
   }
 
-  const total = p.items.reduce((sum, item) => sum + purchaseItemCommittedCents(item), 0);
+  const total = purchaseLines(p.items).reduce((sum, item) => sum + purchaseItemCommittedCents(item), 0);
   if (p.total_cents !== total) {
     ctx.addIssue({
       code: "custom",
@@ -1127,7 +1218,8 @@ export const PurchaseSchema: z.ZodType<Purchase> = z.strictObject({
   date_fs: FirestoreTimestamp.meta(homonym),
   reference: z.string().max(200).nullable().meta({ column: true, label: "Reference", ...homonym }),
   notes: z.string().meta({ pii: "mask", column: true, label: "Notes" }).nullable(),
-  items: z.array(PurchaseItemSchema).min(1).meta({ label: "Item" }),
+  items: z.array(PurchaseRowSchema).min(1).meta({ label: "Item" }),
+  destinations: z.array(PurchaseDestinationSchema).min(1).meta({ label: "Destination" }),
   total_cents: z.int().min(0).meta({ column: true, label: "Total", ...homonym }),
   query_by_products: z.array(FirestoreId).meta({ derived: true }),
   query_by_orders: z.array(FirestoreId).meta({ derived: true }),
@@ -1255,11 +1347,14 @@ export interface PurchaseRentalItemInputType extends PurchaseItemInputBase {
   quantity: number;
   amount_cents?: number | null;
   ledger_account?: COACodeType;
+  /**
+   * The hire window. Stored on the line's PAIR, not the line: the writer puts
+   * the line under the pair holding this window, minting one when none does
+   * (one-document-model Phase 3).
+   */
   dates: PurchaseItemDates;
   /** The orders the item was raised for. Absent is `[]`: the writer states it. */
   uid_orders?: string[];
-  /** Absent: `true` for a time line, `false` for a flat one. */
-  auto_link?: boolean;
   /** The units the line covers. Absent keeps the stored list on an amend, `[]` on a create. */
   uid_units?: string[];
 }
@@ -1271,8 +1366,8 @@ export interface PurchaseServiceItemInputType extends PurchaseItemInputBase {
   quantity?: number;
   amount_cents?: number | null;
   ledger_account: COACodeType;
+  /** The span a span-metered formula reads; stored on the line's pair, as a hire window is. */
   dates?: PurchaseItemDates | null;
-  auto_link?: boolean;
   /** See {@link PurchaseRentalItemInputType.uid_units}. */
   uid_units?: string[];
   uid_product?: string;
@@ -1322,7 +1417,6 @@ const noCustodyInput = {
   amount_cents: z.int().min(0).nullable().optional(),
   ledger_account: COACode,
   dates: inputDates.nullable().optional(),
-  auto_link: z.boolean().optional(),
   uid_units: unitsKey.optional(),
   uid_product: FirestoreId.optional(),
 };
@@ -1367,7 +1461,6 @@ export const PurchaseItemInput: z.ZodType<PurchaseItemInputType> = z.discriminat
     ledger_account: COACode.optional(),
     dates: inputDates,
     uid_orders: z.array(FirestoreId).optional(),
-    auto_link: z.boolean().optional(),
     uid_units: unitsKey.optional(),
   }).superRefine((item, ctx) => {
     datesOrderIssue(item.dates, ctx);

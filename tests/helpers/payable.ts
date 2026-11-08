@@ -10,6 +10,7 @@
  * fixture built here can still catch a regression in the pricer.
  */
 import type { DiscountType, PriceFormulaRef, PriceModifierType } from "../../src/schemas/mod.ts";
+import { tsAt } from "./timestamp.ts";
 
 /** The Fixed formula snapshot every flat payable line carries. */
 export const FIXED_REF: PriceFormulaRef = { uid: "FixedFormula00000000", name: "Fixed", basis: "flat" };
@@ -61,4 +62,58 @@ export function withPayableMoney<T>(line: T): T {
       total_cents: money.total_cents,
     },
   } as T;
+}
+
+/** The store endpoint every default purchase pair names (one-document-model Phase 3). */
+export const STORE_ENDPOINT = {
+  uid: null,
+  address: {
+    city: "Chicago",
+    country_name: "United States",
+    full: "1234 W Store St, Chicago, Illinois 60612, United States",
+    name: "CFS",
+    postcode: "60612",
+    region: "IL",
+    street: "1234 W Store St",
+  },
+  instructions: null,
+  contact: null,
+};
+
+/**
+ * A purchase destination pair's `dates`: the hire window on `delivery_start` →
+ * `collection_end`, everything else null. The `_fs` mirrors are fixture
+ * timestamps from {@link tsAt}, so a schema parse sees a consistent pair.
+ */
+export function hireDates(window: { start: string; end: string | null } | null) {
+  return {
+    delivery_start: window?.start ?? null,
+    delivery_start_fs: window ? tsAt(window.start) : null,
+    delivery_end: null,
+    delivery_end_fs: null,
+    collection_start: null,
+    collection_start_fs: null,
+    collection_end: window?.end ?? null,
+    collection_end_fs: window?.end ? tsAt(window.end) : null,
+    days_active: null,
+    charge_windows: null,
+  };
+}
+
+/**
+ * A purchase destination pair at the store: `collection` is the store too when
+ * the pair carries a hire window (a subrent goes back), else `null`.
+ */
+export function purchasePair(uid: string, window: { start: string; end: string | null } | null = null) {
+  return {
+    uid,
+    dates: hireDates(window),
+    delivery: STORE_ENDPOINT,
+    collection: window ? STORE_ENDPOINT : null,
+  };
+}
+
+/** A destination divider row for a purchase (`path: [uid]`). */
+export function purchaseDivider(uid: string, name = "Chicago") {
+  return { uid, type: "destination" as const, name, path: [uid], description: "" };
 }

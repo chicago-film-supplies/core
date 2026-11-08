@@ -916,12 +916,12 @@ export function checkDestinationJoin(
 }
 
 /** Which document a {@link leadingDividerViolations} call is judging. */
-export type LeadingDividerGrain = "order" | "fulfillment" | "invoice";
+export type LeadingDividerGrain = "order" | "fulfillment" | "invoice" | "purchase" | "purchase_document";
 
 /** A document whose first row is not the divider its grain leads with. */
 export interface LeadingDividerViolation {
   /** The divider type the first row had to be. */
-  expected: "destination" | "order";
+  expected: "destination" | "order" | "purchase";
   /** The type the first row actually has (`null` when it has none). */
   found: string | null;
 }
@@ -963,7 +963,11 @@ export function leadingDividerViolations(
   linked: boolean,
 ): LeadingDividerViolation[] {
   if (items.length === 0) return [];
-  const expected = grain === "invoice" ? (linked ? "order" : null) : "destination";
+  const expected = grain === "invoice"
+    ? (linked ? "order" : null)
+    : grain === "purchase_document"
+    ? (linked ? "purchase" : null)
+    : "destination";
   if (expected === null) return [];
   const type = (items[0] as { type?: unknown } | null)?.type;
   if (type === expected) return [];
@@ -982,15 +986,31 @@ export function leadingDividerViolations(
  */
 export function checkLeadingDivider(
   grain: LeadingDividerGrain,
-): (doc: { items: ReadonlyArray<unknown>; query_by_orders?: ReadonlyArray<string> }, ctx: z.RefinementCtx) => void {
+): (
+  doc: {
+    items: ReadonlyArray<unknown>;
+    query_by_orders?: ReadonlyArray<string>;
+    query_by_purchases?: ReadonlyArray<string>;
+    uid_purchase?: string;
+  },
+  ctx: z.RefinementCtx,
+) => void {
   return (doc, ctx) => {
-    const linked = (doc.query_by_orders?.length ?? 0) > 0;
+    // A payable billing document is linked when it names a purchase: a bill
+    // through `query_by_purchases`, a supplier credit through `uid_purchase`.
+    const linked = (doc.query_by_orders?.length ?? 0) > 0 || (doc.query_by_purchases?.length ?? 0) > 0 ||
+      doc.uid_purchase !== undefined;
     for (const v of leadingDividerViolations(doc.items, grain, linked)) {
+      const subject = grain === "invoice"
+        ? "an order-linked invoice"
+        : grain === "purchase_document"
+        ? "a purchase-linked bill or credit"
+        : `a ${grain}`;
       ctx.addIssue({
         code: "custom",
         path: ["items", 0, "type"],
-        message: `${grain === "invoice" ? "an order-linked invoice" : `a ${grain}`} must lead with ` +
-          `${v.expected === "order" ? "an order" : "a destination"} divider, not ${v.found ?? "an untyped row"}`,
+        message: `${subject} must lead with ${v.expected === "order" ? "an" : "a"} ${v.expected} divider, ` +
+          `not ${v.found ?? "an untyped row"}`,
       });
     }
   };
@@ -1331,6 +1351,15 @@ export interface DocDestinationType {
 }
 
 /**
+ * The side-neutral half of a destination pair — identity, dates and the two
+ * endpoints — shared by BOTH sides (one-document-model Phase 3). A purchase's
+ * pair is exactly this: a supplier leg has no collecting/returning flags, no
+ * customer jurisdiction and no exchange leg. Read off {@link DocDestinationType}
+ * so the two cannot drift.
+ */
+export type PairCoreType = Pick<DocDestinationType, "uid" | "dates" | "delivery" | "collection">;
+
+/**
  * The destination-pair fields the ORDER/FULFILLMENT grain and the INVOICE grain
  * both carry, as ONE instance per field.
  *
@@ -1373,15 +1402,11 @@ export interface DocDestinationType {
  * one. It is reachable at `@cfs/core/schemas/order` only because `order.ts` is an
  * entrypoint; `DocDestination` is the shape to import.
  */
-export const DestinationPairCore: {
+export const PairCore: {
   uid: z.ZodType<string>;
   dates: z.ZodType<OrderDocDatesType>;
   delivery: z.ZodType<DocDestinationEndpointType>;
   collection: z.ZodType<DocDestinationEndpointType | null>;
-  customer_collecting: z.ZodType<boolean>;
-  customer_returning: z.ZodType<boolean | null>;
-  jurisdiction: z.ZodOptional<z.ZodNullable<z.ZodType<JurisdictionType>>>;
-  exchange: z.ZodNullable<z.ZodType<DestinationExchangeType>>;
 } = {
   // The destination divider's uid — see {@link DocDestinationType.uid}. Typed
   // `z.uuid()` to match `DestinationDividerArm.uid` exactly, because it IS that
@@ -1396,6 +1421,26 @@ export const DestinationPairCore: {
   // Nullable — see {@link DocDestinationType.collection}. The label sits on the
   // nullable wrapper, exactly as `contact` does on the endpoint itself.
   collection: DocDestinationEndpoint.nullable().meta({ label: "Collection", propagate: true }),
+};
+
+/**
+ * The receivable pair: {@link PairCore} plus the keys only a CUSTOMER leg has —
+ * the collecting/returning flags, the tax jurisdiction and the exchange-leg
+ * marker. Spread by `DocDestination` (orders, fulfillments) and
+ * `InvoiceDocDestination`. See the docblock above {@link PairCore} for why the
+ * pair is a spread and why the parity test stays.
+ */
+export const DestinationPairCore: {
+  uid: z.ZodType<string>;
+  dates: z.ZodType<OrderDocDatesType>;
+  delivery: z.ZodType<DocDestinationEndpointType>;
+  collection: z.ZodType<DocDestinationEndpointType | null>;
+  customer_collecting: z.ZodType<boolean>;
+  customer_returning: z.ZodType<boolean | null>;
+  jurisdiction: z.ZodOptional<z.ZodNullable<z.ZodType<JurisdictionType>>>;
+  exchange: z.ZodNullable<z.ZodType<DestinationExchangeType>>;
+} = {
+  ...PairCore,
   // 🔴 **REQUIRED, and the `.default(false)` they carried until 2026-09-08 was
   // doing the opposite of what it looked like.** `validateBeforeWrite` discards
   // `result.data` and writes the RAW doc (`api-cloudrun/src/lib/validate.ts`
