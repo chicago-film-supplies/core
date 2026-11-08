@@ -186,11 +186,18 @@ export const PurchaseDocumentLineUnitSchema: z.ZodType<PurchaseDocumentLineUnit>
  * and the span a span-metered formula (Verizon) reads. Required on every arm
  * since api-cloudrun#1425: a flat line states `units: []` and `dates: null`.
  *
- * `xero_id` is the Xero `LineItemID` of the line on the bill's Xero document —
- * the invoice line's `xero_id` twin. A pushed document takes it from the push
- * response; a linked one is backfilled from its Xero document, and a line that
- * cannot be paired is left `null` and listed, never guessed
- * (one-document-model, § Linked-bill tracking).
+ * `xero_line_id` is the Xero `LineItemID` of the line on a LINKED document —
+ * the one id a tracking edit can address a line CFS did not author by. It is
+ * stamped when the document is linked and backfilled for older links; an item
+ * that cannot be paired to exactly one Xero line (several items folded into
+ * one line, or lines with no item code to choose between) stays absent and is
+ * refused for a tracking edit, never guessed (one-document-model, § Linked-bill
+ * tracking). A PUSHED document carries none: CFS authored its lines, so the
+ * settled-edit path pairs them by position, as it does an invoice's, and one
+ * item may be two Xero lines (`splitExactLines`).
+ *
+ * ⚠️ Not the invoice line's `xero_id`, which is the PRODUCT's Xero `ItemID`
+ * (api-cloudrun `productLineDenorms`). The names differ because the facts do.
  */
 interface PurchaseDocumentLineBase {
   uid: string;
@@ -211,7 +218,7 @@ interface PurchaseDocumentLineBase {
   price: PurchaseDocumentLinePrice;
   units: PurchaseDocumentLineUnit[];
   dates: ChargeWindowType | null;
-  xero_id?: string | null;
+  xero_line_id?: string;
 }
 
 /**
@@ -293,8 +300,8 @@ const docItemShape = {
   price: PurchaseDocumentLinePriceSchema,
   units: z.array(PurchaseDocumentLineUnitSchema).meta({ label: "Unit" }),
   dates: ChargeWindow.nullable().meta({ label: "Span" }),
-  // The invoice line's twin (`schemas/invoice.ts`), copied exactly.
-  xero_id: z.uuid().nullable().optional(),
+  // A linked document's Xero `LineItemID` (docblock above). Not shared.
+  xero_line_id: z.uuid().optional(),
 };
 
 /**

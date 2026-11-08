@@ -184,14 +184,11 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["out-of-service.sources[].label", "array-member-uncensusable"],
   // one-document-model Phase 1 — the payable lines spread the SHARED head and
   // tax core, so they inherit the receivable twins' optionality (the same
-  // instances), and bill/credit lines gain the invoice line's `xero_id` twin,
-  // copied exactly. `quantity_per_parent` is a kit ratio a purchase line never
-  // carries; `xero_id` is backfilled from the linked Xero documents in the
-  // Phase 1 window, with an unpairable line left absent and listed.
+  // instances). `quantity_per_parent` is a kit ratio a purchase line never
+  // carries. (A bill/credit line's `xero_line_id` is plain `.optional()`:
+  // absent is the one "unpaired" spelling, so it is not catalogued here.)
   ["purchase-bills.items[].quantity_per_parent", "array-member-uncensusable"],
-  ["purchase-bills.items[].xero_id", "array-member-uncensusable"],
   ["purchase-credits.items[].quantity_per_parent", "array-member-uncensusable"],
-  ["purchase-credits.items[].xero_id", "array-member-uncensusable"],
   ["purchases.items[].quantity_per_parent", "array-member-uncensusable"],
   ["out-of-service.stores[].locations[].max", "array-member-uncensusable"],
   ["products.component_of[].price.replacement_cents", "array-member-uncensusable"],
