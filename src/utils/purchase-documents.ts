@@ -39,7 +39,6 @@
  */
 import {
   type DiscountType,
-  type InvoiceDocItemType,
   type Purchase,
   type PurchaseBill,
   PurchaseBillSchema,
@@ -67,7 +66,16 @@ import {
   syncScopedBillingItems,
 } from "./invoices.ts";
 import type { LineItem } from "./orders.ts";
-import { flatPayablePrice, type PayablePriceDocumentContext, priceDocument } from "./price-document.ts";
+import {
+  chargeWindowContext,
+  flatPayablePrice,
+  meteredLineCounts,
+  type PayablePriceDocumentContext,
+  priceDocument,
+  type PricingFormulas,
+  statedChargeWindows,
+} from "./price-document.ts";
+import { combineTierCounts, type TierCount } from "./price-formulas.ts";
 
 export { purchaseBillIsLive };
 
@@ -144,6 +152,54 @@ export function purchaseLineBilledNet(path: readonly string[], documents: Purcha
   for (const bill of documents.bills) if (purchaseBillIsLive(bill)) add(bill.items, 1);
   for (const credit of documents.credits) if (purchaseCreditIsLive(credit)) add(credit.items, -1);
   return net;
+}
+
+/**
+ * **The counts the live documents bill of one TIME purchase line, net of
+ * credits** — Σ live bill line `counts` − Σ live credit line `counts`, tier by
+ * tier (`combineTierCounts`), joined on the purchase line key as
+ * {@link purchaseLineBilledNet} is. Unfloored, like it.
+ */
+export function purchaseLineBilledCounts(path: readonly string[], documents: PurchaseBilledDocuments): TierCount[] {
+  const key = purchaseLineKey(documents.uid_purchase, path);
+  let net: TierCount[] = [];
+  const add = (rows: readonly PurchaseDocumentRow[], sign: 1 | -1) => {
+    for (const line of linesFor(rows, key)) net = combineTierCounts(net, line.price.counts, sign);
+  };
+  for (const bill of documents.bills) if (purchaseBillIsLive(bill)) add(bill.items, 1);
+  for (const credit of documents.credits) if (purchaseCreditIsLive(credit)) add(credit.items, -1);
+  return net;
+}
+
+/** {@link remainingTimeCounts}' inputs. */
+export interface RemainingTimeCountsArgs {
+  purchase: Pick<Purchase, "uid" | "destinations">;
+  item: PurchaseItem;
+  documents: PurchaseBilledDocuments;
+  formulas: PricingFormulas;
+  holidays: readonly string[];
+}
+
+/**
+ * **What is left to bill of a TIME purchase line, in counts** (0b ruling 3,
+ * the AR rule `extensionGroups` applies to an order): the line metered over its
+ * PAIR's `charge_windows` through its formula, less what live bills already
+ * bill there net of credits ({@link purchaseLineBilledCounts}), each tier
+ * floored at 0. Billing in parts therefore never totals more than metering the
+ * whole, and an over-billed line seeds nothing (the diff reports it).
+ *
+ * `null` when the line's pair states no charge windows — there is no time to
+ * bill, which the bill writer refuses by name.
+ */
+export function remainingTimeCounts(args: RemainingTimeCountsArgs): TierCount[] | null {
+  const metered = meteredLineCounts(asEngineSource(args.item), {
+    charge_windows: statedChargeWindows(args.purchase.destinations),
+    formulas: args.formulas,
+    holidays: args.holidays,
+  });
+  if (metered === null) return null;
+  const billed = purchaseLineBilledCounts(args.item.path, { ...args.documents, uid_purchase: args.purchase.uid });
+  return combineTierCounts(metered, billed, -1).map((t) => (t.num < 0 ? { ...t, num: 0, den: 1 } : t));
 }
 
 /**
@@ -252,8 +308,14 @@ export interface ProjectBillLineOptions {
    * The unit the share starts after — the line's `quantity_billed` by default
    * (the next bill continues where the last stopped). The sync's projector
    * passes `0`: it projects the WHOLE line, as an order line projects whole.
+   * A flat line only.
    */
   from?: number;
+  /**
+   * A TIME line's counts to bill — the writer's {@link remainingTimeCounts}
+   * seed. Absent: `[]`, and `priceDocument` meters the bill's pair instead.
+   */
+  counts?: TierCount[];
 }
 
 /**
@@ -269,13 +331,14 @@ export interface ProjectBillLineOptions {
  * the projection parses on its own; the writer prices the whole document with
  * `priceDocument`, which states the same money and the line's `taxes_base`.
  *
- * @throws PriceRefusalError on a time-priced purchase line — refused until
- *   one-document-model Phase 3 meters it from its pair's windows.
+ * A TIME line projects unpriced, with the caller's `counts` seed
+ * ({@link remainingTimeCounts}); the writer's `priceDocument` prices it.
  */
 export function projectPurchaseLineToBillLine(
   item: PurchaseItem,
   opts: ProjectBillLineOptions,
 ): PurchaseDocumentItem {
+  if (item.price.price_formula.basis === "time") return projectTimeLine(item, opts);
   const amount = item.amount_cents ?? 0;
   const before = opts.from ?? item.quantity_billed ?? 0;
   const amount_cents = flatShareCents(amount, item.quantity, before, before + opts.quantity);
@@ -299,6 +362,41 @@ export function projectPurchaseLineToBillLine(
     amount_cents,
     price,
   } as PurchaseDocumentItem;
+}
+
+/**
+ * A TIME purchase line's bill line, UNPRICED: the purchase line's formula,
+ * rates and discount terms, the seeded `counts` (or `[]`), and zero money. The
+ * writer prices the bill with `priceDocument` (`origin: "pushed"` and its
+ * `time` context), whose time arm meters an empty `counts` from the bill's pair
+ * and writes the line's money and `amount_cents` (one-document-model Phase 3).
+ */
+function projectTimeLine(item: PurchaseItem, opts: ProjectBillLineOptions): PurchaseDocumentItem {
+  const price: PurchaseDocumentLinePrice = {
+    price_formula: { ...item.price.price_formula },
+    rates: item.price.rates.map((r) => ({ ...r })),
+    discount: item.price.discount ? { ...item.price.discount } : null,
+    taxes: [],
+    ...(item.price.taxes_base !== undefined ? { taxes_base: item.price.taxes_base.map((t) => ({ ...t })) } : {}),
+    counts: (opts.counts ?? []).map((t) => ({ ...t })),
+    subtotal_cents: 0,
+    subtotal_discounted_cents: 0,
+    total_cents: 0,
+  };
+  const head = { ...projectedLineHead(item, opts.uid_purchase), ...attributionOf(item), quantity: opts.quantity, amount_cents: 0, price };
+  switch (item.type) {
+    case "sale":
+    case "rental":
+      return { type: item.type, ...head, uid_product: item.uid_product };
+    case "service":
+      return { type: "service", ...head };
+    case "replacement":
+      return { type: "replacement", ...head, uid_out_of_service: item.uid_out_of_service };
+    default: {
+      const unreachable: never = item;
+      throw new Error(`projectTimeLine: unknown purchase item ${JSON.stringify(unreachable)}`);
+    }
+  }
 }
 
 /** A purchase's `purchase` divider on a bill or credit — named `PO-n`, its uid the purchase's. */
@@ -353,7 +451,7 @@ export function purchaseDocumentScope(
   }
   const dividers = new Set(rows.filter((r) => r.type === "destination").map((r) => r.uid));
   return {
-    items: computePurchaseDocumentItemPaths(rows as never[]) as PurchaseDocumentRow[],
+    items: computePurchaseDocumentItemPaths(rows),
     destinations: purchase.destinations.filter((d) => dividers.has(d.uid)).map((d) => ({ uid_purchase: purchase.uid, ...d })),
   };
 }
@@ -377,6 +475,23 @@ export function purchaseBillSharedLineFields(): readonly SharedField[] {
   }
   billFields = fieldsUnder(c, "items[]");
   return billFields;
+}
+
+let timeFields: readonly SharedField[] | null = null;
+
+/**
+ * The fields a TIME line merges: the shared set without `amount_cents`, and
+ * with `quantity` out of the `flat_money` group. A time line's amount is
+ * DERIVED from its counts (`priceDocument`'s pushed time arm), as an order
+ * line's money is, so it is re-priced rather than compared, and its quantity
+ * follows on its own as an order line's does.
+ */
+function timeLineFields(): readonly SharedField[] {
+  if (timeFields !== null) return timeFields;
+  timeFields = purchaseBillSharedLineFields()
+    .filter((f) => f.path !== "amount_cents")
+    .map((f) => (f.group === undefined ? f : { path: f.path, kind: f.kind }));
+  return timeFields;
 }
 
 /**
@@ -426,18 +541,60 @@ export function projectPurchaseRowForBill(row: PurchaseRow, uidPurchase: string)
 }
 
 /**
- * The payable side of the scoped initiator → billing sync (`syncScopedBillingItems`,
- * `@cfs/core/utils/invoices`): the purchase → bill sync IS the order → invoice
- * sync, with a `purchase` scope divider, the `path_purchase_item` move pointer,
- * this projector and the purchase ↔ bill field set (one-document-model Phase 3).
+ * A purchase row in the sync engine's SOURCE shape (`LineItem`, the order-row
+ * shadow): a divider as it is, a line with `counts: []` — a purchase line
+ * meters no counts, and the order-shaped price declares the key. A conversion,
+ * not a cast; {@link payableScopedSync} maps each converted row back to its
+ * original, so the projector reads the purchase row itself.
  */
-export const PAYABLE_SCOPED_SYNC: ScopedSyncSide = {
-  scopeType: "purchase",
-  pointerKey: "path_purchase_item",
-  project: (item, scopeUid) =>
-    projectPurchaseRowForBill(item as unknown as PurchaseRow, scopeUid) as unknown as InvoiceDocItemType,
-  lineFields: () => purchaseBillSharedLineFields(),
-};
+function asEngineSource(row: PurchaseRow): LineItem {
+  if (row.type === "destination" || row.type === "group") return row;
+  return { ...row, price: { ...row.price, counts: [] } };
+}
+
+/**
+ * **The payable side of the scoped initiator → billing sync**
+ * (`syncScopedBillingItems`, `@cfs/core/utils/invoices`): the purchase → bill
+ * sync IS the order → invoice sync, with a `purchase` scope divider, the
+ * `path_purchase_item` move pointer, {@link projectPurchaseRowForBill} and the
+ * purchase ↔ bill field set (one-document-model Phase 3).
+ *
+ * Built per sync over the two purchase revisions it converts
+ * ({@link asEngineSource}): the engine hands its projector the converted rows,
+ * and the side maps each back to the purchase row it came from.
+ */
+export function payableScopedSync(prev: Purchase, next: Purchase): {
+  side: ScopedSyncSide<PurchaseDocumentRow>;
+  prevItems: LineItem[];
+  nextItems: LineItem[];
+} {
+  const original = new WeakMap<LineItem, PurchaseRow>();
+  const convert = (rows: readonly PurchaseRow[]) =>
+    rows.map((row) => {
+      const source = asEngineSource(row);
+      original.set(source, row);
+      return source;
+    });
+  const prevItems = convert(prev.items);
+  const nextItems = convert(next.items);
+  const side: ScopedSyncSide<PurchaseDocumentRow> = {
+    scopeType: "purchase",
+    pointerKey: "path_purchase_item",
+    project: (item, scopeUid) => {
+      const row = original.get(item);
+      if (row === undefined) throw new Error(`payableScopedSync: row ${item.uid} is not one of the purchase's`);
+      return projectPurchaseRowForBill(row, scopeUid);
+    },
+    lineFields: (item) => {
+      const row = original.get(item);
+      return row !== undefined && row.type !== "destination" && row.type !== "group" &&
+          row.price.price_formula.basis === "time"
+        ? timeLineFields()
+        : purchaseBillSharedLineFields();
+    },
+  };
+  return { side, prevItems, nextItems };
+}
 
 /** One bill's outcome from {@link syncPurchaseToBills}. */
 export interface PurchaseBillSync {
@@ -455,6 +612,12 @@ export interface SyncPurchaseToBillsArgs {
   bills: readonly PurchaseBill[];
   /** The tax inputs each touched bill is priced under, at its own date. */
   tax: Omit<PayablePriceDocumentContext["tax"], "asOf">;
+  /**
+   * What a touched bill's TIME lines meter with — the formulas and holidays;
+   * each bill's own pairs supply the windows. Required only when the purchase
+   * carries a time line.
+   */
+  time?: { formulas: PricingFormulas; holidays: readonly string[] };
 }
 
 /**
@@ -524,7 +687,7 @@ function reshareDiscounts(rows: readonly PurchaseDocumentRow[], next: Purchase):
 /**
  * **The purchase → bill three-way sync** (D5): the order → invoice sync's
  * engine (`syncScopedBillingItems`) run on each bill's block for this purchase,
- * with {@link PAYABLE_SCOPED_SYNC}. Every rule is the invoice's — synced,
+ * with {@link payableScopedSync}. Every rule is the invoice's — synced,
  * overridden, new, left out, removed, moved — so a purchase edit reaches an
  * untouched bill line, leaves an overridden one alone, and adds a new purchase
  * line to every bill it can (the New arm; billing it twice reads as billed >
@@ -549,21 +712,20 @@ export function syncPurchaseToBills(args: SyncPurchaseToBillsArgs): PurchaseBill
     let end = start + 1;
     while (end < bill.items.length && bill.items[end].path[0] === uidPurchase) end++;
     const scoped = bill.items.slice(start + 1, end);
-    const synced = syncScopedBillingItems(
-      args.prev.items as unknown as LineItem[],
-      args.next.items as unknown as LineItem[],
-      scoped as unknown as InvoiceDocItemType[],
-      uidPurchase,
-      PAYABLE_SCOPED_SYNC,
-    ) as unknown as PurchaseDocumentRow[];
+    const { side, prevItems, nextItems } = payableScopedSync(args.prev, args.next);
+    const synced = syncScopedBillingItems(prevItems, nextItems, scoped, uidPurchase, side);
     const rows = computePurchaseDocumentItemPaths([
       ...bill.items.slice(0, start + 1),
       ...reshareDiscounts(synced, args.next),
       ...bill.items.slice(end),
-    ] as never[]) as PurchaseDocumentRow[];
+    ]);
     const destinations = syncScopePairs(args.prev, args.next, bill, rows);
     if (sameSharedValue(rows, bill.items) && sameSharedValue(destinations, bill.destinations)) return untouched;
-    const priced = priceDocument(rows, { document: { kind: "purchase_bill" }, tax: { ...args.tax, asOf: bill.date } });
+    const priced = priceDocument(rows, {
+      document: { kind: "purchase_bill", origin: "pushed" },
+      tax: { ...args.tax, asOf: bill.date },
+      ...(args.time ? { time: { ...args.time, charge_windows: chargeWindowContext(destinations) } } : {}),
+    });
     return {
       uid: bill.uid,
       bill: { ...bill, items: priced.items, destinations, totals: withTotal(bill.totals, priced.totals.total_cents) },

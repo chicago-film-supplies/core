@@ -159,6 +159,12 @@ export interface LineItem {
   coa_revenue?: COARevenueType | null;
   /** The line's tracking category (`LinePostingCore`) — a `tracking-categories` uid. */
   uid_tracking_category?: string | null;
+  /**
+   * A PAYABLE line's stated net (purchase, bill and credit lines; the
+   * receivable grains carry none). `priceDocument`'s payable arms read it, and
+   * its pushed time arm writes it (one-document-model Phase 3).
+   */
+  amount_cents?: number | null;
   /** The product's tax-class snapshot (`LineTaxCore`) — see `deriveLineTaxClass`. */
   uid_tax_class?: string | null;
   /** The operator's per-line tax-class override (`LineTaxCore`); wins over the snapshot. */

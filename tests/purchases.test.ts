@@ -555,14 +555,22 @@ Deno.test("PurchaseSchema: a flat line states an amount and no rates (ruling 1)"
   assertEquals(issuePaths(PurchaseSchema, withItems([freight({ quantity_billed: null })])), ["items.1.quantity_billed"]);
 });
 
-Deno.test("PurchaseSchema: a TIME line is refused on every arm until one-document-model Phase 3 (pair windows)", () => {
-  for (const item of [line({ price: weeklyPrice }), timeHire(), carrierLine()]) {
-    assertEquals(
-      issuePaths(PurchaseSchema, withItems([item])).filter((p) => p.startsWith("items.1.")),
-      ["items.1.price.price_formula.basis"],
-      `${item.type} on a time formula`,
-    );
+Deno.test("PurchaseSchema: a TIME line commits nothing — no amount, no billed count, zero money; it carries its rates (Phase 3)", () => {
+  for (const item of [timeHire(), carrierLine()]) {
+    assertEquals(issuePaths(PurchaseSchema, withItems([item])), [], `${item.type} on a time formula`);
   }
+  // A BUY is never time-priced: its arm requires an amount and a billed count,
+  // which a time line refuses.
+  const timeBuy = issuePaths(PurchaseSchema, withItems([line({ price: weeklyPrice })]));
+  assertEquals(timeBuy.includes("items.1.amount_cents") && timeBuy.includes("items.1.quantity_billed"), true, timeBuy.join(", "));
+  // Each half of the rule alone.
+  assertEquals(issuePaths(PurchaseSchema, withItems([timeHire({ quantity_billed: 0 })])), ["items.1.quantity_billed"]);
+  assertEquals(issuePaths(PurchaseSchema, withItems([timeHire({ price: { ...weeklyPrice, rates: [] } })])), ["items.1.price.rates"]);
+  assertEquals(
+    // Planted AFTER the builder, which restates money from the amount.
+    issuePaths(PurchaseSchema, withItems([{ ...timeHire(), price: { ...timeHire().price, subtotal_discounted_cents: 1 } }])),
+    ["items.1.price.subtotal_discounted_cents"],
+  );
 });
 
 Deno.test("PurchaseSchema: a line's price money is what its stated amount gives — each identity alone", () => {
@@ -1090,11 +1098,18 @@ const billTimeLine = (over: Record<string, unknown> = {}) =>
   });
 const t9000 = { total_cents: 9000, amount_paid_cents: 0, amount_credited_cents: 0, amount_void_cents: 0, amount_due_cents: 9000 };
 
-Deno.test("PurchaseBillSchema: a TIME line is refused, pushed or linked, until one-document-model Phase 3", () => {
+Deno.test("PurchaseBillSchema: a TIME line states its amount; a PUSHED one states the counts it bills (Phase 3)", () => {
   for (const origin of ["pushed", "linked"] as const) {
     const doc = bill({ origin, xero_id: origin === "linked" ? XERO_ID : null, items: [billTimeLine()], totals: t9000 });
-    assertEquals(issuePaths(PurchaseBillSchema, doc).includes("items.2.price.price_formula.basis"), true, origin);
+    assertEquals(issuePaths(PurchaseBillSchema, doc), [], origin);
   }
+  const uncounted = billTimeLine({ price: { ...weeklyPrice, counts: [] } });
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [uncounted], totals: t9000 })), ["items.2.price.counts"]);
+  // A linked line's money is Xero's; its counts are what the link could read.
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ origin: "linked", xero_id: XERO_ID, items: [uncounted], totals: t9000 })), []);
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [billTimeLine({ price: { ...weeklyPrice, counts: [{ rate_key: "week", num: 2, den: 1 }], rates: [] } })], totals: t9000 })), [
+    "items.2.price.rates",
+  ]);
 });
 
 Deno.test("PurchaseBillSchema: a bill line's price money is what its stated amount gives, linked as well as pushed", () => {

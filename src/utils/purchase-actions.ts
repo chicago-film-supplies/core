@@ -164,9 +164,10 @@ function closeCancels(item: PurchaseActionItem): boolean {
 }
 
 /**
- * The units a line may still bill, 0 when it has nothing to bill. Every payable
- * line is priced flat (time lines return in one-document-model Phase 3), so
- * this is what is ordered, less what is billed and canceled.
+ * The units a line may still bill, 0 when it has nothing to bill: what is
+ * ordered, less what is billed and canceled. A TIME line counts no
+ * `quantity_billed`, so it offers its open units every time — what is left of
+ * its time is the bill writer's `remainingTimeCounts`, not a unit count.
  */
 function billableQuantity(item: PurchaseActionItem): number {
   return remainingToBill({

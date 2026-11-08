@@ -10701,13 +10701,17 @@ what it un-bills.
 
 - **flat** — `quantity` units, priced at the item's cumulative share of the
   range they un-bill (`cumulativeShareCents`).
-- **time** — credited by COUNTS against its pair's windows, as an AR credit
-  note does (0b ruling 3): a time line credits `quantity` units over the
-  pair's metered counts. The per-unit windows this input used to take
-  retired with the unit charge windows (one-document-model Phase 3).
+- **time** — credited by COUNTS, as an AR credit note is (0b ruling 3):
+  `quantity` units over `counts`, priced `rates × counts` like the bill line
+  it reverses. Absent `counts`, the writer credits everything the line is
+  billed for, net (`purchaseLineBilledCounts`). The per-unit windows this
+  input used to take retired with the unit charge windows
+  (one-document-model Phase 3).
 
 ```ts
-type PurchaseCreditItemInputType = PurchaseDocumentItemInputType;
+interface PurchaseCreditItemInputType {
+  counts?: TierCountType[];
+}
 ```
 
 ### `PurchaseCreditReasonEnum`
@@ -10886,8 +10890,8 @@ How a bill or credit line is priced: the purchase line's {@link PurchaseLinePric
 (formula snapshot, rates, discount — each `propagate: true` there, so an
 un-overridden bill line follows its purchase line; the exempt tax keys; and
 the computed money `priceDocument` writes from the line's stated
-`amount_cents`) plus the line's metered `counts`, always `[]` while every
-payable line is flat (time lines return in one-document-model Phase 3).
+`amount_cents`) plus the line's metered `counts` — `[]` on a flat line, the counts
+a time line bills on a time one (one-document-model Phase 3).
 
 A LINKED document's `amount_cents` is Xero's money, stamped by the link
 writer; the computed money follows from it like any other stated total.
@@ -11193,9 +11197,9 @@ discount, and the money `priceDocument` computes from them.
   discounted = `amount_cents`, total = discounted + Σ taxes. Every money
   reader reads it, as on an order line; `amount_cents` is the input.
 
-⚠️ **A TIME-priced payable line is refused until one-document-model Phase 3**,
-which meters a time line from its destination pair's charge windows as an
-order line is metered. Neither environment stores one (Phase 0b census).
+⚠️ **A TIME line** commits nothing here: its money is zero and its rates are
+the formula's; its bills price it from their pair's windows
+(`priceDocument`'s time arms, one-document-model Phase 3).
 
 `discount` is core's `Discount`. On a payable line it records what came off
 the operator's GROSS, so `discount.amount_cents` is declared, not derived;
@@ -17773,13 +17777,20 @@ that purchase]` joined by `/` — its move pointer when it has one, else its
 own path under its purchase divider — or `null` for a line outside any
 purchase divider. The one join key for "which purchase line is this".
 
-### `purchaseLineMoneyIssues(item: typeLiteral): typeLiteral[]`
+### `purchaseLineMoneyIssues(item: typeLiteral, _: unknown): typeLiteral[]`
 
 The single-document money rule (ruling 1), shared by every arm and by the
-bill line: a payable line is priced FLAT (time lines return in
-one-document-model Phase 3), states its amount and no rates, and its computed
-money is what `priceDocument`'s stated-total arm derives from that amount.
-A refine rather than a union arm because it cuts across all four line types.
+bill line. A refine rather than a union arm because it cuts across all four
+line types.
+
+- **flat** — states its amount and no rates; its computed money is what
+  `priceDocument`'s stated-total arm derives from that amount.
+- **time** (one-document-model Phase 3) — carries its formula's `rates`.
+  On a PURCHASE (`grain: "purchase"`) it commits nothing: `amount_cents` and
+  `quantity_billed` are null and its money is zero. On a BILL or CREDIT line
+  (`grain: "document"`) it states its amount — `rates × counts` metered from
+  its pair's windows on a pushed document, Xero's on a linked one — and its
+  money follows from that amount as a flat line's does.
 
 ### `purchaseLinePair(purchase: Pick<Purchase, "destinations">, item: Pick<PurchaseItem, "path">): PurchaseDestination | undefined`
 
@@ -27212,10 +27223,10 @@ Every item snapshots the formula it is priced by
   stored per-unit rate: measured on prod, most buys cost a total that does
   not divide by their quantity, and no reader needs one (`perUnitCostAt4dp`
   derives the display rate).
-- **time** — REFUSED until api-cloudrun's `one-document-model` Phase 3, which
-  meters a time line from its destination pair's charge windows as an order
-  line is metered. The per-unit metering it used was deleted in Phase 2;
-  neither environment stores a time purchase line.
+- **time** — commits nothing on the purchase (`amount_cents` and
+  `quantity_billed` null, money zero); each bill meters it from its
+  destination pair's charge windows as an order line is metered, and bills in
+  parts by COUNTS (`remainingTimeCounts`, one-document-model Phase 3).
 
 Either way the line's `price` carries the money `priceDocument` computes —
 see {@link PurchaseLinePrice}.
@@ -27593,9 +27604,9 @@ discount, and the money `priceDocument` computes from them.
   discounted = `amount_cents`, total = discounted + Σ taxes. Every money
   reader reads it, as on an order line; `amount_cents` is the input.
 
-⚠️ **A TIME-priced payable line is refused until one-document-model Phase 3**,
-which meters a time line from its destination pair's charge windows as an
-order line is metered. Neither environment stores one (Phase 0b census).
+⚠️ **A TIME line** commits nothing here: its money is zero and its rates are
+the formula's; its bills price it from their pair's windows
+(`priceDocument`'s time arms, one-document-model Phase 3).
 
 `discount` is core's `Discount`. On a payable line it records what came off
 the operator's GROSS, so `discount.amount_cents` is declared, not derived;
@@ -28162,13 +28173,20 @@ Has this item nothing left to happen?
 
 Payment is the bill's business and holds nothing open.
 
-### `purchaseLineMoneyIssues(item: typeLiteral): typeLiteral[]`
+### `purchaseLineMoneyIssues(item: typeLiteral, _: unknown): typeLiteral[]`
 
 The single-document money rule (ruling 1), shared by every arm and by the
-bill line: a payable line is priced FLAT (time lines return in
-one-document-model Phase 3), states its amount and no rates, and its computed
-money is what `priceDocument`'s stated-total arm derives from that amount.
-A refine rather than a union arm because it cuts across all four line types.
+bill line. A refine rather than a union arm because it cuts across all four
+line types.
+
+- **flat** — states its amount and no rates; its computed money is what
+  `priceDocument`'s stated-total arm derives from that amount.
+- **time** (one-document-model Phase 3) — carries its formula's `rates`.
+  On a PURCHASE (`grain: "purchase"`) it commits nothing: `amount_cents` and
+  `quantity_billed` are null and its money is zero. On a BILL or CREDIT line
+  (`grain: "document"`) it states its amount — `rates × counts` metered from
+  its pair's windows on a pushed document, Xero's on a linked one — and its
+  money follows from that amount as a flat line's does.
 
 ### `purchaseLinePair(purchase: Pick<Purchase, "destinations">, item: Pick<PurchaseItem, "path">): PurchaseDestination | undefined`
 
@@ -28596,13 +28614,17 @@ what it un-bills.
 
 - **flat** — `quantity` units, priced at the item's cumulative share of the
   range they un-bill (`cumulativeShareCents`).
-- **time** — credited by COUNTS against its pair's windows, as an AR credit
-  note does (0b ruling 3): a time line credits `quantity` units over the
-  pair's metered counts. The per-unit windows this input used to take
-  retired with the unit charge windows (one-document-model Phase 3).
+- **time** — credited by COUNTS, as an AR credit note is (0b ruling 3):
+  `quantity` units over `counts`, priced `rates × counts` like the bill line
+  it reverses. Absent `counts`, the writer credits everything the line is
+  billed for, net (`purchaseLineBilledCounts`). The per-unit windows this
+  input used to take retired with the unit charge windows
+  (one-document-model Phase 3).
 
 ```ts
-type PurchaseCreditItemInputType = PurchaseDocumentItemInputType;
+interface PurchaseCreditItemInputType {
+  counts?: TierCountType[];
+}
 ```
 
 ### `PurchaseCreditReasonEnum`
@@ -28756,8 +28778,8 @@ How a bill or credit line is priced: the purchase line's {@link PurchaseLinePric
 (formula snapshot, rates, discount — each `propagate: true` there, so an
 un-overridden bill line follows its purchase line; the exempt tax keys; and
 the computed money `priceDocument` writes from the line's stated
-`amount_cents`) plus the line's metered `counts`, always `[]` while every
-payable line is flat (time lines return in one-document-model Phase 3).
+`amount_cents`) plus the line's metered `counts` — `[]` on a flat line, the counts
+a time line bills on a time one (one-document-model Phase 3).
 
 A LINKED document's `amount_cents` is Xero's money, stamped by the link
 writer; the computed money follows from it like any other stated total.
@@ -39784,8 +39806,20 @@ interface LineItem {
   uid_order?: string | null;
   coa_revenue?: COARevenueType | null;
   uid_tracking_category?: string | null;
+  amount_cents?: number | null;
   uid_tax_class?: string | null;
   uid_tax_class_override?: string | null;
+}
+```
+
+### `MovePointerCarrier`
+
+The two move-pointer keys a billing row may carry, one per side.
+
+```ts
+interface MovePointerCarrier {
+  path_order_item?: string[] | null;
+  path_purchase_item?: string[] | null;
 }
 ```
 
@@ -40017,9 +40051,9 @@ line billing a record is the billing document's own row.
 ```ts
 interface ScopedSyncSide {
   scopeType: "order" | "purchase";
-  pointerKey: "path_order_item" | "path_purchase_item";
-  project(item: LineItem, scopeUid: string): InvoiceDocItemType;
-  lineFields(): readonly SharedField[];
+  pointerKey: keyof MovePointerCarrier;
+  project(item: LineItem, scopeUid: string): R;
+  lineFields(item: LineItem): readonly SharedField[];
 }
 ```
 
@@ -41716,7 +41750,7 @@ window's day counts — a PAIR concern. Items reach it through
 {@link syncOrderDestinationScope}, which owns both halves. An unused parameter here would
 read as "this path considers holidays" when it does not.
 
-### `syncScopedBillingItems(prevItems: LineItem[], nextItems: LineItem[], currentItems: InvoiceDocItemType[], scopeUid: string, side: ScopedSyncSide): InvoiceDocItemType[]`
+### `syncScopedBillingItems(prevItems: LineItem[], nextItems: LineItem[], currentItems: R[], scopeUid: string, side: ScopedSyncSide<R>): R[]`
 
 {@link syncOrderToInvoiceSelective} for any side: the scoped three-way sync of
 one initiator's block on one billing document. `side` says which pointer,
@@ -42623,6 +42657,7 @@ interface LineItem {
   uid_order?: string | null;
   coa_revenue?: COARevenueType | null;
   uid_tracking_category?: string | null;
+  amount_cents?: number | null;
   uid_tax_class?: string | null;
   uid_tax_class_override?: string | null;
 }
@@ -47003,6 +47038,7 @@ interface LineItem {
   uid_order?: string | null;
   coa_revenue?: COARevenueType | null;
   uid_tracking_category?: string | null;
+  amount_cents?: number | null;
   uid_tax_class?: string | null;
   uid_tax_class_override?: string | null;
 }
@@ -48598,6 +48634,7 @@ The pair shape {@link chargeWindowContext} reads.
 interface ChargeWindowPair {
   uid?: string | null;
   uid_order?: string | null;
+  uid_purchase?: string | null;
   dates: typeLiteral;
 }
 ```
@@ -48695,7 +48732,7 @@ exactly that. What may be EDITED on a settled bill is the freeze table's
 question (`PURCHASE_BILL_FIELD_FREEZE`), asked by the writer.
 
 ```ts
-type PayableDocumentKind = typeLiteral | typeLiteral | typeLiteral;
+type PayableDocumentKind = typeLiteral | typeLiteral;
 ```
 
 ### `PayableLine`
@@ -48716,6 +48753,7 @@ formula or window input: a payable line is taxed exempt at the store's origin
 ```ts
 interface PayablePriceDocumentContext {
   document: PayableDocumentKind;
+  time?: typeLiteral;
   tax: typeLiteral;
 }
 ```
@@ -48917,6 +48955,10 @@ purchase-line writer, the bill-line projector, a bill's charge line, a credit
 line. A hand-spelled declared literal per builder is how a key gets dropped
 from one of them (`ORDER_DECLARED_PRICE_KEYS`' docblock, api-cloudrun#984).
 
+A FLAT line only (`rates: []`); a time line's price is built by
+`projectTimeLine` (`@cfs/core/utils/purchase-documents`) and priced by the
+document pricer.
+
 ### `formulaUidsOf(items: readonly typeLiteral[]): string[]`
 
 The formula uids a set of lines name — what a caller must load into {@link PricingFormulas}.
@@ -49027,6 +49069,9 @@ the minimum skipped — only a flat tax reads it, and is refused.
 The twin of stage 4's fee arm: a declared amount stored as the line's money,
 not re-derived from rates. Exported for the projectors that default a bill
 or credit line from its purchase line before the writer prices the document.
+
+Basis-blind: a LINKED time line's stated amount is Xero's money and prices
+through here too.
 
 ### `seedLineCounts(items: readonly StructuralItem[], destinations: readonly ChargeWindowPair[], dividerUid: string, formula: PricingFormula, holidays: readonly string[], rates?: readonly MeterRate[] | null): TierCount[] | null`
 
@@ -49642,17 +49687,6 @@ lived here (`unitWindowsForLine`, `coversForUnit`, `billedUnitCoverage`,
 `seedPurchaseLinesForWindows`) retired in one-document-model Phase 3, unused
 in either environment (Phase 0b census).
 
-### `PAYABLE_SCOPED_SYNC`
-
-The payable side of the scoped initiator → billing sync (`syncScopedBillingItems`,
-`@cfs/core/utils/invoices`): the purchase → bill sync IS the order → invoice
-sync, with a `purchase` scope divider, the `path_purchase_item` move pointer,
-this projector and the purchase ↔ bill field set (one-document-model Phase 3).
-
-```ts
-const PAYABLE_SCOPED_SYNC: ScopedSyncSide;
-```
-
 ### `ProjectBillLineOptions`
 
 {@link projectPurchaseLineToBillLine}'s inputs beside the purchase line.
@@ -49662,6 +49696,7 @@ interface ProjectBillLineOptions {
   uid_purchase: string;
   quantity: number;
   from?: number;
+  counts?: TierCount[];
 }
 ```
 
@@ -49703,6 +49738,20 @@ interface PurchaseLineBilledNet {
 }
 ```
 
+### `RemainingTimeCountsArgs`
+
+{@link remainingTimeCounts}' inputs.
+
+```ts
+interface RemainingTimeCountsArgs {
+  purchase: Pick<Purchase, "uid" | "destinations">;
+  item: PurchaseItem;
+  documents: PurchaseBilledDocuments;
+  formulas: PricingFormulas;
+  holidays: readonly string[];
+}
+```
+
 ### `SyncPurchaseToBillsArgs`
 
 {@link syncPurchaseToBills}' inputs.
@@ -49713,6 +49762,7 @@ interface SyncPurchaseToBillsArgs {
   next: Purchase;
   bills: readonly PurchaseBill[];
   tax: Omit<indexedAccess, "asOf">;
+  time?: typeLiteral;
 }
 ```
 
@@ -49723,6 +49773,18 @@ extended past `quantity` at the same per-unit rate, because over-billing is
 legal (D5) and still needs a default. A writer pricing anything against a
 line's `quantity_billed`, which may stand past `quantity`, prices through this
 and never through `cumulativeShareCents`, which throws there.
+
+### `payableScopedSync(prev: Purchase, next: Purchase): typeLiteral`
+
+**The payable side of the scoped initiator → billing sync**
+(`syncScopedBillingItems`, `@cfs/core/utils/invoices`): the purchase → bill
+sync IS the order → invoice sync, with a `purchase` scope divider, the
+`path_purchase_item` move pointer, {@link projectPurchaseRowForBill} and the
+purchase ↔ bill field set (one-document-model Phase 3).
+
+Built per sync over the two purchase revisions it converts
+({@link asEngineSource}): the engine hands its projector the converted rows,
+and the side maps each back to the purchase row it came from.
 
 ### `projectPurchaseLineForBill(item: PurchaseItem, quantity: number): Record<string, unknown>`
 
@@ -49748,6 +49810,9 @@ discount record is the same share of the purchase line's.
 The line's price is built by `flatPayablePrice` (the stated-total arm), so
 the projection parses on its own; the writer prices the whole document with
 `priceDocument`, which states the same money and the line's `taxes_base`.
+
+A TIME line projects unpriced, with the caller's `counts` seed
+({@link remainingTimeCounts}); the writer's `priceDocument` prices it.
 
 ### `projectPurchaseRowForBill(row: PurchaseRow, uidPurchase: string): PurchaseDocumentRow`
 
@@ -49794,6 +49859,13 @@ projectPurchaseLineToBillLine}); a line at a path the purchase does not carry
 (a document-only charge, `[purchase uid, uid]`) sits directly under the
 purchase divider, ahead of the first destination, so contiguity holds.
 
+### `purchaseLineBilledCounts(path: readonly string[], documents: PurchaseBilledDocuments): TierCount[]`
+
+**The counts the live documents bill of one TIME purchase line, net of
+credits** — Σ live bill line `counts` − Σ live credit line `counts`, tier by
+tier (`combineTierCounts`), joined on the purchase line key as
+{@link purchaseLineBilledNet} is. Unfloored, like it.
+
 ### `purchaseLineBilledNet(path: readonly string[], documents: PurchaseBilledDocuments): PurchaseLineBilledNet`
 
 **What the purchase line at `path` is billed, net of credits, UNFLOORED.** The
@@ -49831,11 +49903,23 @@ changes; a bill line's does, so a delta here releases the wrong number on a
 void. Pass EVERY bill and credit of the purchase, including the one the
 caller is writing.
 
+### `remainingTimeCounts(args: RemainingTimeCountsArgs): TierCount[] | null`
+
+**What is left to bill of a TIME purchase line, in counts** (0b ruling 3,
+the AR rule `extensionGroups` applies to an order): the line metered over its
+PAIR's `charge_windows` through its formula, less what live bills already
+bill there net of credits ({@link purchaseLineBilledCounts}), each tier
+floored at 0. Billing in parts therefore never totals more than metering the
+whole, and an over-billed line seeds nothing (the diff reports it).
+
+`null` when the line's pair states no charge windows — there is no time to
+bill, which the bill writer refuses by name.
+
 ### `syncPurchaseToBills(args: SyncPurchaseToBillsArgs): PurchaseBillSync[]`
 
 **The purchase → bill three-way sync** (D5): the order → invoice sync's
 engine (`syncScopedBillingItems`) run on each bill's block for this purchase,
-with {@link PAYABLE_SCOPED_SYNC}. Every rule is the invoice's — synced,
+with {@link payableScopedSync}. Every rule is the invoice's — synced,
 overridden, new, left out, removed, moved — so a purchase edit reaches an
 untouched bill line, leaves an overridden one alone, and adds a new purchase
 line to every bill it can (the New arm; billing it twice reads as billed >
@@ -52041,6 +52125,7 @@ interface LineItem {
   uid_order?: string | null;
   coa_revenue?: COARevenueType | null;
   uid_tracking_category?: string | null;
+  amount_cents?: number | null;
   uid_tax_class?: string | null;
   uid_tax_class_override?: string | null;
 }

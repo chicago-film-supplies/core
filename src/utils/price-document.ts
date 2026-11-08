@@ -49,8 +49,10 @@
  *   payable line states its whole net cost in `amount_cents` — a buy's cost
  *   rarely divides by its quantity — so the money is that amount, with the
  *   declared discount on top as the gross. It is the twin of stage 4's fee arm:
- *   a declared amount stored as the line's money. A TIME-priced payable line is
- *   refused until Phase 3 gives purchases destination pairs to meter.
+ *   a declared amount stored as the line's money. A TIME line commits nothing
+ *   on a purchase, is metered from its pair's windows on a pushed bill or
+ *   credit, and keeps Xero's amount on a linked one (one-document-model
+ *   Phase 3; `payableLineMoney`).
  *
  * ## Pure
  *
@@ -140,8 +142,16 @@ export type ReceivableDocumentKind =
  */
 export type PayableDocumentKind =
   | { kind: "purchase" }
-  | { kind: "purchase_bill" }
-  | { kind: "purchase_credit" };
+  | {
+    kind: "purchase_bill" | "purchase_credit";
+    /**
+     * Who authored the document — only a TIME line reads it. A pushed line's
+     * money is metered from its counts; a LINKED line's is the amount Xero
+     * holds, stamped by the link writer, so it prices as a stated total.
+     * Absent reads as `pushed`.
+     */
+    origin?: "pushed" | "linked";
+  };
 
 /** Every document `priceDocument` prices, on either side. */
 export type PriceDocumentKind = ReceivableDocumentKind | PayableDocumentKind;
@@ -170,6 +180,8 @@ export interface ChargeWindowPair {
   uid?: string | null;
   /** Set on an invoice pair: the order the pair is scoped to. */
   uid_order?: string | null;
+  /** Set on a bill's or supplier credit's pair: the purchase the pair is scoped to. */
+  uid_purchase?: string | null;
   dates: {
     /** `null` on a pair that bills no days (a document with no rental). */
     charge_windows: readonly { start: string; end: string }[] | null;
@@ -216,7 +228,11 @@ export function statedChargeWindows(destinations: readonly ChargeWindowPair[]): 
     const windows = pair.dates?.charge_windows;
     if (!windows || windows.length === 0) continue;
     out.push({
-      divider_path: pair.uid_order ? [pair.uid_order, pair.uid] : [pair.uid],
+      divider_path: pair.uid_order
+        ? [pair.uid_order, pair.uid]
+        : pair.uid_purchase
+        ? [pair.uid_purchase, pair.uid]
+        : [pair.uid],
       windows: windows.map((w) => ({ start: w.start, end: w.end })),
     });
   }
@@ -304,6 +320,18 @@ export type PayableLine = PurchaseRow | PurchaseDocumentRow;
  */
 export interface PayablePriceDocumentContext {
   document: PayableDocumentKind;
+  /**
+   * What a TIME line meters with (one-document-model Phase 3): its formula,
+   * CFS holidays, and the document's pairs' windows
+   * ({@link chargeWindowContext} over the bill's `destinations`). Required
+   * only when a pushed bill or credit carries a time line that states no
+   * counts of its own; a flat document never reads it.
+   */
+  time?: {
+    formulas: PricingFormulas;
+    holidays: readonly string[];
+    charge_windows: readonly PairChargeWindows[];
+  };
   tax: {
     /** The store's jurisdiction — where an exempt line's `taxes_base` resolves. */
     origin: JurisdictionType;
@@ -652,17 +680,12 @@ export interface StatedTotalLine {
  * not re-derived from rates. Exported for the projectors that default a bill
  * or credit line from its purchase line before the writer prices the document.
  *
- * @throws PriceRefusalError on a time-priced line (refused until
- *   one-document-model Phase 3 meters it from its pair's windows) and on a line
- *   that states no amount.
+ * Basis-blind: a LINKED time line's stated amount is Xero's money and prices
+ * through here too.
+ *
+ * @throws PriceRefusalError on a line that states no amount.
  */
 export function priceStatedTotalLine(line: StatedTotalLine): LinePriceMoney {
-  if (line.price.price_formula.basis !== "flat") {
-    throw new PriceRefusalError(
-      `Line ${line.uid} is priced "${line.price.price_formula.name}", by time; a payable line is priced flat until ` +
-        "it can meter its destination pair's windows (one-document-model Phase 3)",
-    );
-  }
   const amount = line.amount_cents;
   if (amount === null) throw new PriceRefusalError(`Line ${line.uid} states no amount`);
   const discount = line.price.discount === null ? null : { ...line.price.discount };
@@ -717,8 +740,9 @@ export function withStatedTotalMoney<P extends StatedTotalLine["price"]>(
  * line. A hand-spelled declared literal per builder is how a key gets dropped
  * from one of them (`ORDER_DECLARED_PRICE_KEYS`' docblock, api-cloudrun#984).
  *
- * @throws PriceRefusalError on a time formula (refused until one-document-model
- *   Phase 3).
+ * A FLAT line only (`rates: []`); a time line's price is built by
+ * `projectTimeLine` (`@cfs/core/utils/purchase-documents`) and priced by the
+ * document pricer.
  */
 export function flatPayablePrice<C extends boolean>(args: {
   uid: string;
@@ -756,6 +780,60 @@ export interface FlatPayablePrice {
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   total_cents: number;
+}
+
+/**
+ * **A payable line's money** — one of three arms, read off the line's basis,
+ * the document kind and its authorship (one-document-model Phase 3):
+ *
+ * | line | money |
+ * |---|---|
+ * | flat, anywhere | its stated `amount_cents` ({@link priceStatedTotalLine}) |
+ * | time, on a PURCHASE | zero: a time line commits nothing up front; its bills decide its cost |
+ * | time, on a LINKED bill or credit | the amount Xero holds, as a stated total |
+ * | time, on a PUSHED bill or credit | `rates × counts`, the order line's rule (`priceLine`), where `counts` are the line's own when it states them (the count-based remaining a writer seeds, 0b ruling 3) and otherwise metered from its pair's windows |
+ *
+ * The pushed time arm writes the metered `counts` onto the line's price and its
+ * net onto `amount_cents`, so the stored line states the money it carries.
+ */
+function payableLineMoney(item: LineItem, ctx: PayablePriceDocumentContext, pricing: Tax[]): LinePriceMoney {
+  const price = item.price;
+  if (!price || price.price_formula?.basis !== "time") return priceStatedTotalLine(statedLineOf(item));
+  if (ctx.document.kind === "purchase") {
+    const discount = price.discount ? { ...price.discount, amount_cents: 0 } : null;
+    return { subtotal_cents: 0, subtotal_discounted_cents: 0, discount, taxes: [], total_cents: 0 };
+  }
+  if ((ctx.document.origin ?? "pushed") === "linked") return priceStatedTotalLine(statedLineOf(item));
+  const stated = (price.counts ?? []) as TierCount[];
+  let counts: TierCount[] | null = stated.length > 0 ? [...stated] : null;
+  if (counts === null) {
+    if (!ctx.time) {
+      throw new PriceRefusalError(`Line ${item.uid} is priced by time and states no counts; the pricer was given no windows to meter`);
+    }
+    counts = meteredLineCounts(item, ctx.time);
+    if (counts === null) {
+      throw new PriceRefusalError(
+        `Line ${item.uid} is on a time formula but under no destination pair with charge windows, so it has no time to bill. ` +
+          "Give its pair charge dates",
+      );
+    }
+  }
+  item.price = { ...price, counts } as LineItem["price"];
+  const money = priceLine(item, pricing);
+  item.amount_cents = money.subtotal_discounted_cents;
+  return money;
+}
+
+/** A payable line as {@link priceStatedTotalLine} reads it — its own fields, picked. */
+function statedLineOf(item: LineItem): StatedTotalLine {
+  const price = item.price;
+  if (!price?.price_formula) throw new PriceRefusalError(`Line ${item.uid} carries no price formula`);
+  return {
+    uid: item.uid,
+    quantity: item.quantity ?? 0,
+    amount_cents: item.amount_cents ?? null,
+    price: { price_formula: price.price_formula, discount: price.discount ?? null, taxes: price.taxes ?? [] },
+  };
 }
 
 /** The tax context a payable document prices under — the side's rule, no destinations. */
@@ -838,10 +916,8 @@ export function priceDocument<T extends LineItem | PayableLine>(
   for (const item of out) {
     if (!isPriceableItem(item)) continue;
     if (payable) {
-      // The stated-total arm: no formula to re-stamp and no windows to meter —
-      // the line's declared amount is its money.
+      const money = payableLineMoney(item, ctx as PayablePriceDocumentContext, pricing);
       const price = item.price;
-      const money = priceStatedTotalLine(item as unknown as StatedTotalLine);
       const taxesBase = (price as { taxes_base?: TaxRefType[] }).taxes_base;
       item.price = assembleLinePrice(
         declaredHalf(price),

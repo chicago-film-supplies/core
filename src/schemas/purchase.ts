@@ -81,10 +81,10 @@
  *   stored per-unit rate: measured on prod, most buys cost a total that does
  *   not divide by their quantity, and no reader needs one (`perUnitCostAt4dp`
  *   derives the display rate).
- * - **time** — REFUSED until api-cloudrun's `one-document-model` Phase 3, which
- *   meters a time line from its destination pair's charge windows as an order
- *   line is metered. The per-unit metering it used was deleted in Phase 2;
- *   neither environment stores a time purchase line.
+ * - **time** — commits nothing on the purchase (`amount_cents` and
+ *   `quantity_billed` null, money zero); each bill meters it from its
+ *   destination pair's charge windows as an order line is metered, and bills in
+ *   parts by COUNTS (`remainingTimeCounts`, one-document-model Phase 3).
  *
  * Either way the line's `price` carries the money `priceDocument` computes —
  * see {@link PurchaseLinePrice}.
@@ -264,9 +264,9 @@ export const PurchaseItemDatesSchema: z.ZodType<PurchaseItemDates> = z.strictObj
  *   discounted = `amount_cents`, total = discounted + Σ taxes. Every money
  *   reader reads it, as on an order line; `amount_cents` is the input.
  *
- * ⚠️ **A TIME-priced payable line is refused until one-document-model Phase 3**,
- * which meters a time line from its destination pair's charge windows as an
- * order line is metered. Neither environment stores one (Phase 0b census).
+ * ⚠️ **A TIME line** commits nothing here: its money is zero and its rates are
+ * the formula's; its bills price it from their pair's windows
+ * (`priceDocument`'s time arms, one-document-model Phase 3).
  *
  * `discount` is core's `Discount`. On a payable line it records what came off
  * the operator's GROSS, so `discount.amount_cents` is declared, not derived;
@@ -333,22 +333,39 @@ export const PurchaseLinePriceSchema: z.ZodType<PurchaseLinePrice> = z.strictObj
 
 /**
  * The single-document money rule (ruling 1), shared by every arm and by the
- * bill line: a payable line is priced FLAT (time lines return in
- * one-document-model Phase 3), states its amount and no rates, and its computed
- * money is what `priceDocument`'s stated-total arm derives from that amount.
- * A refine rather than a union arm because it cuts across all four line types.
+ * bill line. A refine rather than a union arm because it cuts across all four
+ * line types.
+ *
+ * - **flat** — states its amount and no rates; its computed money is what
+ *   `priceDocument`'s stated-total arm derives from that amount.
+ * - **time** (one-document-model Phase 3) — carries its formula's `rates`.
+ *   On a PURCHASE (`grain: "purchase"`) it commits nothing: `amount_cents` and
+ *   `quantity_billed` are null and its money is zero. On a BILL or CREDIT line
+ *   (`grain: "document"`) it states its amount — `rates × counts` metered from
+ *   its pair's windows on a pushed document, Xero's on a linked one — and its
+ *   money follows from that amount as a flat line's does.
  */
 export function purchaseLineMoneyIssues(
   item: { price?: PurchaseLinePrice; amount_cents: number | null; quantity_billed?: number | null },
+  grain: "purchase" | "document" = "purchase",
 ): { path: (string | number)[]; message: string }[] {
   const issues: { path: (string | number)[]; message: string }[] = [];
   const basis = item.price?.price_formula.basis ?? "flat";
   const rates = item.price?.rates ?? [];
-  if (basis !== "flat") {
-    issues.push({
-      path: ["price", "price_formula", "basis"],
-      message: "a payable line is priced flat; time lines return when they meter their pair's windows (one-document-model Phase 3)",
-    });
+  if (basis === "time") {
+    if (rates.length === 0) issues.push({ path: ["price", "rates"], message: "a time line carries its formula's rates" });
+    if (grain === "purchase") {
+      if (item.amount_cents !== null) {
+        issues.push({ path: ["amount_cents"], message: "a time line commits no amount; its bills decide its cost" });
+      }
+      if (item.quantity_billed != null) {
+        issues.push({ path: ["quantity_billed"], message: "a time line counts nothing billed; it resolves on custody" });
+      }
+      if (item.price) issues.push(...statedTotalMoneyIssues(item.price, 0));
+      return issues;
+    }
+    if (item.amount_cents === null) issues.push({ path: ["amount_cents"], message: "a bill or credit line states its amount" });
+    else if (item.price) issues.push(...statedTotalMoneyIssues(item.price, item.amount_cents));
     return issues;
   }
   if (item.amount_cents === null) issues.push({ path: ["amount_cents"], message: "a flat line states its amount" });
@@ -634,8 +651,8 @@ export function purchaseLines(rows: readonly PurchaseRow[]): PurchaseItem[] {
 }
 
 // The shared head (one instance per key, `schemas/_items.ts`) — every key but
-// `quantity`, which stays this side's homonym until Phase 3 (see
-// `PurchaseItemBase`). Key ORDER is the column order: `type` stays first.
+// `quantity`, which this side declares itself because it carries the payable
+// `flat_money` merge group (see `quantityKey` below). Key ORDER is the column order: `type` stays first.
 const itemHead = {
   uid: LineItemCore.uid,
   name: LineItemCore.name,

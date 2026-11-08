@@ -140,8 +140,8 @@ export const PurchaseBillXeroDocumentEnum: z.ZodType<PurchaseBillXeroDocumentTyp
  * (formula snapshot, rates, discount — each `propagate: true` there, so an
  * un-overridden bill line follows its purchase line; the exempt tax keys; and
  * the computed money `priceDocument` writes from the line's stated
- * `amount_cents`) plus the line's metered `counts`, always `[]` while every
- * payable line is flat (time lines return in one-document-model Phase 3).
+ * `amount_cents`) plus the line's metered `counts` — `[]` on a flat line, the counts
+ * a time line bills on a time one (one-document-model Phase 3).
  *
  * A LINKED document's `amount_cents` is Xero's money, stamped by the link
  * writer; the computed money follows from it like any other stated total.
@@ -368,19 +368,27 @@ const docItemShape = {
 /**
  * A line's own shape rules — the purchase line's flat rule and stated-total
  * money (`purchaseLineMoneyIssues`), the type's posting class
- * (`payablePostingIssues`), and the bill line's: a flat line meters no counts.
+ * (`payablePostingIssues`), and the bill line's: a flat line meters no counts,
+ * and a pushed time line states the counts its money is priced from.
  *
- * `origin` is kept for the rules that differ by authorship; none do while
- * every line is flat, because a linked line's computed money follows from its
- * stamped `amount_cents` exactly as a pushed one's does.
+ * `origin` decides the one rule that differs by authorship: a pushed time line
+ * states its counts. Either way a line's computed money follows from its
+ * stated `amount_cents`.
  */
 function documentLineIssues(
   item: PurchaseDocumentItem,
-  _origin: PurchaseDocumentOriginType,
+  origin: PurchaseDocumentOriginType,
 ): { path: (string | number)[]; message: string }[] {
-  const issues = purchaseLineMoneyIssues({ price: item.price, amount_cents: item.amount_cents });
+  const issues = purchaseLineMoneyIssues({ price: item.price, amount_cents: item.amount_cents }, "document");
   issues.push(...payablePostingIssues(item.type, item.ledger_account));
-  if ((item.price?.counts.length ?? 0) > 0) issues.push({ path: ["price", "counts"], message: "a flat line meters no counts" });
+  const counts = item.price?.counts.length ?? 0;
+  const time = item.price?.price_formula.basis === "time";
+  if (!time && counts > 0) issues.push({ path: ["price", "counts"], message: "a flat line meters no counts" });
+  // A pushed time line's money IS its counts priced, so it states them; a linked
+  // one's money is Xero's, and its counts are whatever the link could read.
+  if (time && origin === "pushed" && counts === 0) {
+    issues.push({ path: ["price", "counts"], message: "a pushed time line states the counts it bills" });
+  }
   return issues;
 }
 
@@ -979,17 +987,23 @@ export const PurchaseDocumentItemInput: z.ZodType<PurchaseDocumentItemInputType>
  *
  * - **flat** — `quantity` units, priced at the item's cumulative share of the
  *   range they un-bill (`cumulativeShareCents`).
- * - **time** — credited by COUNTS against its pair's windows, as an AR credit
- *   note does (0b ruling 3): a time line credits `quantity` units over the
- *   pair's metered counts. The per-unit windows this input used to take
- *   retired with the unit charge windows (one-document-model Phase 3).
+ * - **time** — credited by COUNTS, as an AR credit note is (0b ruling 3):
+ *   `quantity` units over `counts`, priced `rates × counts` like the bill line
+ *   it reverses. Absent `counts`, the writer credits everything the line is
+ *   billed for, net (`purchaseLineBilledCounts`). The per-unit windows this
+ *   input used to take retired with the unit charge windows
+ *   (one-document-model Phase 3).
  */
-export type PurchaseCreditItemInputType = PurchaseDocumentItemInputType;
+export interface PurchaseCreditItemInputType extends PurchaseDocumentItemInputType {
+  /** A time line's counts to credit; refused on a flat line by the writer. */
+  counts?: TierCountType[];
+}
 
 /** Zod schema for PurchaseCreditItemInputType. */
 export const PurchaseCreditItemInput: z.ZodType<PurchaseCreditItemInputType> = z.object({
   uid_item: ItemUid,
   quantity: z.int().min(1),
+  counts: z.array(z.object({ rate_key: RateKey, num: z.int().min(0), den: z.int().min(1) })).min(1).optional(),
 });
 
 /**

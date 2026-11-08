@@ -1917,6 +1917,17 @@ export interface OrderInvoiceFieldSync {
   holidays: readonly string[];
 }
 
+/** The two move-pointer keys a billing row may carry, one per side. */
+export interface MovePointerCarrier {
+  path_order_item?: string[] | null;
+  path_purchase_item?: string[] | null;
+}
+
+/** A billing row's move pointer on `key`'s side, or `undefined`. */
+function movePointerOf(row: MovePointerCarrier, key: keyof MovePointerCarrier): string[] | undefined {
+  return row[key] ?? undefined;
+}
+
 /**
  * **What the scoped initiator → billing sync needs to know about a SIDE**
  * (one-document-model Phase 3). The order → invoice sync and the purchase →
@@ -1930,15 +1941,20 @@ export interface OrderInvoiceFieldSync {
  * lost/damaged arm (`uid_out_of_service`) applies to both sides as written: a
  * line billing a record is the billing document's own row.
  */
-export interface ScopedSyncSide {
+export interface ScopedSyncSide<R extends InvoiceItem = InvoiceDocItemType> {
   /** The scope divider's type: `order` on an invoice, `purchase` on a bill or credit. */
   scopeType: "order" | "purchase";
   /** The move pointer a billing row carries: `path_order_item` / `path_purchase_item`. */
-  pointerKey: "path_order_item" | "path_purchase_item";
+  pointerKey: keyof MovePointerCarrier;
   /** An initiator row (line or divider) in the billing document's shape, under the scope divider. */
-  project(item: LineItem, scopeUid: string): InvoiceDocItemType;
-  /** The shared LINE fields, read off the two schemas (`fieldsUnder(…, "items[]")`). */
-  lineFields(): readonly SharedField[];
+  project(item: LineItem, scopeUid: string): R;
+  /**
+   * The shared LINE fields for one initiator row, read off the two schemas
+   * (`fieldsUnder(…, "items[]")`). The row is the PREVIOUS one, so a side whose
+   * merge differs by line kind can say so — a payable TIME line's amount is
+   * derived from its counts, so it is no shared field there.
+   */
+  lineFields(item: LineItem): readonly SharedField[];
 }
 
 /** The receivable side: order → invoice. */
@@ -1946,22 +1962,22 @@ export const RECEIVABLE_SCOPED_SYNC: ScopedSyncSide = {
   scopeType: "order",
   pointerKey: "path_order_item",
   project: (item, scopeUid) => projectOrderItemToInvoiceItem(item, scopeUid),
-  lineFields: () => orderInvoiceSharedFields().line,
+  lineFields: (_item) => orderInvoiceSharedFields().line,
 };
 
-function scopedLineOverridden(side: ScopedSyncSide, prev: LineItem, row: InvoiceDocItemType, scopeUid: string): boolean {
+function scopedLineOverridden<R extends InvoiceItem>(side: ScopedSyncSide<R>, prev: LineItem, row: R, scopeUid: string): boolean {
   const p = side.project(prev, scopeUid);
-  return mergeSharedFields(side.lineFields(), p, p, row).overridden.length > 0;
+  return mergeSharedFields(side.lineFields(prev), p, p, row).overridden.length > 0;
 }
 
-function mergeScopedLine(
-  side: ScopedSyncSide,
+function mergeScopedLine<R extends InvoiceItem>(
+  side: ScopedSyncSide<R>,
   prev: LineItem,
   next: LineItem,
-  row: InvoiceDocItemType,
+  row: R,
   scopeUid: string,
-): InvoiceDocItemType {
-  return mergeSharedFields(side.lineFields(), side.project(prev, scopeUid), side.project(next, scopeUid), row).merged;
+): R {
+  return mergeSharedFields(side.lineFields(prev), side.project(prev, scopeUid), side.project(next, scopeUid), row).merged;
 }
 
 /**
@@ -1970,13 +1986,13 @@ function mergeScopedLine(
  * projector and field set apply; the rules are the order → invoice sync's,
  * unchanged.
  */
-export function syncScopedBillingItems(
+export function syncScopedBillingItems<R extends InvoiceItem>(
   prevItems: LineItem[],
   nextItems: LineItem[],
-  currentItems: InvoiceDocItemType[],
+  currentItems: R[],
   scopeUid: string,
-  side: ScopedSyncSide,
-): InvoiceDocItemType[] {
+  side: ScopedSyncSide<R>,
+): R[] {
   return syncScopedItems(prevItems, nextItems, currentItems, scopeUid, side).items;
 }
 
@@ -2166,22 +2182,22 @@ export function syncOrderToInvoiceSelective(
   currentInvoiceItems: InvoiceDocItemType[],
   orderDividerUid: string,
 ): InvoiceDocItemType[] {
-  return syncScopedItems(prevOrderItems, newOrderItems, currentInvoiceItems, orderDividerUid).items;
+  return syncScopedItems(prevOrderItems, newOrderItems, currentInvoiceItems, orderDividerUid, RECEIVABLE_SCOPED_SYNC).items;
 }
 
 /** {@link syncOrderToInvoiceSelective}'s body. */
-function syncScopedItems(
+function syncScopedItems<R extends InvoiceItem>(
   prevOrderItems: LineItem[],
   newOrderItems: LineItem[],
-  storedInvoiceItems: InvoiceDocItemType[],
+  storedInvoiceItems: R[],
   orderDividerUid: string,
-  side: ScopedSyncSide = RECEIVABLE_SCOPED_SYNC,
-): { items: InvoiceDocItemType[] } {
-  const mergeLine = (prev: LineItem, next: LineItem, row: InvoiceDocItemType, uid: string) =>
+  side: ScopedSyncSide<R>,
+): { items: R[] } {
+  const mergeLine = (prev: LineItem, next: LineItem, row: R, uid: string) =>
     mergeScopedLine(side, prev, next, row, uid);
-  const lineOverridden = (prev: LineItem, row: InvoiceDocItemType, uid: string) =>
+  const lineOverridden = (prev: LineItem, row: R, uid: string) =>
     scopedLineOverridden(side, prev, row, uid);
-  const emit = (row: InvoiceDocItemType) => {
+  const emit = (row: R) => {
     result.push(row);
   };
   const newPathKeys = new Set(newOrderItems.map((it) => itemPathKey(it.path)));
@@ -2229,11 +2245,11 @@ function syncScopedItems(
   const entryAnchorsNew = resync.anchorsNext;
 
   /** The stored row at its order-equivalent quantity under the previous order. */
-  const normalize = (row: InvoiceDocItemType): InvoiceDocItemType => {
+  const normalize = (row: R): R => {
     if (!isLineItemType(row.type) || isInExtensionSection(row.path, orderDividerUid, extensionTargets)) return row;
     const quantity = resync.orderEquivalent(relOf(row), row as InvoiceItem);
     if (quantity === ((row as InvoiceItem).quantity ?? 0)) return row;
-    return { ...row, quantity } as InvoiceDocItemType;
+    return { ...row, quantity } as R;
   };
   const currentInvoiceItems = storedInvoiceItems.map(normalize);
 
@@ -2252,14 +2268,14 @@ function syncScopedItems(
   const newByPath = new Map<string, LineItem>();
   for (const item of newOrderItems) newByPath.set(itemPathKey(item.path), item);
   /** A claimed row as this save leaves it, or `keep: false` when X went with nothing overridden. */
-  const resolveClaim = (row: InvoiceDocItemType, relKey: string): { keep: boolean; row: InvoiceDocItemType } | undefined => {
+  const resolveClaim = (row: R, relKey: string): { keep: boolean; row: R } | undefined => {
     const x = claims.get(relKey);
     if (x === undefined) return undefined;
     // Only the root states the pointer; a component follows it by suffix.
-    const isRoot = (((row as unknown as Record<string, unknown>)[side.pointerKey] as string[] | undefined)?.length ?? 0) > 0;
-    const pointing = (r: InvoiceDocItemType, to: readonly string[] | undefined): InvoiceDocItemType => {
+    const isRoot = (movePointerOf(row, side.pointerKey)?.length ?? 0) > 0;
+    const pointing = (r: R, to: readonly string[] | undefined): R => {
       if (!isRoot) return r;
-      const out = { ...r } as InvoiceDocItemType & Record<string, unknown>;
+      const out: R & MovePointerCarrier = { ...r };
       // A pointer at the row's own path is no claim: moving back clears it.
       if (to !== undefined && itemPathKey(to) !== relKey) out[side.pointerKey] = [...to];
       else delete out[side.pointerKey];
@@ -2272,7 +2288,7 @@ function syncScopedItems(
     const nextPath = moved.toPath(x) ?? (newByPath.has(itemPathKey(x)) ? x : undefined);
     const nextX = nextPath === undefined ? undefined : newByPath.get(itemPathKey(nextPath));
     if (nextX !== undefined) {
-      const merged = { ...mergeLine(prevX, nextX, row, orderDividerUid), path: row.path } as InvoiceDocItemType;
+      const merged = { ...mergeLine(prevX, nextX, row, orderDividerUid), path: row.path } as R;
       return { keep: true, row: pointing(merged, nextPath) };
     }
     if (lineOverridden(prevX, row, orderDividerUid)) return { keep: true, row: pointing(row, undefined) };
@@ -2280,21 +2296,21 @@ function syncScopedItems(
   };
 
   // Index current invoice items by order-relative path key
-  const invoiceByPath = new Map<string, InvoiceDocItemType>();
+  const invoiceByPath = new Map<string, R>();
   for (const item of currentInvoiceItems) {
     if (isInExtensionSection(item.path, orderDividerUid, extensionTargets)) continue;
     const relPath = stripOrderPrefix(item.path, orderDividerUid);
     invoiceByPath.set(itemPathKey(relPath), item);
   }
 
-  const result: InvoiceDocItemType[] = [];
+  const result: R[] = [];
   const processedInvoicePaths = new Set<string>();
   /**
    * Order dividers the invoice DECLINED — on both orders, absent from the
    * invoice (core#126). Emitted in place, then kept only if a row the invoice
    * will hold ends up beneath them.
    */
-  const declined = new Set<InvoiceDocItemType>();
+  const declined = new Set<R>();
   /** Order-relative keys already emitted by the substitution arm. */
   const emittedSubstituted = new Set<string>();
 
@@ -2302,7 +2318,7 @@ function syncScopedItems(
   // path, grouped by X's new key. They are placed right AFTER X's subtree —
   // never inside it, where a positional path recompute would reparent them
   // under X — whether or not X itself is still on the invoice.
-  const entryRowsByX = new Map<string, InvoiceDocItemType[]>();
+  const entryRowsByX = new Map<string, R[]>();
   for (const a of entryAnchorsNew) {
     const rows = currentInvoiceItems.filter((it) => {
       const rel = relOf(it);
@@ -2322,7 +2338,7 @@ function syncScopedItems(
       // own part was overridden on the invoice.
       const prevItem = prevByPath.get(relKey);
       const own = prevItem && !lineOverridden(prevItem, row, orderDividerUid) ? 0 : (row as InvoiceItem).quantity ?? 0;
-      emit({ ...row, quantity: own } as InvoiceDocItemType);
+      emit({ ...row, quantity: own } as R);
     }
     enteredX.delete(x);
   };
@@ -2360,7 +2376,7 @@ function syncScopedItems(
           const row = {
             ...mergeLine(movedPrev, newItem, stored, orderDividerUid),
             path: [orderDividerUid, ...newItem.path],
-          } as InvoiceDocItemType;
+          } as R;
           emit(row);
           continue;
         }
@@ -2390,9 +2406,9 @@ function syncScopedItems(
 
   // Rows the invoice carries that the new order does not. Each either survives
   // or goes; WHERE a survivor goes is decided below, by its stored neighbours.
-  const survivors = new Set<InvoiceDocItemType>();
+  const survivors = new Set<R>();
   /** A survivor's row as emitted, where the sync changed it (a merged claim). */
-  const survivorAs = new Map<InvoiceDocItemType, InvoiceDocItemType>();
+  const survivorAs = new Map<R, R>();
   /** Claimed roots this save removed with their X; their components go too. */
   const droppedClaims: string[][] = [];
   for (const [pathKey, invoiceItem] of invoiceByPath) {
@@ -2468,7 +2484,7 @@ function syncScopedItems(
 
   // Apply the NEW order's D2 offset, re-point live entries and strip spent ones.
   // A substituted row left with no units is dropped, with everything below it.
-  const items: InvoiceDocItemType[] = [];
+  const items: R[] = [];
   const droppedPaths: string[][] = [];
   for (const row of result) {
     if (!isLineItemType(row.type) || isInExtensionSection(row.path, orderDividerUid, extensionTargets)) {
@@ -2490,7 +2506,7 @@ function syncScopedItems(
       droppedPaths.push(rel);
       continue;
     }
-    const out = { ...row, quantity } as InvoiceDocItemType & { substituted_for?: SubstitutedForEntryType[] };
+    const out = { ...row, quantity } as R & { substituted_for?: SubstitutedForEntryType[] };
     if (substituted_for) out.substituted_for = substituted_for as SubstitutedForEntryType[];
     else delete out.substituted_for;
     items.push(out);
@@ -3042,12 +3058,12 @@ export function invoiceAuthoredSubtrees(
 export function orderLineClaims(
   scopedInvoiceItems: readonly InvoiceItem[],
   orderDividerUid: string,
-  pointerKey: "path_order_item" | "path_purchase_item" = "path_order_item",
+  pointerKey: keyof MovePointerCarrier = "path_order_item",
 ): Map<string, string[]> {
   const claims = new Map<string, string[]>();
   const roots: Array<{ rel: string[]; x: readonly string[] }> = [];
   for (const it of scopedInvoiceItems) {
-    const x = (it as unknown as Record<string, string[] | undefined>)[pointerKey];
+    const x = movePointerOf(it, pointerKey);
     const path = it.path ?? [];
     if (!x?.length || !isLineItemType(it.type) || path[0] !== orderDividerUid) continue;
     const rel = path.slice(1);
@@ -3998,7 +4014,7 @@ export function syncOrderDestinationScope(
   orderUid: string,
   mode: OrderInvoiceFieldSync,
 ): OrderDestinationScopeSyncResult {
-  let scopedItems = syncScopedItems(prevOrder.items, nextOrder.items, currentScopedItems, orderUid).items;
+  let scopedItems = syncScopedItems(prevOrder.items, nextOrder.items, currentScopedItems, orderUid, RECEIVABLE_SCOPED_SYNC).items;
 
   const lastOf = (path: readonly string[]): string | undefined => path.length > 0 ? path[path.length - 1] : undefined;
   const isDestinationDivider = (it: { type: string }) => it.type === "destination";
