@@ -300,6 +300,11 @@ export function purchaseBillReopenRefusal(bill: Pick<PurchaseBill, "number" | "t
   return (bill.totals.closure_count ?? 0) > 0 ? null : `Bill ${bill.number} is not marked paid.`;
 }
 
+/** The most credit this bill can take: what is due on a live ACCPAY, else 0 (a card bill is born paid). */
+function billCreditRoom(bill: PurchaseBillActionBill & Pick<PurchaseBill, "xero_document">): number {
+  return bill.xero_document === "invoice" && purchaseBillIsLive(bill) ? Math.max(0, bill.totals.amount_due_cents) : 0;
+}
+
 /**
  * Everything an operator may do to a bill: spend credit on it while it is a live
  * ACCPAY with money due, void it unless {@link purchaseBillVoidRefusal} says
@@ -311,9 +316,8 @@ export function purchaseBillActionsFor(
   ctx: PurchaseBillContext,
 ): PurchaseActionOffer[] {
   const offers: PurchaseActionOffer[] = [];
-  if (bill.xero_document === "invoice" && purchaseBillIsLive(bill) && bill.totals.amount_due_cents > 0) {
-    offers.push({ key: "allocate_credit", action: "allocate_credit", max_cents: bill.totals.amount_due_cents });
-  }
+  const room = billCreditRoom(bill);
+  if (room > 0) offers.push({ key: "allocate_credit", action: "allocate_credit", max_cents: room });
   if (purchaseBillVoidRefusal(bill, ctx) === null) offers.push({ key: "void_bill", action: "void_bill" });
   if (closeRefusal(bill, "bill") === null) offers.push({ key: "close_bill", action: "close_bill" });
   if (purchaseBillReopenRefusal(bill) === null) offers.push({ key: "reopen_bill", action: "reopen_bill" });
@@ -355,16 +359,20 @@ export function assertPurchaseAction(
   throw new InvoiceActionRefusal(request.action, `"${request.action}" is not legal on this ${purchase.status} purchase as it stands`);
 }
 
-/** What an operator route asks to do to a bill. */
+/**
+ * What an operator route asks to do to a bill. Only a void is decided on the
+ * purchase's other documents, so only a void carries them: a caller allocating
+ * credit or pushing a bill does not read a whole purchase to ask.
+ */
 export type PurchaseBillActionRequest =
-  | { action: "void_bill" | "close_bill" | "reopen_bill" }
+  | { action: "void_bill"; context: PurchaseBillContext }
+  | { action: "close_bill" | "reopen_bill" }
   | { action: "push_to_xero"; status: PurchaseBillXeroSyncStatus }
   | { action: "allocate_credit"; amount_cents: number };
 
 /** Refuse a bill action the ruleset does not offer, or one past its limit. Operator routes only. */
 export function assertPurchaseBillAction(
   bill: PurchaseBillActionBill & Pick<PurchaseBill, "xero_document">,
-  ctx: PurchaseBillContext,
   request: PurchaseBillActionRequest,
 ): void {
   const refuse = (message: string): never => {
@@ -375,7 +383,7 @@ export function assertPurchaseBillAction(
   };
   switch (request.action) {
     case "void_bill":
-      return why(purchaseBillVoidRefusal(bill, ctx));
+      return why(purchaseBillVoidRefusal(bill, request.context));
     case "close_bill":
       return why(closeRefusal(bill, "bill"));
     case "reopen_bill":
@@ -384,10 +392,10 @@ export function assertPurchaseBillAction(
       return why(purchaseBillPushRefusal(bill, request.status));
     case "allocate_credit": {
       if (request.amount_cents <= 0) refuse("an allocation must be more than $0");
-      const offer = purchaseBillActionsFor(bill, ctx).find((o) => o.key === "allocate_credit") ??
-        refuse(`Bill ${bill.number} has nothing due to allocate credit to.`);
-      if (request.amount_cents > offer.max_cents!) {
-        refuse(`an allocation of ${request.amount_cents} cents exceeds the ${offer.max_cents} cents due`);
+      const room = billCreditRoom(bill);
+      if (room === 0) refuse(`Bill ${bill.number} has nothing due to allocate credit to.`);
+      if (request.amount_cents > room) {
+        refuse(`an allocation of ${request.amount_cents} cents exceeds the ${room} cents due`);
       }
       return;
     }

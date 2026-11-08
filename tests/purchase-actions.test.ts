@@ -321,18 +321,18 @@ Deno.test("a $0 bill offers Mark Paid until it is closed, then Reopen; the asser
   assert(!has(zero(1), "close_bill"), "already closed");
   assert(has(zero(1), "reopen_bill"));
   assert(!has(voidBill("a", []), "close_bill"), "only a bill totalling $0 closes");
-  assertPurchaseBillAction(zero(), noDocuments, { action: "close_bill" });
-  assertThrows(() => assertPurchaseBillAction(voidBill("a", []), noDocuments, { action: "close_bill" }), InvoiceActionRefusal, "totalling $0");
-  assertThrows(() => assertPurchaseBillAction(zero(), noDocuments, { action: "reopen_bill" }), InvoiceActionRefusal, "not marked paid");
+  assertPurchaseBillAction(zero(), { action: "close_bill" });
+  assertThrows(() => assertPurchaseBillAction(voidBill("a", []), { action: "close_bill" }), InvoiceActionRefusal, "totalling $0");
+  assertThrows(() => assertPurchaseBillAction(zero(), { action: "reopen_bill" }), InvoiceActionRefusal, "not marked paid");
 });
 
 Deno.test("assertPurchaseBillAction: allocate caps at what is due; void reads the shared refusal", () => {
   const bill = voidBill("a", [], { totals_over: { amount_due_cents: 400 } });
-  assertPurchaseBillAction(bill, noDocuments, { action: "allocate_credit", amount_cents: 400 });
-  assertThrows(() => assertPurchaseBillAction(bill, noDocuments, { action: "allocate_credit", amount_cents: 401 }), InvoiceActionRefusal, "exceeds");
-  assertThrows(() => assertPurchaseBillAction(bill, noDocuments, { action: "allocate_credit", amount_cents: 0 }), InvoiceActionRefusal);
+  assertPurchaseBillAction(bill, { action: "allocate_credit", amount_cents: 400 });
+  assertThrows(() => assertPurchaseBillAction(bill, { action: "allocate_credit", amount_cents: 401 }), InvoiceActionRefusal, "exceeds");
+  assertThrows(() => assertPurchaseBillAction(bill, { action: "allocate_credit", amount_cents: 0 }), InvoiceActionRefusal);
   const linked = voidBill("a", [], { origin: "linked", xero_id: "x" });
-  assertThrows(() => assertPurchaseBillAction(linked, noDocuments, { action: "void_bill" }), InvoiceActionRefusal, "linked");
+  assertThrows(() => assertPurchaseBillAction(linked, { action: "void_bill", context: noDocuments }), InvoiceActionRefusal, "linked");
 });
 
 Deno.test("assertPurchaseCreditAction and assertPurchaseAction refuse what is not offered, and allow what is", () => {

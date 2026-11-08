@@ -4627,6 +4627,18 @@
           "doc": "A supplier bill against one or more purchases."
         },
         {
+          "kind": "variable",
+          "name": "PurchaseBillClosureInput",
+          "declaration": "const PurchaseBillClosureInput: z.ZodType<PurchaseBillClosureInputType>;",
+          "doc": "Zod schema for PurchaseBillClosureInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseBillClosureInputType",
+          "declaration": "interface PurchaseBillClosureInputType {\n  version: number;\n}",
+          "doc": "Input for marking a $0 bill paid, or undoing that. `version` is the bill's.\nThe refusals are `closeRefusal` and `purchaseBillReopenRefusal`."
+        },
+        {
           "kind": "interface",
           "name": "PurchaseBillLineEditInputType",
           "declaration": "interface PurchaseBillLineEditInputType {\n  uid: string;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  amount_cents?: number;\n  ledger_account?: COACodeType;\n  uid_tax_class_override?: string | null;\n  uid_tracking_category?: string | null;\n  price?: typeLiteral;\n}",
@@ -13216,6 +13228,18 @@
           "name": "PurchaseBill",
           "declaration": "interface PurchaseBill {\n  uid: string;\n  number: number;\n  query_by_purchases: string[];\n  number_purchases: number[];\n  status: InvoiceStatusType;\n  supplier: UidNameRefType;\n  origin: PurchaseDocumentOriginType;\n  xero_document: PurchaseBillXeroDocumentType;\n  xero_id: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date: string | null;\n  due_date_fs?: FirestoreTimestampType | null;\n  reference: string | null;\n  items: PurchaseDocumentRow[];\n  destinations: PurchaseDocDestination[];\n  totals: PurchaseBillTotals;\n  voided_at?: FirestoreTimestampType;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A supplier bill against one or more purchases."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseBillClosureInput",
+          "declaration": "const PurchaseBillClosureInput: z.ZodType<PurchaseBillClosureInputType>;",
+          "doc": "Zod schema for PurchaseBillClosureInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseBillClosureInputType",
+          "declaration": "interface PurchaseBillClosureInputType {\n  version: number;\n}",
+          "doc": "Input for marking a $0 bill paid, or undoing that. `version` is the bill's.\nThe refusals are `closeRefusal` and `purchaseBillReopenRefusal`."
         },
         {
           "kind": "interface",
@@ -23474,8 +23498,8 @@
         {
           "kind": "typeAlias",
           "name": "PurchaseBillActionRequest",
-          "declaration": "type PurchaseBillActionRequest = typeLiteral | typeLiteral | typeLiteral;",
-          "doc": "What an operator route asks to do to a bill."
+          "declaration": "type PurchaseBillActionRequest = typeLiteral | typeLiteral | typeLiteral | typeLiteral;",
+          "doc": "What an operator route asks to do to a bill. Only a void is decided on the\npurchase's other documents, so only a void carries them: a caller allocating\ncredit or pushing a bill does not read a whole purchase to ask."
         },
         {
           "kind": "interface",
@@ -23500,7 +23524,7 @@
         {
           "kind": "function",
           "name": "assertPurchaseBillAction",
-          "signature": "assertPurchaseBillAction(bill: PurchaseBillActionBill & Pick<PurchaseBill, \"xero_document\">, ctx: PurchaseBillContext, request: PurchaseBillActionRequest): void",
+          "signature": "assertPurchaseBillAction(bill: PurchaseBillActionBill & Pick<PurchaseBill, \"xero_document\">, request: PurchaseBillActionRequest): void",
           "doc": "Refuse a bill action the ruleset does not offer, or one past its limit. Operator routes only.",
           "paramTags": [],
           "returnsTag": null

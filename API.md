@@ -10492,6 +10492,25 @@ interface PurchaseBill {
 }
 ```
 
+### `PurchaseBillClosureInput`
+
+Zod schema for PurchaseBillClosureInputType.
+
+```ts
+const PurchaseBillClosureInput: z.ZodType<PurchaseBillClosureInputType>;
+```
+
+### `PurchaseBillClosureInputType`
+
+Input for marking a $0 bill paid, or undoing that. `version` is the bill's.
+The refusals are `closeRefusal` and `purchaseBillReopenRefusal`.
+
+```ts
+interface PurchaseBillClosureInputType {
+  version: number;
+}
+```
+
 ### `PurchaseBillLineEditInputType`
 
 One line of a PUSHED bill as an operator edits it (D5): any shared field may
@@ -28339,6 +28358,25 @@ interface PurchaseBill {
   updated_by: ActorRefType;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
+}
+```
+
+### `PurchaseBillClosureInput`
+
+Zod schema for PurchaseBillClosureInputType.
+
+```ts
+const PurchaseBillClosureInput: z.ZodType<PurchaseBillClosureInputType>;
+```
+
+### `PurchaseBillClosureInputType`
+
+Input for marking a $0 bill paid, or undoing that. `version` is the bill's.
+The refusals are `closeRefusal` and `purchaseBillReopenRefusal`.
+
+```ts
+interface PurchaseBillClosureInputType {
+  version: number;
 }
 ```
 
@@ -49322,10 +49360,12 @@ type PurchaseBillActionBill = indexedAccess & Pick<PurchaseBill, "origin">;
 
 ### `PurchaseBillActionRequest`
 
-What an operator route asks to do to a bill.
+What an operator route asks to do to a bill. Only a void is decided on the
+purchase's other documents, so only a void carries them: a caller allocating
+credit or pushing a bill does not read a whole purchase to ask.
 
 ```ts
-type PurchaseBillActionRequest = typeLiteral | typeLiteral | typeLiteral;
+type PurchaseBillActionRequest = typeLiteral | typeLiteral | typeLiteral | typeLiteral;
 ```
 
 ### `PurchaseBillContext`
@@ -49357,7 +49397,7 @@ interface PurchaseOfferContext {
 
 Refuse a purchase action the ruleset does not offer. Operator routes only.
 
-### `assertPurchaseBillAction(bill: PurchaseBillActionBill & Pick<PurchaseBill, "xero_document">, ctx: PurchaseBillContext, request: PurchaseBillActionRequest): void`
+### `assertPurchaseBillAction(bill: PurchaseBillActionBill & Pick<PurchaseBill, "xero_document">, request: PurchaseBillActionRequest): void`
 
 Refuse a bill action the ruleset does not offer, or one past its limit. Operator routes only.
 

@@ -297,7 +297,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   ],
   "purchase-actions": [
     { name: "assertPurchaseAction", expr: "it.purchase-actions.assertPurchaseAction(purchase, ctx, request)", desc: "Refuse a purchase action the ruleset does not offer. Operator routes only.", returns: "void" },
-    { name: "assertPurchaseBillAction", expr: "it.purchase-actions.assertPurchaseBillAction(bill, ctx, request)", desc: "Refuse a bill action the ruleset does not offer, or one past its limit. Operator routes only.", returns: "void" },
+    { name: "assertPurchaseBillAction", expr: "it.purchase-actions.assertPurchaseBillAction(bill, request)", desc: "Refuse a bill action the ruleset does not offer, or one past its limit. Operator routes only.", returns: "void" },
     { name: "assertPurchaseCreditAction", expr: "it.purchase-actions.assertPurchaseCreditAction(credit, request)", desc: "Refuse a supplier-credit action the ruleset does not offer. Operator routes only.", returns: "void" },
     { name: "purchaseBillReopenRefusal", expr: "it.purchase-actions.purchaseBillReopenRefusal(bill)", desc: "Why a closed $0 bill may not be reopened, or `null` when it may.", returns: "string | null" },
   ],

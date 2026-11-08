@@ -1326,3 +1326,16 @@ export interface VoidPurchaseBillInputType {
 export const VoidPurchaseBillInput: z.ZodType<VoidPurchaseBillInputType> = z.object({
   version: z.int().min(0),
 });
+
+/**
+ * Input for marking a $0 bill paid, or undoing that. `version` is the bill's.
+ * The refusals are `closeRefusal` and `purchaseBillReopenRefusal`.
+ */
+export interface PurchaseBillClosureInputType {
+  version: number;
+}
+
+/** Zod schema for PurchaseBillClosureInputType. */
+export const PurchaseBillClosureInput: z.ZodType<PurchaseBillClosureInputType> = z.object({
+  version: z.int().min(0),
+});
