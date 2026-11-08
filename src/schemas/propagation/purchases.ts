@@ -603,7 +603,7 @@ const CREDIT_UNBILLS_THE_BUCKET: EnforcementRef = {
   ref:
     "api-cloudrun/tests/integration/purchases/purchaseCredits.test.ts::push — a credit un-bills its items at their cumulative share",
   clause:
-    "each credit recounts its purchase lines' quantity_billed in the same commit; a pushed credit line is priced at the share of the range it un-bills, so a bill and the credit of all its units sum to zero; un-billing past quantity_billed is refused",
+    "each credit recounts its purchase lines' quantity_billed in the same commit; a pushed credit line is priced from the line's billed pool (`purchaseLineCreditCents`: a share of what live bills net of live credits hold, a named bill line's rate, or a stated amount, capped at the pool), so a bill and the credit of all its units sum to zero; un-billing past quantity_billed is refused",
   gates: true,
 };
 
@@ -637,6 +637,47 @@ const XERO_CREDIT_FOLDED: EnforcementRef = {
   gates: true,
 };
 
+/** The $0 bill closure folds as a count, reversibly. */
+const BILL_CLOSURE_FOLD: EnforcementRef = {
+  kind: "test",
+  ref: "core/tests/purchases.test.ts::a $0 bill closes and reopens as a count",
+  clause: "a `bill_closure` row folds +1 into closure_count, its reversal −1, and the status follows the derivation",
+  gates: true,
+};
+
+const closePurchaseBillRules: CollectionRule[] = [
+  {
+    id: "close-purchase-bill:closure-to-bill",
+    source: "settlements",
+    target: "purchase-bills",
+    mode: "co-write",
+    invariant:
+      "An operator closes a $0 bill by appending a `bill_closure` row, the twin of an invoice's `closure`: it moves no money, so the bill reads `paid` only through `closure_count`. Xero marks every $0 document PAID on issue, so Xero's verdict never decides this.",
+    enforced_by: [BILL_CLOSURE_FOLD],
+    transaction: "close-purchase-bill",
+    fields: [
+      { source: [], target: ["totals", "closure_count"], transform: "+1 — the contract multiplier folded through `counts_into`" },
+      { source: [], target: ["status"], transform: "deriveInvoiceStatus over the folded totals — `issued` → `paid`" },
+      { source: [], target: ["version"], transform: "+1" },
+    ],
+  },
+  {
+    id: "reopen-purchase-bill:reversal-to-bill",
+    source: "settlements",
+    target: "purchase-bills",
+    mode: "co-write",
+    invariant:
+      "Reopening a closed $0 bill appends a `bill_closure_reversal`: `closure_count` is a fold rather than a latch, so the bill reads `issued` and unfreezes with no stored flag.",
+    enforced_by: [BILL_CLOSURE_FOLD],
+    transaction: "reopen-purchase-bill",
+    fields: [
+      { source: [], target: ["totals", "closure_count"], transform: "−1 — the contract multiplier folded through `counts_into`" },
+      { source: [], target: ["status"], transform: "deriveInvoiceStatus over the folded totals — `paid` → `issued`" },
+      { source: [], target: ["version"], transform: "+1" },
+    ],
+  },
+];
+
 const createPurchaseCreditRules: CollectionRule[] = [
   {
     id: "create-purchase-credit:credit-to-purchase",
@@ -649,7 +690,7 @@ const createPurchaseCreditRules: CollectionRule[] = [
     transaction: "create-purchase-credit",
     fields: [
       {
-        source: ["uid_purchase"],
+        source: ["query_by_sources"],
         target: ["uid"],
         transform: "the credit names its purchase",
       },
@@ -663,7 +704,7 @@ const CLOSE_RAISES_CREDIT: EnforcementRef = {
   ref:
     "api-cloudrun/tests/integration/purchases/purchaseCredits.test.ts::short close — an item billed beyond what it received raises a short_close credit, allocated to the bill",
   clause:
-    "closing a line billed beyond what it received writes one pushed purchase-credit (reason short_close, keyed on the purchase and the close session) for the excess units at the share of the range they un-bill, and the recount with that credit in it leaves quantity_billed at quantity_received, in the same commit; the credit is then allocated newest bill first; a retried close writes nothing new",
+    "closing a line billed beyond what it received writes one pushed purchase-credit (reason short_close, keyed on the purchase and the close session) for the excess units, priced from the billed pool, and the recount with that credit in it leaves quantity_billed at quantity_received, in the same commit; the credit is then allocated newest bill first; a retried close writes nothing new",
   gates: true,
 };
 
@@ -685,7 +726,7 @@ const closePurchaseRules: CollectionRule[] = [
       },
       {
         source: ["uid"],
-        target: ["uid_purchase"],
+        target: ["query_by_sources"],
         transform: "the credit names the purchase it closes",
       },
     ],
@@ -738,7 +779,7 @@ const allocatePurchaseCreditRules: CollectionRule[] = [
     target: "purchase-credits",
     mode: "co-write",
     invariant:
-      "The credit's `remaining_credit_cents` is its journal folded by `purchaseCreditRemainingFromJournal`, written in the allocation's commit, and its status re-derives (`applied` at 0). Its `version` is bumped.",
+      "The credit's `remaining_credit_cents` is its journal folded by `creditRemainingFromJournal`, written in the allocation's commit, and its status re-derives (`applied` at 0). Its `version` is bumped.",
     enforced_by: [CREDIT_ALLOCATED],
     transaction: "allocate-purchase-credit",
     fields: [
@@ -792,7 +833,7 @@ const reversePurchaseCreditAllocationRules: CollectionRule[] = [
     target: "purchase-credits",
     mode: "co-write",
     invariant:
-      "The credit's `remaining_credit_cents` is its journal folded by `purchaseCreditRemainingFromJournal`, written in the reversal's commit, and its status re-derives (an `applied` credit with balance again is `issued`). Its `version` is bumped.",
+      "The credit's `remaining_credit_cents` is its journal folded by `creditRemainingFromJournal`, written in the reversal's commit, and its status re-derives (an `applied` credit with balance again is `issued`). Its `version` is bumped.",
     enforced_by: [ALLOCATION_REVERSED],
     transaction: "reverse-purchase-credit-allocation",
     fields: [
@@ -815,7 +856,7 @@ const settlementsToCreditRule = (
   target: "purchase-credits",
   mode: "co-write",
   invariant:
-    "Every supplier credit whose `bill_credit` rows this commit appends, reverses or stamps is refolded in the SAME commit: `remaining_credit_cents` is its journal folded by `purchaseCreditRemainingFromJournal`, its status re-derives and its `version` is bumped — so a credit's balance never trails its journal, whichever writer moved it.",
+    "Every supplier credit whose `bill_credit` rows this commit appends, reverses or stamps is refolded in the SAME commit: `remaining_credit_cents` is its journal folded by `creditRemainingFromJournal`, its status re-derives and its `version` is bumped — so a credit's balance never trails its journal, whichever writer moved it.",
   enforced_by: [XERO_CREDIT_FOLDED],
   transaction,
   fields: [
@@ -886,7 +927,7 @@ const settlePurchaseCreditRules: CollectionRule[] = [
     target: "purchase-credits",
     mode: "co-write",
     invariant:
-      "The credit's `remaining_credit_cents` is its journal folded by `purchaseCreditRemainingFromJournal` in the commit that wrote the rows, its status re-derives (`applied` at 0) and its `version` is bumped. The journal is read outside and the commit refuses when the credit's version moved, so every writer of a credit's rows bumps its version.",
+      "The credit's `remaining_credit_cents` is its journal folded by `creditRemainingFromJournal` in the commit that wrote the rows, its status re-derives (`applied` at 0) and its `version` is bumped. The journal is read outside and the commit refuses when the credit's version moved, so every writer of a credit's rows bumps its version.",
     enforced_by: [SUPPLIER_REFUND_FOLDED],
     transaction: "settle-purchase-credit",
     fields: [
@@ -1058,6 +1099,18 @@ const voidPurchaseBillTransaction: TransactionDefinition = {
     "void-purchase-bill:settlements-to-bill",
     ...RECOUNT_STEPS,
   ],
+};
+
+const closePurchaseBillTransaction: TransactionDefinition = {
+  id: "close-purchase-bill",
+  description: "Mark Paid on a $0 bill: appends a `bill_closure` row and folds `closure_count` and the status onto the bill.",
+  steps: ["close-purchase-bill:closure-to-bill"],
+};
+
+const reopenPurchaseBillTransaction: TransactionDefinition = {
+  id: "reopen-purchase-bill",
+  description: "Undoes Mark Paid on a $0 bill: appends a `bill_closure_reversal` row and folds `closure_count` and the status onto the bill.",
+  steps: ["reopen-purchase-bill:reversal-to-bill"],
 };
 
 const voidPurchaseBillFromXeroTransaction: TransactionDefinition = {
@@ -1246,6 +1299,7 @@ export const purchases: PropagationModule = {
     ...settlePurchaseBillRules,
     settlementsToCreditRule("settle-purchase-bill:settlements-to-credit", "settle-purchase-bill"),
     ...voidPurchaseBillRules,
+    ...closePurchaseBillRules,
     ...voidPurchaseBillFromXeroRules,
     settlementsToCreditRule("void-purchase-bill-from-xero:settlements-to-credit", "void-purchase-bill-from-xero"),
     ...createPurchaseCreditRules,
@@ -1268,6 +1322,8 @@ export const purchases: PropagationModule = {
     updatePurchaseBillTransaction,
     settlePurchaseBillTransaction,
     voidPurchaseBillTransaction,
+    closePurchaseBillTransaction,
+    reopenPurchaseBillTransaction,
     voidPurchaseBillFromXeroTransaction,
     createPurchaseCreditTransaction,
     allocatePurchaseCreditTransaction,

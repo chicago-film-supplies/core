@@ -991,15 +991,13 @@ export function checkLeadingDivider(
     items: ReadonlyArray<unknown>;
     query_by_orders?: ReadonlyArray<string>;
     query_by_purchases?: ReadonlyArray<string>;
-    uid_purchase?: string;
   },
   ctx: z.RefinementCtx,
 ) => void {
   return (doc, ctx) => {
-    // A payable billing document is linked when it names a purchase: a bill
-    // through `query_by_purchases`, a supplier credit through `uid_purchase`.
-    const linked = (doc.query_by_orders?.length ?? 0) > 0 || (doc.query_by_purchases?.length ?? 0) > 0 ||
-      doc.uid_purchase !== undefined;
+    // A payable billing document is linked when it names a purchase, through
+    // `query_by_purchases` (a supplier credit's caller states its source there).
+    const linked = (doc.query_by_orders?.length ?? 0) > 0 || (doc.query_by_purchases?.length ?? 0) > 0;
     for (const v of leadingDividerViolations(doc.items, grain, linked)) {
       const subject = grain === "invoice"
         ? "an order-linked invoice"

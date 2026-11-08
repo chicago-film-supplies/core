@@ -52,6 +52,12 @@ const BOOKING_ID = "AAAAAAAAAAAAAAAAAAAA:AAAAAAAAAAAAAAAAAAAA:9c2f4a10-6b3d-4e57
  * a new one cannot be added silently.
  */
 const OVERRIDES: Record<string, Record<string, unknown>> = {
+  // ⚠️ `sources` is derived from the lines by a cross-field refine: a credit names
+  // its purchase, and the first enum member of `collection` is not `purchases`.
+  "purchase-credit": {
+    sources: [{ collection: "purchases", uid: "testpurch10000000000" }],
+    query_by_sources: ["purchases:testpurch10000000000"],
+  },
   // ⚠️ **Added when `name_key` became required** (api-cloudrun#1182).
   // `name_key === foldDepartmentTypeName(name)` is a CROSS-FIELD equality, the
   // class the walker cannot derive.
@@ -268,8 +274,9 @@ Deno.test("corpus gate — every registry schema has a minimal fixture that pars
   // walker has stopped keeping up with the schemas.
   // 6 since core#103's booking delivery mirror, 7 since the purchase mirrors
   // became required, 8 since a bill item's `path` is `[uid]` (api-cloudrun#1407)
-  // — each a new cross-field refinement — and 9 with `price-formulas`' ladder.
-  assertEquals(Object.keys(OVERRIDES).length, 9, "a schema now needs hand-written fixture knowledge");
+  // — each a new cross-field refinement — 9 with `price-formulas`' ladder, and 10
+  // with a supplier credit's `sources` (one-document-model Phase 4).
+  assertEquals(Object.keys(OVERRIDES).length, 10, "a schema now needs hand-written fixture knowledge");
 });
 
 Deno.test("corpus gate companion — an unsatisfiable invariant still throws, naming its path", () => {
@@ -493,6 +500,7 @@ Deno.test("enum-arm search — re-chooses exactly five arms across the corpus, b
     "booking.type",
     "inventory-ledger.stock_method",
     "product.type",
+    "purchase-bill.status",
     "templates-versions.status",
     "unit.status",
   ]);

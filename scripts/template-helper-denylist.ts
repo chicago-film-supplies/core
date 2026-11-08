@@ -354,7 +354,6 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // core#130 row 1: the status a balance write implies — write-path; a template
     // reads the STORED status.
     "deriveCreditNoteStatus",
-    "derivePurchaseBillStatus",
     "derivePurchaseCreditStatus",
     // core#130 row 13: a pair's identity key — a join key, never printed.
     "invoicePairKey",
@@ -380,8 +379,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // entry resolves to a real export, so a rename breaks the build instead.
     "recomputeSettlementTotals", // settlement projection — a template reads STORED totals
     "recomputePurchaseBillTotals", // its payable twin (api-cloudrun#1210), same reason
-    "purchaseCreditRemainingFromJournal", // supplier-credit projection — a template reads the stored balance
-    "creditNoteRemainingFromJournal", // the credit-note twin — a template reads STORED remaining_credit_cents
+    "creditRemainingFromJournal", // supplier-credit projection — a template reads the stored balance
     // ⚠️ **EDITABILITY predicates, not document facts.** `invoiceIsFrozen`
     // answers *"may an operator still change this invoice's organization or its
     // date?"* and `invoiceHasSettlement` is its money-only half. A rendered
@@ -394,9 +392,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "invoiceHasMoneySettlement",
     "invoiceIsFrozen",
     "invoiceFieldIsFrozen", // its per-class form over INVOICE_FIELD_FREEZE — same reason
-    "purchaseBillIsFrozen", // the bill's twin (api-cloudrun#1407 D10) — same reason
     "purchaseBillIsLive", // the one bill liveness rule — a template reads a bill's stored totals
-    "purchaseBillFieldIsFrozen", // and its per-class form over PURCHASE_BILL_FIELD_FREEZE
     // Settlement liveness, for MATCHING rows (the reap, the edit push's held
     // settlements). A rendered invoice reads its stored totals.
     "liveSettlements",
@@ -765,6 +761,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "payableScopedSync",
     "purchaseLineBilledCounts",
     "purchaseLineBilledNet",
+    "purchaseLineCreditCents",
     "purchaseLineCovers",
     "remainingTimeCounts",
     "purchaseLineKey",
@@ -772,11 +769,6 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "purchaseScopeDivider",
     "recomputePurchaseQuantityBilled",
     "syncPurchaseToBills",
-  ],
-  // The purchase ↔ bill diff (D6) is a review surface for the manager, computed
-  // from several documents a render context never holds together.
-  purchaseDiff: [
-    "computePurchaseBillDiffs",
   ],
   replacements: [
     "billedOutOfService",

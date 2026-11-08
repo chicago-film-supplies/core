@@ -66,7 +66,7 @@ export interface ItemArrayDoc {
   /** A bill's purchases; non-empty ⇒ it must lead with a `purchase` divider. */
   query_by_purchases?: readonly string[];
   /** A supplier credit's purchase; present ⇒ it must lead with a `purchase` divider. */
-  uid_purchase?: string;
+  sources?: ReadonlyArray<{ collection: string }>;
 }
 
 /** Options for {@link itemArrayIssues}. */
@@ -150,7 +150,7 @@ export function itemArrayIssues(
   const issues: ItemArrayIssue[] = [];
 
   const linked = (doc.query_by_orders?.length ?? 0) > 0 || (doc.query_by_purchases?.length ?? 0) > 0 ||
-    doc.uid_purchase !== undefined;
+    (doc.sources?.some((s) => s.collection === "purchases") ?? false);
   for (const v of leadingDividerViolations(items, grain, linked)) issues.push({ rule: "leading_divider", ...v });
   if (doc.destinations) {
     for (const v of destinationJoinViolations(items, doc.destinations)) {

@@ -19,8 +19,9 @@ import {
   type PurchaseServiceItem,
   PurchaseServiceItemSchema,
   derivePurchaseStatus,
-  PURCHASE_BILL_FIELD_CLASSES,
-  PURCHASE_BILL_FIELD_FREEZE,
+  derivePurchaseCreditSources,
+  INVOICE_FIELD_CLASSES,
+  INVOICE_FIELD_FREEZE,
   PURCHASE_ITEM_TYPES,
   type PurchaseItem,
   PurchaseItemInput,
@@ -37,7 +38,7 @@ import {
 } from "../src/schemas/mod.ts";
 import { buildFirestoreColumns } from "../src/schemas/display-columns.ts";
 import { classifySharedFields } from "../src/utils/shared-fields.ts";
-import { purchaseBillFieldIsFrozen, purchaseBillIsFrozen } from "../src/utils/invoices.ts";
+import { deriveInvoiceStatus, invoiceFieldIsFrozen, invoiceIsFrozen, recomputePurchaseBillTotals } from "../src/utils/invoices.ts";
 import { XERO_ASSET_ACCOUNTS } from "../src/utils/movements.ts";
 import {
   allocateLandedCostCents,
@@ -865,6 +866,7 @@ function bill(over: Record<string, unknown> = {}) {
   return {
     uid: "testbill100000000000",
     number: 1,
+    status: "issued",
     query_by_purchases: [P],
     number_purchases: [1],
     supplier: SUPPLIER,
@@ -906,6 +908,7 @@ Deno.test("PurchaseBillSchema accepts a pushed ACCPAY, a linked ACCPAY and a car
         xero_document: "bank_transaction",
         xero_id: XERO_ID,
         due_date: null,
+        status: "paid",
         totals: { total_cents: 140985, amount_paid_cents: 140985, amount_credited_cents: 0, amount_void_cents: 0, amount_due_cents: 0 },
       }),
     ),
@@ -1022,7 +1025,7 @@ Deno.test("PurchaseBillSchema: a bill item posts within its type's class, linked
 
 Deno.test("PurchaseBillSchema: paid + credited + void + due must equal total", () => {
   const t = { total_cents: 140985, amount_paid_cents: 100, amount_credited_cents: 0, amount_void_cents: 0, amount_due_cents: 140985 };
-  assertEquals(issuePaths(PurchaseBillSchema, bill({ totals: t })), ["totals"]);
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ status: "part_paid", totals: t })), ["totals"]);
 });
 
 Deno.test("PurchaseBillSchema: a linked bill names its Xero document", () => {
@@ -1140,26 +1143,25 @@ Deno.test("PurchaseBillSchema: every line states `price`; `units` and `dates` ar
 
 // ── bill freeze (D10) ────────────────────────────────────────────────
 
-Deno.test("purchaseBillIsFrozen: money settled ≠ 0, by VALUE — reversed to zero unfreezes; xero_id is no term", () => {
-  const t = (over: Record<string, number>) => ({ totals: { ...bill().totals, ...over } });
-  assertEquals(purchaseBillIsFrozen(t({})), false);
-  assertEquals(purchaseBillIsFrozen({ ...t({}), xero_id: XERO_ID } as never), false);
-  assertEquals(purchaseBillIsFrozen(t({ amount_paid_cents: 1, amount_due_cents: 140984 })), true);
-  assertEquals(purchaseBillIsFrozen(t({ amount_credited_cents: 1, amount_due_cents: 140984 })), true);
-  assertEquals(purchaseBillIsFrozen(t({ amount_void_cents: 140985, amount_due_cents: 0 })), true);
-  assertEquals(purchaseBillIsFrozen({ ...t({}), voided_at: mockTimestamp }), true, "a $0 void settles no money");
+Deno.test("invoiceIsFrozen on a bill: money settled ≠ 0, by VALUE — reversed to zero unfreezes; xero_id is no term", () => {
+  const t = (over: Record<string, number>, status: "issued" | "void" = "issued") => ({ status, totals: { ...bill().totals, ...over } });
+  assertEquals(invoiceIsFrozen(t({})), false);
+  assertEquals(invoiceIsFrozen({ ...t({}), xero_id: XERO_ID } as never), false);
+  assertEquals(invoiceIsFrozen(t({ amount_paid_cents: 1, amount_due_cents: 140984 })), true);
+  assertEquals(invoiceIsFrozen(t({ amount_credited_cents: 1, amount_due_cents: 140984 })), true);
+  assertEquals(invoiceIsFrozen(t({ amount_void_cents: 140985, amount_due_cents: 0 }, "void")), true);
+  assertEquals(invoiceIsFrozen(t({}, "void")), true, "a $0 void settles no money");
 });
 
-Deno.test("PURCHASE_BILL_FIELD_FREEZE: the invoice's table, class for class; tracking freezes only on void and is the one class Xero takes once settled", () => {
-  assertEquals(Object.keys(PURCHASE_BILL_FIELD_FREEZE), [...PURCHASE_BILL_FIELD_CLASSES]);
-  const paid = { totals: { ...bill().totals, amount_paid_cents: 140985, amount_due_cents: 0 } };
-  const voided = { totals: { ...bill().totals, amount_void_cents: 140985, amount_due_cents: 0 } };
-  const open = { totals: bill().totals };
-  const frozenOn = (b: typeof open) => PURCHASE_BILL_FIELD_CLASSES.filter((c) => purchaseBillFieldIsFrozen(b, c));
+Deno.test("INVOICE_FIELD_FREEZE on a bill: tracking freezes only on void and is the one class Xero takes once settled", () => {
+  const paid = { status: "paid" as const, totals: { ...bill().totals, amount_paid_cents: 140985, amount_due_cents: 0 } };
+  const voided = { status: "void" as const, totals: { ...bill().totals, amount_void_cents: 140985, amount_due_cents: 0 } };
+  const open = { status: "issued" as const, totals: bill().totals };
+  const frozenOn = (b: typeof open | typeof paid | typeof voided) => INVOICE_FIELD_CLASSES.filter((c) => invoiceFieldIsFrozen(b, c));
   assertEquals(frozenOn(open), []);
-  assertEquals(frozenOn(paid), ["supplier", "date", "line_money", "ledger_account"]);
-  assertEquals(frozenOn(voided), ["supplier", "date", "line_money", "ledger_account", "tracking"]);
-  assertEquals(PURCHASE_BILL_FIELD_CLASSES.filter((c) => PURCHASE_BILL_FIELD_FREEZE[c].xero_accepts_on_settled), ["tracking"]);
+  assertEquals(frozenOn(paid), ["counterparty", "date", "line_money", "ledger_account"]);
+  assertEquals(frozenOn(voided), ["counterparty", "date", "line_money", "ledger_account", "tracking"]);
+  assertEquals(INVOICE_FIELD_CLASSES.filter((c) => INVOICE_FIELD_FREEZE[c].xero_accepts_on_settled), ["tracking"]);
 });
 
 Deno.test("classifySharedFields(PurchaseSchema, bill/credit) is fail-closed — every shared key is declared (D5)", () => {
@@ -1206,7 +1208,8 @@ function credit(over: Record<string, unknown> = {}) {
   return {
     uid: "testcred100000000000",
     number: 1,
-    uid_purchase: "testpurch10000000000",
+    sources: [{ collection: "purchases", uid: P }],
+    query_by_sources: [`purchases:${P}`],
     supplier: SUPPLIER,
     origin: "pushed",
     reason: "short_close",
@@ -1227,6 +1230,47 @@ function credit(over: Record<string, unknown> = {}) {
     ...rest,
   };
 }
+
+Deno.test("a $0 bill closes and reopens as a count", () => {
+  const close = { type: "bill_closure" as const, reason: "zero_total" as const, amount_cents: 0 };
+  const reopen = { type: "bill_closure_reversal" as const, reason: "source_retracted" as const, amount_cents: 0 };
+  const count = (rows: (typeof close | typeof reopen)[]) => recomputePurchaseBillTotals(0, rows).closure_count;
+  assertEquals([count([close]), count([close, reopen]), count([close, reopen, close])], [1, 0, 1]);
+  const zero = (closure_count: number, status: "issued" | "paid") =>
+    bill({
+      status,
+      totals: { total_cents: 0, amount_paid_cents: 0, amount_credited_cents: 0, amount_void_cents: 0, amount_due_cents: 0, closure_count },
+    });
+  assertEquals(deriveInvoiceStatus(zero(1, "issued") as never), "paid");
+  assertEquals(deriveInvoiceStatus(zero(0, "paid") as never), "issued");
+  assertEquals(invoiceIsFrozen(zero(1, "paid") as never), true, "a closed bill freezes as a paid one does");
+  assertEquals(invoiceIsFrozen(zero(0, "issued") as never), false, "reopening unfreezes, with no flag");
+});
+
+Deno.test("PurchaseBillSchema: the stored status is the derivation's, and void is what the stamp and the money say", () => {
+  const paths = (over: Record<string, unknown>) => issuePaths(PurchaseBillSchema, bill(over)).filter((p) => p === "status");
+  assertEquals(paths({}), []);
+  assertEquals(paths({ status: "paid" }), ["status"], "nothing is settled");
+  assertEquals(paths({ status: "draft" }).length > 0, true, "a bill has no draft step");
+  assertEquals(paths({ status: "void" }), ["status"], "void with no stamp and no void money");
+  assertEquals(paths({ voided_at: mockTimestamp }), ["status"], "a stamp with a live status");
+  assertEquals(paths({ status: "void", voided_at: mockTimestamp }), []);
+  const closedOwing = bill({ totals: { ...bill().totals, closure_count: 1 } });
+  assertEquals(issuePaths(PurchaseBillSchema, closedOwing), ["totals.closure_count"]);
+});
+
+Deno.test("PurchaseCreditSchema: sources are derived from the lines; a line names a bill line with both keys or neither", () => {
+  const BILL = "testbill100000000000";
+  const named = billItem({ quantity: 1, amount_cents: 46995, uid_purchase_bill: BILL, path_bill_item: billItem().path });
+  const sources = derivePurchaseCreditSources(P, [named] as never);
+  assertEquals(sources.query_by_sources, [`purchases:${P}`, `purchase-bills:${BILL}`]);
+  assertEquals(issuePaths(PurchaseCreditSchema, credit({ items: [named], ...sources })), []);
+  assertEquals(issuePaths(PurchaseCreditSchema, credit({ items: [named] })).includes("query_by_sources"), true, "the bill is missing from the mirror");
+  const half = billItem({ quantity: 1, amount_cents: 46995, uid_purchase_bill: BILL });
+  assertEquals(issuePaths(PurchaseCreditSchema, credit({ items: [half], ...sources })).some((p) => p.endsWith("path_bill_item")), true);
+  assertEquals(issuePaths(PurchaseCreditSchema, credit({ sources: [], query_by_sources: [] })).includes("sources"), true);
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [named] })).includes("items"), true, "a bill line credits nothing");
+});
 
 Deno.test("PurchaseCreditSchema accepts an issued credit and an applied one", () => {
   assertEquals(issuePaths(PurchaseCreditSchema, credit()), []);

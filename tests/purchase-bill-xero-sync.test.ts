@@ -70,7 +70,7 @@ Deno.test("purchaseBillXeroSyncStatus: each answer", () => {
 
 Deno.test("purchaseBillXeroSyncStatus: a void bill is not applicable; a settled one still compares", () => {
   const current = { pushed_projection_hash: purchaseBillXeroProjectionHash(bill()) };
-  const voided = { voided_at: { seconds: 1, nanoseconds: 0 } };
+  const voided = { status: "void", voided_at: { seconds: 1, nanoseconds: 0 } };
   assertEquals(purchaseBillXeroSyncStatus(bill(voided), current), "not_applicable");
   const paid = { totals: { total_cents: 12345, amount_paid_cents: 12345, amount_credited_cents: 0, amount_void_cents: 0, amount_due_cents: 0 } };
   assertEquals(purchaseBillXeroSyncStatus(bill({ ...paid, reference: "other" }), current), "out_of_sync");

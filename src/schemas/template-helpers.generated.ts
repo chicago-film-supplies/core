@@ -147,6 +147,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "svg", expr: "it.icons.svg(name, arg2)", desc: "Inline SVG markup for a lucide icon. Emit raw: `<%~ it.icons.svg(\"truck\") %>`.", returns: "string" },
   ],
   "invoice-actions": [
+    { name: "closeRefusal", expr: "it.invoice-actions.closeRefusal(doc, arg2)", desc: "Why a $0 billing document may not be marked paid, or `null` when it may — one rule for an invoice and a bill (`noun` is for the message only).", returns: "string | null" },
     { name: "countsTime", expr: "it.invoice-actions.countsTime(counts)", desc: "**One unit's billed time**: Σ a line's `counts`, exact. A line with no counts (none stored) counts as one period, so the budget is exactly its unit count.", returns: "TimeAmount" },
   ],
   "invoice-xero-sync": [
@@ -159,12 +160,13 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "calculateItemSubtotal", expr: "it.invoices.calculateItemSubtotal(item)", desc: "Calculate the pre-discount and post-discount subtotals for a single line item: `priceFromFormula(rates, counts, quantity, discount)` — Σ tier `rate × quantity × num ÷ den`, each tier rounded once, then the discount (purchases-as-documents Phase 2 ruling 8). Five-day week's one-week minimum and an extension's skipped minimum are already in the counts.", returns: "typeLiteral" },
     { name: "calculateItemTax", expr: "it.invoices.calculateItemTax(item, taxes, arg3)", desc: "Calculate tax amounts for a single line item from the Tax[] parameter. Returns a PriceModifier[] with computed amounts.", returns: "PriceModifier[]" },
     { name: "componentDepthOf", expr: "it.invoices.componentDepthOf(items)", desc: "How deep a line sits UNDER ANOTHER LINE — 0 for a top-level line, 1 for a kit component, 2 for a component of a component. What a document indents by.", returns: "fnOrConstructor" },
-    { name: "deriveInvoiceStatus", expr: "it.invoices.deriveInvoiceStatus(invoice)", desc: "Derive an invoice's status from its stored status and its settled totals. Pure function — does not mutate the invoice. **Replaced `derivePaymentStatus`** (api-cloudrun#1169), taking the same argument shape as {@link invoiceIsFrozen} so no caller can hand it a partial set of the buckets.", returns: "InvoiceStatusType" },
+    { name: "deriveInvoiceStatus", expr: "it.invoices.deriveInvoiceStatus(invoice)", desc: "**The one billing-document status derivation**, for invoices and supplier bills alike (one-document-model Phase 4). Pure, and it lives beside the schemas because both refine their stored `status` against it.", returns: "InvoiceStatusType" },
     { name: "documentRenderRows", expr: "it.invoices.documentRenderRows(items, levels, arg3)", desc: "**The rows a customer document draws** — the one author of what the quote and invoice templates hand-copied (core#130 row 11), which differed only in the `order` divider level.", returns: "DocumentRenderRows<T>" },
     { name: "extensionSectionTargets", expr: "it.invoices.extensionSectionTargets(scopedItems, orderDividerUid)", desc: "The date-extension sections in one order scope of an invoice: each extension divider's uid → the ORDER-relative path of the order destination divider it extends (`path_extension_for`).", returns: "Map<string, string[]>" },
     { name: "getDestinationsLegend", expr: "it.invoices.getDestinationsLegend(destinations)", desc: "Pair-derived legend strings for the order's start/end dates.", returns: "typeLiteral" },
     { name: "getOrderScopedItems", expr: "it.invoices.getOrderScopedItems(items, orderDividerUid)", desc: "Get all invoice items scoped to a specific order divider. Returns the order divider itself plus all items whose path starts with the order divider's uid.", returns: "T[]" },
     { name: "isInExtensionSection", expr: "it.invoices.isInExtensionSection(path, orderDividerUid, targets)", desc: "Is this invoice item an extension divider, or anywhere beneath one?", returns: "boolean" },
+    { name: "isPaidUp", expr: "it.invoices.isPaidUp(status)", desc: "Nothing is owed: the status settlement moves a live document to.", returns: "boolean" },
     { name: "isPreTaxItem", expr: "it.invoices.isPreTaxItem(item)", desc: "Determine whether a line item participates in subtotal/discount/tax calculations. Standalone predicate (not composed) because TS doesn't support negated predicates.", returns: "item is PreTaxLineItem" },
     { name: "isPriceableItem", expr: "it.invoices.isPriceableItem(item)", desc: "Determine whether a line item is priceable (has a price object, not a structural item).", returns: "item is PriceableLineItem" },
     { name: "isSameAsDeliveryDates", expr: "it.invoices.isSameAsDeliveryDates(dates)", desc: "Whether the pair charges exactly its possession: one charge window from delivery start to collection start (no custom charge period has been set). Instants are compared, not strings.", returns: "boolean" },
@@ -294,16 +296,16 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "removeComponentEntries", expr: "it.products.removeComponentEntries(components, path)", desc: "Remove a component and all its descendants from a flat components array. An entry is removed if its `path` starts with the given path prefix — this covers the component itself and every entry nested beneath it.", returns: "T[]" },
   ],
   "purchase-actions": [
-
+    { name: "assertPurchaseAction", expr: "it.purchase-actions.assertPurchaseAction(purchase, ctx, request)", desc: "Refuse a purchase action the ruleset does not offer. Operator routes only.", returns: "void" },
+    { name: "assertPurchaseBillAction", expr: "it.purchase-actions.assertPurchaseBillAction(bill, ctx, request)", desc: "Refuse a bill action the ruleset does not offer, or one past its limit. Operator routes only.", returns: "void" },
+    { name: "assertPurchaseCreditAction", expr: "it.purchase-actions.assertPurchaseCreditAction(credit, request)", desc: "Refuse a supplier-credit action the ruleset does not offer. Operator routes only.", returns: "void" },
+    { name: "purchaseBillReopenRefusal", expr: "it.purchase-actions.purchaseBillReopenRefusal(bill)", desc: "Why a closed $0 bill may not be reopened, or `null` when it may.", returns: "string | null" },
   ],
   "purchase-bill-xero-sync": [
 
   ],
   "purchase-documents": [
-
-  ],
-  "purchaseDiff": [
-
+    { name: "purchaseBillSharedDocFields", expr: "it.purchase-documents.purchaseBillSharedDocFields()", desc: "The document-level fields a purchase and its bill share, read off the two schemas as the line fields are. Every entry comes off the classification, so a new shared key is compared by construction.", returns: "readonly SharedField[]" },
   ],
   "purchases": [
     { name: "allocateLandedCostCents", expr: "it.purchases.allocateLandedCostCents(amountCents, lines)", desc: "Spread one landed amount over several buy lines, in proportion to each line's value still to arrive ({@link landedCostWeightCents}), with {@link apportionCents}. Σ is exactly `amountCents`.", returns: "number[]" },

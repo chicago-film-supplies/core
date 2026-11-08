@@ -60,7 +60,7 @@ import { roundDivHalfUp } from "./money.ts";
 import { classifySharedFields, fieldsUnder, sameSharedValue, type SharedField } from "./shared-fields.ts";
 import {
   computePurchaseDocumentItemPaths,
-  purchaseBillIsFrozen,
+  invoiceIsFrozen,
   purchaseBillIsLive,
   type ScopedSyncSide,
   syncScopedBillingItems,
@@ -89,7 +89,7 @@ export { purchaseBillIsLive };
  */
 export interface PurchaseBilledDocuments {
   uid_purchase: string;
-  bills: readonly Pick<PurchaseBill, "uid" | "number" | "totals" | "items" | "voided_at">[];
+  bills: readonly Pick<PurchaseBill, "uid" | "number" | "totals" | "items" | "status">[];
   credits: readonly Pick<PurchaseCredit, "status" | "items">[];
 }
 
@@ -249,6 +249,47 @@ export function flatShareCents(amountCents: number, quantity: number, before: nu
   if (after <= quantity) return cumulativeShareCents(amountCents, quantity, before, after);
   const at = (k: number) => Number(roundDivHalfUp(BigInt(amountCents) * BigInt(k), BigInt(quantity)));
   return at(after) - at(before);
+}
+
+/**
+ * **What a supplier credit of `n` flat units is worth** (api-cloudrun#1439) — a
+ * share of the line's billed POOL (`purchaseLineBilledNet`: live bills less live
+ * credits), never of the PO line, so an edited bill strands nothing.
+ *
+ * - No bill line named: the pool's share of its last `n` units. Crediting the
+ *   whole pool returns exactly its money, and successive credits sum to it.
+ * - A bill line named: that line's rate for `n` units, so a credit raised from a
+ *   bill is not blended across bills at different prices.
+ * - `stated_cents`: the supplier's memo governs.
+ *
+ * **The pool caps all three.** A named rate above the pool is capped, a stated
+ * amount above it refused, because an operator typed that one.
+ *
+ * @throws {RangeError} when `n` is outside `1..pool quantity`, the pool holds no
+ *   money, or a stated amount exceeds the pool
+ */
+export function purchaseLineCreditCents(args: {
+  pool: PurchaseLineBilledNet;
+  n: number;
+  bill_line?: { quantity: number; amount_cents: number };
+  stated_cents?: number;
+}): number {
+  const { pool, n, bill_line, stated_cents } = args;
+  if (!Number.isInteger(n) || n < 1 || n > pool.quantity) {
+    throw new RangeError(`crediting ${n} exceeds the ${pool.quantity} billed`);
+  }
+  if (pool.amount_cents <= 0) throw new RangeError("this line's billed pool holds no money to credit");
+  if (stated_cents !== undefined) {
+    if (stated_cents > pool.amount_cents) {
+      throw new RangeError(`a credit of ${stated_cents} cents exceeds the ${pool.amount_cents} cents billed`);
+    }
+    return stated_cents;
+  }
+  if (bill_line !== undefined) {
+    const named = Number(roundDivHalfUp(BigInt(bill_line.amount_cents) * BigInt(n), BigInt(bill_line.quantity)));
+    return Math.min(named, pool.amount_cents);
+  }
+  return flatShareCents(pool.amount_cents, pool.quantity, pool.quantity - n, pool.quantity);
 }
 
 // ── The projector ───────────────────────────────────────────────
@@ -477,6 +518,18 @@ export function purchaseBillSharedLineFields(): readonly SharedField[] {
   return billFields;
 }
 
+/**
+ * The document-level fields a purchase and its bill share, read off the two
+ * schemas as the line fields are. Every entry comes off the classification, so a
+ * new shared key is compared by construction.
+ */
+export function purchaseBillSharedDocFields(): readonly SharedField[] {
+  purchaseBillSharedLineFields();
+  return classifySharedFields(PurchaseSchema, PurchaseBillSchema).fields.filter((f) =>
+    !f.path.startsWith("items[]") && !f.path.startsWith("destinations[]")
+  );
+}
+
 let timeFields: readonly SharedField[] | null = null;
 
 /**
@@ -695,7 +748,7 @@ function reshareDiscounts(rows: readonly PurchaseDocumentRow[], next: Purchase):
  * purchase writer's transaction.
  *
  * Skipped whole: a linked bill (Xero is authoritative), a frozen one
- * (`purchaseBillIsFrozen`), a voided one, and a bill with no block for this
+ * (`invoiceIsFrozen`), a voided one, and a bill with no block for this
  * purchase. A changed bill is re-pathed and re-priced whole by `priceDocument`
  * at its own date, and its total is the Σ.
  *
@@ -706,7 +759,7 @@ export function syncPurchaseToBills(args: SyncPurchaseToBillsArgs): PurchaseBill
   const uidPurchase = args.next.uid;
   return args.bills.map((bill) => {
     const untouched = { uid: bill.uid, bill, changed: false };
-    if (bill.origin !== "pushed" || !purchaseBillIsLive(bill) || purchaseBillIsFrozen(bill)) return untouched;
+    if (bill.origin !== "pushed" || !purchaseBillIsLive(bill) || invoiceIsFrozen(bill)) return untouched;
     const start = bill.items.findIndex((r) => r.type === "purchase" && r.uid === uidPurchase);
     if (start < 0) return untouched;
     let end = start + 1;

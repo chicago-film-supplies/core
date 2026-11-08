@@ -102,7 +102,6 @@
     "./utils/purchase-actions": "./src/utils/purchase-actions.ts",
     "./utils/purchase-bill-xero-sync": "./src/utils/purchase-bill-xero-sync.ts",
     "./utils/purchase-documents": "./src/utils/purchase-documents.ts",
-    "./utils/purchaseDiff": "./src/utils/purchaseDiff.ts",
     "./utils/purchases": "./src/utils/purchases.ts",
     "./utils/organizations": "./src/utils/organizations.ts",
     "./utils/cogs": "./src/utils/cogs.ts",

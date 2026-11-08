@@ -21,10 +21,9 @@
  * (`schemas/side.ts`) rather than a branch on the collection. No sign enters the
  * math; the side is derived from the collection, never stored.
  *
- * Phase 1 shares the LINE: the head (`LineItemCore`), the posting
- * (`LedgerPostingCore`, `ledger_account`) and the tax levers (`LineTaxCore`),
- * with the receivable line types labelled per side. The pricer, sync, diff and
- * status follow in later phases.
+ * The bill shares the invoice's line head, posting and tax cores, its pricer and
+ * sync, its status vocabulary (stored, refined against `deriveInvoiceStatus`), its
+ * freeze table and its diff (`computeDocumentDiffs`).
  *
  * ## Pushed or linked
  *
@@ -63,10 +62,10 @@
  *
  * ## A bill freezes under the invoice's rules (D10)
  *
- * `PURCHASE_BILL_FIELD_FREEZE` copies `INVOICE_FIELD_FREEZE` class for class,
- * and `purchaseBillIsFrozen` (`@cfs/core/utils/invoices`) is the invoice's money
- * predicate over a bill's totals. `updatePurchaseBill` and the purchase → bill
- * sync both read it. Supplier credits get no table, matching sales credit notes.
+ * `INVOICE_FIELD_FREEZE` is the one table, with per-side members, and
+ * `invoiceIsFrozen` (`@cfs/core/utils/invoices`) the one predicate, over a bill's
+ * status and totals. `updatePurchaseBill` and the purchase → bill sync both read
+ * it. Supplier credits get no table, matching sales credit notes.
  *
  * @module
  */
@@ -99,11 +98,16 @@ import {
 import { LedgerPostingCore, LineItemCore, LineTaxCore } from "./_items.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import { PriceFormulaRefSchema, RateKey, RateSnapshotSchema, TierCountSchema, type TierCountType } from "./price-formula.ts";
+import { deriveInvoiceStatus } from "./_invoice-freeze.ts";
 import {
   ActorRef,
   type ActorRefType,
+  DocSource,
+  type DocSourceType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
+  InvoiceStatusEnum,
+  type InvoiceStatusType,
   type SettlementReasonType,
   TimestampFields,
   UidNameRef,
@@ -208,6 +212,16 @@ interface PurchaseDocumentLineBase {
   amount_cents: number;
   price: PurchaseDocumentLinePrice;
   xero_line_id?: string;
+  /**
+   * On a supplier CREDIT line only: the bill this line credits. Both or neither
+   * with {@link path_bill_item}, because a path is a row identity within ONE
+   * document, so the bill's uid has to travel with it. A close and a linked
+   * credit name none: a close has no single bill, and Xero's allocation view
+   * carries no lines (api-cloudrun#1439).
+   */
+  uid_purchase_bill?: string;
+  /** The `path` of the bill line credited — the AR credit note's `path_invoice_item`. */
+  path_bill_item?: string[];
 }
 
 /**
@@ -363,6 +377,10 @@ const docItemShape = {
   price: PurchaseDocumentLinePriceSchema,
   // A linked document's Xero `LineItemID` (docblock above). Not shared.
   xero_line_id: z.uuid().optional(),
+  // A credit line's pointer at the bill line it credits (the docblock above).
+  uid_purchase_bill: FirestoreId.optional().meta({ seed: false }),
+  // `seed: false`: `[]` fails `.min(1)`, exactly as `path_invoice_item`.
+  path_bill_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
 };
 
 /**
@@ -388,6 +406,9 @@ function documentLineIssues(
   // one's money is Xero's, and its counts are whatever the link could read.
   if (time && origin === "pushed" && counts === 0) {
     issues.push({ path: ["price", "counts"], message: "a pushed time line states the counts it bills" });
+  }
+  if ((item.uid_purchase_bill === undefined) !== (item.path_bill_item === undefined)) {
+    issues.push({ path: ["path_bill_item"], message: "uid_purchase_bill and path_bill_item are set together" });
   }
   return issues;
 }
@@ -535,6 +556,11 @@ export interface PurchaseBillTotals {
   amount_credited_cents: number;
   amount_void_cents: number;
   amount_due_cents: number;
+  /**
+   * How many live `bill_closure` rows close this bill: 1 on a $0 bill an operator
+   * marked paid. Stated only where it says something, as on the invoice.
+   */
+  closure_count?: number;
 }
 
 /** Zod schema for PurchaseBillTotals. */
@@ -544,6 +570,7 @@ export const PurchaseBillTotalsSchema: z.ZodType<PurchaseBillTotals> = z.strictO
   amount_credited_cents: z.int().meta({ column: true, label: "Credited" }),
   amount_void_cents: z.int().meta({ column: true, label: "Voided" }),
   amount_due_cents: z.int().meta({ column: true, label: "Due" }),
+  closure_count: z.int().nonnegative().optional(),
 });
 
 /**
@@ -556,8 +583,9 @@ export function deriveQueryByPurchases(rows: readonly Pick<PurchaseDocumentRow, 
 
 /** Every `purchase` divider names a distinct purchase, and the mirrors agree with them. */
 function purchaseScopeIssues(
-  doc: { items: PurchaseDocumentRow[]; query_by_purchases?: string[]; number_purchases?: number[]; uid_purchase?: string },
+  doc: { items: PurchaseDocumentRow[]; query_by_purchases?: string[]; number_purchases?: number[] },
   ctx: z.RefinementCtx,
+  uidPurchase?: string,
 ): void {
   const scoped = deriveQueryByPurchases(doc.items);
   if (new Set(scoped).size !== scoped.length) {
@@ -579,8 +607,8 @@ function purchaseScopeIssues(
       });
     }
   }
-  if (doc.uid_purchase !== undefined && scoped.some((u) => u !== doc.uid_purchase)) {
-    ctx.addIssue({ code: "custom", path: ["items"], message: "a supplier credit's purchase dividers name its uid_purchase" });
+  if (uidPurchase !== undefined && scoped.some((u) => u !== uidPurchase)) {
+    ctx.addIssue({ code: "custom", path: ["items"], message: "a supplier credit's purchase dividers name the purchase in its sources" });
   }
 }
 
@@ -598,6 +626,11 @@ export interface PurchaseBill {
   query_by_purchases: string[];
   /** The purchases' numbers, one per {@link query_by_purchases} entry — the `Invoice.number_orders` twin. */
   number_purchases: number[];
+  /**
+   * The invoice's status vocabulary, stored and refined equal to
+   * `deriveInvoiceStatus`. A bill has no draft step, so it is born `issued`.
+   */
+  status: InvoiceStatusType;
   /** Must equal the purchase's `supplier` — asserted by the writer. */
   supplier: UidNameRefType;
   origin: PurchaseDocumentOriginType;
@@ -629,9 +662,8 @@ export interface PurchaseBill {
   totals: PurchaseBillTotals;
   /**
    * When the bill was voided, stamped by every void path. **Absent means not
-   * voided.** `purchaseBillIsLive` (`@cfs/core/utils/invoices`) reads it as well as
-   * `totals.amount_void_cents`, because a $0 bill's void folds to 0 and would
-   * otherwise read live. A bare `.optional()` rather than `.nullable()` on purpose:
+   * voided**, or voided before this stamp existed (`amount_void_cents` then says
+   * so). A bare `.optional()` rather than `.nullable()` on purpose:
    * required-nullable would mean backfilling every bill, for a key only a void
    * ever writes. Not a display column and not a Typesense field:
    * `totals.amount_void_cents` already is both, and a new field would force a
@@ -679,6 +711,33 @@ function checkPurchaseBill(b: PurchaseBill, ctx: z.RefinementCtx): void {
       message: "amount_paid_cents + amount_credited_cents + amount_void_cents + amount_due_cents must equal total_cents exactly",
     });
   }
+  checkBillStatus(b, ctx);
+  purchaseDocumentLines(b.items).forEach((l) => {
+    if (l.uid_purchase_bill !== undefined || l.path_bill_item !== undefined) {
+      ctx.addIssue({ code: "custom", path: ["items"], message: "a bill line credits nothing; only a supplier credit line names a bill line" });
+    }
+  });
+}
+
+/**
+ * `status` is the derivation's answer, and `void` says exactly what the money and
+ * the stamp say: a $0 bill's void folds to 0, so the stamp carries it.
+ */
+function checkBillStatus(b: PurchaseBill, ctx: z.RefinementCtx): void {
+  // One vocabulary, and a bill has no draft step: it is born `issued`.
+  if (b.status === "draft") ctx.addIssue({ code: "custom", path: ["status"], message: "a bill has no draft status" });
+  // The #2396 shape from the other side: a closed bill that still owes money.
+  if ((b.totals.closure_count ?? 0) > 0 && b.totals.total_cents !== 0) {
+    ctx.addIssue({ code: "custom", path: ["totals", "closure_count"], message: "closure_count > 0 is legal only on a bill whose total_cents is 0" });
+  }
+  const derived = deriveInvoiceStatus(b);
+  if (b.status !== derived) {
+    ctx.addIssue({ code: "custom", path: ["status"], message: `a bill with these totals is ${derived}, not ${b.status}` });
+  }
+  const voided = b.voided_at !== undefined || b.totals.amount_void_cents !== 0;
+  if ((b.status === "void") !== voided) {
+    ctx.addIssue({ code: "custom", path: ["status"], message: "a bill is void exactly when it carries a void stamp or void money" });
+  }
 }
 
 /** Zod schema for PurchaseBill. */
@@ -687,6 +746,7 @@ export const PurchaseBillSchema: z.ZodType<PurchaseBill> = z.strictObject({
   number: z.int().min(1).meta({ column: true, label: "#", linkTo: "purchaseBillDetail", serverSortVia: "number" }),
   query_by_purchases: z.array(FirestoreId).meta({ derived: true }),
   number_purchases: z.array(z.int().min(1)).meta({ column: true, label: "Purchase #" }),
+  status: InvoiceStatusEnum.meta({ column: true, label: "Status" }),
   supplier: UidNameRef.meta({ label: "Supplier" }),
   origin: PurchaseDocumentOriginEnum.meta({ column: true, label: "Origin" }),
   xero_document: PurchaseBillXeroDocumentEnum.meta({ column: true, label: "Xero Document" }),
@@ -712,100 +772,16 @@ export const PurchaseBillSchema: z.ZodType<PurchaseBill> = z.strictObject({
   title: "Purchase Bill",
   collection: "purchase-bills",
   displayDefaults: {
-    columns: ["number", "date", "supplier.name", "reference", "totals.total_cents", "totals.amount_due_cents"],
-    filters: {},
+    columns: ["number", "date", "supplier.name", "reference", "status", "totals.total_cents", "totals.amount_due_cents"],
+    filters: { status: [] },
     sort: { column: "number", direction: "desc" },
     groupBy: [
       { field: null, label: "None" },
       { field: "origin", label: "Origin", kind: "enum" },
+      { field: "status", label: "Status", kind: "enum" },
     ],
   },
 });
-
-// ── Bill field-class freeze table (D10) ──────────────────────────
-
-/**
- * The classes a bill's editable fields fall into, for the freeze question
- * *"may an operator still change this field?"* — `INVOICE_FIELD_CLASSES` with
- * `organization` → `supplier` and `coa_revenue` → `ledger_account` (the class is
- * named after its one member, as the invoice's is; `coa_posting` until the
- * one-document-model Phase 1 rename).
- *
- * Explicit tuple type rather than `as const` alone (core#43).
- */
-export const PURCHASE_BILL_FIELD_CLASSES: readonly [
-  "supplier",
-  "date",
-  "line_money",
-  "ledger_account",
-  "tracking",
-  "text",
-] = ["supplier", "date", "line_money", "ledger_account", "tracking", "text"];
-
-/** One of {@link PURCHASE_BILL_FIELD_CLASSES}. */
-export type PurchaseBillFieldClass = typeof PURCHASE_BILL_FIELD_CLASSES[number];
-
-/** When a bill field class freezes, and what Xero does with it once settled. */
-export interface PurchaseBillFieldFreezeContract {
-  /**
-   * - `"frozen"` — while `purchaseBillIsFrozen` (`@cfs/core/utils/invoices`):
-   *   any money settled against the bill, paid, credited or voided.
-   * - `"void"` — only once the bill is void (`purchaseBillIsLive` is false; a bill has
-   *   no status).
-   * - `"never"` — always editable.
-   */
-  frozen_when: "frozen" | "void" | "never";
-  /**
-   * Does Xero accept a change to this class on a bill it holds a payment or
-   * credit allocation against? `false` everywhere, and `false` means "NOT
-   * SHOWN", never "refused" — the invoice rule. Xero's 2026-03-19 changelog
-   * relaxed edits to "non financial fields" on paid ACCPAY bills without
-   * defining them, and CFS has measured none. Before any change sets
-   * `tracking` to `true`, probe one paid bill with the invoice's settled-edit
-   * shape (GET, round-trip Xero's own lines by `LineItemID`, change only
-   * `Tracking`) — a write to the live ledger, so the owner's go-ahead first.
-   */
-  xero_accepts_on_settled: boolean;
-  /** The document and item keys in the class, typed against the stored shapes. */
-  members: readonly (
-    | keyof PurchaseBill
-    | keyof PurchaseDocumentProductItem
-    | keyof PurchaseDocumentServiceItem
-    | keyof PurchaseDocumentReplacementItem
-  )[];
-}
-
-/**
- * **The one bill field-class freeze table** (owner, 2026-10-28). Read only
- * through `purchaseBillFieldIsFrozen` (`@cfs/core/utils/invoices`).
- *
- * `tracking` says `true`, as the invoice's does. The invoice's records edits
- * Xero has ALREADY ACCEPTED on paid ACCREC invoices. For ACCPAY the evidence is
- * thinner: CFS-BILL-299 is PAID and carries tracking, with `UpdatedDateUTC` after
- * its payment date, and that does not say the edit came through the API. So the
- * push re-reads the bill and advances nothing unless money, status and lines
- * held and the tracking landed. `line_money` is decided over the rebuilt items,
- * as the invoice's `lineMoneyAgrees` does.
- */
-export const PURCHASE_BILL_FIELD_FREEZE: Readonly<
-  Record<PurchaseBillFieldClass, PurchaseBillFieldFreezeContract>
-> = {
-  supplier: { frozen_when: "frozen", xero_accepts_on_settled: false, members: ["supplier"] },
-  date: { frozen_when: "frozen", xero_accepts_on_settled: false, members: ["date"] },
-  line_money: {
-    frozen_when: "frozen",
-    xero_accepts_on_settled: false,
-    // The tax levers sit here as on the invoice: a class change re-prices the line.
-    members: ["quantity", "amount_cents", "price", "uid_tax_class", "uid_tax_class_override"],
-  },
-  ledger_account: { frozen_when: "frozen", xero_accepts_on_settled: false, members: ["ledger_account"] },
-  tracking: { frozen_when: "void", xero_accepts_on_settled: true, members: ["uid_tracking_category"] },
-  text: {
-    frozen_when: "never",
-    xero_accepts_on_settled: false,
-    members: ["reference", "due_date", "name", "description"],
-  },
-};
 
 // ── Supplier credit ──────────────────────────────────────────────
 
@@ -850,26 +826,19 @@ export type PurchaseCreditStatusType = typeof PURCHASE_CREDIT_STATUSES[number];
 /** Zod schema for PurchaseCreditStatusType. */
 export const PurchaseCreditStatusEnum: z.ZodType<PurchaseCreditStatusType> = z.enum(PURCHASE_CREDIT_STATUSES);
 
-/**
- * What a bill's settlements add up to, for display. A bill stores NO status:
- * `derivePurchaseBillStatus` (`@cfs/core/utils/invoices`) reads this off its
- * totals. `unpaid` stands where an invoice says `issued`, because a bill has no
- * issue step. `credited` has no invoice twin: the invoice folds it into `paid`,
- * while an operator reading supplier bills needs to tell settled-by-credit from
- * money paid.
- */
-export const PURCHASE_BILL_STATUSES = ["unpaid", "part_paid", "paid", "credited", "void"] as const;
-/** One {@link PURCHASE_BILL_STATUSES} member. */
-export type PurchaseBillStatusType = typeof PURCHASE_BILL_STATUSES[number];
-/** Zod schema for PurchaseBillStatusType. */
-export const PurchaseBillStatusEnum: z.ZodType<PurchaseBillStatusType> = z.enum(PURCHASE_BILL_STATUSES);
-
 /** A supplier credit (ACCPAYCREDIT) against one purchase. */
 export interface PurchaseCredit {
   uid: string;
   /** Monotonic (`counters/purchase-credits`). */
   number: number;
-  uid_purchase: string;
+  /**
+   * What the credit was raised on — the `CreditNote` shape: one `purchases`
+   * source, then a `purchase-bills` source per bill its lines name
+   * ({@link derivePurchaseCreditSources}). "Raised on" is read here and "allocated
+   * to" from the journal, as on a credit note.
+   */
+  sources: DocSourceType[];
+  query_by_sources: string[];
   supplier: UidNameRefType;
   origin: PurchaseDocumentOriginType;
   reason: PurchaseCreditReasonType;
@@ -889,7 +858,7 @@ export interface PurchaseCredit {
   total_cents: number;
   /**
    * Credit not yet consumed: a **co-written projection** of the journal,
-   * `purchaseCreditRemainingFromJournal(total_cents, rows)` — `total_cents` minus
+   * `creditRemainingFromJournal("payable", total_cents, rows)` — `total_cents` minus
    * every signed `bill_credit` allocation and `supplier_refund`. A supplier's
    * cash refund is a `supplier_refund` row, so unlike the AR note before
    * api-cloudrun#1207 this is rebuildable from the first document.
@@ -903,11 +872,45 @@ export interface PurchaseCredit {
   updated_at: FirestoreTimestampType;
 }
 
+/** The purchase a credit was raised on, or `undefined` when its sources name none. */
+export function purchaseCreditPurchaseUid(credit: Pick<PurchaseCredit, "sources">): string | undefined {
+  return credit.sources.find((s) => s.collection === "purchases")?.uid;
+}
+
+/**
+ * **The one author of a supplier credit's `sources`**: its purchase, then each
+ * bill its lines name, in line order. `query_by_sources` is
+ * `<collection>:<uid>` of each, as on a credit note.
+ */
+export function derivePurchaseCreditSources(
+  uidPurchase: string,
+  rows: readonly PurchaseDocumentRow[],
+): Pick<PurchaseCredit, "sources" | "query_by_sources"> {
+  const bills = [...new Set(purchaseDocumentLines([...rows]).flatMap((l) => l.uid_purchase_bill ?? []))];
+  const sources: DocSourceType[] = [
+    { collection: "purchases", uid: uidPurchase },
+    ...bills.map((uid) => ({ collection: "purchase-bills" as const, uid })),
+  ];
+  return { sources, query_by_sources: sources.map((s) => `${s.collection}:${s.uid}`) };
+}
+
 function checkPurchaseCredit(c: PurchaseCredit, ctx: z.RefinementCtx): void {
   documentItemsIssues(c, c.total_cents, ["total_cents"], ctx);
-  purchaseScopeIssues(c, ctx);
+  const uidPurchase = purchaseCreditPurchaseUid(c);
+  purchaseScopeIssues(c, ctx, uidPurchase);
+  if (uidPurchase === undefined) {
+    ctx.addIssue({ code: "custom", path: ["sources"], message: "a supplier credit names the purchase it was raised on" });
+  } else {
+    const want = derivePurchaseCreditSources(uidPurchase, c.items);
+    if (want.query_by_sources.join(" ") !== c.query_by_sources.join(" ")) {
+      ctx.addIssue({ code: "custom", path: ["query_by_sources"], message: "query_by_sources must be derivePurchaseCreditSources over the credit's lines" });
+    }
+    if (want.sources.map((s) => s.uid).join(" ") !== c.sources.map((s) => s.uid).join(" ")) {
+      ctx.addIssue({ code: "custom", path: ["sources"], message: "sources must name the purchase, then each bill the lines credit" });
+    }
+  }
   // An empty credit (allowed at zero) has no rows to lead with.
-  if (c.items.length > 0) checkLeadingDivider("purchase_document")(c, ctx);
+  if (c.items.length > 0) checkLeadingDivider("purchase_document")({ items: c.items, query_by_purchases: uidPurchase ? [uidPurchase] : [] }, ctx);
   checkDestinationJoin(c, ctx);
   if (c.origin === "linked" && c.xero_id === null) {
     ctx.addIssue({ code: "custom", path: ["xero_id"], message: "a linked credit names the Xero document it links" });
@@ -933,7 +936,8 @@ function checkPurchaseCredit(c: PurchaseCredit, ctx: z.RefinementCtx): void {
 export const PurchaseCreditSchema: z.ZodType<PurchaseCredit> = z.strictObject({
   uid: FirestoreId,
   number: z.int().min(1).meta({ column: true, label: "#", linkTo: "purchaseCreditDetail", serverSortVia: "number" }),
-  uid_purchase: FirestoreId,
+  sources: z.array(DocSource).min(1),
+  query_by_sources: z.array(z.string()),
   supplier: UidNameRef.meta({ label: "Supplier" }),
   origin: PurchaseDocumentOriginEnum.meta({ column: true, label: "Origin" }),
   reason: PurchaseCreditReasonEnum.meta({ column: true, label: "Reason" }),
@@ -985,8 +989,9 @@ export const PurchaseDocumentItemInput: z.ZodType<PurchaseDocumentItemInputType>
  * One line of a supplier CREDIT as an operator states it: a purchase item and
  * what it un-bills.
  *
- * - **flat** — `quantity` units, priced at the item's cumulative share of the
- *   range they un-bill (`cumulativeShareCents`).
+ * - **flat** — `quantity` units, priced from the line's billed pool
+ *   (`purchaseLineCreditCents`): the pool's share, a named bill line's rate, or a
+ *   stated `amount_cents`, the pool capping all three.
  * - **time** — credited by COUNTS, as an AR credit note is (0b ruling 3):
  *   `quantity` units over `counts`, priced `rates × counts` like the bill line
  *   it reverses. Absent `counts`, the writer credits everything the line is
@@ -997,6 +1002,11 @@ export const PurchaseDocumentItemInput: z.ZodType<PurchaseDocumentItemInputType>
 export interface PurchaseCreditItemInputType extends PurchaseDocumentItemInputType {
   /** A time line's counts to credit; refused on a flat line by the writer. */
   counts?: TierCountType[];
+  /** The bill line credited (api-cloudrun#1439). Both or neither with {@link path_bill_item}; refused on a link. */
+  uid_purchase_bill?: string;
+  path_bill_item?: string[];
+  /** A pushed flat line's stated credit, capped at the line's billed pool; a supplier's memo governs. */
+  amount_cents?: number;
 }
 
 /** Zod schema for PurchaseCreditItemInputType. */
@@ -1004,6 +1014,9 @@ export const PurchaseCreditItemInput: z.ZodType<PurchaseCreditItemInputType> = z
   uid_item: ItemUid,
   quantity: z.int().min(1),
   counts: z.array(z.object({ rate_key: RateKey, num: z.int().min(0), den: z.int().min(1) })).min(1).optional(),
+  uid_purchase_bill: FirestoreId.optional(),
+  path_bill_item: z.array(ItemUid).min(1).optional(),
+  amount_cents: z.int().min(0).optional(),
 });
 
 /**
@@ -1041,9 +1054,15 @@ const PurchaseDocumentChargeItemInput: z.ZodType<PurchaseDocumentChargeItemInput
 });
 
 /** Each purchase item once per write: it is billed by at most one item of a document. */
-function uniqueItemInputs(items: readonly { uid_item: string }[], ctx: z.RefinementCtx): void {
+function uniqueItemInputs(
+  items: readonly { uid_item: string; uid_purchase_bill?: string; path_bill_item?: string[] }[],
+  ctx: z.RefinementCtx,
+): void {
   const seen = new Set<string>();
   items.forEach((item, i) => {
+    if ((item.uid_purchase_bill === undefined) !== (item.path_bill_item === undefined)) {
+      ctx.addIssue({ code: "custom", path: ["items", i, "path_bill_item"], message: "uid_purchase_bill and path_bill_item are set together" });
+    }
     if (seen.has(item.uid_item)) {
       ctx.addIssue({ code: "custom", path: ["items", i, "uid_item"], message: "one item per purchase item" });
     }
@@ -1122,9 +1141,8 @@ export const CreatePurchaseBillInput: z.ZodType<CreatePurchaseBillInputType> = z
  * ACCPAYCREDIT, or link one the supplier's credit was entered as in Xero.
  *
  * Each `items` entry UN-bills that quantity of its purchase item: it lowers
- * `quantity_billed`, and a PUSHED credit prices it at the item's cumulative
- * share of the range it un-bills, so a price the purchase does not hold cannot
- * be credited. A price correction with no quantity is a `charge_items` entry
+ * `quantity_billed`, and a PUSHED credit prices it from the line's billed pool
+ * (`purchaseLineCreditCents`), so more than was billed cannot be credited. A price correction with no quantity is a `charge_items` entry
  * (push only). A LINKED credit reads its date, reference and total from Xero,
  * as a linked bill does.
  */
@@ -1207,7 +1225,7 @@ export interface PurchaseBillLineEditInputType {
  * Input for editing a PUSHED, unsettled bill (`PUT /purchase-bills/{uid}`) — a
  * PATCH. `items`, when present, names lines to edit by `uid`; lines it omits are
  * kept. Refused on a linked bill (Xero is authoritative) and, per field class,
- * once the bill is frozen (`PURCHASE_BILL_FIELD_FREEZE`). An accepted edit is
+ * once the bill is frozen (`INVOICE_FIELD_FREEZE`). An accepted edit is
  * pushed to Xero through the ACCPAY edit push (D5).
  */
 export interface UpdatePurchaseBillInputType {

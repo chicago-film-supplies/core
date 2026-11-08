@@ -212,11 +212,20 @@ Deno.test("InvoiceSchema rejects invalid status", () => {
   assertEquals(InvoiceSchema.safeParse(doc).success, false);
 });
 
+/** Totals whose derived status IS `status`: the schema refines the two equal. */
+function settledAs(status: InvoiceStatusType) {
+  const t = validInvoice.totals;
+  if (status === "part_paid") return { ...t, amount_paid_cents: 1, amount_due_cents: t.total_cents - 1 };
+  if (status === "paid") return { ...t, amount_paid_cents: t.total_cents, amount_due_cents: 0 };
+  return t;
+}
+
 Deno.test("checkStoredEndpoints — a draft or void invoice may leave a leg unplaced; nothing live may", () => {
   const unplaced = { uid: null, address: null, instructions: null, contact: null };
   const withLeg = (status: InvoiceStatusType, collection: typeof unplaced | typeof placedEndpoint) => ({
     ...validInvoice,
     status,
+    totals: settledAs(status),
     destinations: [{ ...validDestination, collection }],
   });
   assertEquals(InvoiceSchema.safeParse(withLeg("draft", unplaced)).success, true, "a draft is still being built");
@@ -275,7 +284,7 @@ Deno.test("unplacedEndpoints — a null collection leg is legal exactly when not
 });
 
 Deno.test("InvoiceSchema accepts part_paid and void statuses", () => {
-  assertEquals(InvoiceSchema.safeParse({ ...validInvoice, status: "part_paid" }).success, true);
+  assertEquals(InvoiceSchema.safeParse({ ...validInvoice, status: "part_paid", totals: settledAs("part_paid") }).success, true);
   assertEquals(InvoiceSchema.safeParse({ ...validInvoice, status: "void" }).success, true);
 });
 
@@ -843,24 +852,21 @@ Deno.test("VOID is NOT exempt any more — the identity holds on all four bucket
     true,
   );
 
-  // And `status` is not a lever on the identity in EITHER direction — the same
-  // numbers parse on an issued invoice, because what balances the books is the
-  // journal, not the status word. (Reaching this state on a live `issued`
-  // invoice would take a void row without the status move, which is a real
-  // defect the audit reports; the schema's job here is the arithmetic.)
-  assertEquals(
-    InvoiceSchema.safeParse({
-      ...withTotals({
-        total_cents: 247_000,
-        amount_paid_cents: 0,
-        amount_credited_cents: 0,
-        amount_void_cents: 247_000,
-        amount_due_cents: 0,
-      }),
-      status: "issued",
-    }).success,
-    true,
-  );
+  // Reaching this state on a live `issued` invoice takes a void row without the
+  // status move: since the status is refined against the derivation, that is
+  // refused at the write rather than left for an audit to report.
+  const live = InvoiceSchema.safeParse({
+    ...withTotals({
+      total_cents: 247_000,
+      amount_paid_cents: 0,
+      amount_credited_cents: 0,
+      amount_void_cents: 247_000,
+      amount_due_cents: 0,
+    }),
+    status: "issued",
+  });
+  assertEquals(live.success, false);
+  assertEquals(live.error!.issues.map((i) => i.path.join(".")), ["status"]);
 });
 
 Deno.test("amount_void is OPTIONAL, so every pre-#436 invoice still parses", () => {
@@ -943,6 +949,7 @@ Deno.test("every operator transition table row is transcribed, not imported", ()
     issued: ["void"],
     part_paid: ["void"],
     paid: ["void"],
+    credited: ["void"],
     void: [], // terminal
   };
   for (const [from, tos] of Object.entries(expected)) {
@@ -1014,10 +1021,10 @@ Deno.test("each derived status list matches its column and none is empty", () =>
   // An empty list would silently disable whatever query consumes it — a
   // `not-in []` filter matches everything, which is how the `"voided"` defect
   // behaved. Pin the memberships that queries actually depend on.
-  assertEquals([...SETTLED_STATUSES].sort(), ["paid", "void"]);
-  assertEquals([...LIVE_IN_XERO_STATUSES].sort(), ["issued", "paid", "part_paid"]);
+  assertEquals([...SETTLED_STATUSES].sort(), ["credited", "paid", "void"]);
+  assertEquals([...LIVE_IN_XERO_STATUSES].sort(), ["credited", "issued", "paid", "part_paid"]);
   assertEquals([...ACCEPTS_PAYMENT_STATUSES].sort(), ["issued", "part_paid"]);
-  assertEquals([...REACHED_XERO_STATUSES].sort(), ["issued", "paid", "part_paid", "void"]);
+  assertEquals([...REACHED_XERO_STATUSES].sort(), ["credited", "issued", "paid", "part_paid", "void"]);
 });
 
 Deno.test("deriveInvoiceStatus never leaves a terminal status, and never invents one", () => {
@@ -1492,10 +1499,10 @@ Deno.test("uid_out_of_service is valid on a replacement or service line and no o
 Deno.test("totals.closure_count: legal only on a $0 invoice, and never negative (api-cloudrun#1169)", () => {
   const zero = {
     ...validInvoice,
-    status: "paid",
+    status: "issued",
     totals: { ...validInvoice.totals, subtotal_cents: 0, subtotal_discounted_cents: 0, total_cents: 0, amount_due_cents: 0 },
   };
-  assertEquals(InvoiceSchema.safeParse({ ...zero, totals: { ...zero.totals, closure_count: 1 } }).success, true);
+  assertEquals(InvoiceSchema.safeParse({ ...zero, status: "paid", totals: { ...zero.totals, closure_count: 1 } }).success, true);
   // Absent and 0 both mean "not closed".
   assertEquals(InvoiceSchema.safeParse(zero).success, true);
   assertEquals(InvoiceSchema.safeParse({ ...validInvoice, totals: { ...validInvoice.totals, closure_count: 0 } }).success, true);

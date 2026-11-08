@@ -10,6 +10,10 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  * to one `items` array, as on the bill. A credit's `items` may be EMPTY (a $0
  * credit), which is one more reason every `items*` field is optional.
  *
+ * v3 (one-document-model Phase 4): `uid_purchase` is gone with the stored key.
+ * `query_by_sources` is not indexed (the indexer strips every `query_by_*`), as
+ * on `credit-notes`.
+ *
  * `remaining_credit_cents` is the "what credit is left" column; `reason` is
  * faceted for the same reporting reason it is on `credit-notes`.
  *
@@ -19,18 +23,17 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  */
 export const purchaseCredits: TypesenseCollectionConfig = {
   alias: "purchase-credits",
-  version: 2,
+  version: 3,
   firestoreCollection: "purchase-credits",
-  collectionName: "purchase-credits_v2",
+  collectionName: "purchase-credits_v3",
   enabled: true,
   schema: {
-    name: "purchase-credits_v2",
+    name: "purchase-credits_v3",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
       { name: "number", type: "int64", sort: true, index: true, facet: false },
       { name: "number_str", type: "string", index: true, sort: false, facet: false, optional: true },
-      { name: "uid_purchase", type: "string", index: true, facet: false },
       { name: "supplier", type: "object" },
       { name: "supplier.uid", type: "string", facet: false, optional: true },
       { name: "supplier.name", type: "string", sort: true, stem: true, facet: false },

@@ -148,6 +148,12 @@
  * yields no entries — never an "in sync" answer.
  */
 import type {
+  Purchase,
+  PurchaseBill,
+  PurchaseCredit,
+  PurchaseDocDestination,
+  PurchaseDocumentItem,
+  PurchaseItem,
   DocDestinationType,
   Fulfillment,
   FulfillmentItemType,
@@ -158,7 +164,18 @@ import type {
   OrderDocItemType,
   OutOfService,
 } from "../schemas/mod.ts";
-import { exchangedForKey, exchangedForOf, isDividerItemType, isFulfillableItemType } from "../schemas/mod.ts";
+import {
+  deriveQueryByPurchases,
+  exchangedForKey,
+  exchangedForOf,
+  isDividerItemType,
+  isFulfillableItemType,
+  purchaseCreditPurchaseUid,
+  purchaseDocumentLines,
+  purchaseItemBasis,
+  purchaseLineKeyOf,
+  purchaseLines,
+} from "../schemas/mod.ts";
 import {
   canonicalizePayload,
   explainInvoiceItemDifferences,
@@ -174,6 +191,17 @@ import {
   projectOrderItemToInvoiceItem,
 } from "./invoices.ts";
 import type { LineItem } from "./orders.ts";
+import {
+  projectPurchaseLineForBill,
+  purchaseBillIsLive,
+  purchaseBillSharedDocFields,
+  purchaseBillSharedLineFields,
+  purchaseCreditIsLive,
+  purchaseLineBilledNet,
+  purchaseLineKey,
+} from "./purchase-documents.ts";
+import { priceFromFormula } from "./price-formulas.ts";
+import { roundDivHalfUp } from "./money.ts";
 import { type PricingFormulas, statedChargeWindows } from "./price-document.ts";
 import {
   collectSubstitutionAnchors,
@@ -192,7 +220,10 @@ import { parseBookingId } from "./booking-id.ts";
 import { BILLABLE_OOS_REASONS, billedOutOfService, type ReplacementBillingInvoice } from "./replacements.ts";
 
 /** The three document kinds a diff can be viewed from or sourced from. */
-export type DocumentKind = "order" | "fulfillment" | "invoice";
+export type DocumentKind = "order" | "fulfillment" | "invoice" | "purchase" | "bill" | "purchase_credit";
+
+/** The kinds a diff can be VIEWED from. A credit is a source of netting, as a credit note is, never a view. */
+export type DocumentViewKind = Exclude<DocumentKind, "purchase_credit">;
 
 /** Which document a diff entry is against — enough to link to it and to CAS a later sync. */
 export interface DocumentRef {
@@ -360,6 +391,16 @@ export interface DocumentQuantityEntry {
    * its booking; `null` for an order line's. A row can carry both.
    */
   uid_out_of_service: string | null;
+  /**
+   * The payable side's money, on a flat line only: Σ live bill line money less
+   * live credits, unfloored, and what `invoiced` units cost at the line's
+   * cumulative share. Absent on the receivable side, whose money is
+   * {@link quantity_cents}: a payable flat line states a total with no rate.
+   */
+  billed_cents?: number;
+  expected_cents?: number;
+  /** The live supplier credits netted out of `invoiced`. Absent on the receivable side. */
+  credit_sources?: DocumentRef[];
 }
 
 /** One entry at one key of the viewed document. Discriminated on `kind`. */
@@ -523,6 +564,12 @@ export interface DocumentDiffSources {
    * annotated, silent by design like {@link outOfService}.
    */
   creditNotes?: readonly DocumentDiffCreditNote[];
+  /** The payable initiators. A bill view needs each purchase it bills. */
+  purchases?: readonly Purchase[];
+  /** Every bill of the purchases, voided ones included: sibling bills are what "billed" sums over. */
+  bills?: readonly PurchaseBill[];
+  /** Their supplier credits; a live credit nets out of `invoiced`. */
+  purchaseCredits?: readonly PurchaseCredit[];
 }
 
 /** What the order ↔ invoice explanation arms need, per order. */
@@ -568,7 +615,7 @@ const derivedLineFields = (): ReadonlySet<string> => {
 let derivedLineFieldsMemo: ReadonlySet<string> | undefined;
 
 /** The pair keys a comparison is addressed BY, never part of what it compares. */
-const PAIR_IDENTITY_FIELDS: ReadonlySet<string> = new Set(["uid", "uid_order"]);
+const PAIR_IDENTITY_FIELDS: ReadonlySet<string> = new Set(["uid", "uid_order", "uid_purchase"]);
 
 /**
  * Pair fields a FULFILLMENT does not own, skipped whenever one is on either side.
@@ -656,24 +703,29 @@ function invoiceScopes(invoice: Invoice): string[] {
     .map((it) => it.uid);
 }
 
-type Side = { kind: DocumentKind; doc: Order | Fulfillment | Invoice; lines: ScopedLines };
+type DiffSide = { kind: DocumentKind; doc: Order | Fulfillment | Invoice | Purchase | PurchaseBill; lines: ScopedLines };
+
+/** What a document IS, whichever side it sits on: the comparison reads this, never the collection. */
+const isBilling = (side: DiffSide): boolean => side.kind === "invoice" || side.kind === "bill";
+const isInitiator = (side: DiffSide): boolean => side.kind === "order" || side.kind === "purchase";
 
 /** Only fulfillable lines take part in a comparison that involves a fulfillment. */
-function comparable(side: Side, other: Side, item: LineItem): boolean {
+function comparable(side: DiffSide, other: DiffSide, item: LineItem): boolean {
   const involvesFulfillment = side.kind === "fulfillment" || other.kind === "fulfillment";
   return !involvesFulfillment || isFulfillableItemType(item.type);
 }
 
 /** The compared fields two same-path lines disagree on. `here` belongs to `viewed`. */
 function lineFields(
-  viewed: Side,
-  source: Side,
+  viewed: DiffSide,
+  source: DiffSide,
   here: LineItem,
   there: LineItem,
   orderUid: string,
   context: DocumentDiffContext,
   expectedFulfillmentQuantity?: number,
 ): DocumentDiffField[] {
+  if (viewed.kind === "purchase" || viewed.kind === "bill") return payableLineFields(viewed, source, here, there);
   const involvesFulfillment = viewed.kind === "fulfillment" || source.kind === "fulfillment";
   // Fulfillment ↔ invoice quantity is the `quantity` entry's, over every invoice.
   if (involvesFulfillment && (viewed.kind === "invoice" || source.kind === "invoice")) return [];
@@ -841,6 +893,7 @@ function docFieldsFor(a: DocumentKind, b: DocumentKind): readonly SharedField[] 
   if (pair.size !== 2) return null;
   if (pair.has("order") && pair.has("invoice")) return orderInvoiceSharedFields().doc;
   if (pair.has("order") && pair.has("fulfillment")) return orderFulfillmentSharedFields().doc;
+  if (pair.has("purchase") && pair.has("bill")) return purchaseBillSharedDocFields();
   return null;
 }
 
@@ -865,7 +918,7 @@ function docFieldsFor(a: DocumentKind, b: DocumentKind): readonly SharedField[] 
  * difference. The sync never had that defect because it projects the order
  * into the fulfillment's shape before merging; this is the same projection.
  */
-function compareDocFields(out: DocumentDiffMap, viewed: Side, source: Side): void {
+function compareDocFields(out: DocumentDiffMap, viewed: DiffSide, source: DiffSide): void {
   const shared = docFieldsFor(viewed.kind, source.kind);
   if (shared === null) return;
   const sourceRef = refOf(source.kind, source.doc);
@@ -905,10 +958,10 @@ function isExchangeUnit(item: LineItem | undefined): boolean {
  */
 function compareScope(
   out: DocumentDiffMap,
-  viewed: Side,
-  source: Side,
+  viewed: DiffSide,
+  source: DiffSide,
   orderUid: string,
-  coverage: InvoiceCoverage,
+  billed: (rel: string) => boolean,
   context: DocumentDiffContext,
   notInvoiced: (rel: string, viewedKey: string) => void,
   invoiceLegs: ReadonlySet<string> = new Set(),
@@ -916,10 +969,10 @@ function compareScope(
   const sourceRef = refOf(source.kind, source.doc);
   compareDocFields(out, viewed, source);
   // An invoice key carries its order-divider prefix; the others are order-relative.
-  const viewedKey = (rel: string) => (viewed.kind === "invoice" ? (rel === "" ? orderUid : `${orderUid}/${rel}`) : rel);
+  const viewedKey = (rel: string) => (isBilling(viewed) ? (rel === "" ? orderUid : `${orderUid}/${rel}`) : rel);
 
   /** The anchor that makes `rel` itself a substitute on `side`, if any. */
-  const substituteAt = (side: Side, rel: string) => side.lines.anchors.find((a) => key(a.path) === rel);
+  const substituteAt = (side: DiffSide, rel: string) => side.lines.anchors.find((a) => key(a.path) === rel);
   const substituted = (at: string, replaced: string, substitute: string) =>
     push(out.lines, viewedKey(at), { kind: "substituted", source: sourceRef, replaced: viewedKey(replaced), substitute: viewedKey(substitute) });
   /**
@@ -936,7 +989,7 @@ function compareScope(
    * substitute on `side` replaced — where `other` carries the replaced X? Such
    * a line is explained by the one `substituted` entry and reports nothing.
    */
-  const explainedBy = (side: Side, other: Side, rel: string): boolean => {
+  const explainedBy = (side: DiffSide, other: DiffSide, rel: string): boolean => {
     const path = rel.split("/");
     return side.lines.anchors.some((a) =>
       other.lines.byKey.has(key(a.substitutedFor)) &&
@@ -945,17 +998,18 @@ function compareScope(
   };
 
   // ── Destination pairs ──
-  const pairsOf = (side: Side): Map<string, DocDestinationType> => {
+  const pairsOf = (side: DiffSide): Map<string, DocDestinationType> => {
     const m = new Map<string, DocDestinationType>();
     for (const p of side.doc.destinations as readonly (DocDestinationType | InvoiceDocDestinationType)[]) {
       if (side.kind === "invoice" && (p as InvoiceDocDestinationType).uid_order !== orderUid) continue;
+      if (side.kind === "bill" && (p as unknown as PurchaseDocDestination).uid_purchase !== orderUid) continue;
       m.set(p.uid, p);
     }
     return m;
   };
   const viewedPairs = pairsOf(viewed);
   const sourcePairs = pairsOf(source);
-  const involvesInvoice = viewed.kind === "invoice" || source.kind === "invoice";
+  const involvesInvoice = isBilling(viewed) || isBilling(source);
   /**
    * Legs on only one side (decision 7). Between the order and the fulfillment,
    * any leg. Against an invoice, only a leg the INVOICE authored
@@ -968,7 +1022,7 @@ function compareScope(
    */
   const oneSidedLegs = new Set<string>();
   if (involvesInvoice) {
-    const invoiceIsViewed = viewed.kind === "invoice";
+    const invoiceIsViewed = isBilling(viewed);
     const [mine, theirs] = invoiceIsViewed ? [viewedPairs, sourcePairs] : [sourcePairs, viewedPairs];
     for (const uid of invoiceLegs) {
       if (!mine.has(uid) || theirs.has(uid)) continue;
@@ -995,7 +1049,7 @@ function compareScope(
    * (decision 7). The ancestor's entry is the one fact; its descendants are not
    * listed again.
    */
-  const coveredByAncestor = (side: Side, other: Side, rel: string): boolean => {
+  const coveredByAncestor = (side: DiffSide, other: DiffSide, rel: string): boolean => {
     const path = rel.split("/");
     if (oneSidedLegs.has(path[0])) return true;
     for (let i = 1; i < path.length; i++) {
@@ -1007,7 +1061,7 @@ function compareScope(
 
   // Order ↔ downstream only: which side carries the substitutions, and the D2
   // quantity each downstream row that the order also carries should have.
-  const orderSide = viewed.kind === "order" ? viewed : source.kind === "order" ? source : undefined;
+  const orderSide = isInitiator(viewed) ? viewed : isInitiator(source) ? source : undefined;
   const downstream = orderSide === undefined ? undefined : orderSide === viewed ? source : viewed;
   const liveAnchors = downstream === undefined || orderSide === undefined
     ? []
@@ -1052,7 +1106,7 @@ function compareScope(
       if (explainedBy(viewed, source, rel) || explainedBy(source, viewed, rel)) continue;
       // Presence against invoices is a question about ALL of them: the
       // viewed order or fulfillment's `quantity` entry answers it.
-      if (source.kind === "invoice") continue;
+      if (isBilling(source)) continue;
       if (coveredByAncestor(viewed, source, rel)) continue;
       push(out.lines, viewedKey(rel), { source: sourceRef, kind: "not_on_source", fields: [] });
       continue;
@@ -1086,9 +1140,9 @@ function compareScope(
     const theirs = substituteAt(source, rel);
     if (theirs && viewed.lines.byKey.has(key(theirs.substitutedFor))) continue;
     if (explainedBy(source, viewed, rel)) continue;
-    if (viewed.kind === "invoice") {
+    if (isBilling(viewed)) {
       // The order or fulfillment has it and this invoice does not: a sibling may bill it.
-      if (covers(coverage, rel)) continue;
+      if (billed(rel)) continue;
       notInvoiced(rel, viewedKey(rel));
       continue;
     }
@@ -1125,13 +1179,17 @@ function compareScope(
  */
 export function computeDocumentDiffs(
   sources: DocumentDiffSources,
-  viewing: { kind: DocumentKind; uid: string },
+  viewing: { kind: DocumentViewKind; uid: string },
   context: DocumentDiffContext,
 ): DocumentDiffMap {
   const out: DocumentDiffMap = {
     lines: new Map(), pairs: new Map(), unaligned: [], status: [], doc: [], unplaced_out_of_service: [],
     credits: new Map(), unkeyed_credit_notes: [],
   };
+  if (viewing.kind === "purchase" || viewing.kind === "bill") {
+    payableDiffs(out, sources, { kind: viewing.kind, uid: viewing.uid }, context);
+    return out;
+  }
   const creditNotes = sources.creditNotes ?? [];
   const orders = sources.orders ?? [];
   const fulfillments = sources.fulfillments ?? [];
@@ -1306,7 +1364,7 @@ export function computeDocumentDiffs(
   };
 
   /** An order- or fulfillment-shaped viewed side against every invoice on its order. */
-  const againstInvoices = (viewed: Side, orderUid: string) => {
+  const againstInvoices = (viewed: DiffSide, orderUid: string) => {
     if (isCanceled(orderByUid.get(orderUid))) {
       for (const invoice of invoices) {
         if (invoiceScopes(invoice).includes(orderUid)) {
@@ -1327,7 +1385,7 @@ export function computeDocumentDiffs(
         viewed,
         { kind: "invoice", doc: invoice, lines: scopeInvoice(invoice, orderUid) },
         orderUid,
-        coverage,
+        (rel) => covers(coverage, rel),
         context,
         () => {},
         invoiceLegsOf(invoice, orderUid),
@@ -1347,10 +1405,10 @@ export function computeDocumentDiffs(
   if (viewing.kind === "order") {
     const order = orderByUid.get(viewing.uid);
     if (order === undefined) return out;
-    const viewed: Side = { kind: "order", doc: order, lines: scopeOrder(order) };
+    const viewed: DiffSide = { kind: "order", doc: order, lines: scopeOrder(order) };
     const fulfillment = fulfillmentByUid.get(order.uid);
     if (fulfillment !== undefined) {
-      compareScope(out, viewed, { kind: "fulfillment", doc: fulfillment, lines: scopeFulfillment(fulfillment) }, order.uid, coverageOf(order.uid), context, () => {});
+      compareScope(out, viewed, { kind: "fulfillment", doc: fulfillment, lines: scopeFulfillment(fulfillment) }, order.uid, (rel) => covers(coverageOf(order.uid), rel), context, () => {});
     }
     againstInvoices(viewed, order.uid);
     return out;
@@ -1359,10 +1417,10 @@ export function computeDocumentDiffs(
   if (viewing.kind === "fulfillment") {
     const fulfillment = fulfillmentByUid.get(viewing.uid);
     if (fulfillment === undefined) return out;
-    const viewed: Side = { kind: "fulfillment", doc: fulfillment, lines: scopeFulfillment(fulfillment) };
+    const viewed: DiffSide = { kind: "fulfillment", doc: fulfillment, lines: scopeFulfillment(fulfillment) };
     const order = orderByUid.get(fulfillment.uid);
     if (order !== undefined) {
-      compareScope(out, viewed, { kind: "order", doc: order, lines: scopeOrder(order) }, order.uid, coverageOf(order.uid), context, () => {});
+      compareScope(out, viewed, { kind: "order", doc: order, lines: scopeOrder(order) }, order.uid, (rel) => covers(coverageOf(order.uid), rel), context, () => {});
     }
     againstInvoices(viewed, fulfillment.uid);
     return out;
@@ -1371,7 +1429,7 @@ export function computeDocumentDiffs(
   const invoice = invoices.find((i) => i.uid === viewing.uid);
   if (invoice === undefined) return out;
   for (const orderUid of invoiceScopes(invoice)) {
-    const viewed: Side = { kind: "invoice", doc: invoice, lines: scopeInvoice(invoice, orderUid) };
+    const viewed: DiffSide = { kind: "invoice", doc: invoice, lines: scopeInvoice(invoice, orderUid) };
     const order = orderByUid.get(orderUid);
     // Without the order there is no path space to compare in — not even
     // against the fulfillment, which is joined THROUGH the order's paths. So
@@ -1391,7 +1449,7 @@ export function computeDocumentDiffs(
     const viewedKey = (rel: string) => (rel === "" ? orderUid : `${orderUid}/${rel}`);
     const notInvoiced = (rel: string, k: string) => quantityEntry(orderUid, coverage, rel, k);
     const invoiceLegs = invoiceLegsOf(invoice, orderUid);
-    compareScope(out, viewed, { kind: "order", doc: order, lines: scopeOrder(order) }, orderUid, coverage, context, notInvoiced, invoiceLegs);
+    compareScope(out, viewed, { kind: "order", doc: order, lines: scopeOrder(order) }, orderUid, (rel) => covers(coverage, rel), context, notInvoiced, invoiceLegs);
     // Each row this invoice carries reports the sum for the order line it bills —
     // its own path, or the line a substitute replaced.
     for (const [rel, at] of coverage.invoiced.byPath) {
@@ -1406,7 +1464,7 @@ export function computeDocumentDiffs(
         viewed,
         { kind: "fulfillment", doc: fulfillment, lines: scopeFulfillment(fulfillment) },
         orderUid,
-        coverage,
+        (rel) => covers(coverage, rel),
         context,
         notInvoiced,
         invoiceLegs,
@@ -1415,6 +1473,224 @@ export function computeDocumentDiffs(
     outOfServiceEntries(orderUid, coverage, viewedKey);
   }
   return out;
+}
+
+// ── The payable side ─────────────────────────────────────────────
+
+function readLeaf(root: unknown, path: string): unknown {
+  let v: unknown = root;
+  for (const s of path.split(".")) {
+    if (v === null || typeof v !== "object" || Array.isArray(v)) return undefined;
+    v = (v as Record<string, unknown>)[s];
+  }
+  return v;
+}
+
+/**
+ * The shared fields a bill line and its purchase line disagree on, `here` the
+ * bill line's. What the sync merges, read off the two schemas and projected to
+ * the bill's shape. A null parent (no discount on one side) compares the parent
+ * whole, as the merge does.
+ */
+function billLineFields(line: PurchaseDocumentItem, item: PurchaseItem): DocumentDiffField[] {
+  const there = projectPurchaseLineForBill(item, line.quantity);
+  const out: DocumentDiffField[] = [];
+  const seen = new Set<string>();
+  const isObj = (v: unknown) => v !== null && typeof v === "object" && !Array.isArray(v);
+  for (const f of purchaseBillSharedLineFields()) {
+    if (f.kind === "derived" || f.kind === "homonym") continue;
+    // `{quantity, amount_cents}` (the `flat_money` group) is what the `quantity`
+    // entry states, summed over every bill; a per-bill field entry would report
+    // every partial bill as a difference.
+    if (f.group !== undefined) continue;
+    const segs = f.path.split(".");
+    let unit = f.path;
+    for (let i = 1; i < segs.length; i++) {
+      const parent = segs.slice(0, i).join(".");
+      if (!isObj(readLeaf(line, parent)) || !isObj(readLeaf(there, parent))) {
+        unit = parent;
+        break;
+      }
+    }
+    if (seen.has(unit)) continue;
+    seen.add(unit);
+    const h = readLeaf(line, unit);
+    const t = readLeaf(there, unit);
+    if (JSON.stringify(canonicalizePayload(h)) !== JSON.stringify(canonicalizePayload(t))) {
+      out.push({ field: unit, here: h, there: t });
+    }
+  }
+  return out;
+}
+
+/** A linked time line's Xero amount against its own `rates × counts`: the one place a line's money can disagree with itself. */
+function linkedMoneyField(line: PurchaseDocumentItem, origin: PurchaseBill["origin"]): DocumentDiffField[] {
+  if (origin !== "linked" || line.price?.price_formula.basis !== "time") return [];
+  let expected: number;
+  try {
+    expected = priceFromFormula(line.price.rates, line.price.counts, 1, line.price.discount).subtotal_discounted_cents;
+  } catch {
+    return [{ field: "price.counts", here: line.price.counts, there: line.price.rates }];
+  }
+  return expected === line.amount_cents ? [] : [{ field: "amount_cents", here: line.amount_cents, there: expected }];
+}
+
+/** The `lineFields` arm for a bill against its purchase; `here` belongs to the viewed document. */
+function payableLineFields(viewed: DiffSide, source: DiffSide, here: LineItem, there: LineItem): DocumentDiffField[] {
+  const viewingBill = viewed.kind === "bill";
+  const line = (viewingBill ? here : there) as unknown as PurchaseDocumentItem;
+  const item = (viewingBill ? there : here) as unknown as PurchaseItem;
+  const origin = ((viewingBill ? viewed : source).doc as PurchaseBill).origin;
+  const fields = [...billLineFields(line, item), ...linkedMoneyField(line, origin)];
+  return viewingBill ? fields : fields.map((f) => ({ field: f.field, here: f.there, there: f.here }));
+}
+
+function scopePurchase(purchase: Purchase): ScopedLines {
+  const byKey = new Map<string, LineItem>();
+  for (const line of purchaseLines(purchase.items)) byKey.set(key(line.path), line as unknown as LineItem);
+  return { byKey, anchors: [], claims: new Map() };
+}
+
+function scopeBill(bill: PurchaseBill, uidPurchase: string): ScopedLines {
+  const byKey = new Map<string, LineItem>();
+  for (const line of purchaseDocumentLines(bill.items)) {
+    if (line.path[0] === uidPurchase) byKey.set(key(line.path.slice(1)), line as unknown as LineItem);
+  }
+  const claims = new Map<string, string>();
+  for (const [row, x] of orderLineClaims(bill.items as unknown as InvoiceItem[], uidPurchase, "path_purchase_item")) {
+    if (byKey.has(row)) claims.set(row, key(x));
+  }
+  return { byKey, anchors: [], claims };
+}
+
+/**
+ * A flat purchase line's units and money across every live bill, net of live
+ * credits, or `null` when they agree with what was ordered.
+ *
+ * 🔴 **`fulfilled` (the units received) is stated and is NEVER a trigger**, unlike
+ * the receivable entry: the owner bills before delivery as often as after, so a
+ * difference there is routine. A short close lowers `ordered` to what came, so
+ * billing past what was received then reads as billed ≠ ordered.
+ *
+ * Only once a live document names the line: a line nothing has billed is not a
+ * difference. A live credit with no live bill left under it reads as a negative
+ * `invoiced`, which is how a voided bill's stranded credit reaches the operator.
+ */
+function payableQuantityEntry(
+  uidPurchase: string,
+  item: PurchaseItem,
+  bills: readonly PurchaseBill[],
+  credits: readonly PurchaseCredit[],
+): DocumentQuantityEntry | null {
+  const k = purchaseLineKey(uidPurchase, item.path);
+  const names = (rows: PurchaseBill["items"]) => purchaseDocumentLines(rows).some((l) => purchaseLineKeyOf(l) === k);
+  const namingBills = bills.filter((b) => names(b.items));
+  const namingCredits = credits.filter((c) => names(c.items));
+  if (namingBills.length === 0 && namingCredits.length === 0) return null;
+  const net = purchaseLineBilledNet(item.path, { uid_purchase: uidPurchase, bills: namingBills, credits: namingCredits });
+  const ordered = item.quantity - item.quantity_canceled;
+  const expected_cents = Number(roundDivHalfUp(BigInt(item.amount_cents ?? 0) * BigInt(Math.max(0, net.quantity)), BigInt(item.quantity)));
+  if (net.quantity === ordered && net.amount_cents === expected_cents) return null;
+  return {
+    kind: "quantity",
+    invoices: namingBills.map((b) => refOf("bill", b)),
+    ordered,
+    fulfilled: item.type === "service" || item.type === "replacement" ? null : item.quantity_received,
+    invoiced: net.quantity,
+    quantity_cents: null,
+    extension_cents: null,
+    fulfilled_quantity_cents: null,
+    crms_blocked: false,
+    uid_out_of_service: null,
+    billed_cents: net.amount_cents,
+    expected_cents,
+    credit_sources: namingCredits.map((c) => refOf("purchase_credit", c)),
+  };
+}
+
+/**
+ * The diff from a purchase or a bill: the same comparison as the receivable side,
+ * over the payable documents. A TIME line's remainder is the bill writer's
+ * (`remainingTimeCounts`) and has no `quantity` entry yet; none is stored.
+ */
+function payableDiffs(
+  out: DocumentDiffMap,
+  sources: DocumentDiffSources,
+  viewing: { kind: "purchase" | "bill"; uid: string },
+  context: DocumentDiffContext,
+): void {
+  const purchases = sources.purchases ?? [];
+  const bills = sources.bills ?? [];
+  const liveBills = bills.filter(purchaseBillIsLive);
+  const liveCredits = (sources.purchaseCredits ?? []).filter(purchaseCreditIsLive);
+  const scopesOf = (bill: PurchaseBill) => deriveQueryByPurchases(bill.items);
+  // The `purchase` divider is the scope itself, as an invoice's `order` divider
+  // is; the predicates below compare what sits under it.
+  const scopedRows = (bill: PurchaseBill, uid: string) =>
+    bill.items.filter((r) => r.path[0] === uid && r.type !== "purchase") as unknown as InvoiceItem[];
+  const alignedTo = (bill: PurchaseBill, purchase: Purchase) =>
+    invoiceScopeDividersMatch(scopedRows(bill, purchase.uid), purchase.items as unknown as LineItem[], purchase.uid, "path_purchase_item");
+  const legsOf = (bill: PurchaseBill, purchase: Purchase) => {
+    const roots = invoiceAuthoredSubtrees(scopedRows(bill, purchase.uid), purchase.items as unknown as LineItem[], purchase.uid);
+    const types = new Map(scopedRows(bill, purchase.uid).map((r) => [key((r.path ?? []).slice(1)), r.type]));
+    return new Set(roots.filter((r) => r.length === 1 && types.get(key(r)) === "destination").map((r) => r[0]));
+  };
+  const isFlat = (item: PurchaseItem) => purchaseItemBasis(item) === "flat";
+  const billsOf = (uidPurchase: string) => liveBills.filter((b) => scopesOf(b).includes(uidPurchase));
+  const creditsOf = (uidPurchase: string) => liveCredits.filter((c) => purchaseCreditPurchaseUid(c) === uidPurchase);
+
+  if (viewing.kind === "purchase") {
+    const purchase = purchases.find((p) => p.uid === viewing.uid);
+    if (purchase === undefined) return;
+    const viewed: DiffSide = { kind: "purchase", doc: purchase, lines: scopePurchase(purchase) };
+    for (const bill of billsOf(purchase.uid)) {
+      if (!alignedTo(bill, purchase)) {
+        out.unaligned.push({ scope: purchase.uid, source: refOf("bill", bill) });
+        continue;
+      }
+      const source: DiffSide = { kind: "bill", doc: bill, lines: scopeBill(bill, purchase.uid) };
+      compareScope(out, viewed, source, purchase.uid, () => true, context, () => {}, legsOf(bill, purchase));
+    }
+    for (const item of purchaseLines(purchase.items)) {
+      if (!isFlat(item)) continue;
+      const entry = payableQuantityEntry(purchase.uid, item, billsOf(purchase.uid), creditsOf(purchase.uid));
+      if (entry !== null) push(out.lines, key(item.path), entry);
+    }
+    return;
+  }
+
+  // A voided bill is still viewable; it is just not summed.
+  const bill = bills.find((b) => b.uid === viewing.uid);
+  if (bill === undefined) return;
+  const scopes = new Set(scopesOf(bill));
+  for (const line of purchaseDocumentLines(bill.items)) {
+    // A line under no purchase divider is the bill's own.
+    if (!scopes.has(line.path[0])) {
+      const ref = purchases[0];
+      if (ref !== undefined) push(out.lines, key(line.path), { kind: "not_on_source", source: refOf("purchase", ref), fields: [] });
+    }
+  }
+  for (const uidPurchase of scopes) {
+    const purchase = purchases.find((p) => p.uid === uidPurchase);
+    if (purchase === undefined) continue;
+    if (!alignedTo(bill, purchase)) {
+      out.unaligned.push({ scope: uidPurchase, source: refOf("purchase", purchase) });
+      continue;
+    }
+    const viewed: DiffSide = { kind: "bill", doc: bill, lines: scopeBill(bill, uidPurchase) };
+    const source: DiffSide = { kind: "purchase", doc: purchase, lines: scopePurchase(purchase) };
+    // A purchase line this bill leaves out is no difference: bills are routinely partial.
+    compareScope(out, viewed, source, uidPurchase, () => true, context, () => {}, legsOf(bill, purchase));
+    const byKey = new Map(purchaseLines(purchase.items).map((i) => [purchaseLineKey(uidPurchase, i.path), i]));
+    for (const line of purchaseDocumentLines(bill.items)) {
+      if (line.path[0] !== uidPurchase) continue;
+      const lineKey = purchaseLineKeyOf(line);
+      const item = lineKey === null ? undefined : byKey.get(lineKey);
+      if (item === undefined || !isFlat(item)) continue;
+      const entry = payableQuantityEntry(uidPurchase, item, billsOf(uidPurchase), creditsOf(uidPurchase));
+      if (entry !== null) push(out.lines, key(line.path), entry);
+    }
+  }
 }
 
 /** Every keyable credit, per invoice row, plus the notes that could not be keyed. */

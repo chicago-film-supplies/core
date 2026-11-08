@@ -9,16 +9,13 @@
  * - {@link purchaseBillActionsFor} — on a bill;
  * - {@link purchaseCreditActionsFor} — on a supplier credit.
  *
- * ## ⚠️ There is no `assert*` here yet, unlike the invoice ruleset
+ * and an `assert*` per function, throwing `InvoiceActionRefusal`, that the API
+ * runs on its OPERATOR routes, so a button cannot be offered that the server
+ * refuses. The same shape as the receivable ruleset (`utils/invoice-actions.ts`),
+ * which shares its refusal class and its $0 close rule.
  *
- * The invoice module's guarantee is that a button cannot be offered that the
- * server refuses, because the route asserts the same functions. This one has
- * that guarantee for three rules only: {@link purchaseItemTouched},
- * {@link purchaseBillVoidRefusal} and {@link purchaseBillPushRefusal} are shared
- * with the API. Every other rule here
- * is a statement of what `api-cloudrun/src/services/purchases.ts` and
- * `purchaseCredits.ts` refuse, matched by hand and pinned by tests on both
- * sides.
+ * ⚠️ `assert*` belongs on operator routes only, never on a Xero webhook or sweep:
+ * an operator's policy is not the ledger's legality.
  *
  * ## Rules every caller keeps
  *
@@ -49,6 +46,7 @@ import {
   purchaseBillIsLive,
   purchaseLineBilledNet,
 } from "./purchase-documents.ts";
+import { closeRefusal, InvoiceActionRefusal } from "./invoice-actions.ts";
 import type { PurchaseBillXeroSyncStatus } from "./purchase-bill-xero-sync.ts";
 import { remainingToBill, remainingToReceive, remainingToReturn } from "./purchases.ts";
 
@@ -96,7 +94,7 @@ export interface PurchaseOfferContext {
  * own `item.path`. A bill may bill several purchases, hence the scope.
  */
 export function purchaseBilledPaths(
-  bills: readonly Pick<PurchaseBill, "totals" | "items" | "voided_at">[],
+  bills: readonly Pick<PurchaseBill, "totals" | "items" | "status">[],
   uidPurchase: string,
 ): Set<string> {
   const prefix = `${uidPurchase}/`;
@@ -297,10 +295,16 @@ export function purchaseBillPushRefusal(
   return null;
 }
 
+/** Why a closed $0 bill may not be reopened, or `null` when it may. */
+export function purchaseBillReopenRefusal(bill: Pick<PurchaseBill, "number" | "totals">): string | null {
+  return (bill.totals.closure_count ?? 0) > 0 ? null : `Bill ${bill.number} is not marked paid.`;
+}
+
 /**
  * Everything an operator may do to a bill: spend credit on it while it is a live
  * ACCPAY with money due, void it unless {@link purchaseBillVoidRefusal} says
- * otherwise, and push it while {@link purchaseBillPushRefusal} allows.
+ * otherwise, mark a $0 bill paid and reopen it, and push it while
+ * {@link purchaseBillPushRefusal} allows.
  */
 export function purchaseBillActionsFor(
   bill: PurchaseBillActionBill & Pick<PurchaseBill, "xero_document">,
@@ -311,6 +315,8 @@ export function purchaseBillActionsFor(
     offers.push({ key: "allocate_credit", action: "allocate_credit", max_cents: bill.totals.amount_due_cents });
   }
   if (purchaseBillVoidRefusal(bill, ctx) === null) offers.push({ key: "void_bill", action: "void_bill" });
+  if (closeRefusal(bill, "bill") === null) offers.push({ key: "close_bill", action: "close_bill" });
+  if (purchaseBillReopenRefusal(bill) === null) offers.push({ key: "reopen_bill", action: "reopen_bill" });
   if (ctx.xero_sync_status !== undefined && purchaseBillPushRefusal(bill, ctx.xero_sync_status) === null) {
     offers.push({ key: "push_to_xero", action: "push_to_xero" });
   }
@@ -321,6 +327,78 @@ export function purchaseBillActionsFor(
 export function purchaseCreditActionsFor(
   credit: Pick<PurchaseCredit, "status" | "total_cents" | "remaining_credit_cents">,
 ): PurchaseActionOffer[] {
-  if (credit.status === "void" || credit.remaining_credit_cents !== credit.total_cents) return [];
-  return [{ key: "void_credit", action: "void_credit" }];
+  return purchaseCreditVoidRefusal(credit) === null ? [{ key: "void_credit", action: "void_credit" }] : [];
+}
+
+/** A credit nothing has drawn on, or why not. */
+function purchaseCreditVoidRefusal(credit: Pick<PurchaseCredit, "status" | "total_cents" | "remaining_credit_cents">): string | null {
+  if (credit.status === "void") return "The credit is already void.";
+  if (credit.remaining_credit_cents !== credit.total_cents) {
+    return "The credit has been allocated or refunded. Remove those first, as Xero itself requires.";
+  }
+  return null;
+}
+
+/** What an operator route asks to do to a purchase. Over-billing is a difference, never a refusal, so `bill_item` is not capped here. */
+export type PurchaseActionRequest =
+  | { action: "close" | "add_bill" | "add_credit" }
+  | { action: "close_item" | "remove_item" | "change_basis"; uid_item: string };
+
+/** Refuse a purchase action the ruleset does not offer. Operator routes only. */
+export function assertPurchaseAction(
+  purchase: Parameters<typeof purchaseActionsFor>[0],
+  ctx: PurchaseOfferContext,
+  request: PurchaseActionRequest,
+): void {
+  const k = "uid_item" in request ? `${request.action}:${request.uid_item}` : request.action;
+  if (purchaseActionsFor(purchase, ctx).some((o) => o.key === k)) return;
+  throw new InvoiceActionRefusal(request.action, `"${request.action}" is not legal on this ${purchase.status} purchase as it stands`);
+}
+
+/** What an operator route asks to do to a bill. */
+export type PurchaseBillActionRequest =
+  | { action: "void_bill" | "close_bill" | "reopen_bill" }
+  | { action: "push_to_xero"; status: PurchaseBillXeroSyncStatus }
+  | { action: "allocate_credit"; amount_cents: number };
+
+/** Refuse a bill action the ruleset does not offer, or one past its limit. Operator routes only. */
+export function assertPurchaseBillAction(
+  bill: PurchaseBillActionBill & Pick<PurchaseBill, "xero_document">,
+  ctx: PurchaseBillContext,
+  request: PurchaseBillActionRequest,
+): void {
+  const refuse = (message: string): never => {
+    throw new InvoiceActionRefusal(request.action, message);
+  };
+  const why = (reason: string | null) => {
+    if (reason !== null) refuse(reason);
+  };
+  switch (request.action) {
+    case "void_bill":
+      return why(purchaseBillVoidRefusal(bill, ctx));
+    case "close_bill":
+      return why(closeRefusal(bill, "bill"));
+    case "reopen_bill":
+      return why(purchaseBillReopenRefusal(bill));
+    case "push_to_xero":
+      return why(purchaseBillPushRefusal(bill, request.status));
+    case "allocate_credit": {
+      if (request.amount_cents <= 0) refuse("an allocation must be more than $0");
+      const offer = purchaseBillActionsFor(bill, ctx).find((o) => o.key === "allocate_credit") ??
+        refuse(`Bill ${bill.number} has nothing due to allocate credit to.`);
+      if (request.amount_cents > offer.max_cents!) {
+        refuse(`an allocation of ${request.amount_cents} cents exceeds the ${offer.max_cents} cents due`);
+      }
+      return;
+    }
+  }
+}
+
+/** Refuse a supplier-credit action the ruleset does not offer. Operator routes only. */
+export function assertPurchaseCreditAction(
+  credit: Pick<PurchaseCredit, "status" | "total_cents" | "remaining_credit_cents">,
+  request: { action: "void_credit" },
+): void {
+  const why = purchaseCreditVoidRefusal(credit);
+  if (why !== null) throw new InvoiceActionRefusal(request.action, why);
 }

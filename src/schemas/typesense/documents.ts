@@ -1178,6 +1178,7 @@ export interface PurchaseBillDocument {
   number: number;
   number_str?: string;
   number_purchases: number[];
+  status: string;
   supplier: { uid?: string; name: string };
   origin: string;
   xero_document: string;
@@ -1210,7 +1211,6 @@ export interface PurchaseCreditDocument {
   uid: string;
   number: number;
   number_str?: string;
-  uid_purchase: string;
   supplier: { uid?: string; name: string };
   origin: string;
   reason: string;

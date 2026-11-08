@@ -78,7 +78,7 @@ export type PurchaseBillXeroSyncStatus = "in_sync" | "out_of_sync" | "unknown" |
  * (`purchaseBillPushRefusal`, `@cfs/core/utils/purchase-actions`).
  */
 export function purchaseBillXeroSyncStatus(
-  bill: PurchaseBillXeroFields & Pick<PurchaseBill, "origin" | "xero_id" | "totals" | "voided_at">,
+  bill: PurchaseBillXeroFields & Pick<PurchaseBill, "origin" | "xero_id" | "totals" | "status">,
   state: Pick<XeroSyncState, "pushed_projection_hash"> | null,
 ): PurchaseBillXeroSyncStatus {
   if (bill.origin !== "pushed" || !purchaseBillIsLive(bill)) return "not_applicable";

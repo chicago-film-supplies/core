@@ -80,7 +80,7 @@ Deno.test("D7 tracks_xero_edits: literal per status, and non-null exactly where 
   const statuses = Object.keys(INVOICE_STATUS_CONTRACTS) as InvoiceStatusType[];
   assertEquals(
     Object.fromEntries(statuses.map((s) => [s, INVOICE_STATUS_CONTRACTS[s].tracks_xero_edits])),
-    { draft: null, issued: "always", part_paid: "always", paid: "once_pushed", void: null },
+    { draft: null, issued: "always", part_paid: "always", paid: "once_pushed", credited: "once_pushed", void: null },
   );
   for (const s of statuses) {
     const c = INVOICE_STATUS_CONTRACTS[s];

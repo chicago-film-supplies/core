@@ -32,6 +32,8 @@ export const PURCHASE_ACTION_IDS = [
   // on a bill
   "allocate_credit",
   "void_bill",
+  "close_bill",
+  "reopen_bill",
   "push_to_xero",
   // on a supplier credit
   "void_credit",
@@ -66,6 +68,8 @@ export const PURCHASE_ACTIONS: Readonly<Record<PurchaseActionId, PurchaseActionD
   change_basis: { subject: "purchase_item", description: "Move a line with no history between flat and time." },
   allocate_credit: { subject: "purchase_bill", description: "Spend supplier credit on a live bill with money due." },
   void_bill: { subject: "purchase_bill", description: "Void a pushed bill nothing has settled." },
+  close_bill: { subject: "purchase_bill", description: "Mark a $0 bill paid." },
+  reopen_bill: { subject: "purchase_bill", description: "Reopen a $0 bill marked paid." },
   push_to_xero: { subject: "purchase_bill", description: "Ask for a bill Xero is behind on to be pushed again." },
   void_credit: { subject: "purchase_credit", description: "Void a credit nothing has drawn on." },
 };

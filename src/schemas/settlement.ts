@@ -353,7 +353,9 @@ function checkSettlementContract(s: Settlement, ctx: z.RefinementCtx): void {
   // the rule was always about — the credit bucket was a proxy for it — and it is
   // `false` by declaration on every type that is not a credit or refund, so a
   // new type still defaults to being CHECKED.
-  if (!contract.draws_credit) {
+  const drawsNote = contract.draws_credit && !payable;
+  const drawsSupplierCredit = contract.draws_credit && payable;
+  if (!drawsNote) {
     for (const field of ["uid_credit_note", "number_credit_note"] as const) {
       if (s[field] !== null) {
         ctx.addIssue({
@@ -366,14 +368,14 @@ function checkSettlementContract(s: Settlement, ctx: z.RefinementCtx): void {
   }
   // The payable twin. A `bill_credit` names the supplier credit it draws, and a
   // `supplier_refund` the one it settles; nothing else may name one.
-  if (!contract.draws_purchase_credit && s.uid_purchase_credit !== null) {
+  if (!drawsSupplierCredit && s.uid_purchase_credit !== null) {
     ctx.addIssue({
       code: "custom",
       path: ["uid_purchase_credit"],
       message: `a "${s.type}" does not draw on a supplier credit and cannot reference one`,
     });
   }
-  if (contract.draws_purchase_credit && s.uid_purchase_credit === null) {
+  if (drawsSupplierCredit && s.uid_purchase_credit === null) {
     ctx.addIssue({
       code: "custom",
       path: ["uid_purchase_credit"],

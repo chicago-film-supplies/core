@@ -108,7 +108,7 @@ const CREDIT_NOTE_STATUS_REFINE: EnforcementRef = {
 
 /**
  * The note's projection, corpus-wide: every note's stored
- * `remaining_credit_cents` equals `creditNoteRemainingFromJournal` over the rows
+ * `remaining_credit_cents` equals `creditRemainingFromJournal` over the rows
  * naming it, plus parity with Xero's `RemainingCredit` where the note is linked.
  * Possible only once refunds are rows (api-cloudrun#1207) — before that a cash
  * refund consumed a note invisibly, and the fold disagreed on CN-1013 and CN-1016
@@ -252,7 +252,7 @@ const allocateCreditNoteRules: CollectionRule[] = [
     target: "credit-notes",
     mode: "co-write",
     invariant:
-      "The note's `remaining_credit_cents` tracks its UNREVERSED allocations, and it does so through two writers rather than one: `allocate-credit-note` subtracts what a request consumed, and `reverse-settlement` adds back what a retraction released. Both are DELTAS applied under compare-and-set, outside the per-invoice transactions, so concurrent writers compose instead of clobbering (api-cloudrun#545). ⚠️ The reversal leg is the half that is easy to omit — without it a retracted allocation restores the invoice and strands the note's credit forever, and a note driven to zero then refuses every future allocation. Since api-cloudrun#1207 it IS also a fold over the journal — a cash refund is a `refund` row, so `creditNoteRemainingFromJournal` rebuilds it and `audit-credit-note-remaining.ts` checks it — but the writers still apply deltas, because the fold needs every row and the CAS needs only this request's. `applied` means remaining_credit_cents === 0 HOWEVER it got there, by allocation or by cash refund.",
+      "The note's `remaining_credit_cents` tracks its UNREVERSED allocations, and it does so through two writers rather than one: `allocate-credit-note` subtracts what a request consumed, and `reverse-settlement` adds back what a retraction released. Both are DELTAS applied under compare-and-set, outside the per-invoice transactions, so concurrent writers compose instead of clobbering (api-cloudrun#545). ⚠️ The reversal leg is the half that is easy to omit — without it a retracted allocation restores the invoice and strands the note's credit forever, and a note driven to zero then refuses every future allocation. Since api-cloudrun#1207 it IS also a fold over the journal — a cash refund is a `refund` row, so `creditRemainingFromJournal` rebuilds it and `audit-credit-note-remaining.ts` checks it — but the writers still apply deltas, because the fold needs every row and the CAS needs only this request's. `applied` means remaining_credit_cents === 0 HOWEVER it got there, by allocation or by cash refund.",
     enforced_by: [CREDIT_NOTE_STATUS_REFINE],
     transaction: "allocate-credit-note",
     fields: [

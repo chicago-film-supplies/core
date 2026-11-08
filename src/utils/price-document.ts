@@ -100,6 +100,7 @@ import {
   type RateSnapshot,
   type TierCount,
 } from "./price-formulas.ts";
+import { isPaidUp } from "../schemas/_invoice-freeze.ts";
 import { pairItemsAcrossRebuild, type PathedItem } from "./item-pairing.ts";
 import { assignLineTaxes, type DocumentTaxContext, type UnreviewedTaxWarning } from "./taxes.ts";
 import { pricingTaxesOf, type TaxCatalog } from "./tax-classes.ts";
@@ -366,7 +367,7 @@ export interface PricedDocument<T> {
 export function invoiceRepriceRefusal(document: PriceDocumentKind): string | null {
   if (document.kind !== "invoice") return null;
   if (document.status === "void") return "Cannot price a void invoice: its money is retracted, not re-priced";
-  if (document.status === "paid" || document.has_settlement) {
+  if (isPaidUp(document.status) || document.has_settlement) {
     return `Cannot price a settled invoice (status "${document.status}"): its money is agreed. ` +
       "Void it and issue a new one, or reverse the settlement first";
   }
@@ -589,7 +590,7 @@ export interface ChargeWindowPairViolation {
  */
 function keepsStoredLineDays(document: ReceivableDocumentKind): boolean {
   if (document.kind === "order") return TERMINAL_ORDER_STATUSES.includes(document.status);
-  return document.status === "void" || document.status === "paid" || document.has_settlement;
+  return document.status === "void" || isPaidUp(document.status) || document.has_settlement;
 }
 
 /** Two count lists name the same tiers with the same exact values. */

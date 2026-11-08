@@ -89,22 +89,21 @@ import {
 } from "./substitutions.ts";
 import { closestAncestor, mapPathsAcrossRebuild, pairItemsAcrossRebuild } from "./item-pairing.ts";
 import { interleaveStoredOnlyRows } from "./stored-only-rows.ts";
-import type { COARevenueType, CreditNoteStatusType, DocDestinationType, FirestoreTimestampType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, SettlementReasonType, SettlementTargetType, SettlementTypeType, SubstitutedForEntryType, PurchaseCreditStatusType } from "../schemas/mod.ts";
+import type { COARevenueType, CreditNoteStatusType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, SettlementReasonType, SettlementTargetType, SettlementTypeType, SubstitutedForEntryType, PurchaseCreditStatusType } from "../schemas/mod.ts";
 import {
   getSettlementMultiplier,
   INVOICE_FIELD_FREEZE,
   type InvoiceFieldClass,
-  PURCHASE_BILL_FIELD_FREEZE,
-  type PurchaseBillFieldClass,
-  type PurchaseBillStatusType,
   InvoiceSchema,
   isDividerItemType,
   isLineItemType,
   OrderSchema,
   SETTLEMENT_CONTRACTS,
+  SETTLEMENT_TARGET_SIDE,
+  type Side,
 } from "../schemas/mod.ts";
 import { fromCentsBig, roundDivHalfAwayFromZero } from "./money.ts";
-import { invoiceHasMoneySettlement, invoiceIsFrozen, type InvoiceSettledTotals } from "../schemas/_invoice-freeze.ts";
+import { invoiceIsFrozen, type InvoiceSettledTotals } from "../schemas/_invoice-freeze.ts";
 import { canonicalChargeWindows, chicagoDaysBetween } from "./dates.ts";
 import {
   classifySharedFields,
@@ -259,10 +258,12 @@ export function rederiveInvoiceTotalsForAudit(
 // without importing this module, which imports the schemas. Re-exported here so
 // every caller keeps its import path.
 export {
+  deriveInvoiceStatus,
   invoiceHasMoneySettlement,
   invoiceHasSettlement,
   invoiceIsFrozen,
   type InvoiceSettledTotals,
+  isPaidUp,
 } from "../schemas/_invoice-freeze.ts";
 
 /**
@@ -288,63 +289,12 @@ export function invoiceFieldIsFrozen(
 }
 
 /**
- * What {@link purchaseBillIsLive} reads. ⚠️ `voided_at` is an optional key, so a
- * `Pick` that leaves it out still compiles and silently reads a $0 void as live.
- * Name it in every narrowed type that reaches this predicate.
+ * **Is this bill live — not voided?** The ONE liveness rule, for every "already
+ * billed" reader. Declared here rather than in `utils/purchase-documents.ts`
+ * (which re-exports it) because that module imports this one.
  */
-export interface PurchaseBillLiveness {
-  totals: { amount_void_cents?: number };
-  voided_at?: FirestoreTimestampType;
-}
-
-/**
- * **Is this bill live — not voided?** The ONE liveness rule: every "already
- * billed" reader, {@link purchaseBillIsFrozen} and {@link derivePurchaseBillStatus}
- * ask it. Declared here rather than in `utils/purchase-documents.ts` (which
- * re-exports it) because that module imports this one.
- *
- * The stamp is read first and the money second. A $0 bill's `bill_void` folds to
- * `amount_void_cents: 0`, so the money alone reads it live for ever; the money
- * stays a term because a bill voided before `voided_at` existed carries no stamp.
- */
-export function purchaseBillIsLive(bill: PurchaseBillLiveness): boolean {
-  return bill.voided_at === undefined && (bill.totals.amount_void_cents ?? 0) === 0;
-}
-
-/**
- * 🔴 **Is this purchase bill frozen?** — the invoice's money predicate over the
- * bill's totals (D10, owner 2026-10-28), so a bill freezes exactly when an
- * invoice with the same settled money would, plus a voided bill of any amount.
- *
- * Not a copy: a bill's `totals` already fit {@link InvoiceSettledTotals}, so the
- * money half IS {@link invoiceHasMoneySettlement}. The terms a bill lacks drop out
- * by themselves — it has no `status` (so {@link purchaseBillIsLive} stands in for
- * `void`) and no `closure_count`. It tests the settled VALUE, so a payment
- * reversed to zero unfreezes, and `xero_id` is not a term (invoice parity). A
- * born-paid `bank_transaction` bill carries its `bill_payment` from creation, so
- * it is frozen from birth — correctly, since the money is already settled.
- */
-export function purchaseBillIsFrozen(bill: { totals: InvoiceSettledTotals; voided_at?: FirestoreTimestampType }): boolean {
-  return invoiceHasMoneySettlement(bill) || !purchaseBillIsLive(bill);
-}
-
-/**
- * **May an operator still change fields of this class on this bill?** — the
- * accessor over `PURCHASE_BILL_FIELD_FREEZE` (`@cfs/core/schemas`), and the only
- * way to read it. `true` means frozen.
- */
-export function purchaseBillFieldIsFrozen(
-  bill: { totals: InvoiceSettledTotals; voided_at?: FirestoreTimestampType },
-  cls: PurchaseBillFieldClass,
-): boolean {
-  switch (PURCHASE_BILL_FIELD_FREEZE[cls].frozen_when) {
-    case "frozen":
-      return purchaseBillIsFrozen(bill);
-    case "void":
-      return !purchaseBillIsLive(bill);
-    case "never":
-      return false;
-  }
+export function purchaseBillIsLive(bill: { status: InvoiceStatusType }): boolean {
+  return bill.status !== "void";
 }
 
 /**
@@ -365,55 +315,6 @@ export function liveSettlements<T extends { uid: string; reverses: string | null
     settlements.map((s) => s.reverses).filter((r): r is string => r !== null),
   );
   return settlements.filter((s) => !reversed.has(s.uid));
-}
-
-/**
- * Derive an invoice's status from its stored status and its settled totals.
- * Pure function — does not mutate the invoice. **Replaced `derivePaymentStatus`**
- * (api-cloudrun#1169), taking the same argument shape as {@link invoiceIsFrozen}
- * so no caller can hand it a partial set of the buckets.
- *
- * - `draft` and `void` pass through: leaving either is an explicit move, never a
- *   derivation.
- * - 🔴 **A $0 invoice with nothing money-settled is `paid` only if an operator
- *   CLOSED it** (`closure_count > 0`), and `issued` otherwise — never from
- *   `amount_due_cents <= 0`. That comparison is what made #2396 read `paid`: a
- *   shrink invoice whose lines were all removed reached $0 due, the Xero webhook
- *   re-derived `paid`, and the freeze locked the operator out of their own edit.
- *   Xero marks every $0 invoice PAID on issue (probed 2026-10-01), so copying
- *   Xero's verdict here would reproduce it on every one.
- * - Otherwise: `amount_due_cents <= 0` ⇒ `paid` (`paid` means nothing owed, not
- *   "cash received" — #1751 and #1322 are PAID in Xero with `AmountPaid: 0`);
- *   any cash or credit ⇒ `part_paid`; else `issued`.
- *
- * `amount_due_cents` is RE-COMPUTED here from `total − paid − credited − voided`
- * when `total_cents` is present rather than read, so a caller holding a stale
- * `amount_due_cents` beside fresh buckets cannot derive from the stale one.
- */
-export function deriveInvoiceStatus(
-  invoice: { status: InvoiceStatusType; totals: InvoiceSettledTotals & { total_cents: number } },
-): InvoiceStatusType {
-  const { status, totals } = invoice;
-  if (status === "draft" || status === "void") return status;
-  const paid = totals.amount_paid_cents;
-  const credited = totals.amount_credited_cents ?? 0;
-  const voided = totals.amount_void_cents ?? 0;
-  if (totals.total_cents === 0 && !invoiceHasMoneySettlement(invoice)) {
-    return (totals.closure_count ?? 0) > 0 ? "paid" : "issued";
-  }
-  // Bare integer comparisons: every operand is an exact count of cents.
-  const due = totals.total_cents - paid - credited - voided;
-  if (due <= 0) return "paid";
-  // A partially-credited invoice is as much "part paid" as a partially-paid one
-  // — the operator's question is "has anything settled this yet?"
-  // ⚠️ Deliberately `> 0`, NOT {@link invoiceHasMoneySettlement}'s `!== 0`: that
-  // predicate asks whether money MOVED (a net-negative over-reversal did move
-  // money, so it still freezes), while this asks whether anything is PAID
-  // toward the balance. A negative bucket leaves MORE due than the total, which
-  // is not part paid. A partial void is a retraction, not a payment, so it does
-  // not count here either.
-  if (paid > 0 || credited > 0) return "part_paid";
-  return "issued";
 }
 
 /**
@@ -496,8 +397,8 @@ export function recomputeSettlementTotals(
  * ⚠️ **Refuses any row that does not settle a `purchase_bill`** — a receivable
  * row, or a `supplier_refund` — rather than skipping it, for the reason the
  * invoice fold refuses a refund: such a row reaching here means the caller read
- * settlements by something other than `uid_purchase_bill`. There is no closure
- * count; no payable type feeds one.
+ * settlements by something other than `uid_purchase_bill`. `bill_closure` feeds
+ * `closure_count`, exactly as an invoice's `closure` does.
  *
  * @param totalCents - The bill's `totals.total_cents`
  * @param settlements - Every settlement naming the bill, reversals included
@@ -514,10 +415,10 @@ export function recomputePurchaseBillTotals(
   amount_credited_cents: number;
   amount_void_cents: number;
   amount_due_cents: number;
+  closure_count: number;
   breakdown: Partial<Record<SettlementReasonType, number>>;
 } {
-  const { closure_count: _none, ...totals } = foldSettlements("purchase_bill", totalCents, settlements);
-  return totals;
+  return foldSettlements("purchase_bill", totalCents, settlements);
 }
 
 /** A target as prose, for the fold's refusal message. */
@@ -615,29 +516,31 @@ function foldSettlements(
 }
 
 /**
- * A credit note's unconsumed credit, folded from the journal (api-cloudrun#1207):
- * `total − Σ signed draws`, over every row that draws on the note's credit
- * (`SettlementContract.draws_credit` — `credit`, `refund` and their reversals).
+ * **A credit document's unconsumed credit, folded from the journal** — for a
+ * customer credit note and a supplier credit alike: `total − Σ signed draws`
+ * over every row of that side with `SettlementContract.draws_credit`
+ * (`credit`, `refund`, `bill_credit`, `supplier_refund` and their reversals).
  *
- * This is what `CreditNote.remaining_credit_cents` is a projection of. It could
- * not be, until refunds were rows: a cash refund consumed a note without
- * appending anything, so CN-1013 and CN-1016 sat `applied` with zero rows naming
- * them and a fold handed both their full credit back (api-cloudrun#469).
+ * This is what `remaining_credit_cents` is a projection of. It could not be on
+ * the receivable side until refunds were rows: a cash refund consumed a note
+ * without appending anything, so CN-1013 and CN-1016 sat `applied` with zero
+ * rows naming them and a fold handed both their full credit back
+ * (api-cloudrun#469).
  *
- * **A voided note folds to whatever its rows say, which is `total`** — a note
+ * **A voided document folds to whatever its rows say, which is `total`** — it
  * voids only with no live allocation and no live refund, so its draws net to 0.
  * Voiding strands the balance rather than consuming it.
  *
- * Rows that do not draw credit are skipped, not refused: a caller reading by
- * `uid_credit_note` sees only drawing rows anyway, and skipping lets a caller
- * pass a mixed list. **Negative results are preserved, never clamped** — an
- * over-allocated note must stay visible, as {@link recomputeSettlementTotals}
- * preserves an over-credited invoice.
+ * Rows that do not draw this side's credit are skipped, not refused: a caller
+ * reading by the document's key sees only drawing rows anyway, and skipping lets
+ * a caller pass a mixed list. **Negative results are preserved, never clamped**.
  *
- * @param totalCents - The note's `totals.total_cents`
- * @param settlements - Every settlement naming the note, reversals included
+ * @param side - Which side's credit: `receivable` (a note) or `payable`
+ * @param totalCents - The document's total
+ * @param settlements - Every settlement naming it, reversals included
  */
-export function creditNoteRemainingFromJournal(
+export function creditRemainingFromJournal(
+  side: Side,
   totalCents: number,
   settlements: readonly { type: SettlementTypeType; amount_cents: number }[],
 ): number {
@@ -645,7 +548,7 @@ export function creditNoteRemainingFromJournal(
   for (const s of settlements) {
     const contract = SETTLEMENT_CONTRACTS[s.type];
     if (!contract) throw new Error(`unknown settlement type: ${s.type}`);
-    if (!contract.draws_credit) continue;
+    if (!contract.draws_credit || SETTLEMENT_TARGET_SIDE[contract.settles] !== side) continue;
     drawnCents += s.amount_cents * getSettlementMultiplier(s.type);
   }
   return totalCents - drawnCents;
@@ -694,60 +597,6 @@ export function derivePurchaseCreditStatus(
 ): PurchaseCreditStatusType {
   if (credit.status === "void") return "void";
   return remainingCents === 0 && credit.total_cents > 0 ? "applied" : "issued";
-}
-
-/**
- * **A bill's status, derived** — a bill stores none, so this reads the folded
- * totals: `void` once a void is folded, `unpaid` with nothing settled toward it,
- * `part_paid` while money is still due, then `paid`, or `credited` when supplier
- * credit alone settled it.
- *
- * The due amount is recomputed from the buckets, as {@link deriveInvoiceStatus}
- * does, and the `> 0` tests carry that function's reasoning: a negative bucket
- * leaves more due than the total, which is not part paid.
- *
- * A $0 bill with nothing settled reads `unpaid`, the twin of an invoice's
- * `issued`: bills have no closure row, so nothing can read it `paid`.
- */
-export function derivePurchaseBillStatus(
-  bill: { totals: InvoiceSettledTotals & { total_cents: number }; voided_at?: FirestoreTimestampType },
-): PurchaseBillStatusType {
-  if (!purchaseBillIsLive(bill)) return "void";
-  const { totals } = bill;
-  const paid = totals.amount_paid_cents;
-  const credited = totals.amount_credited_cents ?? 0;
-  if (paid <= 0 && credited <= 0) return "unpaid";
-  if (totals.total_cents - paid - credited > 0) return "part_paid";
-  return paid > 0 ? "paid" : "credited";
-}
-
-/**
- * A supplier credit's unconsumed credit, folded from the journal
- * (api-cloudrun#1210) — the payable twin of {@link creditNoteRemainingFromJournal}:
- * `total − Σ signed draws` over every row with `draws_purchase_credit`
- * (`bill_credit`, `supplier_refund` and their reversals). Because a supplier's
- * cash refund is a `supplier_refund` row, `PurchaseCredit.remaining_credit_cents`
- * is rebuildable from the journal from the first document — the AR note could
- * not be until api-cloudrun#1207.
- *
- * Rows that do not draw a supplier credit are skipped, not refused, exactly as
- * the AR twin skips. Negative results are preserved, never clamped.
- *
- * @param totalCents - The credit's `total_cents`
- * @param settlements - Every settlement naming the credit, reversals included
- */
-export function purchaseCreditRemainingFromJournal(
-  totalCents: number,
-  settlements: readonly { type: SettlementTypeType; amount_cents: number }[],
-): number {
-  let drawnCents = 0;
-  for (const s of settlements) {
-    const contract = SETTLEMENT_CONTRACTS[s.type];
-    if (!contract) throw new Error(`unknown settlement type: ${s.type}`);
-    if (!contract.draws_purchase_credit) continue;
-    drawnCents += s.amount_cents * getSettlementMultiplier(s.type);
-  }
-  return totalCents - drawnCents;
 }
 
 // ── Xero helpers ────────────────────────────────────────────────
@@ -2919,6 +2768,7 @@ export function invoiceScopeDividersMatch(
   scopedInvoiceItems: InvoiceItem[],
   orderItems: LineItem[],
   orderDividerUid: string,
+  pointerKey: keyof MovePointerCarrier = "path_order_item",
 ): boolean {
   // An extension section reads as the order divider it extends, so a scope
   // holding both that divider and its extension collapses to one key, and a
@@ -2965,7 +2815,7 @@ export function invoiceScopeDividersMatch(
     orderLinePaths.add(itemPathKey(it.path ?? []));
     if (missing.some((m) => isStrictlyBelow(it.path ?? [], m))) uidsUnderMissing.add(it.uid);
   }
-  const claims = orderLineClaims(scopedInvoiceItems, orderDividerUid);
+  const claims = orderLineClaims(scopedInvoiceItems, orderDividerUid, pointerKey);
   for (const it of scopedInvoiceItems) {
     if (isDividerItemType(it.type)) continue;
     const path = it.path ?? [];

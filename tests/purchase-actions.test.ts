@@ -4,9 +4,12 @@
  * `purchaseItemTouched`, `purchaseBillVoidRefusal` and `purchaseBillPushRefusal`;
  * the module docblock says so.
  */
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
   type PurchaseActionItem,
+  assertPurchaseAction,
+  assertPurchaseBillAction,
+  assertPurchaseCreditAction,
   purchaseActionsFor,
   purchaseBillActionsFor,
   purchaseBillPushRefusal,
@@ -16,11 +19,11 @@ import {
   purchaseItemClosable,
   purchaseItemTouched,
 } from "../src/utils/purchase-actions.ts";
-import { derivePurchaseBillStatus } from "../src/utils/purchases.ts";
+import { deriveInvoiceStatus } from "../src/utils/invoices.ts";
+import { InvoiceActionRefusal } from "../src/utils/invoice-actions.ts";
 import {
   PURCHASE_ACTION_IDS,
   PURCHASE_ACTIONS,
-  PURCHASE_BILL_STATUSES,
   type PurchaseBill,
   type PurchaseCredit,
   type PurchaseDocumentItem,
@@ -94,8 +97,8 @@ Deno.test("purchaseBilledPaths: a voided bill names nothing; another purchase's 
   const elsewhere = { type: "service", path: ["OtherPurchase0000000", "c"] } as PurchaseDocumentItem;
   const divider = { type: "purchase", uid: PU, path: [PU] } as unknown as PurchaseDocumentItem;
   const totals = (amount_void_cents: number) => ({ amount_void_cents }) as PurchaseBill["totals"];
-  assertEquals([...purchaseBilledPaths([{ totals: totals(0), items: [divider, line, moved, elsewhere] }], PU)].sort(), ["c", "d"]);
-  assertEquals([...purchaseBilledPaths([{ totals: totals(500), items: [line] }], PU)], []);
+  assertEquals([...purchaseBilledPaths([{ status: "issued", totals: totals(0), items: [divider, line, moved, elsewhere] }], PU)].sort(), ["c", "d"]);
+  assertEquals([...purchaseBilledPaths([{ status: "void", totals: totals(500), items: [line] }], PU)], []);
 });
 
 Deno.test("close: refused whole while a subrent has units out, even with another line open", () => {
@@ -166,6 +169,7 @@ const voidBill = (
   return {
     uid,
     number: 7,
+    status: o.voided_at !== undefined || (totals_over?.amount_void_cents ?? 0) !== 0 ? "void" : "issued",
     origin: "pushed",
     xero_document: "invoice",
     items: lines.map(([path, quantity]) => ({ type: "sale", path: [PU, path], quantity, amount_cents: 100 * quantity })),
@@ -230,7 +234,7 @@ Deno.test("purchaseBillVoidRefusal: refused only when the void leaves a credit w
   assertEquals(refused([a, b], [voidCredit([["b", 5]])]), false, "exactly covered: net 0 is not negative");
   assertEquals(refused([a, b], [voidCredit([["b", 6]])]), true, "the other bill covers only 5 of 6");
   assertEquals(refused([a], [voidCredit([["b", 2]], "void")]), false, "a void credit is not subtracted");
-  assertEquals(refused([a, { ...b, voided_at: mockTimestamp }], [voidCredit([["b", 2]])]), true, "a void bill covers nothing");
+  assertEquals(refused([a, { ...b, status: "void" as const, voided_at: mockTimestamp }], [voidCredit([["b", 2]])]), true, "a void bill covers nothing");
   assertEquals(refused([a], [voidCredit([["other", 2]])]), false, "a line stranded already, which this bill does not name, is not its problem");
   assertEquals(
     purchaseBillVoidRefusal(a, { uid_purchase: PU, purchase: { items }, bills: [], credits: [voidCredit([["b", 2]])] })?.includes("Void the credit first"),
@@ -254,30 +258,23 @@ Deno.test("purchaseCreditActionsFor: void only while nothing has drawn on it", (
   assertEquals(purchaseCreditActionsFor(credit("void", 1000)), []);
 });
 
-Deno.test("derivePurchaseBillStatus: every member, read off the totals", () => {
-  const status = (total_cents: number, paid: number, credited: number, voided = 0) =>
-    derivePurchaseBillStatus({ totals: { total_cents, amount_paid_cents: paid, amount_credited_cents: credited, amount_void_cents: voided } });
-  assertEquals(status(1000, 0, 0), "unpaid");
-  assertEquals(status(0, 0, 0), "unpaid", "no closure row exists on a bill");
+Deno.test("deriveInvoiceStatus reads a bill as it reads an invoice: every member, off the totals", () => {
+  const status = (total_cents: number, paid: number, credited: number, closure_count = 0, stored: "issued" | "void" = "issued") =>
+    deriveInvoiceStatus({
+      status: stored,
+      totals: { total_cents, amount_paid_cents: paid, amount_credited_cents: credited, amount_void_cents: 0, closure_count },
+    });
+  assertEquals(status(1000, 0, 0), "issued");
+  assertEquals(status(0, 0, 0), "issued", "an unclosed $0 bill, whatever Xero says");
+  assertEquals(status(0, 0, 0, 1), "paid", "closed by an operator");
   assertEquals(status(1000, 400, 0), "part_paid");
   assertEquals(status(1000, 0, 400), "part_paid");
   assertEquals(status(1000, 1000, 0), "paid");
   assertEquals(status(1000, 600, 400), "paid", "money was paid, so credit does not name it");
   assertEquals(status(1000, 1200, 0), "paid", "an overpayment from Xero is a fact");
   assertEquals(status(1000, 0, 1000), "credited");
-  assertEquals(status(1000, 0, 0, 1000), "void");
-  assertEquals(status(1000, 600, 0, 1000), "void", "a void beats anything its reversers left");
-  assertEquals(status(1000, -100, 0), "unpaid", "a net-negative bucket is not part paid");
-  assertEquals(
-    derivePurchaseBillStatus({
-      totals: { total_cents: 0, amount_paid_cents: 0, amount_credited_cents: 0, amount_void_cents: 0 },
-      voided_at: mockTimestamp,
-    }),
-    "void",
-    "a $0 void folds to 0, so the stamp is the only thing saying so",
-  );
-  // Coverage: the cases above reach every member.
-  assertEquals(PURCHASE_BILL_STATUSES.length, 5);
+  assertEquals(status(1000, 600, 0, 0, "void"), "void", "void is an explicit move");
+  assertEquals(status(1000, -100, 0), "issued", "a net-negative bucket is not part paid");
 });
 
 Deno.test("purchaseBillPushRefusal: one row per reason, and the offer follows it", () => {
@@ -313,4 +310,40 @@ Deno.test("purchaseActionsFor: a divider row is no line — it offers nothing an
   const lines = [buy({ quantity_billed: 1 }), timeCharge()];
   const withDivider = { status: "active" as const, items: [divider, ...lines], query_by_bills: [] };
   assertEquals(purchaseActionsFor(withDivider), purchaseActionsFor(po(lines)));
+});
+
+Deno.test("a $0 bill offers Mark Paid until it is closed, then Reopen; the assert follows the offer", () => {
+  const zero = (closure_count = 0) =>
+    voidBill("a", [], { totals_over: { total_cents: 0, amount_due_cents: 0, closure_count } });
+  const has = (b: PurchaseBill, action: string) => purchaseBillActionsFor(b, noDocuments).some((o) => o.action === action);
+  assert(has(zero(), "close_bill"));
+  assert(!has(zero(), "reopen_bill"));
+  assert(!has(zero(1), "close_bill"), "already closed");
+  assert(has(zero(1), "reopen_bill"));
+  assert(!has(voidBill("a", []), "close_bill"), "only a bill totalling $0 closes");
+  assertPurchaseBillAction(zero(), noDocuments, { action: "close_bill" });
+  assertThrows(() => assertPurchaseBillAction(voidBill("a", []), noDocuments, { action: "close_bill" }), InvoiceActionRefusal, "totalling $0");
+  assertThrows(() => assertPurchaseBillAction(zero(), noDocuments, { action: "reopen_bill" }), InvoiceActionRefusal, "not marked paid");
+});
+
+Deno.test("assertPurchaseBillAction: allocate caps at what is due; void reads the shared refusal", () => {
+  const bill = voidBill("a", [], { totals_over: { amount_due_cents: 400 } });
+  assertPurchaseBillAction(bill, noDocuments, { action: "allocate_credit", amount_cents: 400 });
+  assertThrows(() => assertPurchaseBillAction(bill, noDocuments, { action: "allocate_credit", amount_cents: 401 }), InvoiceActionRefusal, "exceeds");
+  assertThrows(() => assertPurchaseBillAction(bill, noDocuments, { action: "allocate_credit", amount_cents: 0 }), InvoiceActionRefusal);
+  const linked = voidBill("a", [], { origin: "linked", xero_id: "x" });
+  assertThrows(() => assertPurchaseBillAction(linked, noDocuments, { action: "void_bill" }), InvoiceActionRefusal, "linked");
+});
+
+Deno.test("assertPurchaseCreditAction and assertPurchaseAction refuse what is not offered, and allow what is", () => {
+  const credit = { status: "issued", total_cents: 10, remaining_credit_cents: 10 } as const;
+  assertPurchaseCreditAction(credit, { action: "void_credit" });
+  assertThrows(() => assertPurchaseCreditAction({ ...credit, remaining_credit_cents: 4 }, { action: "void_credit" }), InvoiceActionRefusal, "allocated");
+  assertThrows(() => assertPurchaseCreditAction({ ...credit, status: "void" }, { action: "void_credit" }), InvoiceActionRefusal, "void");
+  assertPurchaseAction(po([timeCharge()]), {}, { action: "remove_item", uid_item: "c" });
+  assertThrows(
+    () => assertPurchaseAction(po([timeCharge()]), { billed_paths: new Set(["c"]) }, { action: "remove_item", uid_item: "c" }),
+    InvoiceActionRefusal,
+    "remove_item",
+  );
 });

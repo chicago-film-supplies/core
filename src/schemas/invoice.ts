@@ -46,7 +46,13 @@ import {
   type TierCountType,
 } from "./price-formula.ts";
 import { checkItemsLineMoney } from "./_line-money.ts";
-import { invoiceIsFrozen } from "./_invoice-freeze.ts";
+import { deriveInvoiceStatus, invoiceIsFrozen } from "./_invoice-freeze.ts";
+import type {
+  PurchaseBill,
+  PurchaseDocumentProductItem,
+  PurchaseDocumentReplacementItem,
+  PurchaseDocumentServiceItem,
+} from "./purchase-bill.ts";
 import {
   checkLeadingDivider,
   checkStoredEndpoints,
@@ -150,14 +156,12 @@ export interface InvoiceStatusContract {
  * No separate parity guard — a `T extends keyof typeof TABLE` assertion beside
  * this would read `T extends T` and could not fail.
  *
- * Deliberately **not** carrying an `amounts` column. Two status↔amounts rules
- * were proposed and both were killed by paging all 962 prod invoices:
- * `paid ⟹ amount_due <= 0` fails on 20 of 813, and `issued ⟹ amount_paid == 0`
- * fails on **75 of 98** — a bucket whose money matches Xero to the cent and
- * whose `status` is what is stale. The arithmetic identity that did survive
- * (`amount_paid + amount_credited + amount_due == total`, exempting `void`)
- * ships separately as a `superRefine`, because it is the one rule that does not
- * mention status.
+ * Deliberately **not** carrying an `amounts` column: the status↔amounts rule is
+ * one function, `deriveInvoiceStatus`, and the schema refines `status` against
+ * it. Two earlier per-status rules were killed by paging all 962 prod invoices
+ * in 2026 (`issued ⟹ amount_paid == 0` failed on 75 of 98, a bucket whose
+ * `status` was what was stale). Those repairs have since landed: on 2026-11-08
+ * 0 of 1,115 prod and 1,118 dev invoices disagreed with the derivation.
  */
 export const INVOICE_STATUS_CONTRACTS: Readonly<
   Record<InvoiceStatusType, InvoiceStatusContract>
@@ -187,6 +191,16 @@ export const INVOICE_STATUS_CONTRACTS: Readonly<
     tracks_xero_edits: "always",
   },
   paid: {
+    operator_moves: ["void"],
+    reached_xero: true,
+    live_in_xero: true,
+    settled: true,
+    accepts_payment: false,
+    tracks_xero_edits: "once_pushed",
+  },
+  // `paid`, settled wholly by credit. A separate status so an operator can tell
+  // the two apart; every column answers as `paid` does.
+  credited: {
     operator_moves: ["void"],
     reached_xero: true,
     live_in_xero: true,
@@ -262,20 +276,21 @@ export const ACCEPTS_PAYMENT_STATUSES: readonly InvoiceStatusType[] =
 // ── Field-class freeze table ────────────────────────────────────
 
 /**
- * The classes an invoice's editable fields fall into, for the freeze question
- * *"may an operator still change this field?"*.
+ * The classes a billing document's editable fields fall into, for the freeze
+ * question *"may an operator still change this field?"* — one list for invoices
+ * and supplier bills (one-document-model Phase 4).
  *
  * Explicit tuple type rather than `as const` alone: core#43 is JSR's npm
  * `.d.ts` emit truncating an inferred tuple.
  */
 export const INVOICE_FIELD_CLASSES: readonly [
-  "organization",
+  "counterparty",
   "date",
   "line_money",
-  "coa_revenue",
+  "ledger_account",
   "tracking",
   "text",
-] = ["organization", "date", "line_money", "coa_revenue", "tracking", "text"];
+] = ["counterparty", "date", "line_money", "ledger_account", "tracking", "text"];
 
 /** One of {@link INVOICE_FIELD_CLASSES}. */
 export type InvoiceFieldClass = typeof INVOICE_FIELD_CLASSES[number];
@@ -284,85 +299,97 @@ export type InvoiceFieldClass = typeof INVOICE_FIELD_CLASSES[number];
 export interface InvoiceFieldFreezeContract {
   /**
    * - `"frozen"` — while `invoiceIsFrozen` (`@cfs/core/utils/invoices`): a live
-   *   settlement or closure, or a `paid` / `void` status.
-   * - `"void"` — only on a `void` invoice.
+   *   settlement or closure, or a `paid` / `credited` / `void` status.
+   * - `"void"` — only on a `void` document.
    * - `"never"` — always editable.
    */
   frozen_when: "frozen" | "void" | "never";
   /**
-   * Does Xero accept a change to this class on an invoice it holds a payment or
+   * Does Xero accept a change to this class on a document it holds a payment or
    * credit allocation against? Read by the Xero edit push, which on a settled
-   * invoice may push only when every changed class says `true`.
+   * document may push only when every changed class says `true`.
    *
-   * `true` only where an edit Xero has ALREADY ACCEPTED shows it (2026-10-26,
-   * from prod history): tracking-only edits on paid invoices, including one
-   * with a payment and a credit allocation (#1689). They were accepted only in
-   * the shape that GETs the invoice and round-trips Xero's own lines by
-   * `LineItemID`, changing nothing but `Tracking`. `false` is "not shown",
-   * which is not the same as "refused" — it keeps the push at its manual seam.
+   * `true` only where an edit Xero has ALREADY ACCEPTED shows it: tracking-only
+   * edits on paid invoices (2026-10-26, from prod history, including #1689 with
+   * a payment and a credit allocation) and on a paid ACCPAY (BILL-267, probed
+   * 2026-11-08). They were accepted only in the shape that GETs the document and
+   * round-trips Xero's own lines by `LineItemID`, changing nothing but
+   * `Tracking`. `false` is "not shown", which is not "refused" — it keeps the
+   * push at its manual seam.
    */
   xero_accepts_on_settled: boolean;
   /**
-   * The document and line keys in the class. Typed against the stored shapes,
-   * so a misspelled member is a compile error rather than a field that never
-   * freezes. Descriptive for `line_money`: the API decides that class with
-   * `lineMoneyAgrees`, over the REBUILT lines, not by comparing these keys.
+   * The document and line keys in the class, per side: the keys differ (an
+   * invoice's `organization` and `coa_revenue` are a bill's `supplier` and
+   * `ledger_account`) and the rule does not. Typed against the stored shapes, so
+   * a misspelled member is a compile error rather than a field that never
+   * freezes. Descriptive for `line_money`: the writers decide that class over
+   * the REBUILT lines, not by comparing these keys.
    */
-  members: readonly (keyof Invoice | keyof InvoiceDocLineItemType)[];
+  members: {
+    receivable: readonly (keyof Invoice | keyof InvoiceDocLineItemType)[];
+    payable: readonly (
+      | keyof PurchaseBill
+      | keyof PurchaseDocumentProductItem
+      | keyof PurchaseDocumentServiceItem
+      | keyof PurchaseDocumentReplacementItem
+    )[];
+  };
 }
 
 /**
- * **The one field-class freeze table.** The API's refusals, the manager's
- * offers (`edit_items.frozen_classes`, `edit_organization`, `edit_date`) and
- * the Xero edit push all read it, through `invoiceFieldIsFrozen`
- * (`@cfs/core/utils/invoices`).
+ * **The one field-class freeze table**, for invoices and supplier bills. The
+ * writers' refusals, the offers (`edit_items.frozen_classes`) and the Xero edit
+ * pushes all read it, through `invoiceFieldIsFrozen` (`@cfs/core/utils/invoices`).
  *
- * This list used to be in four places: `updateInvoice` refusing `organization`
- * and `date` by name, the money gate, `invoiceIsFrozen`'s docblock, and the
- * manager's own comment — which disagreed with its own section lock.
+ * **The rule follows Xero's** (owner, 2026-10-26): the account is locked once
+ * settled; tracking stays editable on a settled document, because Xero accepts a
+ * tracking-only edit there, and freezes only on `void`.
  *
- * **The rule follows Xero's** (owner, 2026-10-26): the revenue account is
- * locked once settled; tracking stays editable on a settled invoice, because
- * Xero accepts a tracking-only edit there, and freezes only on `void`.
- *
- * ⚠️ `text` is `"never"`, and the document-level order → invoice sync must NOT
- * route through it: that sync freezes the whole invoice on `invoiceIsFrozen`
- * (`api-cloudrun/src/lib/orderInvoiceSync.ts`). Reading the text class there
- * would let an order edit rewrite a paid invoice's subject.
+ * ⚠️ `text` is `"never"`, and the document-level initiator → billing sync must
+ * NOT route through it: that sync freezes the whole document on
+ * `invoiceIsFrozen`. Reading the text class there would let an order edit
+ * rewrite a paid invoice's subject.
  */
 export const INVOICE_FIELD_FREEZE: Readonly<
   Record<InvoiceFieldClass, InvoiceFieldFreezeContract>
 > = {
-  organization: {
+  counterparty: {
     frozen_when: "frozen",
     xero_accepts_on_settled: false,
-    members: ["organization"],
+    members: { receivable: ["organization"], payable: ["supplier"] },
   },
   date: {
     frozen_when: "frozen",
     xero_accepts_on_settled: false,
-    members: ["date"],
+    members: { receivable: ["date"], payable: ["date"] },
   },
   line_money: {
     frozen_when: "frozen",
     xero_accepts_on_settled: false,
-    members: ["quantity", "price", "uid_tax_class", "uid_tax_class_override"],
+    members: {
+      receivable: ["quantity", "price", "uid_tax_class", "uid_tax_class_override"],
+      payable: ["quantity", "amount_cents", "price", "uid_tax_class", "uid_tax_class_override"],
+    },
   },
-  coa_revenue: {
+  ledger_account: {
     frozen_when: "frozen",
     xero_accepts_on_settled: false,
-    members: ["coa_revenue"],
+    members: { receivable: ["coa_revenue"], payable: ["ledger_account"] },
   },
   tracking: {
     frozen_when: "void",
     xero_accepts_on_settled: true,
-    members: ["uid_tracking_category"],
+    members: { receivable: ["uid_tracking_category"], payable: ["uid_tracking_category"] },
   },
   text: {
     frozen_when: "never",
     // Not shown either way: the accepted settled edits changed only Tracking.
     xero_accepts_on_settled: false,
-    members: ["reference", "subject", "notes", "due_date", "name", "description"],
+    members: {
+      receivable: ["reference", "subject", "notes", "due_date", "name", "description"],
+      payable: ["reference", "due_date", "name", "description"],
+    },
   },
 };
 
@@ -1380,6 +1407,12 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
     message: "closure_count > 0 is legal only on an invoice whose total_cents is 0",
     path: ["totals", "closure_count"],
   },
+).refine(
+  // The stored status IS the derivation's answer (one-document-model Phase 4), so
+  // a writer that moved the money and forgot the status cannot commit. Measured
+  // 2026-11-08: 0 of 1,115 prod and 1,118 dev invoices disagreed.
+  (inv) => inv.status === deriveInvoiceStatus(inv),
+  { message: "status must equal deriveInvoiceStatus over the totals", path: ["status"] },
 ).meta({
   title: "Invoice",
   collection: "invoices",

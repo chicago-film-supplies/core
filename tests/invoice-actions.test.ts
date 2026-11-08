@@ -314,7 +314,7 @@ Deno.test("D3 add_credit_note: offered on a status live in Xero with credit left
 Deno.test("D8 edit_items: always offered; money frozen with the freeze, labels never", () => {
   for (const status of INVOICE_STATUSES) {
     const o = invoiceActionsFor(invoice(status)).find((x) => x.action === "edit_items")!;
-    assertEquals(o.money_frozen, status === "paid" || status === "void", status);
+    assertEquals(o.money_frozen, status === "paid" || status === "credited" || status === "void", status);
   }
   const paidUp = invoice("part_paid", { amount_paid_cents: 1 });
   assertEquals(invoiceActionsFor(paidUp).find((x) => x.action === "edit_items")!.money_frozen, true, "a partial payment freezes money");
@@ -330,16 +330,16 @@ Deno.test("D4 frozen_classes: literal per fixture — draft, issued, part_paid w
   const cases: [string, OfferInvoice, InvoiceFieldClass[]][] = [
     ["draft", invoice("draft"), []],
     ["issued", invoice("issued"), []],
-    ["part_paid + payment", invoice("part_paid", { amount_paid_cents: 1 }), ["organization", "date", "line_money", "coa_revenue"]],
-    ["paid", invoice("paid"), ["organization", "date", "line_money", "coa_revenue"]],
-    ["void", invoice("void"), ["organization", "date", "line_money", "coa_revenue", "tracking"]],
+    ["part_paid + payment", invoice("part_paid", { amount_paid_cents: 1 }), ["counterparty", "date", "line_money", "ledger_account"]],
+    ["paid", invoice("paid"), ["counterparty", "date", "line_money", "ledger_account"]],
+    ["void", invoice("void"), ["counterparty", "date", "line_money", "ledger_account", "tracking"]],
   ];
   for (const [label, inv, want] of cases) {
     const o = invoiceActionsFor(inv).find((x) => x.action === "edit_items")!;
     assertEquals(o.frozen_classes, want, label);
     assertEquals(o.money_frozen, want.includes("line_money"), label);
     assertEquals(INVOICE_FIELD_CLASSES.filter((c) => invoiceFieldIsFrozen(inv, c)), want, label);
-    assertEquals(has(invoiceActionsFor(inv), "edit_organization"), !want.includes("organization"), label);
+    assertEquals(has(invoiceActionsFor(inv), "edit_organization"), !want.includes("counterparty"), label);
     assertEquals(has(invoiceActionsFor(inv), "edit_date"), !want.includes("date"), label);
   }
   // The text class is never frozen — on a void invoice included.
@@ -348,16 +348,18 @@ Deno.test("D4 frozen_classes: literal per fixture — draft, issued, part_paid w
 
 Deno.test("D4 INVOICE_FIELD_FREEZE: every class has a row, and no field sits in two classes", () => {
   assertEquals(Object.keys(INVOICE_FIELD_FREEZE).sort(), [...INVOICE_FIELD_CLASSES].sort());
-  const seen = new Map<string, string>();
-  for (const cls of INVOICE_FIELD_CLASSES) {
-    for (const m of INVOICE_FIELD_FREEZE[cls].members) {
-      assertEquals(seen.get(m), undefined, `${m} is in ${seen.get(m)} and ${cls}`);
-      seen.set(m, cls);
+  for (const side of ["receivable", "payable"] as const) {
+    const seen = new Map<string, string>();
+    for (const cls of INVOICE_FIELD_CLASSES) {
+      for (const m of INVOICE_FIELD_FREEZE[cls].members[side]) {
+        assertEquals(seen.get(m), undefined, `${side}: ${m} is in ${seen.get(m)} and ${cls}`);
+        seen.set(m, cls);
+      }
     }
   }
   // Phase 0's ruling, stated literally: Xero takes a settled tracking edit, not an account change.
   assertEquals(INVOICE_FIELD_FREEZE.tracking.xero_accepts_on_settled, true);
-  assertEquals(INVOICE_FIELD_FREEZE.coa_revenue.xero_accepts_on_settled, false);
+  assertEquals(INVOICE_FIELD_FREEZE.ledger_account.xero_accepts_on_settled, false);
 });
 
 Deno.test("D8 void: refused while Xero holds a settlement; absent or false keeps the offer", () => {
@@ -386,7 +388,7 @@ Deno.test("api-cloudrun#1332 push_to_xero: a linked issued/part_paid/paid invoic
   for (const status of INVOICE_STATUSES) {
     for (const xero_sync_status of XERO_SYNC_STATUSES) {
       const inv = { ...invoice(status), xero_id: "x-1" };
-      const expected = (status === "issued" || status === "part_paid" || status === "paid") &&
+      const expected = (status === "issued" || status === "part_paid" || status === "paid" || status === "credited") &&
         (xero_sync_status === "out_of_sync" || xero_sync_status === "unknown");
       assertEquals(has(invoiceActionsFor(inv, { xero_sync_status }), "push_to_xero"), expected, `${status}/${xero_sync_status}`);
       if (expected) assertInvoiceAction(inv, { xero_sync_status }, { action: "push_to_xero" });

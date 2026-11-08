@@ -80,6 +80,7 @@ import {
   type InvoiceStatusType,
   isInvoiceLineItem,
   type Order,
+  type PurchaseActionId,
   type Settlement,
   SETTLEMENT_CONTRACTS,
 } from "../schemas/mod.ts";
@@ -97,13 +98,13 @@ import {
 // ── refusal ──────────────────────────────────────────────────────────
 
 /**
- * A refused invoice action. The API maps it to a 400 in its error middleware
+ * A refused invoice or purchase action. The API maps it to a 400 in its error middleware
  * (`api-cloudrun/src/middleware/error.ts`), so a route never builds one by hand.
  */
 export class InvoiceActionRefusal extends Error {
   /** The action that was refused. */
-  readonly action: InvoiceActionId;
-  constructor(action: InvoiceActionId, message: string) {
+  readonly action: InvoiceActionId | PurchaseActionId;
+  constructor(action: InvoiceActionId | PurchaseActionId, message: string) {
     super(message);
     this.name = "InvoiceActionRefusal";
     this.action = action;
@@ -435,7 +436,7 @@ export function invoiceActionsFor(invoice: OfferInvoice, ctx: InvoiceOfferContex
 
   if (canOperatorTransition(invoice.status, "issued")) offer("issue");
   if (invoiceVoidRefusal(invoice, ctx) === null) offer("void");
-  if (closeRefusal(invoice, contract) === null) offer("close");
+  if (closeRefusal(invoice) === null) offer("close");
 
   const due = invoice.totals.amount_due_cents;
   if (contract.accepts_payment && due > 0) offer("add_payment", { max_cents: due });
@@ -452,7 +453,7 @@ export function invoiceActionsFor(invoice: OfferInvoice, ctx: InvoiceOfferContex
 
   const frozen = INVOICE_FIELD_CLASSES.filter((cls) => invoiceFieldIsFrozen(invoice, cls));
   offer("edit_items", { money_frozen: frozen.includes("line_money"), frozen_classes: frozen });
-  if (!frozen.includes("organization")) offer("edit_organization");
+  if (!frozen.includes("counterparty")) offer("edit_organization");
   if (!frozen.includes("date")) offer("edit_date");
   if (pushRefusal(invoice, ctx) === null) offer("push_to_xero");
   return offers;
@@ -480,11 +481,19 @@ function invoiceVoidRefusal(invoice: OfferInvoice, ctx: InvoiceOfferContext): st
   return null;
 }
 
-function closeRefusal(invoice: OfferInvoice, contract: InvoiceStatusContract): string | null {
-  if (!contract.live_in_xero) return `a ${invoice.status} invoice cannot be closed`;
-  if (invoice.totals.total_cents !== 0) return "only an invoice totalling $0 can be closed; record a payment instead";
-  if (invoiceHasMoneySettlement(invoice)) return "the invoice already has money settled against it";
-  if ((invoice.totals.closure_count ?? 0) > 0) return "the invoice is already closed";
+/**
+ * Why a $0 billing document may not be marked paid, or `null` when it may — one
+ * rule for an invoice and a bill (`noun` is for the message only).
+ */
+export function closeRefusal(
+  doc: Pick<OfferInvoice, "status" | "totals">,
+  noun: "invoice" | "bill" = "invoice",
+): string | null {
+  const contract = invoiceContract(doc.status);
+  if (!contract?.live_in_xero) return `a ${doc.status} ${noun} cannot be closed`;
+  if (doc.totals.total_cents !== 0) return `only ${noun === "invoice" ? "an invoice" : "a bill"} totalling $0 can be closed; record a payment instead`;
+  if (invoiceHasMoneySettlement(doc)) return `the ${noun} already has money settled against it`;
+  if ((doc.totals.closure_count ?? 0) > 0) return `the ${noun} is already closed`;
   return null;
 }
 
@@ -544,7 +553,7 @@ export function assertInvoiceAction(
       return;
     }
     case "close": {
-      const why = closeRefusal(invoice, contract!);
+      const why = closeRefusal(invoice);
       if (why !== null) refuse(why);
       return;
     }

@@ -84,5 +84,57 @@ export function invoiceHasSettlement(invoice: { totals: InvoiceSettledTotals }):
 export function invoiceIsFrozen(
   invoice: { status: InvoiceStatusType; totals: InvoiceSettledTotals },
 ): boolean {
-  return invoiceHasSettlement(invoice) || invoice.status === "paid" || invoice.status === "void";
+  return invoiceHasSettlement(invoice) || isPaidUp(invoice.status) || invoice.status === "void";
+}
+
+/** Nothing is owed: the status settlement moves a live document to. */
+export function isPaidUp(status: InvoiceStatusType): boolean {
+  return status === "paid" || status === "credited";
+}
+
+/**
+ * **The one billing-document status derivation**, for invoices and supplier bills
+ * alike (one-document-model Phase 4). Pure, and it lives beside the schemas
+ * because both refine their stored `status` against it.
+ *
+ * - `draft` and `void` pass through: leaving either is an explicit move, never a
+ *   derivation.
+ * - 🔴 **A $0 document with nothing money-settled is `paid` only if an operator
+ *   CLOSED it** (`closure_count > 0`), and `issued` otherwise — never from
+ *   `amount_due_cents <= 0`. That comparison is what made #2396 read `paid`: a
+ *   shrink invoice whose lines were all removed reached $0 due, the Xero webhook
+ *   re-derived `paid`, and the freeze locked the operator out of their own edit.
+ *   Xero marks every $0 document PAID on issue (probed 2026-10-01), so copying
+ *   Xero's verdict here would reproduce it on every one.
+ * - Nothing owed: `paid` when any cash moved (`paid` means nothing owed, not
+ *   "cash received" — #1751 and #1322 were PAID in Xero with `AmountPaid: 0`),
+ *   `credited` when credit alone settled it.
+ * - Otherwise any cash or credit ⇒ `part_paid`; else `issued`.
+ *
+ * `amount_due_cents` is RE-COMPUTED from `total − paid − credited − voided`
+ * rather than read, so a caller holding a stale due beside fresh buckets cannot
+ * derive from the stale one.
+ */
+export function deriveInvoiceStatus(
+  invoice: { status: InvoiceStatusType; totals: InvoiceSettledTotals & { total_cents: number } },
+): InvoiceStatusType {
+  const { status, totals } = invoice;
+  if (status === "draft" || status === "void") return status;
+  const paid = totals.amount_paid_cents;
+  const credited = totals.amount_credited_cents ?? 0;
+  const voided = totals.amount_void_cents ?? 0;
+  if (totals.total_cents === 0 && !invoiceHasMoneySettlement(invoice)) {
+    return (totals.closure_count ?? 0) > 0 ? "paid" : "issued";
+  }
+  // Bare integer comparisons: every operand is an exact count of cents.
+  const due = totals.total_cents - paid - credited - voided;
+  if (due <= 0) return paid <= 0 && credited > 0 ? "credited" : "paid";
+  // ⚠️ Deliberately `> 0`, NOT {@link invoiceHasMoneySettlement}'s `!== 0`: that
+  // predicate asks whether money MOVED (a net-negative over-reversal did move
+  // money, so it still freezes), while this asks whether anything is PAID
+  // toward the balance. A negative bucket leaves MORE due than the total, which
+  // is not part paid. A partial void is a retraction, not a payment, so it does
+  // not count here either.
+  if (paid > 0 || credited > 0) return "part_paid";
+  return "issued";
 }

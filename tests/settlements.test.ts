@@ -26,10 +26,9 @@ import {
   type SettlementTypeType,
 } from "../src/schemas/mod.ts";
 import {
-  creditNoteRemainingFromJournal,
+  creditRemainingFromJournal,
   deriveInvoiceStatus,
   invoiceIsFrozen,
-  purchaseCreditRemainingFromJournal,
   recomputePurchaseBillTotals,
   recomputeSettlementTotals,
 } from "../src/utils/invoices.ts";
@@ -328,7 +327,7 @@ Deno.test("#1322: fully credited with ZERO cash collected", () => {
   assertEquals(r.amount_paid_cents, 0);
   assertEquals(r.amount_credited_cents, 449_562);
   assertEquals(r.amount_due_cents, 0);
-  assertEquals(derive("issued", r.amount_paid_cents, r.amount_due_cents, r.amount_credited_cents), "paid");
+  assertEquals(derive("issued", r.amount_paid_cents, r.amount_due_cents, r.amount_credited_cents), "credited");
 });
 
 Deno.test("an over-credited invoice stays NEGATIVE — clamping hides the defect", () => {
@@ -464,8 +463,8 @@ Deno.test("a reversal subtracts from its reason's breakdown too", () => {
 
 // ── deriveInvoiceStatus ──────────────────────────────────────────
 
-Deno.test("a fully-credited, never-paid invoice derives paid", () => {
-  assertEquals(derive("issued", 0, 0, 2_196), "paid");
+Deno.test("a fully-credited, never-paid invoice derives credited", () => {
+  assertEquals(derive("issued", 0, 0, 2_196), "credited");
 });
 
 Deno.test("a partially-credited, never-paid invoice derives part_paid", () => {
@@ -483,7 +482,7 @@ Deno.test("an untouched issued invoice stays issued", () => {
 
 // ── closure (api-cloudrun#1169) ──────────────────────────────────
 
-Deno.test("every INVOICE-settling type feeds exactly one of a cents bucket and a count; a BILL one a cents bucket; a CREDIT one neither", () => {
+Deno.test("every INVOICE- or BILL-settling type feeds exactly one of a cents bucket and a count; a CREDIT one neither", () => {
   // Built from the vocabulary, not the table: a type with both, or neither,
   // would be folded twice or not at all.
   const types = Object.keys(SETTLEMENT_CONTRACTS) as SettlementTypeType[];
@@ -494,7 +493,7 @@ Deno.test("every INVOICE-settling type feeds exactly one of a cents bucket and a
         assertEquals((c.sums_into === null) !== (c.counts_into === null), true, type);
         break;
       case "purchase_bill":
-        assertEquals([c.sums_into !== null, c.counts_into], [true, null], type);
+        assertEquals((c.sums_into === null) !== (c.counts_into === null), true, type);
         break;
       case "credit_note":
       case "purchase_credit":
@@ -510,6 +509,8 @@ Deno.test("every INVOICE-settling type feeds exactly one of a cents bucket and a
   assertEquals(settling("credit_note"), ["refund", "refund_reversal"]);
   assertEquals(settling("purchase_credit"), ["supplier_refund", "supplier_refund_reversal"]);
   assertEquals(settling("purchase_bill"), [
+    "bill_closure",
+    "bill_closure_reversal",
     "bill_credit",
     "bill_credit_reversal",
     "bill_payment",
@@ -518,7 +519,7 @@ Deno.test("every INVOICE-settling type feeds exactly one of a cents bucket and a
     "bill_void_reversal",
   ]);
   // Non-vacuity: every arm is populated.
-  assertEquals(types.filter((t) => SETTLEMENT_CONTRACTS[t].counts_into !== null).sort(), ["closure", "closure_reversal"]);
+  assertEquals(types.filter((t) => SETTLEMENT_CONTRACTS[t].counts_into !== null).sort(), ["bill_closure", "bill_closure_reversal", "closure", "closure_reversal"]);
   assertEquals(types.filter((t) => SETTLEMENT_CONTRACTS[t].sums_into !== null).length, 12);
 });
 
@@ -665,10 +666,10 @@ Deno.test("SettlementSchema enforces the refund contract", async (t) => {
   });
 });
 
-Deno.test("draws_credit is exactly credit, refund and their reversals", () => {
+Deno.test("a receivable row's draws_credit is exactly credit, refund and their reversals", () => {
   const types = Object.keys(SETTLEMENT_CONTRACTS) as SettlementTypeType[];
   assertEquals(
-    types.filter((t) => SETTLEMENT_CONTRACTS[t].draws_credit).sort(),
+    types.filter((t) => SETTLEMENT_CONTRACTS[t].draws_credit && SETTLEMENT_TARGET_SIDE[SETTLEMENT_CONTRACTS[t].settles] === "receivable").sort(),
     ["credit", "credit_reversal", "refund", "refund_reversal"],
   );
 });
@@ -683,22 +684,22 @@ Deno.test("an invoice fold REFUSES a refund row rather than skipping it", () => 
 
 Deno.test("creditNoteRemainingFromJournal: total − signed draws, over credits AND refunds", () => {
   const R = (type: SettlementTypeType, amount_cents: number) => ({ type, amount_cents });
-  assertEquals(creditNoteRemainingFromJournal(2_400, []), 2_400, "untouched");
-  assertEquals(creditNoteRemainingFromJournal(2_400, [R("refund", 2_400)]), 0, "fully refunded (CN-1030)");
-  assertEquals(creditNoteRemainingFromJournal(48_506, [R("refund", 48_506)]), 0, "CN-1013 once backfilled");
-  assertEquals(creditNoteRemainingFromJournal(10_000, [R("credit", 3_000), R("refund", 2_000)]), 5_000, "mixed");
+  assertEquals(creditRemainingFromJournal("receivable", 2_400, []), 2_400, "untouched");
+  assertEquals(creditRemainingFromJournal("receivable", 2_400, [R("refund", 2_400)]), 0, "fully refunded (CN-1030)");
+  assertEquals(creditRemainingFromJournal("receivable", 48_506, [R("refund", 48_506)]), 0, "CN-1013 once backfilled");
+  assertEquals(creditRemainingFromJournal("receivable", 10_000, [R("credit", 3_000), R("refund", 2_000)]), 5_000, "mixed");
   assertEquals(
-    creditNoteRemainingFromJournal(2_400, [R("refund", 2_400), R("refund_reversal", 2_400)]),
+    creditRemainingFromJournal("receivable", 2_400, [R("refund", 2_400), R("refund_reversal", 2_400)]),
     2_400,
     "a reaped refund gives the credit back",
   );
   assertEquals(
-    creditNoteRemainingFromJournal(2_400, [R("refund", 2_400), R("refund_reversal", 2_400), R("refund", 2_400)]),
+    creditRemainingFromJournal("receivable", 2_400, [R("refund", 2_400), R("refund_reversal", 2_400), R("refund", 2_400)]),
     0,
     "refund → reap → refund reads 0 at the end",
   );
-  assertEquals(creditNoteRemainingFromJournal(1_000, [R("credit", 1_500)]), -500, "negative is preserved");
-  assertEquals(creditNoteRemainingFromJournal(1_000, [R("payment", 1_000)]), 1_000, "a non-drawing row is skipped");
+  assertEquals(creditRemainingFromJournal("receivable", 1_000, [R("credit", 1_500)]), -500, "negative is preserved");
+  assertEquals(creditRemainingFromJournal("receivable", 1_000, [R("payment", 1_000)]), 1_000, "a non-drawing row is skipped");
 });
 
 Deno.test("a voided note folds to its total — it voids only with nothing live", () => {
@@ -706,7 +707,7 @@ Deno.test("a voided note folds to its total — it voids only with nothing live"
     { type: "credit" as SettlementTypeType, amount_cents: 700 },
     { type: "credit_reversal" as SettlementTypeType, amount_cents: 700 },
   ];
-  assertEquals(creditNoteRemainingFromJournal(700, rows), 700);
+  assertEquals(creditRemainingFromJournal("receivable", 700, rows), 700);
 });
 
 // ── payable (api-cloudrun#1210) ──────────────────────────────────
@@ -733,8 +734,8 @@ function validRowFor(type: SettlementTypeType): Record<string, unknown> {
     uid_organization: payable ? null : ORG,
     uid_supplier: payable ? SUPPLIER : null,
     uid_purchase_bill: c.settles === "purchase_bill" ? BILL : null,
-    uid_credit_note: c.draws_credit ? NOTE : null,
-    uid_purchase_credit: c.draws_purchase_credit ? PCREDIT : null,
+    uid_credit_note: c.draws_credit && SETTLEMENT_TARGET_SIDE[c.settles] === "receivable" ? NOTE : null,
+    uid_purchase_credit: c.draws_credit && SETTLEMENT_TARGET_SIDE[c.settles] === "payable" ? PCREDIT : null,
   });
 }
 
@@ -755,21 +756,13 @@ Deno.test("every target has a side, and both sides are populated by types", () =
   assertEquals([...targets].sort(), [...SETTLEMENT_TARGETS].sort());
 });
 
-Deno.test("draws_purchase_credit is exactly bill_credit, supplier_refund and their reversals — and never with draws_credit", () => {
+Deno.test("a payable row's draws_credit is exactly bill_credit, supplier_refund and their reversals", () => {
   const types = Object.keys(SETTLEMENT_CONTRACTS) as SettlementTypeType[];
   assertEquals(
-    types.filter((t) => SETTLEMENT_CONTRACTS[t].draws_purchase_credit).sort(),
+    types.filter((t) => SETTLEMENT_CONTRACTS[t].draws_credit && SETTLEMENT_TARGET_SIDE[SETTLEMENT_CONTRACTS[t].settles] === "payable").sort(),
     ["bill_credit", "bill_credit_reversal", "supplier_refund", "supplier_refund_reversal"],
   );
-  for (const t of types) {
-    const c = SETTLEMENT_CONTRACTS[t];
-    assertEquals(c.draws_credit && c.draws_purchase_credit, false, t);
-    // A receivable never draws a supplier credit, a payable never a customer one.
-    if (SETTLEMENT_TARGET_SIDE[c.settles] === "payable") assertEquals(c.draws_credit, false, t);
-    else assertEquals(c.draws_purchase_credit, false, t);
-  }
 });
-
 Deno.test("no payable type shares a reason list with `unspecified` — there is no payable history to backfill blind", () => {
   for (const [t, c] of Object.entries(SETTLEMENT_CONTRACTS)) {
     if (SETTLEMENT_TARGET_SIDE[c.settles] === "payable") assertEquals(c.reasons.includes("unspecified"), false, t);
@@ -841,6 +834,7 @@ Deno.test("recomputePurchaseBillTotals: the invoice fold, over bill rows", () =>
     amount_credited_cents: 10_000,
     amount_void_cents: 0,
     amount_due_cents: 70_985,
+    closure_count: 0,
     breakdown: { payment_sent: 65_000, short_close: 10_000, source_retracted: -5_000 },
   });
   // A card purchase born paid: one row for the whole total, due 0.
@@ -877,15 +871,15 @@ Deno.test("each fold REFUSES the other side's rows rather than skipping them", a
 
 Deno.test("purchaseCreditRemainingFromJournal: total − signed draws, over allocations AND supplier refunds", () => {
   const R = (type: SettlementTypeType, amount_cents: number) => ({ type, amount_cents });
-  assertEquals(purchaseCreditRemainingFromJournal(5_000, []), 5_000, "untouched");
-  assertEquals(purchaseCreditRemainingFromJournal(5_000, [R("bill_credit", 3_000), R("supplier_refund", 2_000)]), 0, "mixed");
+  assertEquals(creditRemainingFromJournal("payable", 5_000, []), 5_000, "untouched");
+  assertEquals(creditRemainingFromJournal("payable", 5_000, [R("bill_credit", 3_000), R("supplier_refund", 2_000)]), 0, "mixed");
   assertEquals(
-    purchaseCreditRemainingFromJournal(5_000, [R("bill_credit", 5_000), R("bill_credit_reversal", 5_000)]),
+    creditRemainingFromJournal("payable", 5_000, [R("bill_credit", 5_000), R("bill_credit_reversal", 5_000)]),
     5_000,
     "a reaped allocation gives the credit back",
   );
-  assertEquals(purchaseCreditRemainingFromJournal(1_000, [R("bill_credit", 1_500)]), -500, "negative is preserved");
+  assertEquals(creditRemainingFromJournal("payable", 1_000, [R("bill_credit", 1_500)]), -500, "negative is preserved");
   // The two sides' credit folds are disjoint: neither reads the other's draws.
-  assertEquals(purchaseCreditRemainingFromJournal(1_000, [R("credit", 1_000), R("refund", 1_000)]), 1_000);
-  assertEquals(creditNoteRemainingFromJournal(1_000, [R("bill_credit", 1_000), R("supplier_refund", 1_000)]), 1_000);
+  assertEquals(creditRemainingFromJournal("payable", 1_000, [R("credit", 1_000), R("refund", 1_000)]), 1_000);
+  assertEquals(creditRemainingFromJournal("receivable", 1_000, [R("bill_credit", 1_000), R("supplier_refund", 1_000)]), 1_000);
 });

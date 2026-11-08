@@ -77,7 +77,6 @@ import * as outOfServiceUtils from "../src/utils/out-of-service.ts";
 import * as purchaseUtils from "../src/utils/purchases.ts";
 import * as purchaseActionUtils from "../src/utils/purchase-actions.ts";
 import * as purchaseDocumentUtils from "../src/utils/purchase-documents.ts";
-import * as purchaseDiffUtils from "../src/utils/purchaseDiff.ts";
 import * as custodyUtils from "../src/utils/custody.ts";
 import * as invoiceActionUtils from "../src/utils/invoice-actions.ts";
 
@@ -138,11 +137,9 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // Listed so the drift guard sees its exports.
   purchases: purchaseUtils,
   // `utils/purchase-documents.ts` defaults, meters, prices and syncs a bill's
-  // lines, and `utils/purchaseDiff.ts` compares a bill with its purchase — both
   // write- or review-path machinery over documents a template has already been
   // handed priced. Listed so the drift guard sees their exports.
   "purchase-documents": purchaseDocumentUtils,
-  purchaseDiff: purchaseDiffUtils,
   // `utils/custody.ts` is the booking LEVER's ruleset — which step is legal,
   // what it does to a breakdown, what a record PUT moves. Every export answers a
   // question about a write; a template renders one that already happened.

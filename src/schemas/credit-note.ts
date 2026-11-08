@@ -454,7 +454,7 @@ export interface CreditNote {
    * unreversed allocation minus any cash refunded.
    *
    * A stored projection of the settlements that name this note, exactly as the
-   * invoice's `amount_credited_cents` is: `creditNoteRemainingFromJournal`
+   * invoice's `amount_credited_cents` is: `creditRemainingFromJournal`
    * (`@cfs/core/utils/invoices`) over every `credit` and `refund` row and their
    * reversals. The writers apply deltas under compare-and-set; the fold is what
    * `audit-credit-note-remaining.ts` checks them against and what a lost-claim

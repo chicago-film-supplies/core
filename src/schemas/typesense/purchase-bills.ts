@@ -4,12 +4,14 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  * Typesense collection config for purchase bills (api-cloudrun#1220) — the
  * supplier's ACCPAY bill against one purchase.
  *
- * ⚠️ **Not the purchase skeleton.** A bill has no `store` and no `status`.
+ * ⚠️ **Not the purchase skeleton.** A bill has no `store`.
  *
  * v2 (api-cloudrun#1407): `lines` + `direct_lines` → one `items` array, product
  * projections and direct items together, each carrying `type` and `name` — so
  * `items.type` is a facet and `items.name` is searchable. Every `items.*` field
  * is `optional: true`: a direct item may name no product.
+ *
+ * v4 (one-document-model Phase 4): adds `status`, the invoice's vocabulary.
  *
  * v3 (one-document-model Phase 3): `uid_purchase` → `number_purchases`, the
  * invoice's `number_orders` twin, because one bill may now bill several
@@ -24,12 +26,12 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  */
 export const purchaseBills: TypesenseCollectionConfig = {
   alias: "purchase-bills",
-  version: 3,
+  version: 4,
   firestoreCollection: "purchase-bills",
-  collectionName: "purchase-bills_v3",
+  collectionName: "purchase-bills_v4",
   enabled: true,
   schema: {
-    name: "purchase-bills_v3",
+    name: "purchase-bills_v4",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -39,6 +41,7 @@ export const purchaseBills: TypesenseCollectionConfig = {
       { name: "supplier", type: "object" },
       { name: "supplier.uid", type: "string", facet: false, optional: true },
       { name: "supplier.name", type: "string", sort: true, stem: true, facet: false },
+      { name: "status", type: "string", facet: true },
       { name: "origin", type: "string", facet: true },
       { name: "xero_document", type: "string", facet: true },
       { name: "xero_id", type: "string", index: true, sort: false, facet: false, optional: true },
