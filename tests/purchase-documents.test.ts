@@ -86,7 +86,7 @@ function visionLine(over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem 
     uid_tax_class: TAX_CLASS,
     quantity_received: 2,
     quantity_billed: null,
-    quantity_canceled: 0,
+    status: "open",
     quantity_returned: 0,
     uid_orders: [],
     uid_units: ["unit-1", "unit-2"],
@@ -114,7 +114,7 @@ function buyLine(over: Record<string, unknown> = {}): PurchaseItem {
     expected_date: null,
     quantity_received: 0,
     quantity_billed: 0,
-    quantity_canceled: 0,
+    status: "open",
     landed_costs: [],
     ...over,
   }) as PurchaseItem;
@@ -359,6 +359,10 @@ Deno.test("syncPurchaseToBills: a TIME line's quantity follows on its own and th
 
 // ── The purchase → bill sync ────────────────────────────────────────
 
+function syncPurchaseToBillsOver(prev: PurchaseItem[], next: PurchaseItem[], bills: PurchaseBill[]) {
+  return syncPurchaseToBills({ prev: purchaseDoc(prev), next: purchaseDoc(next), bills, tax: TAX });
+}
+
 function purchaseDoc(items: PurchaseItem[]): Purchase {
   const hire = items.some((i) => i.type === "rental");
   return {
@@ -412,6 +416,32 @@ const parses = (bill: PurchaseBill) => {
   const r = PurchaseBillSchema.safeParse(bill);
   assert(r.success, JSON.stringify(r.error?.issues));
 };
+
+Deno.test("syncPurchaseToBills: a line closed to 0 removes an untouched bill line, keeps an edited one, and never empties a bill", () => {
+  const prevItem = buyLine({ quantity_billed: 3 });
+  const closed = { ...prevItem, quantity: 0, amount_cents: 0, status: "canceled" } as PurchaseItem;
+  const other = buyLine({ uid: iuid(5), path: [DIV, iuid(5)] });
+  const whole = project(prevItem, 10, 3);
+  const second = project(other, 10, 3);
+
+  // The bill keeps its other line, and the closed one goes.
+  const [out] = syncPurchaseToBillsOver([prevItem, other], [closed, other], [billDoc(1, [whole, second])]);
+  assert(out.changed);
+  assertEquals(linesOf(out.bill).map((l) => l.uid), [second.uid]);
+  assertEquals(out.kept_no_lines, undefined);
+
+  // An edited bill line is an override: it stays, and the diff reports it.
+  const edited = { ...whole, name: "Walkie (supplier's wording)" };
+  const [kept] = syncPurchaseToBillsOver([prevItem, other], [closed, other], [billDoc(1, [edited, second])]);
+  assertEquals(linesOf(kept.bill).map((l) => l.uid).sort(), [whole.uid, second.uid].sort());
+
+  // Its only line: left as it stood and reported, because Xero ignores an empty LineItems.
+  const only = billDoc(1, [whole]);
+  const [lone] = syncPurchaseToBillsOver([prevItem], [closed], [only]);
+  assertEquals(lone.changed, false);
+  assertEquals(lone.kept_no_lines, true);
+  assertEquals(lone.bill, only);
+});
 
 Deno.test("syncPurchaseToBills: a name and a discount reach a PARTIAL bill line; its net stays, and the discount lands as its SHARE", () => {
   const prevItem = buyLine();

@@ -448,7 +448,6 @@ export type StockPurchaseItemSource =
     type: "sale";
     uid_product: string;
     quantity: number;
-    quantity_canceled: number;
     quantity_received: number;
     expected_date: string | null;
   }
@@ -456,7 +455,6 @@ export type StockPurchaseItemSource =
     type: "rental";
     uid_product: string;
     quantity: number;
-    quantity_canceled: number;
     quantity_returned: number;
     path: readonly string[];
   }
@@ -512,7 +510,7 @@ export function supplyFromPurchase(p: StockPurchaseSource, uidProduct: string): 
     switch (item.type) {
       case "rental": {
         if (item.uid_product !== uidProduct) break;
-        const quantity = item.quantity - item.quantity_canceled - item.quantity_returned;
+        const quantity = item.quantity - item.quantity_returned;
         if (quantity <= 0) break;
         const pair = p.destinations.find((d) => d.uid === item.path[0]);
         const start = pair?.dates.delivery_start ?? null;

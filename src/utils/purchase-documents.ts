@@ -54,6 +54,8 @@ import {
   purchaseLineKeyOf,
   type PurchaseRow,
   PurchaseSchema,
+  isPurchaseLine,
+  purchaseDocumentLines,
 } from "../schemas/mod.ts";
 import { cumulativeShareCents } from "./purchases.ts";
 import { roundDivHalfUp } from "./money.ts";
@@ -235,6 +237,7 @@ export function recomputePurchaseQuantityBilled(
  * `round(discount × billed ÷ ordered)`, informational, and never summed.
  */
 function flatDiscountShare(discount: DiscountType, billed: number, ordered: number): number {
+  if (ordered === 0) return 0; // A canceled line: no discount left to share.
   return Number(roundDivHalfUp(BigInt(discount.amount_cents) * BigInt(billed), BigInt(ordered)));
 }
 
@@ -655,6 +658,12 @@ export interface PurchaseBillSync {
   /** The bill to store — the input object unchanged when `changed` is false. */
   bill: PurchaseBill;
   changed: boolean;
+  /**
+   * The sync would have removed the bill's every line (each followed a canceled
+   * purchase line), so the bill was left as it stood: Xero ignores an empty
+   * `LineItems`, which is how invoice #2396 froze. The caller reports it.
+   */
+  kept_no_lines?: true;
 }
 
 /** {@link syncPurchaseToBills}' inputs. */
@@ -765,13 +774,16 @@ export function syncPurchaseToBills(args: SyncPurchaseToBillsArgs): PurchaseBill
     let end = start + 1;
     while (end < bill.items.length && bill.items[end].path[0] === uidPurchase) end++;
     const scoped = bill.items.slice(start + 1, end);
-    const { side, prevItems, nextItems } = payableScopedSync(args.prev, args.next);
+    const { side, prevItems, nextItems } = payableScopedSync(withoutCanceledLines(args.prev), withoutCanceledLines(args.next));
     const synced = syncScopedBillingItems(prevItems, nextItems, scoped, uidPurchase, side);
     const rows = computePurchaseDocumentItemPaths([
       ...bill.items.slice(0, start + 1),
       ...reshareDiscounts(synced, args.next),
       ...bill.items.slice(end),
     ]);
+    if (purchaseDocumentLines(rows).length === 0 && purchaseDocumentLines(bill.items).length > 0) {
+      return { ...untouched, kept_no_lines: true };
+    }
     const destinations = syncScopePairs(args.prev, args.next, bill, rows);
     if (sameSharedValue(rows, bill.items) && sameSharedValue(destinations, bill.destinations)) return untouched;
     const priced = priceDocument(rows, {
@@ -785,6 +797,17 @@ export function syncPurchaseToBills(args: SyncPurchaseToBillsArgs): PurchaseBill
       changed: true,
     };
   });
+}
+
+/**
+ * The purchase as a bill sync sees it: a line canceled to quantity 0 is a line
+ * the purchase no longer has. Bill lines are `≥ 1`, so a 0 could never be
+ * followed, and the invoice sync's rule applies as it stands: an untouched line
+ * goes, an edited one stays and the diff reports it (one-document-model Phase 5).
+ * A canceled TIME line keeps its quantity, and so stays.
+ */
+function withoutCanceledLines(purchase: Purchase): Purchase {
+  return { ...purchase, items: purchase.items.filter((r) => !isPurchaseLine(r) || r.quantity > 0) };
 }
 
 /**

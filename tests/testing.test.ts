@@ -173,7 +173,7 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
       expected_date: null,
       quantity_received: 0,
       quantity_billed: 0,
-      quantity_canceled: 0,
+      status: "open",
       landed_costs: [],
     }],
   },

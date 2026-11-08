@@ -30,9 +30,8 @@
  * edit, and a close each change supply: they bump `stock-locks/{P}` and rebuild
  * `stock/{P}` through {@link STOCK_STEPS}. ⚠️ An edit or a close can LOWER
  * supply, which is the direction that oversells, so the bump is not optional.
- * A close also moves the document's own `quantity_canceled`, and when it
- * leaves a line billed beyond what was received it raises a supplier credit for
- * the excess in the same commit (`close-purchase:excess-to-credit`).
+ * A close lowers the document's own line quantities and reaches its bills by the
+ * three-way sync (`close-purchase:purchase-to-bills`).
  *
  * ## A SUBRENT's do: supply, and a card
  *
@@ -95,7 +94,7 @@ const receivePurchaseRules: CollectionRule[] = [
     target: "purchases",
     mode: "co-write",
     invariant:
-      "Every receipt is ONE movement naming its purchase in sources[] (exactly one `purchases` source — the movement refine) — a `purchase` on a buy, a cost-forbidden `subrent_in` on a subrent — written in ONE commit with the purchase line's `quantity_received` bump, so the bucket is the sum of the receipts naming it by construction. Receiving is refused past `quantity − quantity_canceled − quantity_received`. A buy receipt's cost is the line's CUMULATIVE target at the new received count — the goods' share plus every landed cost's share (`purchaseLineReceiptTargetCents`) — minus the cost the journal already holds for the product, never a client input, so the receipts of a fully received line sum to its `amount_cents` plus its landed costs exactly; a subrent receipt carries no cost at all, because a rented unit is never owned. A receipt posts nothing to Xero: the bill is its own document.",
+      "Every receipt is ONE movement naming its purchase in sources[] (exactly one `purchases` source — the movement refine) — a `purchase` on a buy, a cost-forbidden `subrent_in` on a subrent — written in ONE commit with the purchase line's `quantity_received` bump, so the bucket is the sum of the receipts naming it by construction. Receiving is refused past `quantity − quantity_received`. A buy receipt's cost is the line's CUMULATIVE target at the new received count — the goods' share plus every landed cost's share (`purchaseLineReceiptTargetCents`) — minus the cost the journal already holds for the product, never a client input, so the receipts of a fully received line sum to its `amount_cents` plus its landed costs exactly; a subrent receipt carries no cost at all, because a rented unit is never owned. A receipt posts nothing to Xero: the bill is its own document.",
     enforced_by: [RECEIPT_MOVES_THE_BUCKET],
     transaction: "receive-purchase",
     fields: [
@@ -698,36 +697,26 @@ const createPurchaseCreditRules: CollectionRule[] = [
   },
 ];
 
-/** The short-close auto-credit, asserted with a bill it is then allocated to. */
-const CLOSE_RAISES_CREDIT: EnforcementRef = {
-  kind: "test",
-  ref:
-    "api-cloudrun/tests/integration/purchases/purchaseCredits.test.ts::short close — an item billed beyond what it received raises a short_close credit, allocated to the bill",
-  clause:
-    "closing a line billed beyond what it received writes one pushed purchase-credit (reason short_close, keyed on the purchase and the close session) for the excess units, priced from the billed pool, and the recount with that credit in it leaves quantity_billed at quantity_received, in the same commit; the credit is then allocated newest bill first; a retried close writes nothing new",
-  gates: true,
-};
-
 const closePurchaseRules: CollectionRule[] = [
   {
-    id: "close-purchase:excess-to-credit",
+    id: "close-purchase:purchase-to-bills",
     source: "purchases",
-    target: "purchase-credits",
+    target: "purchase-bills",
     mode: "co-write",
     invariant:
-      "A close that leaves a line billed beyond what it received (`quantity_billed > quantity_received`) raises ONE pushed supplier credit (`reason: short_close`) in the same commit, with one line per such purchase line for `quantity_billed − quantity_received` units, priced at `flatShareCents(amount_cents, quantity, received, billed)` — the share of the range it un-bills, as any pushed credit is. The recount, with this credit passed in, leaves `quantity_billed` at `quantity_received` in that commit. The credit's id is derived from the purchase and the close session, so a retried close finds it rather than minting a second. Allocating it to the purchase's bills is a separate write per bill (`allocate-purchase-credit`), newest bill first, after the commit.",
-    enforced_by: [CLOSE_RAISES_CREDIT],
+      "A close is a quantity edit, so it reaches the purchase's bills by the same three-way rule as any purchase edit: an untouched line on a pushed, unsettled bill follows the lowered quantity and amount, and is removed when the line is canceled to 0 unless that would leave the bill with no lines. An edited, linked, settled or void bill keeps its line, and the diff reports it.",
+    enforced_by: [PURCHASE_BILL_SYNC_SEMANTICS],
     transaction: "close-purchase",
     fields: [
       {
-        source: ["items", "quantity_billed"],
-        target: ["items", "quantity"],
-        transform: "quantity_billed − quantity_received, for each line the close leaves over-billed",
+        source: ["items"],
+        target: ["items"],
+        transform: "the order → invoice sync's own engine (`syncScopedBillingItems`), run on the closed purchase",
       },
       {
-        source: ["uid"],
-        target: ["query_by_sources"],
-        transform: "the credit names the purchase it closes",
+        source: ["items"],
+        target: ["totals"],
+        transform: "total_cents = Σ line money (`priceDocument`, payable arm); amount_due_cents moves with it",
       },
     ],
   },
@@ -1032,7 +1021,7 @@ const purchaseBilledRules: CollectionRule[] = [
     mode: "co-write",
     invariant:
       "The other half of the recount: every live credit line is subtracted from the purchase line it credits (`purchaseLineKeyOf`), and a voided credit stops being subtracted, so its units read billed again. Voiding a credit from Xero is never refused and is uncapped: a void that re-bills units the purchase has since CANCELED (a short close's credit, voided in Xero) over-bills the line, which is legal and flagged by the purchase ↔ bill diff (D5), never trimmed. An operator void is refused only while a row draws on the credit, since Xero refuses to void a note with an allocation or a payment. A credit left with no live bill under it floors the count at 0, and the diff shows the unfloored number.",
-    enforced_by: [BILLED_RECOUNT, CREDIT_UNBILLS_THE_BUCKET, CREDIT_VOIDED_FROM_XERO, CREDIT_VOIDED_FROM_CFS, CLOSE_RAISES_CREDIT],
+    enforced_by: [BILLED_RECOUNT, CREDIT_UNBILLS_THE_BUCKET, CREDIT_VOIDED_FROM_XERO, CREDIT_VOIDED_FROM_CFS],
     fields: [
       {
         source: ["items", "quantity"],
@@ -1215,11 +1204,9 @@ const updatePurchaseTransaction: TransactionDefinition = {
 const closePurchaseTransaction: TransactionDefinition = {
   id: "close-purchase",
   description:
-    "Short-closes (or, with nothing received, cancels) some or all of a purchase's buy and subrent items: `quantity_canceled = quantity − quantity_received`. When that leaves a line billed beyond what it received, the same commit raises a pushed supplier credit (`short_close`) for the excess, and the recount leaves `quantity_billed` at `quantity_received`; after the commit the credit is pushed to Xero and allocated to the purchase's bills, newest first, one `allocate-purchase-credit` per bill. The raised credit gets its default thread in the same commit, as an operator-raised one does. Fires on: a close of an over-billed line. Every close lowers the closed line's supply, so it fires STOCK_STEPS: on a BUY item the short-closed remainder stops being inbound. A SUBRENT item's close is refused while units are unreturned; when it is allowed it also fires the return card, for a subrent item only.",
+    "Closes some or all of a purchase's lines: a buy or subrent line lowers its quantity to what was received, a flat charge to what was billed, restating its money; a line with nothing left is canceled, and a time charge is canceled at its quantity. The lowered lines reach the purchase's bills by the three-way sync. Raises no credit: billed beyond what was received is a diff entry.",
   steps: [
-    "close-purchase:excess-to-credit",
-    "cowrite-thread:purchase-credits-to-thread",
-    "cowrite-thread:thread-to-purchase-credits",
+    "close-purchase:purchase-to-bills",
     ...STOCK_STEPS,
     ...RECOUNT_STEPS,
   ],

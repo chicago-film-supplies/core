@@ -69,6 +69,7 @@
  *
  * @module
  */
+import type { SharedLineType } from "./side.ts";
 import { z } from "zod";
 import { FirestoreId, ItemUid, OutOfServiceId, ThreadId } from "./_uid.ts";
 import { chicagoStartOfDay } from "./_datetime.ts";
@@ -797,8 +798,6 @@ export const PurchaseBillSchema: z.ZodType<PurchaseBill> = z.strictObject({
  * `tests/settlements.test.ts`.
  */
 export const PURCHASE_CREDIT_REASONS = [
-  /** A short close left a line billed beyond what was received; auto-raised for the excess. */
-  "short_close",
   /** The supplier corrected a price or quantity after billing. */
   "supplier_adjustment",
   /** An operator fixing their own record. */
@@ -1197,18 +1196,27 @@ export const CreatePurchaseCreditInput: z.ZodType<CreatePurchaseCreditInputType>
   }
 }) as z.ZodType<CreatePurchaseCreditInputType>;
 
+/** A divider row of a bill's whole-array input. */
+export interface PurchaseBillDividerInputType {
+  type: "purchase" | "destination" | "group";
+  uid: string;
+  path: string[];
+  name?: string;
+}
+
 /**
- * One line of a PUSHED bill as an operator edits it (D5): any shared field may
- * be overridden until the bill is settled — exactly the invoice rule. Matched
- * to the stored line by `uid`; an absent key KEEPS the stored value.
+ * A line row of a bill's whole-array input, identified by its `path`.
  *
- * Money is edited through its INPUTS, never typed over the result on a time
- * line: `price.rates` and `price.discount`, from which the writer re-meters
- * `counts` over the line's pair windows and re-prices `amount_cents`. A flat line's
+ * A path the bill already holds keeps every key this row omits. A path it does
+ * not hold is projected from the purchase line named by that path, so a bill can
+ * take a line of another purchase of the same supplier under that purchase's
+ * divider. On a TIME line `price.rates` restates each unit rate; a flat line's
  * `amount_cents` is stated directly (gross when a discount is set).
  */
-export interface PurchaseBillLineEditInputType {
+export interface PurchaseBillLineInputType {
+  type: SharedLineType;
   uid: string;
+  path: string[];
   name?: string;
   description?: string;
   quantity?: number;
@@ -1221,11 +1229,15 @@ export interface PurchaseBillLineEditInputType {
   price?: { rates?: { rate_key: string; amount_cents: number }[]; discount?: DiscountInputType | null };
 }
 
+/** One row of a bill's whole-array input. */
+export type PurchaseBillRowInputType = PurchaseBillDividerInputType | PurchaseBillLineInputType;
+
 /**
- * Input for editing a PUSHED, unsettled bill (`PUT /purchase-bills/{uid}`) — a
- * PATCH. `items`, when present, names lines to edit by `uid`; lines it omits are
- * kept. Refused on a linked bill (Xero is authoritative) and, per field class,
- * once the bill is frozen (`INVOICE_FIELD_FREEZE`). An accepted edit is
+ * Input for editing a PUSHED, unsettled bill (`PUT /purchase-bills/{uid}`).
+ * `items`, when present, is the WHOLE array in its new order, keyed by `path`, the
+ * invoice's shape (one-document-model Phase 5): a row it omits is removed. Refused
+ * on a linked bill apart from tracking (Xero is authoritative) and, per field
+ * class, once the bill is frozen (`INVOICE_FIELD_FREEZE`). An accepted edit is
  * pushed to Xero through the ACCPAY edit push (D5).
  */
 export interface UpdatePurchaseBillInputType {
@@ -1233,17 +1245,17 @@ export interface UpdatePurchaseBillInputType {
   date?: string;
   due_date?: string;
   reference?: string | null;
-  items?: PurchaseBillLineEditInputType[];
+  items?: PurchaseBillRowInputType[];
 }
 
-/** Zod schema for UpdatePurchaseBillInputType. */
-export const UpdatePurchaseBillInput: z.ZodType<UpdatePurchaseBillInputType> = z.object({
-  version: z.int().min(0),
-  date: chicagoStartOfDay().optional(),
-  due_date: chicagoStartOfDay().optional(),
-  reference: z.string().max(255).nullable().optional(),
-  items: z.array(z.object({
+const billDividerInput = (type: "purchase" | "destination" | "group") =>
+  z.object({ type: z.literal(type), uid: ItemUid, path: z.array(ItemUid).min(1), name: LineItemCore.name.optional() });
+
+const billLineInput = (type: SharedLineType) =>
+  z.object({
+    type: z.literal(type),
     uid: ItemUid,
+    path: z.array(ItemUid).min(1),
     name: LineItemCore.name.optional(),
     description: LineItemCore.description.optional(),
     quantity: z.int().min(1).optional(),
@@ -1255,12 +1267,32 @@ export const UpdatePurchaseBillInput: z.ZodType<UpdatePurchaseBillInputType> = z
       rates: z.array(z.object({ rate_key: RateKey, amount_cents: z.int() })).optional(),
       discount: DiscountInput.nullable().optional(),
     }).optional(),
-  })).optional(),
+  });
+
+/** Zod schema for one {@link PurchaseBillRowInputType}. */
+export const PurchaseBillRowInput: z.ZodType<PurchaseBillRowInputType> = z.discriminatedUnion("type", [
+  billDividerInput("purchase"),
+  billDividerInput("destination"),
+  billDividerInput("group"),
+  billLineInput("sale"),
+  billLineInput("rental"),
+  billLineInput("service"),
+  billLineInput("replacement"),
+]);
+
+/** Zod schema for UpdatePurchaseBillInputType. */
+export const UpdatePurchaseBillInput: z.ZodType<UpdatePurchaseBillInputType> = z.object({
+  version: z.int().min(0),
+  date: chicagoStartOfDay().optional(),
+  due_date: chicagoStartOfDay().optional(),
+  reference: z.string().max(255).nullable().optional(),
+  items: z.array(PurchaseBillRowInput).optional(),
 }).superRefine((u, ctx) => {
   const seen = new Set<string>();
   u.items?.forEach((item, i) => {
-    if (seen.has(item.uid)) ctx.addIssue({ code: "custom", path: ["items", i, "uid"], message: "a line is edited once per write" });
-    seen.add(item.uid);
+    const key = item.path.join("/");
+    if (seen.has(key)) ctx.addIssue({ code: "custom", path: ["items", i, "path"], message: "a row appears once per write" });
+    seen.add(key);
   });
 }) as z.ZodType<UpdatePurchaseBillInputType>;
 

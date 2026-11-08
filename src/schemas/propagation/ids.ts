@@ -256,7 +256,7 @@ export type RuleId =
   | "reverse-purchase-credit-allocation:reverser-to-settlements"
   | "reverse-purchase-credit-allocation:settlements-to-bill"
   | "reverse-purchase-credit-allocation:settlements-to-credit"
-  | "close-purchase:excess-to-credit"
+  | "close-purchase:purchase-to-bills"
   | "settle-purchase-credit:xero-to-settlements"
   | "settle-purchase-credit:settlements-to-credit"
   | "void-purchase-credit-from-xero:void-to-settlements"

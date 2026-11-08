@@ -51,7 +51,7 @@ import type { PurchaseBillXeroSyncStatus } from "./purchase-bill-xero-sync.ts";
 import { remainingToBill, remainingToReceive, remainingToReturn } from "./purchases.ts";
 
 /** The keys of a purchase line the ruleset reads — so a line not yet saved can be asked too. */
-type LineKeys = "uid" | "path" | "quantity" | "quantity_billed" | "quantity_canceled" | "price";
+type LineKeys = "uid" | "path" | "quantity" | "quantity_billed" | "status" | "price";
 
 /** A purchase line as the ruleset reads it. */
 export type PurchaseActionItem =
@@ -119,12 +119,12 @@ export function purchaseItemTouched(item: PurchaseActionItem, billedPaths: Reado
   const billed = (item.quantity_billed ?? 0) > 0 || billedPaths.has(item.path.join("/"));
   switch (item.type) {
     case "sale":
-      return billed || item.quantity_received + item.quantity_canceled > 0;
+      return billed || item.quantity_received > 0 || item.status === "canceled";
     case "rental":
-      return billed || item.quantity_received + item.quantity_canceled + item.quantity_returned > 0;
+      return billed || item.quantity_received + item.quantity_returned > 0 || item.status === "canceled";
     case "service":
     case "replacement":
-      return billed || item.quantity_canceled > 0;
+      return billed || item.status === "canceled";
     default: {
       const unreachable: never = item;
       throw new Error(`purchaseItemTouched: unknown item ${JSON.stringify(unreachable)}`);
@@ -133,16 +133,17 @@ export function purchaseItemTouched(item: PurchaseActionItem, billedPaths: Reado
 }
 
 /**
- * **Would a close change this line?** Units still to arrive are canceled; a
- * service or replacement cancels its unbilled quantity, or all of it on a time line. A rental
+ * **Would a close change this line?** Units still to arrive are dropped; a
+ * service or replacement drops its unbilled quantity, and a time line is canceled. A rental
  * with units still out is NOT closable: the close zeroes its supply, so the API
  * refuses it until they have gone back.
  */
 export function purchaseItemClosable(item: PurchaseActionItem): boolean {
+  if (item.status === "canceled") return false;
   switch (item.type) {
     case "service":
     case "replacement":
-      return item.quantity - item.quantity_canceled - (item.quantity_billed ?? 0) > 0;
+      return item.quantity - (item.quantity_billed ?? 0) > 0;
     case "rental":
       return remainingToReturn(item) === 0 && remainingToReceive(item) > 0;
     case "sale":
@@ -163,16 +164,13 @@ function closeCancels(item: PurchaseActionItem): boolean {
 
 /**
  * The units a line may still bill, 0 when it has nothing to bill: what is
- * ordered, less what is billed and canceled. A TIME line counts no
+ * ordered, less what is billed, and nothing on a canceled line. A TIME line counts no
  * `quantity_billed`, so it offers its open units every time — what is left of
  * its time is the bill writer's `remainingTimeCounts`, not a unit count.
  */
 function billableQuantity(item: PurchaseActionItem): number {
-  return remainingToBill({
-    quantity: item.quantity,
-    quantity_billed: item.quantity_billed ?? 0,
-    quantity_canceled: item.quantity_canceled,
-  });
+  if (item.status === "canceled") return 0;
+  return remainingToBill({ quantity: item.quantity, quantity_billed: item.quantity_billed ?? 0 });
 }
 
 /**
@@ -233,8 +231,9 @@ export type PurchaseBillActionBill =
  * re-checks. Here it would offer Void on an unknown answer, so a caller without
  * these documents cannot compile.
  */
-export interface PurchaseBillContext extends PurchaseBilledDocuments {
-  purchase: Pick<Purchase, "items">;
+export interface PurchaseBillContext {
+  /** One entry per purchase the bill names: a bill may bill several. */
+  per_purchase: (PurchaseBilledDocuments & { purchase: Pick<Purchase, "items"> })[];
   /**
    * `purchaseBillXeroSyncStatus(bill, sidecar)`. The one optional key: absent means
    * `push_to_xero` is not offered, so an unknown answer cannot offer it.
@@ -261,13 +260,15 @@ export function purchaseBillVoidRefusal(bill: PurchaseBillActionBill, ctx: Purch
   if (bill.totals.amount_paid_cents > 0 || bill.totals.amount_credited_cents > 0) {
     return `Cannot void bill ${bill.number}: payments or supplier credits are applied to it. Remove them first.`;
   }
-  const others = { uid_purchase: ctx.uid_purchase, bills: ctx.bills.filter((b) => b.uid !== bill.uid), credits: ctx.credits };
-  const named = purchaseBilledPaths([bill], ctx.uid_purchase);
-  const stranded = purchaseLines(ctx.purchase.items).filter((item) =>
-    purchaseItemBasis(item) === "flat" && named.has(item.path.join("/")) &&
-    purchaseLineBilledNet(item.path, others).quantity < 0
-  );
-  if (stranded.length > 0) {
+  const stranded = ctx.per_purchase.some((p) => {
+    const others = { uid_purchase: p.uid_purchase, bills: p.bills.filter((b) => b.uid !== bill.uid), credits: p.credits };
+    const named = purchaseBilledPaths([bill], p.uid_purchase);
+    return purchaseLines(p.purchase.items).some((item) =>
+      purchaseItemBasis(item) === "flat" && named.has(item.path.join("/")) &&
+      purchaseLineBilledNet(item.path, others).quantity < 0
+    );
+  });
+  if (stranded) {
     return `Cannot void bill ${bill.number}: a supplier credit would be left with no bill under it. Void the credit first.`;
   }
   return null;

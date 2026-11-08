@@ -825,7 +825,7 @@ Deno.test("the narrowing guards partition the journal by side and target", () =>
 Deno.test("recomputePurchaseBillTotals: the invoice fold, over bill rows", () => {
   const rows = [
     S({ type: "bill_payment", reason: "payment_sent", amount_cents: 60_000 }),
-    S({ type: "bill_credit", reason: "short_close", amount_cents: 10_000 }),
+    S({ type: "bill_credit", reason: "supplier_adjustment", amount_cents: 10_000 }),
     S({ type: "bill_payment", reason: "payment_sent", amount_cents: 5_000 }),
     S({ type: "bill_payment_reversal", reason: "source_retracted", amount_cents: 5_000 }),
   ];
@@ -835,7 +835,7 @@ Deno.test("recomputePurchaseBillTotals: the invoice fold, over bill rows", () =>
     amount_void_cents: 0,
     amount_due_cents: 70_985,
     closure_count: 0,
-    breakdown: { payment_sent: 65_000, short_close: 10_000, source_retracted: -5_000 },
+    breakdown: { payment_sent: 65_000, supplier_adjustment: 10_000, source_retracted: -5_000 },
   });
   // A card purchase born paid: one row for the whole total, due 0.
   assertEquals(

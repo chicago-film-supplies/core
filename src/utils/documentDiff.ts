@@ -1588,8 +1588,11 @@ function payableQuantityEntry(
   const namingCredits = credits.filter((c) => names(c.items));
   if (namingBills.length === 0 && namingCredits.length === 0) return null;
   const net = purchaseLineBilledNet(item.path, { uid_purchase: uidPurchase, bills: namingBills, credits: namingCredits });
-  const ordered = item.quantity - item.quantity_canceled;
-  const expected_cents = Number(roundDivHalfUp(BigInt(item.amount_cents ?? 0) * BigInt(Math.max(0, net.quantity)), BigInt(item.quantity)));
+  const ordered = item.quantity;
+  // A canceled line holds quantity 0 and states no money, so nothing is expected of its bills.
+  const expected_cents = item.quantity === 0
+    ? 0
+    : Number(roundDivHalfUp(BigInt(item.amount_cents ?? 0) * BigInt(Math.max(0, net.quantity)), BigInt(item.quantity)));
   if (net.quantity === ordered && net.amount_cents === expected_cents) return null;
   return {
     kind: "quantity",

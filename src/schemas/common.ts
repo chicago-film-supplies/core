@@ -1986,8 +1986,6 @@ const SETTLEMENT_REASONS = [
   "credit_refunded",
   /** bill_payment — cash CFS sent against a supplier bill, or a card purchase born paid. */
   "payment_sent",
-  /** bill_credit — a short close left a line billed beyond what was received. */
-  "short_close",
   /** bill_credit — the supplier corrected a price or quantity after billing. */
   "supplier_adjustment",
   /**
@@ -2270,7 +2268,7 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
   bill_credit: {
     settles: "purchase_bill",
     draws_credit: true,
-    reasons: ["short_close", "supplier_adjustment", "correction"],
+    reasons: ["supplier_adjustment", "correction"],
     xero_id_field: "xero_credit_note_id",
     sums_into: "amount_credited_cents",
     counts_into: null,

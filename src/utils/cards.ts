@@ -338,7 +338,7 @@ export function computeCardStatusFromPurchase(
   if (current === "blocked") return current;
   if (purchase.status === "canceled") return "canceled";
   if (unitsInCustody(purchase)) return "active";
-  const settled = subrentItems(purchase).every((i) => i.quantity_received + i.quantity_canceled === i.quantity);
+  const settled = subrentItems(purchase).every((i) => i.quantity_received === i.quantity);
   return settled ? "complete" : "planned";
 }
 
@@ -365,7 +365,7 @@ export function computeCardActionFromPurchase(purchase: Pick<Purchase, "items">)
 export function purchaseCardDue(purchase: Pick<Purchase, "items" | "destinations">): string | null {
   const items = subrentItems(purchase);
   const open = items.filter((i) =>
-    i.quantity_received > i.quantity_returned || i.quantity_received + i.quantity_canceled < i.quantity
+    i.quantity_received > i.quantity_returned || i.quantity_received < i.quantity
   );
   // The due-back is the hire window's end, on the line's PAIR (one-document-model Phase 3).
   const pool = (open.length > 0 ? open : items).map((i) => purchaseHireWindow(purchase, i)?.end ?? null)

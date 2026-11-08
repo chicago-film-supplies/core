@@ -24,6 +24,9 @@ import {
   type StockMethodType,
   type PurchaseRentalItem,
   type PurchaseRentalItemInputType,
+  purchaseItemBasis,
+  type PurchaseItem,
+  type PurchaseLineStatusType,
 } from "../schemas/mod.ts";
 import { apportionCents, roundDivHalfUp, toCentsBig } from "./money.ts";
 import { type FormulaDiscount, priceFromFormula } from "../schemas/_line-money.ts";
@@ -48,7 +51,7 @@ export {
 };
 
 /** The co-written receipt buckets — a buy or subrent item. */
-type ReceivableItem = Pick<PurchaseSaleItem, "quantity" | "quantity_received" | "quantity_canceled">;
+type ReceivableItem = Pick<PurchaseSaleItem, "quantity" | "quantity_received">;
 
 /**
  * The cents a line's units `(before, after]` cost — the k-th receipt or the
@@ -176,7 +179,7 @@ export function isLandedCostFrozen(
  * post-receipt re-base, which is designed with depreciation (api-cloudrun#1388).
  */
 export function strandedLandedCents(
-  line: Pick<PurchaseSaleItem, "quantity" | "quantity_received" | "quantity_canceled" | "landed_costs">,
+  line: Pick<PurchaseSaleItem, "quantity" | "quantity_received" | "landed_costs">,
 ): number {
   if (remainingToReceive(line) > 0) return 0;
   return line.landed_costs.reduce(
@@ -188,13 +191,14 @@ export function strandedLandedCents(
 /**
  * A line's weight when one landed amount is spread over several lines: the
  * value still to arrive, `cumulativeShareCents(amount, quantity, received,
- * quantity − canceled)`. Units already received carry none of it, because the
+ * quantity)`. Units already received carry none of it, because the
  * entry only ever prices units received after it.
  */
 export function landedCostWeightCents(
-  line: Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "quantity_received" | "quantity_canceled">,
+  line: Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "quantity_received">,
 ): number {
-  return cumulativeShareCents(line.amount_cents, line.quantity, line.quantity_received, line.quantity - line.quantity_canceled);
+  if (line.quantity === 0) return 0; // Canceled: nothing still to arrive, and the share divides by quantity.
+  return cumulativeShareCents(line.amount_cents, line.quantity, line.quantity_received, line.quantity);
 }
 
 /**
@@ -211,14 +215,42 @@ export function landedCostWeightCents(
  */
 export function allocateLandedCostCents(
   amountCents: number,
-  lines: readonly Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "quantity_received" | "quantity_canceled">[],
+  lines: readonly Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "quantity_received">[],
 ): number[] {
   return apportionCents(BigInt(amountCents), lines.map((l) => BigInt(landedCostWeightCents(l)))).map(Number);
 }
 
-/** Units of a buy or subrent item still to be received: `quantity − canceled − received`. */
+/**
+ * **What a close leaves a line holding** (one-document-model Phase 5). A close is
+ * a quantity edit: a buy or subrent line drops to what was received, a flat
+ * charge to what was billed (never above what was ordered), and a line left with
+ * nothing is canceled at quantity 0. A TIME charge is canceled at its quantity,
+ * because its bills metered that quantity and a carrier line simply stops.
+ *
+ * Only the two facts both sides need live here; restating the money is the
+ * writer's, through the one payable pricer.
+ */
+export function purchaseLineCloseOutcome(item: PurchaseItem): { quantity: number; status: PurchaseLineStatusType } {
+  switch (item.type) {
+    case "sale":
+    case "rental":
+      return { quantity: item.quantity_received, status: item.quantity_received === 0 ? "canceled" : "open" };
+    case "service":
+    case "replacement": {
+      if (purchaseItemBasis(item) === "time") return { quantity: item.quantity, status: "canceled" };
+      const quantity = Math.min(item.quantity, item.quantity_billed ?? 0);
+      return { quantity, status: quantity === 0 ? "canceled" : "open" };
+    }
+    default: {
+      const unreachable: never = item;
+      throw new Error(`purchaseLineCloseOutcome: unknown item ${JSON.stringify(unreachable)}`);
+    }
+  }
+}
+
+/** Units of a buy or subrent item still to be received: `quantity − received`. */
 export function remainingToReceive(item: ReceivableItem): number {
-  return item.quantity - item.quantity_canceled - item.quantity_received;
+  return item.quantity - item.quantity_received;
 }
 
 /**
@@ -267,9 +299,9 @@ export function flatPurchaseLineMoney(
  * the bill projector, not a number here.
  */
 export function remainingToBill(
-  item: { quantity: number; quantity_billed: number; quantity_canceled: number },
+  item: { quantity: number; quantity_billed: number },
 ): number {
-  return Math.max(0, item.quantity - item.quantity_canceled - item.quantity_billed);
+  return Math.max(0, item.quantity - item.quantity_billed);
 }
 
 /**

@@ -494,7 +494,7 @@ const pline = (over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem => {
     price: payablePrice(50_000),
     quantity_received: 0,
     quantity_billed: 0,
-    quantity_canceled: 0,
+    status: "open",
     quantity_returned: 0,
     uid_orders: [],
     uid_units: [],
@@ -520,7 +520,7 @@ const bline: PurchaseSaleItem = {
   expected_date: null,
   quantity_received: 0,
   quantity_billed: 0,
-  quantity_canceled: 0,
+  status: "open",
   landed_costs: [],
 };
 
@@ -530,9 +530,9 @@ Deno.test("computeCardStatusFromPurchase / computeCardActionFromPurchase — the
     ["received, none returned", "active", { quantity_received: 10 }, "active", "return_to_supplier"],
     ["partly returned", "active", { quantity_received: 10, quantity_returned: 4 }, "active", "return_to_supplier"],
     ["all received returned, more to come", "active", { quantity_received: 6, quantity_returned: 6 }, "planned", null],
-    ["all returned, rest canceled (unbilled)", "active", { quantity_received: 6, quantity_returned: 6, quantity_canceled: 4 }, "complete", null],
+    ["all returned, rest canceled (unbilled)", "active", { quantity: 6, quantity_received: 6, quantity_returned: 6 }, "complete", null],
     ["all returned and billed", "complete", { quantity_received: 10, quantity_returned: 10, quantity_billed: 10 }, "complete", null],
-    ["canceled outright", "canceled", { quantity_canceled: 10 }, "canceled", null],
+    ["canceled outright", "canceled", { quantity: 0, status: "canceled" }, "canceled", null],
   ];
   for (const [name, status, over, want, action] of cases) {
     const p = { status, items: [pline(over)] };
@@ -552,7 +552,7 @@ Deno.test("purchaseCardDue: the earliest due-back among OPEN subrent items, else
   const PA = "9a1b2c3d-0000-4000-8000-0000000000da";
   const PB = "9a1b2c3d-0000-4000-8000-0000000000db";
   const destinations = [purchasePair(PA, { start: early, end: early }), purchasePair(PB, { start: early, end: late })];
-  const a = pline({ uid: "9a1b2c3d-0000-4000-8000-00000000000a", path: [PA, "9a1b2c3d-0000-4000-8000-00000000000a"], quantity_received: 3, quantity_returned: 3, quantity_canceled: 7 });
+  const a = pline({ uid: "9a1b2c3d-0000-4000-8000-00000000000a", path: [PA, "9a1b2c3d-0000-4000-8000-00000000000a"], quantity: 3, quantity_received: 3, quantity_returned: 3 });
   const b = pline({ uid: "9a1b2c3d-0000-4000-8000-00000000000b", path: [PB, "9a1b2c3d-0000-4000-8000-00000000000b"], quantity_received: 10 });
   assertEquals(purchaseCardDue({ items: [a, b], destinations }), late, "a is settled, so b's date leads");
   assertEquals(purchaseCardDue({ items: [a, { ...b, quantity_returned: 10 }], destinations }), early, "nothing open: the earliest of all");

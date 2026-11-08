@@ -83,6 +83,17 @@ export type LineCustody = "custody" | "none";
  */
 export type SideTax = "resolved" | "exempt";
 
+/**
+ * How a Xero line states its money. `exact_split` is at most two lines that are
+ * exact in cents; `unit_amount` is one line, `UnitAmount` = amount ÷ quantity,
+ * with a discount rate absorbing the remainder where the line has one
+ * (api-cloudrun#1211 is where it has none).
+ */
+export type XeroLineMoney = "exact_split" | "unit_amount";
+
+/** The billing and credit documents, the two roles that post lines to Xero. */
+export type XeroDocumentRole = "billing" | "credit";
+
 /** One side's entries. Total over {@link SharedLineType}, so a new type is a compile error until both sides state it. */
 export interface SideContract {
   /** The operator-facing name of each shared line type on this side. */
@@ -93,6 +104,8 @@ export interface SideContract {
   custody: Readonly<Record<SharedLineType, LineCustody>>;
   /** How the side's lines are taxed. */
   tax: SideTax;
+  /** How each posting role's lines state their money. Xero takes no discount on a credit note, so the role decides too. */
+  xero_line_money: Readonly<Record<XeroDocumentRole, XeroLineMoney>>;
 }
 
 /**
@@ -106,11 +119,13 @@ export const SIDE_CONTRACTS: Readonly<Record<Side, SideContract>> = {
     posting_class: { sale: "revenue", rental: "revenue", service: "revenue", replacement: "revenue" },
     custody: { sale: "custody", rental: "custody", service: "custody", replacement: "none" },
     tax: "resolved",
+    xero_line_money: { billing: "unit_amount", credit: "exact_split" },
   },
   payable: {
     line_labels: { sale: "Buy", rental: "Subrent", service: "Charge", replacement: "Replacement" },
     posting_class: { sale: "asset_or_expensed", rental: "cost", service: "any", replacement: "any" },
     custody: { sale: "custody", rental: "custody", service: "none", replacement: "none" },
     tax: "exempt",
+    xero_line_money: { billing: "exact_split", credit: "exact_split" },
   },
 };

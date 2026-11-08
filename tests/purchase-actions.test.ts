@@ -46,14 +46,14 @@ const TIME_PRICE = {
 
 const buy = (o: Record<string, unknown> = {}) => ({
   type: "sale", uid: "b", path: ["b"], quantity: 3, price: FIXED_PRICE,
-  quantity_received: 0, quantity_billed: 0, quantity_canceled: 0, ...o,
+  quantity_received: 0, quantity_billed: 0, status: "open", ...o,
 }) as PurchaseActionItem;
 const subrent = (o: Record<string, unknown> = {}) => ({
   type: "rental", uid: "s", path: ["s"], quantity: 2, price: FIXED_PRICE,
-  quantity_received: 0, quantity_returned: 0, quantity_billed: 0, quantity_canceled: 0, ...o,
+  quantity_received: 0, quantity_returned: 0, quantity_billed: 0, status: "open", ...o,
 }) as PurchaseActionItem;
 const charge = (o: Record<string, unknown> = {}) => ({
-  type: "service", uid: "c", path: ["c"], quantity: 2, price: FIXED_PRICE, quantity_billed: 0, quantity_canceled: 0, ...o,
+  type: "service", uid: "c", path: ["c"], quantity: 2, price: FIXED_PRICE, quantity_billed: 0, status: "open", ...o,
 }) as PurchaseActionItem;
 const timeCharge = (o: Record<string, unknown> = {}) => charge({ price: TIME_PRICE, quantity_billed: null, ...o });
 
@@ -69,7 +69,7 @@ Deno.test("PURCHASE_ACTION_IDS and PURCHASE_ACTIONS name the same actions, both 
 Deno.test("purchaseItemClosable: units to arrive, an unbilled charge; never a subrent with units out", () => {
   assert(purchaseItemClosable(buy()));
   assert(!purchaseItemClosable(buy({ quantity_received: 3 })));
-  assert(!purchaseItemClosable(buy({ quantity_canceled: 3 })));
+  assert(!purchaseItemClosable(buy({ quantity: 0, status: "canceled" })));
   assert(purchaseItemClosable(subrent()));
   // One of two arrived and is still out: the API refuses this close (the subrent plan, D4).
   assert(!purchaseItemClosable(subrent({ quantity_received: 1 })));
@@ -79,12 +79,12 @@ Deno.test("purchaseItemClosable: units to arrive, an unbilled charge; never a su
   assert(!purchaseItemClosable(charge({ quantity_billed: 2 })));
   assert(!purchaseItemClosable(charge({ quantity_billed: 3 })), "an over-billed charge has nothing left to cancel");
   assert(purchaseItemClosable(timeCharge()));
-  assert(!purchaseItemClosable(timeCharge({ quantity_canceled: 2 })));
+  assert(!purchaseItemClosable(timeCharge({ status: "canceled" })));
 });
 
 Deno.test("purchaseItemTouched: buckets, and a time line a bill names", () => {
   assert(!purchaseItemTouched(buy(), new Set()));
-  for (const o of [{ quantity_received: 1 }, { quantity_billed: 1 }, { quantity_canceled: 1 }]) assert(purchaseItemTouched(buy(o), new Set()));
+  for (const o of [{ quantity_received: 1 }, { quantity_billed: 1 }, { status: "canceled" as const }]) assert(purchaseItemTouched(buy(o), new Set()));
   assert(purchaseItemTouched(subrent({ quantity_returned: 1 }), new Set()));
   assert(!purchaseItemTouched(timeCharge(), new Set()));
   assert(purchaseItemTouched(timeCharge(), new Set(["c"])), "a time line counts no quantity_billed");
@@ -122,13 +122,13 @@ Deno.test("close outcome: cancel only when every line ends canceled in full", ()
   assertEquals(outcome([charge({ quantity_billed: 1 })]), "close");
   // A time charge cancels in full however much was billed.
   assertEquals(outcome([timeCharge()]), "cancel");
-  // A billed, unreceived buy cancels too: the close credits the excess.
+  // A billed, unreceived buy cancels too: the excess is a diff entry to credit by hand.
   assertEquals(outcome([buy({ quantity_billed: 1 })]), "cancel");
 });
 
 Deno.test("add_bill: any purchase that is not canceled, fully billed included (owner, 2026-11-05)", () => {
   assert(offer(purchaseActionsFor(po([buy({ quantity_billed: 3, quantity_received: 3 })], "complete")), "add_bill"));
-  assertEquals(offer(purchaseActionsFor(po([buy({ quantity_canceled: 3 })], "canceled")), "add_bill"), undefined);
+  assertEquals(offer(purchaseActionsFor(po([buy({ quantity: 0, status: "canceled" })], "canceled")), "add_bill"), undefined);
 });
 
 Deno.test("add_credit: a billed line, or any bill, which reaches a time-only purchase", () => {
@@ -179,7 +179,7 @@ const voidBill = (
 };
 const voidCredit = (lines: [string, number][], status: PurchaseCredit["status"] = "issued") =>
   ({ status, items: lines.map(([path, quantity]) => ({ type: "sale", path: [PU, path], quantity, amount_cents: 100 * quantity })) }) as PurchaseCredit;
-const noDocuments = { uid_purchase: PU, purchase: { items: [] }, bills: [], credits: [] };
+const noDocuments = { per_purchase: [{ uid_purchase: PU, purchase: { items: [] }, bills: [], credits: [] }] };
 const asLines = (...items: PurchaseActionItem[]) => items as PurchaseItem[];
 
 Deno.test("purchaseBillActionsFor: a live ACCPAY with money due, capped at what is due", () => {
@@ -194,7 +194,7 @@ Deno.test("purchaseBillActionsFor: a live ACCPAY with money due, capped at what 
 
 Deno.test("purchaseBillVoidRefusal: one row per reason, and the offer follows it", () => {
   const items = asLines(buy());
-  const ctx = (bills: PurchaseBill[], credits: PurchaseCredit[] = []) => ({ uid_purchase: PU, purchase: { items }, bills, credits });
+  const ctx = (bills: PurchaseBill[], credits: PurchaseCredit[] = []) => ({ per_purchase: [{ uid_purchase: PU, purchase: { items }, bills, credits }] });
   const refuse = (b: PurchaseBill, c: ReturnType<typeof ctx>, reason: string) => {
     assertEquals(purchaseBillVoidRefusal(b, c)?.includes(reason), true, purchaseBillVoidRefusal(b, c) ?? "no refusal");
     assertEquals(purchaseBillActionsFor(b, c).some((a) => a.action === "void_bill"), false);
@@ -227,7 +227,7 @@ Deno.test("purchaseBillVoidRefusal: refused only when the void leaves a credit w
   const a = voidBill("a", [["b", 5]]);
   const b = voidBill("b", [["b", 5]]);
   const refused = (bills: PurchaseBill[], credits: PurchaseCredit[]) =>
-    purchaseBillVoidRefusal(a, { uid_purchase: PU, purchase: { items }, bills, credits })?.includes("Void the credit first") === true;
+    purchaseBillVoidRefusal(a, { per_purchase: [{ uid_purchase: PU, purchase: { items }, bills, credits }] })?.includes("Void the credit first") === true;
 
   assertEquals(refused([a], [voidCredit([["b", 2]])]), true, "bill 5, credit 2, nothing else billed: net −2");
   assertEquals(refused([a, b], [voidCredit([["b", 2]])]), false, "the other bill still covers it: net 3");
@@ -237,7 +237,7 @@ Deno.test("purchaseBillVoidRefusal: refused only when the void leaves a credit w
   assertEquals(refused([a, { ...b, status: "void" as const, voided_at: mockTimestamp }], [voidCredit([["b", 2]])]), true, "a void bill covers nothing");
   assertEquals(refused([a], [voidCredit([["other", 2]])]), false, "a line stranded already, which this bill does not name, is not its problem");
   assertEquals(
-    purchaseBillVoidRefusal(a, { uid_purchase: PU, purchase: { items }, bills: [], credits: [voidCredit([["b", 2]])] })?.includes("Void the credit first"),
+    purchaseBillVoidRefusal(a, { per_purchase: [{ uid_purchase: PU, purchase: { items }, bills: [], credits: [voidCredit([["b", 2]])] }] })?.includes("Void the credit first"),
     true,
     "the bill itself need not be in the list",
   );
@@ -246,7 +246,7 @@ Deno.test("purchaseBillVoidRefusal: refused only when the void leaves a credit w
 Deno.test("purchaseBillVoidRefusal: a time line counts nothing, so its credit refuses nothing", () => {
   const bill = voidBill("a", [["c", 5]]);
   assertEquals(
-    purchaseBillVoidRefusal(bill, { uid_purchase: PU, purchase: { items: asLines(timeCharge()) }, bills: [bill], credits: [voidCredit([["c", 2]])] }),
+    purchaseBillVoidRefusal(bill, { per_purchase: [{ uid_purchase: PU, purchase: { items: asLines(timeCharge()) }, bills: [bill], credits: [voidCredit([["c", 2]])] }] }),
     null,
   );
 });

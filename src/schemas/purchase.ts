@@ -27,7 +27,7 @@
  *   `query_by_sources`. There is no `Movement.purchase` field and no back-list
  *   of movement ids here — the HISTORY of a purchase is the journal.
  * - **Co-written buckets** per item (`quantity_received`, `quantity_billed`,
- *   `quantity_canceled`), each written in the same transaction as the receipt,
+ *   the line `status`), each written in the same transaction as the receipt,
  *   bill or close that moves it — the analogue of the record's `breakdown`.
  * - **A derived status** in the record's vocabulary (`active | complete |
  *   canceled`), authored by {@link derivePurchaseStatus} and refined here, so a
@@ -498,13 +498,26 @@ export const PurchaseLandedCostSchema: z.ZodType<PurchaseLandedCost> = z.strictO
  * `zero_priced` and `quantity_per_parent` are a kit component's keys and are
  * `null` / absent on a purchase line, which has no kits.
  */
+/** Whether a close has stopped a purchase line. */
+export const PURCHASE_LINE_STATUSES = ["open", "canceled"] as const;
+/** One {@link PURCHASE_LINE_STATUSES} member. */
+export type PurchaseLineStatusType = typeof PURCHASE_LINE_STATUSES[number];
+
 interface PurchaseItemBase {
   /** Row identity, minted by the writer. Never a product uid: one product may sit on two items. */
   uid: string;
   name: string;
   description: string;
-  /** Units ordered. `≥ 1` — refined on each arm. */
+  /** Units ordered. `≥ 1`, except 0 on a line a close canceled — refined on each arm. */
   quantity: number;
+  /**
+   * `canceled` once a close stopped the whole line. A close that leaves units
+   * lowers `quantity` instead and the line stays `open` (one-document-model
+   * Phase 5; it replaced the `quantity_canceled` bucket). A flat or custody
+   * line canceled in full holds quantity 0; a TIME charge keeps its quantity,
+   * because its bills already metered it.
+   */
+  status: PurchaseLineStatusType;
   /**
    * Self-inclusive, under its destination divider (and group, when there is
    * one): `[destination uid, ...group uid, uid]`, authored by
@@ -547,8 +560,6 @@ export interface PurchaseSaleItem extends PurchaseItemBase {
    * refused (D5).
    */
   quantity_billed: number;
-  /** Units that will never be received — set by a short close or a cancel. */
-  quantity_canceled: number;
   /** Freight, duty and fees spread onto the units still to arrive ({@link PurchaseLandedCost}). */
   landed_costs: PurchaseLandedCost[];
 }
@@ -563,7 +574,6 @@ export interface PurchaseRentalItem extends PurchaseItemBase {
   quantity_received: number;
   /** Units billed on a flat line; `null` on a time line, which resolves on custody alone (Q7). */
   quantity_billed: number | null;
-  quantity_canceled: number;
   /**
    * Units no longer owed to the supplier: Σ of the `subrent_out` (handed back)
    * and `return_to_supplier` (lost or damaged, settled to the supplier's
@@ -606,8 +616,6 @@ export interface PurchaseServiceItem extends PurchaseItemBase {
   price: PurchaseLinePrice;
   /** Units billed on a flat line; `null` on a time line. */
   quantity_billed: number | null;
-  /** Units a close or cancel stopped. A time line resolves only once all are. */
-  quantity_canceled: number;
   /** See {@link PurchaseRentalItem.uid_units} — a Verizon line names its device. `[]` for freight. */
   uid_units: string[];
   uid_product?: string;
@@ -674,11 +682,11 @@ const itemShape = {
 // purchase line on both, so it keeps both and a purchase edit never re-bills it.
 // The co-written buckets below have no counterpart on a bill at all.
 const flatMoney = { propagate: true, shared_group: "flat_money" } as const;
-const quantityKey = z.int().min(1).meta({ column: true, label: "Quantity", ...flatMoney });
+const quantityKey = z.int().min(0).meta({ column: true, label: "Quantity", ...flatMoney });
 const amountKey = z.int().min(0).meta({ column: true, label: "Amount", ...flatMoney });
 const receivedKey = z.int().min(0).meta({ column: true, label: "Received" });
 const billedKey = z.int().min(0).meta({ column: true, label: "Billed" });
-const canceledKey = z.int().min(0).meta({ column: true, label: "Canceled" });
+const lineStatusKey = z.enum(PURCHASE_LINE_STATUSES).meta({ column: true, label: "Line Status" });
 const productKey = FirestoreId.meta({ propagate: true });
 const unitsKey = z.array(UnitId);
 
@@ -723,17 +731,20 @@ function uniqueUnitsIssue(units: readonly string[], ctx: z.RefinementCtx): void 
 }
 
 function bucketIssues(
-  item: { quantity: number; quantity_received?: number; quantity_canceled: number },
+  item: { quantity: number; quantity_received?: number; status: PurchaseLineStatusType },
   ctx: z.RefinementCtx,
 ): void {
+  if (item.quantity === 0 && item.status !== "canceled") {
+    ctx.addIssue({ code: "custom", path: ["quantity"], message: "quantity may be 0 only on a canceled line" });
+  }
   // Received is bounded by what is still coming — the out-of-service
   // `Σ breakdown ≤ quantity`. Billing has NO ceiling: over-billing is legal and
   // flagged by the purchase↔bill diff, never refused (D5, reversing #1396).
-  if ((item.quantity_received ?? 0) + item.quantity_canceled > item.quantity) {
+  if ((item.quantity_received ?? 0) > item.quantity) {
     ctx.addIssue({
       code: "custom",
-      path: [item.quantity_received === undefined ? "quantity_canceled" : "quantity_received"],
-      message: `received ${item.quantity_received ?? 0} + canceled ${item.quantity_canceled} exceeds the ${item.quantity} ordered`,
+      path: ["quantity_received"],
+      message: `received ${item.quantity_received ?? 0} exceeds the ${item.quantity} ordered`,
     });
   }
 }
@@ -753,7 +764,7 @@ const SaleItemInner = z.strictObject({
   expected_date: chicagoStartOfDay().nullable().meta({ column: true, label: "Expected" }),
   quantity_received: receivedKey,
   quantity_billed: billedKey,
-  quantity_canceled: canceledKey,
+  status: lineStatusKey,
   landed_costs: z.array(PurchaseLandedCostSchema).meta({ label: "Landed Cost" }),
 }).superRefine((item, ctx) => {
   bucketIssues(item, ctx);
@@ -790,7 +801,7 @@ const RentalItemInner = z.strictObject({
   price: PurchaseLinePriceSchema,
   quantity_received: receivedKey,
   quantity_billed: billedKey.nullable(),
-  quantity_canceled: canceledKey,
+  status: lineStatusKey,
   quantity_returned: z.int().min(0).meta({ column: true, label: "Returned" }),
   uid_orders: z.array(FirestoreId),
   uid_units: unitsKey,
@@ -816,7 +827,7 @@ const noCustodyShape = {
   amount_cents: amountKey.nullable(),
   price: PurchaseLinePriceSchema,
   quantity_billed: billedKey.nullable(),
-  quantity_canceled: canceledKey,
+  status: lineStatusKey,
   uid_units: unitsKey,
   // Permanent `.optional()`: freight and fees attribute nothing (api-cloudrun#1360).
   uid_product: FirestoreId.optional().meta({ propagate: true }),
@@ -884,37 +895,37 @@ function unreachableItem(item: never): never {
   throw new Error(`unknown purchase item type: ${JSON.stringify(item)}`);
 }
 
-/** Has a flat line been billed for everything not canceled? Over-billed counts as billed in full. */
-function billedInFull(item: { quantity: number; quantity_canceled: number; quantity_billed: number | null }): boolean {
-  return (item.quantity_billed ?? 0) + item.quantity_canceled >= item.quantity;
+/** Has a flat line been billed for everything ordered? Over-billed counts as billed in full. */
+function billedInFull(item: { quantity: number; quantity_billed: number | null }): boolean {
+  return (item.quantity_billed ?? 0) >= item.quantity;
 }
 
 /**
  * Has this item nothing left to happen?
  *
- * - **sale** — every unit received or canceled, and billed for at least what was
- *   not canceled (over-billing is flagged, not held open).
- * - **rental** — every unit received or canceled, every unit received gone
+ * - **sale** — every unit received, and billed for at least what is ordered
+ *   (over-billing is flagged, not held open). A close lowers `quantity` to what
+ *   came, so a closed line resolves here.
+ * - **rental** — every unit received, every unit received gone
  *   back (a hire with units still in CFS's custody is not finished), and on a
  *   flat line billed in full. A TIME line resolves on custody alone (Q7): it
  *   bills windows as they accrue, with no count to close.
- * - **service** / **replacement** — a flat one when billed or canceled in
- *   full; a time one only once canceled in full, since a carrier line accrues
- *   for as long as it lives.
+ * - **service** / **replacement** — a flat one when billed in full; a time one
+ *   only once canceled, since a carrier line accrues for as long as it lives.
  *
  * Payment is the bill's business and holds nothing open.
  */
 export function purchaseItemResolved(item: PurchaseItem): boolean {
   switch (item.type) {
     case "sale":
-      return item.quantity_received + item.quantity_canceled === item.quantity && billedInFull(item);
+      return item.quantity_received === item.quantity && billedInFull(item);
     case "rental":
-      return item.quantity_received + item.quantity_canceled === item.quantity &&
+      return item.quantity_received === item.quantity &&
         item.quantity_returned === item.quantity_received &&
         (purchaseItemBasis(item) === "time" || billedInFull(item));
     case "service":
     case "replacement":
-      return purchaseItemBasis(item) === "time" ? item.quantity_canceled === item.quantity : billedInFull(item);
+      return purchaseItemBasis(item) === "time" ? item.status === "canceled" : billedInFull(item);
     default:
       return unreachableItem(item);
   }
@@ -927,7 +938,7 @@ export function purchaseItemCanceled(item: PurchaseItem): boolean {
     case "rental":
     case "service":
     case "replacement":
-      return item.quantity_canceled === item.quantity && (item.quantity_billed ?? 0) === 0;
+      return item.status === "canceled" && (item.quantity_billed ?? 0) === 0;
     default:
       return unreachableItem(item);
   }
@@ -1453,7 +1464,7 @@ export const PurchaseItemInput: z.ZodType<PurchaseItemInputType> = z.discriminat
     type: z.literal("sale"),
     ...inputHead,
     uid_product: FirestoreId,
-    quantity: z.int().min(1),
+    quantity: z.int().min(0),
     amount_cents: z.int().min(0),
     ledger_account: COACode.optional(),
     expected_date: chicagoStartOfDay().nullable().optional(),
@@ -1473,7 +1484,7 @@ export const PurchaseItemInput: z.ZodType<PurchaseItemInputType> = z.discriminat
     type: z.literal("rental"),
     ...inputHead,
     uid_product: FirestoreId,
-    quantity: z.int().min(1),
+    quantity: z.int().min(0),
     amount_cents: z.int().min(0).nullable().optional(),
     ledger_account: COACode.optional(),
     dates: inputDates,
@@ -1576,25 +1587,21 @@ export const UpdatePurchaseInput: z.ZodType<UpdatePurchaseInputType> = z.object(
 /**
  * Input for a short close or a cancel.
  *
- * Sets each named buy or subrent item's `quantity_canceled` to
- * `quantity − quantity_received`, a flat charge's to `quantity − quantity_billed`,
- * and a time charge's to `quantity` (it stops accruing). `uid_items` absent
- * closes every such item; a
- * cancel is a close of a purchase with nothing received. When the close leaves
- * a FLAT item billed beyond what was received, the writer raises a
- * `purchase-credits` document for the excess; a time line has no billed count.
+ * Lowers each named buy or subrent item's `quantity` to what was received and a
+ * flat charge's to what was billed, restating its money; a line with nothing
+ * left is canceled (`purchaseLineCloseOutcome`). A time charge is canceled and
+ * keeps its quantity. `uid_items` absent closes every such item; a cancel is a
+ * close of a purchase with nothing received. Billed beyond what was received is
+ * a diff entry the operator credits by hand; a close raises no credit.
  */
 export interface ClosePurchaseInputType {
   uid_items?: string[];
-  /** Client-minted per operator action; keys the auto-credit, so a retry cannot mint two. */
-  uuid_session: string;
   version: number;
 }
 
 /** Zod schema for ClosePurchaseInputType. */
 export const ClosePurchaseInput: z.ZodType<ClosePurchaseInputType> = z.object({
   uid_items: z.array(ItemUid).min(1).optional(),
-  uuid_session: z.uuid(),
   version: z.int().min(0),
 });
 

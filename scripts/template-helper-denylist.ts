@@ -710,6 +710,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // (api-cloudrun#1407). A template renders a purchase that has already been
   // written — its `total_cents` is the committed amount already summed.
   purchases: [
+    // A close's arithmetic, for the writer and the operator's preview; a render never closes a line.
+    "purchaseLineCloseOutcome",
     "cumulativeShareCents",
     "deriveQueryByItemTypes",
     "deriveQueryByOrders",

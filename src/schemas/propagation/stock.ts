@@ -334,9 +334,8 @@ const rules: CollectionRule[] = [
         source: ["items", "quantity"],
         target: ["supply", "quantity"],
         transform:
-          "subrent: quantity − quantity_canceled − quantity_returned; buy: quantity − quantity_canceled − quantity_received (`remainingToReceive`). An entry supplying nothing is DROPPED, not stored as a zero",
+          "subrent: quantity − quantity_returned; buy: quantity − quantity_received (`remainingToReceive`). An entry supplying nothing is DROPPED, not stored as a zero",
       },
-      { source: ["items", "quantity_canceled"], target: ["supply", "quantity"], transform: "subtracted — see quantity" },
       { source: ["items", "quantity_returned"], target: ["supply", "quantity"], transform: "subtracted on a subrent — see quantity" },
       { source: ["items", "quantity_received"], target: ["supply", "quantity"], transform: "subtracted on a buy — see quantity" },
       {

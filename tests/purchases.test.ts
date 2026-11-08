@@ -47,6 +47,7 @@ import {
   expandPurchaseItems,
   isLandedCostFrozen,
   landedCostWeightCents,
+  purchaseLineCloseOutcome,
   landedUnitsPriced,
   purchaseLineReceiptTargetCents,
   strandedLandedCents,
@@ -210,7 +211,7 @@ const line = (over: Partial<PurchaseSaleItem> = {}): PurchaseSaleItem => {
     expected_date: null,
     quantity_received: 0,
     quantity_billed: 0,
-    quantity_canceled: 0,
+    status: "open",
     landed_costs: [],
     ...over,
   });
@@ -251,7 +252,7 @@ const hireLine = (over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem =>
     uid_tax_class: TAX_CLASS,
     quantity_received: 0,
     quantity_billed: 0,
-    quantity_canceled: 0,
+    status: "open",
     quantity_returned: 0,
     uid_orders: [ORDER_1074],
     uid_units: [],
@@ -280,7 +281,7 @@ const carrierLine = (over: Partial<PurchaseServiceItem> = {}): PurchaseServiceIt
     uid_tracking_category: null,
     uid_tax_class: TAX_CLASS,
     quantity_billed: null,
-    quantity_canceled: 0,
+    status: "open",
     uid_units: [],
     uid_product: PRODUCT,
     ...over,
@@ -304,7 +305,7 @@ const freight = (over: Partial<PurchaseServiceItem> = {}): PurchaseServiceItem =
     uid_tracking_category: null,
     uid_tax_class: TAX_CLASS,
     quantity_billed: 0,
-    quantity_canceled: 0,
+    status: "open",
     uid_units: [],
     ...over,
   });
@@ -319,10 +320,10 @@ Deno.test("derivePurchaseStatus — the buy table", () => {
     ["received in full, unbilled", [{ quantity_received: 3 }], "active"],
     ["received and billed", [{ quantity_received: 3, quantity_billed: 3 }], "complete"],
     ["received and OVER-billed — flagged by the diff, not held open (D5)", [{ quantity_received: 3, quantity_billed: 4 }], "complete"],
-    ["short-closed after 2, billed 2", [{ quantity_received: 2, quantity_billed: 2, quantity_canceled: 1 }], "complete"],
-    ["short-closed after 2, billed 1", [{ quantity_received: 2, quantity_billed: 1, quantity_canceled: 1 }], "active"],
-    ["canceled outright", [{ quantity_canceled: 3 }], "canceled"],
-    ["one item done, one canceled", [{ quantity_received: 3, quantity_billed: 3 }, { quantity_canceled: 3 }], "complete"],
+    ["short-closed after 2, billed 2", [{ quantity: 2, quantity_received: 2, quantity_billed: 2 }], "complete"],
+    ["short-closed after 2, billed 1", [{ quantity: 2, quantity_received: 2, quantity_billed: 1 }], "active"],
+    ["canceled outright", [{ quantity: 0, status: "canceled" }], "canceled"],
+    ["one item done, one canceled", [{ quantity_received: 3, quantity_billed: 3 }, { quantity: 0, status: "canceled" }], "complete"],
     ["one item done, one open", [{ quantity_received: 3, quantity_billed: 3 }, {}], "active"],
   ];
   for (const [name, items, want] of cases) {
@@ -338,8 +339,8 @@ Deno.test("derivePurchaseStatus — a subrent is complete only once every receiv
     ["…not returned", { ...done, quantity_returned: 9 }, "active"],
     ["…not billed", { ...done, quantity_billed: 9 }, "active"],
     ["…not received (and so not returned)", { ...done, quantity_received: 9, quantity_returned: 9 }, "active"],
-    ["short-closed after 6, billed 6, returned 6", { quantity_received: 6, quantity_billed: 6, quantity_returned: 6, quantity_canceled: 4 }, "complete"],
-    ["canceled outright", { quantity_canceled: 10 }, "canceled"],
+    ["short-closed after 6, billed 6, returned 6", { quantity: 6, quantity_received: 6, quantity_billed: 6, quantity_returned: 6 }, "complete"],
+    ["canceled outright", { quantity: 0, status: "canceled" }, "canceled"],
   ];
   for (const [name, over, want] of cases) {
     assertEquals(derivePurchaseStatus({ items: [hireLine(over)] }), want, name);
@@ -352,15 +353,15 @@ Deno.test("derivePurchaseStatus — a TIME subrent resolves on custody alone; a 
   // Control: the same custody on a FLAT subrent is still owed a bill.
   assertEquals(derivePurchaseStatus({ items: [hireLine({ quantity_received: 10, quantity_returned: 10, quantity_billed: 0 })] }), "active");
   assertEquals(derivePurchaseStatus({ items: [carrierLine()] }), "active", "a carrier line accrues while it lives");
-  assertEquals(derivePurchaseStatus({ items: [carrierLine({ quantity_canceled: 1 })] }), "canceled");
+  assertEquals(derivePurchaseStatus({ items: [carrierLine({ status: "canceled" })] }), "canceled");
   assertEquals(derivePurchaseStatus({ items: [freight()] }), "active");
   assertEquals(derivePurchaseStatus({ items: [freight({ quantity_billed: 1 })] }), "complete");
-  assertEquals(derivePurchaseStatus({ items: [freight({ quantity_canceled: 1 })] }), "canceled");
-  assertEquals(derivePurchaseStatus({ items: [line({ quantity_canceled: 3 }), carrierLine({ uid: iuid(5) })] }), "active");
+  assertEquals(derivePurchaseStatus({ items: [freight({ quantity: 0, status: "canceled" })] }), "canceled");
+  assertEquals(derivePurchaseStatus({ items: [line({ quantity: 0, status: "canceled" }), carrierLine({ uid: iuid(5) })] }), "active");
 });
 
-Deno.test("remainingToReceive / remainingToBill are each bounded by what was canceled; remainingToReturn is received − returned", () => {
-  const l = line({ quantity_received: 1, quantity_billed: 2, quantity_canceled: 1 });
+Deno.test("remainingToReceive / remainingToBill are each bounded by the quantity; remainingToReturn is received − returned", () => {
+  const l = line({ quantity: 2, quantity_received: 1, quantity_billed: 2 });
   assertEquals(remainingToReceive(l), 1);
   assertEquals(remainingToBill(l), 0);
   assertEquals(remainingToBill(line({ quantity_billed: 5 })), 0, "an over-billed line has nothing left, never a negative");
@@ -436,14 +437,14 @@ Deno.test("PurchaseSchema accepts every arm on ONE purchase — the kind is per 
   assertEquals(deriveQueryByItemTypes(items), ["sale", "rental", "service"]);
 });
 
-Deno.test("PurchaseSchema: received + canceled may not exceed the quantity ordered", () => {
-  assertEquals(issuePaths(PurchaseSchema, purchase({ items: [line({ quantity_received: 2, quantity_canceled: 2 })] })), [
+Deno.test("PurchaseSchema: received may not exceed the quantity ordered", () => {
+  assertEquals(issuePaths(PurchaseSchema, purchase({ items: [line({ quantity: 1, quantity_received: 2 })] })), [
     "items.1.quantity_received",
   ]);
 });
 
 Deno.test("PurchaseSchema: OVER-billing is legal — the ceiling refine is gone; the diff flags it (D5)", () => {
-  assertEquals(issuePaths(PurchaseSchema, withItems([line({ quantity_billed: 3, quantity_canceled: 1 })])), []);
+  assertEquals(issuePaths(PurchaseSchema, withItems([line({ quantity: 2, quantity_billed: 3 })])), []);
   assertEquals(issuePaths(PurchaseSchema, withItems([freight({ quantity_billed: 2 })])), []);
 });
 
@@ -1212,7 +1213,7 @@ function credit(over: Record<string, unknown> = {}) {
     query_by_sources: [`purchases:${P}`],
     supplier: SUPPLIER,
     origin: "pushed",
-    reason: "short_close",
+    reason: "supplier_adjustment",
     status: "issued",
     xero_id: null,
     date: "2026-10-01T00:00:00.000-05:00",
@@ -1631,11 +1632,11 @@ Deno.test("strandedLandedCents: 0 while units are to come; the unpriced share on
   const e = entry({ amount_cents: 10_000, quantity: 4 });
   assertEquals(strandedLandedCents(line({ quantity: 4, quantity_received: 1, landed_costs: [e] })), 0);
   // Closed after 1 of 4: three quarters never arrives.
-  assertEquals(strandedLandedCents(line({ quantity: 4, quantity_received: 1, quantity_canceled: 3, landed_costs: [e] })), 7_500);
+  assertEquals(strandedLandedCents(line({ quantity: 1, quantity_received: 1, landed_costs: [e] })), 7_500);
   // Received in full: nothing stranded.
   assertEquals(strandedLandedCents(line({ quantity: 4, quantity_received: 4, landed_costs: [e] })), 0);
   // No entries, or absent: nothing.
-  assertEquals(strandedLandedCents(line({ quantity: 4, quantity_canceled: 4 })), 0);
+  assertEquals(strandedLandedCents(line({ quantity: 0, status: "canceled" })), 0);
 });
 
 Deno.test("isLandedCostFrozen: frozen once a receipt after the entry has priced it", () => {
@@ -1741,4 +1742,21 @@ Deno.test("flatPurchaseLineMoney: a flat discount is cents per unit × quantity;
   // 10% of $617.18 = $61.718 → $61.72 off, half away from zero.
   assertEquals(flatPurchaseLineMoney(61_718, 288, { rate: 10, type: "percent" }).amount_cents, 55_546);
   assertThrows(() => flatPurchaseLineMoney(100.5, 1, null));
+});
+
+Deno.test("PurchaseSchema: quantity may be 0 only on a canceled line", () => {
+  assertEquals(issuePaths(PurchaseSchema, withItems([line({ quantity: 0, status: "open", amount_cents: 0 })])).includes("items.1.quantity"), true);
+  assertEquals(issuePaths(PurchaseSchema, withItems([line({ quantity: 0, status: "canceled" })])).includes("items.1.quantity"), false);
+});
+
+Deno.test("purchaseLineCloseOutcome: a buy drops to received, a flat charge to billed, a time charge cancels at its quantity", () => {
+  assertEquals(purchaseLineCloseOutcome(line({ quantity: 16, quantity_received: 14 })), { quantity: 14, status: "open" });
+  assertEquals(purchaseLineCloseOutcome(line({ quantity: 3, quantity_received: 0, quantity_billed: 3 })), { quantity: 0, status: "canceled" });
+  assertEquals(purchaseLineCloseOutcome(freight({ quantity: 1, quantity_billed: 0 })), { quantity: 0, status: "canceled" });
+  assertEquals(purchaseLineCloseOutcome(freight({ quantity: 2, quantity_billed: 5 })), { quantity: 2, status: "open" }, "over-billed stays at what was ordered");
+  assertEquals(purchaseLineCloseOutcome(carrierLine({ quantity: 2 })), { quantity: 2, status: "canceled" });
+});
+
+Deno.test("landedCostWeightCents: a canceled line weighs nothing rather than dividing by 0", () => {
+  assertEquals(landedCostWeightCents(line({ quantity: 0, status: "canceled", amount_cents: 0 })), 0);
 });
