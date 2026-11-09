@@ -345,13 +345,13 @@ const updatePurchaseBillRules: CollectionRule[] = [
     enforced_by: [PURCHASE_BILL_SYNC_SEMANTICS],
     transaction: "update-purchase",
     trigger:
-      "an item's name, description, type, price (formula, rates, discount), ledger_account, uid_tracking_category, tax class or attribution changes on the purchase — targets every bill in `query_by_bills` that is pushed, has no money settlement and is not voided",
+      "an item's name, description, type, price (formula, rates, discount), ledger_account, uid_tracking_category, tax class or attribution changes on the purchase — targets every bill in `query_by_bills` that is pushed (or linked and just compared equal with Xero), has no money settlement and is not voided",
     fields: [
       {
         source: ["items"],
         target: ["items"],
         transform:
-          "match each bill line to its purchase line by its path under the purchase's `purchase` divider (or its `path_purchase_item` move pointer) — the order → invoice sync's own engine (`syncScopedBillingItems` with `payableScopedSync`); mergeSharedFields(prev purchase line, next purchase line, bill line) over the classification of (PurchaseSchema, PurchaseBillSchema), each purchase line first projected to the bill line's shape at the bill line's quantity (`projectPurchaseLineForBill`), so its discount is that quantity's share. A line keeps its net amount (a homonym); the changed bill is then priced by `priceDocument` (payable arm), whose stated-total arm states each line's money from that amount and its discount.",
+          "match each bill line to its purchase line by its path under the purchase's `purchase` divider (or its `path_purchase_item` move pointer) — the order → invoice sync's own engine (`syncScopedDestinations` with `payableScopedSync`); mergeSharedFields(prev purchase line, next purchase line, bill line) over the classification of (PurchaseSchema, PurchaseBillSchema), each purchase line first projected to the bill line's shape at the bill line's quantity (`projectPurchaseLineForBill`), so its discount is that quantity's share. A line keeps its net amount (a homonym); the changed bill is then priced by `priceDocument` (payable arm), whose stated-total arm states each line's money from that amount and its discount.",
       },
       {
         source: ["items"],
@@ -711,7 +711,7 @@ const closePurchaseRules: CollectionRule[] = [
       {
         source: ["items"],
         target: ["items"],
-        transform: "the order → invoice sync's own engine (`syncScopedBillingItems`), run on the closed purchase",
+        transform: "the order → invoice sync's own engine (`syncScopedDestinations`), run on the closed purchase",
       },
       {
         source: ["items"],

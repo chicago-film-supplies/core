@@ -349,7 +349,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // scoped initiator → billing sync — write-path; a template renders paths
     // already written.
     "computePurchaseDocumentItemPaths",
-    "syncScopedBillingItems",
+    "syncScopedDestinations",
     "validatePurchaseDocumentItemPaths",
     // core#130 row 1: the status a balance write implies — write-path; a template
     // reads the STORED status.
@@ -768,6 +768,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "remainingTimeCounts",
     "purchaseLineKey",
     "purchaseBillSharedLineFields",
+    "purchaseBillSharedPairFields",
     "purchaseScopeDivider",
     "recomputePurchaseQuantityBilled",
     "syncPurchaseToBills",
@@ -995,6 +996,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // write, and a render prints what the line stored.
     "catalogRateSnapshot",
     "combineTierCounts",
+    "meanTierCounts",
     // A manager convenience for a NEW line (settings/pricing); a render prints a stored line.
     "defaultPriceFormulaFor",
     "formulaPeriods",

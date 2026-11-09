@@ -155,7 +155,9 @@ export const SubstitutedForEntry: z.ZodType<SubstitutedForEntryType> = z.strictO
  * merge into an existing sibling could not be told from an in-place substitution, and
  * could not be reversed.
  */
-export const SubstitutedForList: z.ZodType<SubstitutedForEntryType[]> = z.array(SubstitutedForEntry).superRefine((entries, ctx) => {
+export const SubstitutedForList: z.ZodType<SubstitutedForEntryType[]> = z.array(SubstitutedForEntry).superRefine(uniqueSubstitutedForPaths);
+
+function uniqueSubstitutedForPaths(entries: readonly SubstitutedForEntryType[], ctx: z.RefinementCtx): void {
   const seen = new Set<string>();
   for (const [i, entry] of entries.entries()) {
     const k = entry.path.join("/");
@@ -164,7 +166,12 @@ export const SubstitutedForList: z.ZodType<SubstitutedForEntryType[]> = z.array(
     }
     seen.add(k);
   }
-});
+}
+
+/** {@link SubstitutedForList} as an input takes it: an extra key is stripped, as every input node's is. */
+export const SubstitutedForListInput: z.ZodType<SubstitutedForEntryType[]> = z.array(
+  z.object({ path: z.array(ItemUid).min(1), quantity: z.int().positive() }),
+).superRefine(uniqueSubstitutedForPaths);
 
 /**
  * One `exchanged_for` entry: a row the exchange takes units back from, how many, and

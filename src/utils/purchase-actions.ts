@@ -48,6 +48,7 @@ import {
   purchaseLineBilledNet,
 } from "./purchase-documents.ts";
 import { closeRefusal, InvoiceActionRefusal } from "./invoice-actions.ts";
+import { invoiceIsFrozen } from "./invoices.ts";
 import type { PurchaseBillXeroSyncStatus } from "./purchase-bill-xero-sync.ts";
 import { remainingToBill, remainingToReceive, remainingToReturn } from "./purchases.ts";
 
@@ -301,7 +302,9 @@ export function purchaseBillPushRefusal(
   status: PurchaseBillXeroSyncStatus,
 ): string | null {
   if (!purchaseBillIsLive(bill)) return `Bill ${bill.number} is void.`;
-  if (bill.origin === "linked") return `Bill ${bill.number} is linked to a document in Xero, so CFS does not push it.`;
+  if (bill.origin === "linked" && invoiceIsFrozen(bill)) {
+    return `Bill ${bill.number} is linked to a Xero document that has a payment or credit, so CFS does not push it.`;
+  }
   if (status === "in_sync") return `Xero already has bill ${bill.number} as it stands.`;
   return null;
 }

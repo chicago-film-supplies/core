@@ -43,6 +43,7 @@ import {
   type PurchaseBill,
   PurchaseBillSchema,
   type PurchaseCredit,
+  type PurchaseDestination,
   type PurchaseDocDestination,
   type PurchaseDocumentItem,
   type PurchaseDocumentLinePrice,
@@ -64,9 +65,11 @@ import { classifySharedFields, fieldsUnder, sameSharedValue, type SharedField } 
 import {
   computePurchaseDocumentItemPaths,
   invoiceIsFrozen,
+  type LineClaimSide,
   purchaseBillIsLive,
+  type ScopedPairSide,
   type ScopedSyncSide,
-  syncScopedBillingItems,
+  syncScopedDestinations,
 } from "./invoices.ts";
 import type { LineItem } from "./orders.ts";
 import {
@@ -78,7 +81,7 @@ import {
   type PricingFormulas,
   statedChargeWindows,
 } from "./price-document.ts";
-import { combineTierCounts, type TierCount } from "./price-formulas.ts";
+import { combineTierCounts, meanTierCounts, type TierCount } from "./price-formulas.ts";
 
 export { purchaseBillIsLive };
 
@@ -159,15 +162,21 @@ export function purchaseLineBilledNet(path: readonly string[], documents: Purcha
 
 /**
  * **The counts the live documents bill of one TIME purchase line, net of
- * credits** — Σ live bill line `counts` − Σ live credit line `counts`, tier by
- * tier (`combineTierCounts`), joined on the purchase line key as
+ * credits** — Σ live bill `counts` − Σ live credit `counts`, tier by tier
+ * (`combineTierCounts`), joined on the purchase line key as
  * {@link purchaseLineBilledNet} is. Unfloored, like it.
+ *
+ * The rows of ONE document that bill the line fold first, into their
+ * quantity-weighted mean (`meanTierCounts`), so a split reads as one billing:
+ * 4 units split 2 + 2 over 30 days have billed 30 days, not 60. Summing across
+ * documents is unchanged (core#149 tracks what that means for a partial bill).
  */
 export function purchaseLineBilledCounts(path: readonly string[], documents: PurchaseBilledDocuments): TierCount[] {
   const key = purchaseLineKey(documents.uid_purchase, path);
   let net: TierCount[] = [];
   const add = (rows: readonly PurchaseDocumentRow[], sign: 1 | -1) => {
-    for (const line of linesFor(rows, key)) net = combineTierCounts(net, line.price.counts, sign);
+    const counts = meanTierCounts(linesFor(rows, key).map((line) => ({ quantity: line.quantity, counts: line.price.counts })));
+    net = combineTierCounts(net, counts, sign);
   };
   for (const bill of documents.bills) if (purchaseBillIsLive(bill)) add(bill.items, 1);
   for (const credit of documents.credits) if (purchaseCreditIsLive(credit)) add(credit.items, -1);
@@ -181,6 +190,14 @@ export interface RemainingTimeCountsArgs {
   documents: PurchaseBilledDocuments;
   formulas: PricingFormulas;
   holidays: readonly string[];
+  /**
+   * Meter over a BILL's own pair rather than the purchase's: `path` is the row's
+   * path on the bill and `destinations` the bill's pairs. A row that moved to
+   * another pair, or a pair the bill's edit re-dated, is metered there, because
+   * the purchase line's own path names the pair it sat under. `documents` is
+   * then whichever bills and credits the caller counts as already billed.
+   */
+  metered_over?: { path: readonly string[]; destinations: readonly PurchaseDocDestination[] };
 }
 
 /**
@@ -195,8 +212,10 @@ export interface RemainingTimeCountsArgs {
  * bill, which the bill writer refuses by name.
  */
 export function remainingTimeCounts(args: RemainingTimeCountsArgs): TierCount[] | null {
-  const metered = meteredLineCounts(asEngineSource(args.item), {
-    charge_windows: statedChargeWindows(args.purchase.destinations),
+  const over = args.metered_over;
+  const source = asEngineSource(args.item);
+  const metered = meteredLineCounts(over ? { ...source, path: [...over.path] } : source, {
+    charge_windows: statedChargeWindows(over ? over.destinations : args.purchase.destinations),
     formulas: args.formulas,
     holidays: args.holidays,
   });
@@ -623,16 +642,18 @@ function asEngineSource(row: PurchaseRow): LineItem {
 
 /**
  * **The payable side of the scoped initiator → billing sync**
- * (`syncScopedBillingItems`, `@cfs/core/utils/invoices`): the purchase → bill
+ * (`syncScopedDestinations`, `@cfs/core/utils/invoices`): the purchase → bill
  * sync IS the order → invoice sync, with a `purchase` scope divider, the
  * `path_purchase_item` move pointer, {@link projectPurchaseRowForBill} and the
  * purchase ↔ bill field set (one-document-model Phase 3).
  *
  * Built per sync over the two purchase revisions it converts
  * ({@link asEngineSource}): the engine hands its projector the converted rows,
- * and the side maps each back to the purchase row it came from.
+ * and the side maps each back to the purchase row it came from. `stored` is the
+ * purchase's whole row set, which a pointer at a line closed out of the sync's
+ * rows is judged against; it defaults to the revision being synced.
  */
-export function payableScopedSync(prev: Purchase, next: Purchase): {
+export function payableScopedSync(prev: Purchase, next: Purchase, stored: readonly PurchaseRow[] = next.items): {
   side: ScopedSyncSide<PurchaseDocumentRow>;
   prevItems: LineItem[];
   nextItems: LineItem[];
@@ -646,10 +667,12 @@ export function payableScopedSync(prev: Purchase, next: Purchase): {
     });
   const prevItems = convert(prev.items);
   const nextItems = convert(next.items);
+  const storedPaths = new Set(stored.map((r) => r.path.join("/")));
   const side: ScopedSyncSide<PurchaseDocumentRow> = {
     scopeType: "purchase",
     pointerKey: "path_purchase_item",
     isStructural: (item) => isKitHeaderLine(item),
+    stillStored: (path) => storedPaths.has(path.join("/")),
     project: (item, scopeUid) => {
       const row = original.get(item);
       if (row === undefined) throw new Error(`payableScopedSync: row ${item.uid} is not one of the purchase's`);
@@ -689,52 +712,52 @@ export interface SyncPurchaseToBillsArgs {
   /** The tax inputs each touched bill is priced under, at its own date. */
   tax: Omit<PayablePriceDocumentContext["tax"], "asOf">;
   /**
-   * What a touched bill's TIME lines meter with — the formulas and holidays;
-   * each bill's own pairs supply the windows. Required only when the purchase
-   * carries a time line.
+   * What a touched bill's TIME lines meter with, and what settles a merged pair's
+   * day counts — the formulas and holidays; each bill's own pairs supply the windows.
    */
-  time?: { formulas: PricingFormulas; holidays: readonly string[] };
+  time: { formulas: PricingFormulas; holidays: readonly string[] };
+  /**
+   * The unpaid LINKED bills the writer has just compared with Xero and found
+   * equal. Only these follow a purchase edit: a linked bill's push replaces
+   * Xero's lines, so an unchecked one would overwrite an edit made in Xero. The
+   * compare needs Xero, so it runs before the transaction this sync runs in.
+   */
+  linked_cleared?: ReadonlySet<string>;
 }
 
 /**
- * The bill's pairs for one purchase block after a purchase edit: a pair
- * follows its destination divider (kept exactly when the divider is), and a
- * kept pair follows the purchase's pair WHOLE when the bill still holds the
- * previous purchase's pair, else keeps its own. Whole, not per leaf: a payable
- * pair's `dates` carries derived `_fs` mirrors and day counts, and a per-leaf
- * merge would need the receivable side's holiday-aware window resolution for
- * pairs that are, today, almost all the store with no window. A deliberate
- * simplification, stated here so it is not mistaken for the invoice's rule.
+ * **A purchase's pair in a bill's shape**, the payable `ScopedPairSide.project`:
+ * the pair scoped by `uid_purchase`, the invoice pair's twin.
  */
-function syncScopePairs(
-  prev: Purchase,
-  next: Purchase,
-  bill: PurchaseBill,
-  items: readonly PurchaseDocumentRow[],
-): PurchaseDocDestination[] {
-  const uidPurchase = next.uid;
-  const dividers = new Set(
-    items.filter((r) => r.type === "destination" && r.path[0] === uidPurchase).map((r) => r.uid),
-  );
-  const others = bill.destinations.filter((d) => d.uid_purchase !== uidPurchase);
-  const stored = new Map(bill.destinations.filter((d) => d.uid_purchase === uidPurchase).map((d) => [d.uid, d]));
-  const prevPairs = new Map(prev.destinations.map((d) => [d.uid, d]));
-  const nextPairs = new Map(next.destinations.map((d) => [d.uid, d]));
-  const mine: PurchaseDocDestination[] = [];
-  for (const uid of dividers) {
-    const own = stored.get(uid);
-    const p = prevPairs.get(uid);
-    const n = nextPairs.get(uid);
-    if (own === undefined) {
-      if (n !== undefined) mine.push({ uid_purchase: uidPurchase, ...n });
-      continue;
-    }
-    const { uid_purchase: _scope, ...ownPair } = own;
-    if (n !== undefined && p !== undefined && sameSharedValue(ownPair, p)) mine.push({ uid_purchase: uidPurchase, ...n });
-    else mine.push(own);
-  }
-  return [...others, ...mine];
+function purchasePairForBill(pair: PurchaseDestination, uidPurchase: string): PurchaseDocDestination {
+  return { uid_purchase: uidPurchase, ...pair };
 }
+
+let billPairFields: readonly SharedField[] | null = null;
+
+/** The pair fields the purchase → bill merge follows, read off the two schemas. */
+export function purchaseBillSharedPairFields(): readonly SharedField[] {
+  if (billPairFields !== null) return billPairFields;
+  purchaseBillSharedLineFields();
+  billPairFields = fieldsUnder(classifySharedFields(PurchaseSchema, PurchaseBillSchema), "destinations[]");
+  return billPairFields;
+}
+
+const PAYABLE_PAIR_SIDE: ScopedPairSide<PurchaseDestination, PurchaseDocDestination> = {
+  scopeKey: "uid_purchase",
+  fields: purchaseBillSharedPairFields,
+  project: purchasePairForBill,
+};
+
+/**
+ * The payable side of `orderLineClaimIssues`: a bill or credit's
+ * `path_purchase_item`. A canceled line cannot be billed.
+ */
+export const PAYABLE_LINE_CLAIMS: LineClaimSide<PurchaseRow> = {
+  scopeType: "purchase",
+  pointerKey: "path_purchase_item",
+  lineClosed: (line) => isPurchaseLine(line) && line.status === "canceled",
+};
 
 /**
  * A bill line's discount record is ITS SHARE of its purchase line's discount
@@ -762,7 +785,7 @@ function reshareDiscounts(rows: readonly PurchaseDocumentRow[], next: Purchase):
 
 /**
  * **The purchase → bill three-way sync** (D5): the order → invoice sync's
- * engine (`syncScopedBillingItems`) run on each bill's block for this purchase,
+ * engine (`syncScopedDestinations`) run on each bill's block for this purchase,
  * with {@link payableScopedSync}. Every rule is the invoice's — synced,
  * overridden, new, left out, removed, moved — so a purchase edit reaches an
  * untouched bill line, leaves an overridden one alone, and adds a new purchase
@@ -770,10 +793,11 @@ function reshareDiscounts(rows: readonly PurchaseDocumentRow[], next: Purchase):
  * ordered, as on AR). Pure; the writer stores the `changed` bills in the
  * purchase writer's transaction.
  *
- * Skipped whole: a linked bill (Xero is authoritative), a frozen one
- * (`invoiceIsFrozen`), a voided one, and a bill with no block for this
- * purchase. A changed bill is re-pathed and re-priced whole by `priceDocument`
- * at its own date, and its total is the Σ.
+ * Skipped whole: a frozen bill (`invoiceIsFrozen`), a voided one, a linked one
+ * the writer did not clear ({@link SyncPurchaseToBillsArgs.linked_cleared}), and
+ * a bill with no block for this purchase. A changed bill is re-pathed and
+ * re-priced whole by `priceDocument` at its own date, and its total is the Σ.
+ * Pairs follow the invoice's rule, per field (`syncScopedDestinations`).
  *
  * `total_cents` and `amount_due_cents` move together (an unfrozen bill has no
  * money settlement, so the identity holds with what is due).
@@ -782,14 +806,25 @@ export function syncPurchaseToBills(args: SyncPurchaseToBillsArgs): PurchaseBill
   const uidPurchase = args.next.uid;
   return args.bills.map((bill) => {
     const untouched = { uid: bill.uid, bill, changed: false };
-    if (bill.origin !== "pushed" || !purchaseBillIsLive(bill) || invoiceIsFrozen(bill)) return untouched;
+    if (bill.origin === "linked" && !args.linked_cleared?.has(bill.uid)) return untouched;
+    if (!purchaseBillIsLive(bill) || invoiceIsFrozen(bill)) return untouched;
     const start = bill.items.findIndex((r) => r.type === "purchase" && r.uid === uidPurchase);
     if (start < 0) return untouched;
     let end = start + 1;
     while (end < bill.items.length && bill.items[end].path[0] === uidPurchase) end++;
     const scoped = bill.items.slice(start + 1, end);
-    const { side, prevItems, nextItems } = payableScopedSync(withoutCanceledLines(args.prev), withoutCanceledLines(args.next));
-    const synced = syncScopedBillingItems(prevItems, nextItems, scoped, uidPurchase, side);
+    const { side, prevItems, nextItems } = payableScopedSync(withoutCanceledLines(args.prev), withoutCanceledLines(args.next), args.next.items);
+    // A dropped pair is the purchase's own removal, so nothing here reports it.
+    const { items: synced, destinations } = syncScopedDestinations(
+      { items: prevItems, destinations: args.prev.destinations },
+      { items: nextItems, destinations: args.next.destinations },
+      scoped,
+      bill.destinations,
+      uidPurchase,
+      side,
+      PAYABLE_PAIR_SIDE,
+      args.time.holidays,
+    );
     const rows = computePurchaseDocumentItemPaths([
       ...bill.items.slice(0, start + 1),
       ...reshareDiscounts(synced, args.next),
@@ -798,12 +833,11 @@ export function syncPurchaseToBills(args: SyncPurchaseToBillsArgs): PurchaseBill
     if (purchaseDocumentLines(rows).length === 0 && purchaseDocumentLines(bill.items).length > 0) {
       return { ...untouched, kept_no_lines: true };
     }
-    const destinations = syncScopePairs(args.prev, args.next, bill, rows);
     if (sameSharedValue(rows, bill.items) && sameSharedValue(destinations, bill.destinations)) return untouched;
     const priced = priceDocument(rows, {
-      document: { kind: "purchase_bill", origin: "pushed" },
+      document: { kind: "purchase_bill", origin: bill.origin },
       tax: { ...args.tax, asOf: bill.date },
-      ...(args.time ? { time: { ...args.time, charge_windows: chargeWindowContext(destinations) } } : {}),
+      time: { ...args.time, charge_windows: chargeWindowContext(destinations) },
     });
     return {
       uid: bill.uid,

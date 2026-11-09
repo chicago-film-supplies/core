@@ -157,6 +157,9 @@ export const XERO_EVENT_MSGS = [
   // The bill committed but its push task could not be enqueued. The daily
   // bill sweep is the backstop; this arm carries an alert.
   "purchase_bill_enqueue_failed",
+  // A purchase edit left an unpaid linked bill alone: Xero holds it differently,
+  // or it could not be read. The purchase ↔ bill diff shows what it did not follow.
+  "purchase_bill_linked_sync_skipped",
   // A Xero void of a bill released less than the bill's line says, because the
   // line was edited up after billing while the count was kept by delta. A recount
   // has nothing to clamp (api-cloudrun#1441), so no writer emits this any more; the

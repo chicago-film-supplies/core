@@ -1680,7 +1680,13 @@ export interface PurchaseDestinationInputType {
 export const PurchaseDestinationInput: z.ZodType<PurchaseDestinationInputType> = z.object({
   uid: z.uuid(),
   ...PairInputCore,
-}).superRefine((pair, ctx) => {
+}).superRefine(purchaseDestinationInputIssues);
+
+/** The rules a payable pair input carries, shared with a bill's pair input. */
+export function purchaseDestinationInputIssues(
+  pair: Pick<PurchaseDestinationInputType, "dates">,
+  ctx: z.RefinementCtx,
+): void {
   hireOrderIssue(pair.dates, ctx);
   const { collection_start: start, collection_end: end } = pair.dates;
   if (start === null) return;
@@ -1689,7 +1695,7 @@ export const PurchaseDestinationInput: z.ZodType<PurchaseDestinationInputType> =
   } else if (Date.parse(end) < Date.parse(start)) {
     ctx.addIssue({ code: "custom", path: ["dates", "collection_end"], message: "a hire ends at or after its collection starts" });
   }
-});
+}
 
 /** A row named twice in one write is ambiguous: which one is kept? */
 function uniqueRowUids(items: readonly { uid: string }[], ctx: z.RefinementCtx): void {

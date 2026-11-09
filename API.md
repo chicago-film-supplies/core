@@ -10535,6 +10535,25 @@ interface PurchaseBillClosureInputType {
 }
 ```
 
+### `PurchaseBillDestinationInput`
+
+Zod schema for {@link PurchaseBillDestinationInputType}.
+
+```ts
+const PurchaseBillDestinationInput: z.ZodType<PurchaseBillDestinationInputType>;
+```
+
+### `PurchaseBillDestinationInputType`
+
+A bill's pair as a client sends it: a purchase's pair input scoped by
+`uid_purchase`, the `InvoiceDocDestination` input's twin.
+
+```ts
+interface PurchaseBillDestinationInputType {
+  uid_purchase: string;
+}
+```
+
 ### `PurchaseBillDividerInputType`
 
 A divider row of a bill's whole-array input.
@@ -10550,13 +10569,22 @@ interface PurchaseBillDividerInputType {
 
 ### `PurchaseBillLineInputType`
 
-A line row of a bill's whole-array input, identified by its `path`.
+A line row of a bill's whole-array input.
 
-A path the bill already holds keeps every key this row omits. A path it does
-not hold is projected from the purchase line named by that path, so a bill can
-take a line of another purchase of the same supplier under that purchase's
-divider. On a TIME line `price.rates` restates each unit rate; a flat line's
+The writer pairs each row to a stored one (exact path, then the row's uid and
+ancestry), and the paired row is the base for every key this row omits, so a
+row that moved keeps them. A row no stored row pairs with is, in order: a
+split's clone if it states {@link path_purchase_item}; a line of the purchase
+named by its path; or a line the bill itself authors, which states its name,
+account, quantity and money (and `uid_product` on a sale or rental).
+
+On a TIME line `price.rates` restates each unit rate; a flat line's
 `amount_cents` is stated directly (gross when a discount is set).
+
+`path_purchase_item` absent keeps the stored pointer, and there is no `null`
+form: the writer stamps every moved row's pointer and clears one a move back
+made pointless, so a stale client's identity-only rows cannot clear one.
+The writer assigns the tax class and a bill-authored line's flat formula.
 
 ```ts
 interface PurchaseBillLineInputType {
@@ -10567,7 +10595,13 @@ interface PurchaseBillLineInputType {
   description?: string;
   quantity?: number;
   amount_cents?: number;
-  ledger_account?: COACodeType;
+  ledger_account?: COACodeType | null;
+  uid_product?: string;
+  zero_priced?: boolean | null;
+  quantity_per_parent?: number | null;
+  uid_out_of_service?: string;
+  path_purchase_item?: string[];
+  substituted_for?: SubstitutedForEntryType[];
   uid_tax_class_override?: string | null;
   uid_tracking_category?: string | null;
   price?: typeLiteral;
@@ -10991,6 +11025,7 @@ interface PurchaseDocumentProductItem {
   type: PurchaseProductItemTypeType;
   uid_product: string;
   path_purchase_item?: string[];
+  substituted_for?: SubstitutedForEntryType[];
 }
 ```
 
@@ -15723,12 +15758,15 @@ const UpdatePurchaseBillInput: z.ZodType<UpdatePurchaseBillInputType>;
 
 ### `UpdatePurchaseBillInputType`
 
-Input for editing a PUSHED, unsettled bill (`PUT /purchase-bills/{uid}`).
-`items`, when present, is the WHOLE array in its new order, keyed by `path`, the
-invoice's shape (one-document-model Phase 5): a row it omits is removed. Refused
-on a linked bill apart from tracking (Xero is authoritative) and, per field
-class, once the bill is frozen (`INVOICE_FIELD_FREEZE`). An accepted edit is
-pushed to Xero through the ACCPAY edit push (D5).
+Input for editing a bill (`PUT /purchase-bills/{uid}`). `items`, when present,
+is the WHOLE array in its new order, the invoice's shape (one-document-model
+Phase 5): a row it omits is removed. Refused per field class once the bill is
+settled (`INVOICE_FIELD_FREEZE`); a settled linked bill takes a tracking edit
+alone. An accepted edit is pushed to Xero through the ACCPAY edit push (D5).
+
+`destinations`, when present, edits the pairs it names, each stated whole; a
+pair it leaves out is unchanged. A pair's membership follows its divider in
+`items`, as on an invoice.
 
 ```ts
 interface UpdatePurchaseBillInputType {
@@ -15737,6 +15775,7 @@ interface UpdatePurchaseBillInputType {
   due_date?: string;
   reference?: string | null;
   items?: PurchaseBillRowInputType[];
+  destinations?: PurchaseBillDestinationInputType[];
 }
 ```
 
@@ -20189,6 +20228,14 @@ could not be reversed.
 
 ```ts
 const SubstitutedForList: z.ZodType<SubstitutedForEntryType[]>;
+```
+
+### `SubstitutedForListInput`
+
+{@link SubstitutedForList} as an input takes it: an extra key is stripped, as every input node's is.
+
+```ts
+const SubstitutedForListInput: z.ZodType<SubstitutedForEntryType[]>;
 ```
 
 ### `TAX_JURISDICTIONS`
@@ -28424,6 +28471,10 @@ line took any account while the purchase's buy took an asset one; the
 census found the bills' non-asset buys were all de minimis acquisitions
 (6500 / 6300) plus one mis-coding (6000) the owner recodes.
 
+### `purchaseDestinationInputIssues(pair: Pick<PurchaseDestinationInputType, "dates">, ctx: z.RefinementCtx): void`
+
+The rules a payable pair input carries, shared with a bill's pair input.
+
 ### `purchaseHireWindow(purchase: Pick<Purchase, "destinations">, item: Pick<PurchaseItem, "path">): PurchaseItemDates | null`
 
 A subrent line's hire window, read off its pair — `{start, end}` with a null
@@ -28734,6 +28785,25 @@ interface PurchaseBillClosureInputType {
 }
 ```
 
+### `PurchaseBillDestinationInput`
+
+Zod schema for {@link PurchaseBillDestinationInputType}.
+
+```ts
+const PurchaseBillDestinationInput: z.ZodType<PurchaseBillDestinationInputType>;
+```
+
+### `PurchaseBillDestinationInputType`
+
+A bill's pair as a client sends it: a purchase's pair input scoped by
+`uid_purchase`, the `InvoiceDocDestination` input's twin.
+
+```ts
+interface PurchaseBillDestinationInputType {
+  uid_purchase: string;
+}
+```
+
 ### `PurchaseBillDividerInputType`
 
 A divider row of a bill's whole-array input.
@@ -28749,13 +28819,22 @@ interface PurchaseBillDividerInputType {
 
 ### `PurchaseBillLineInputType`
 
-A line row of a bill's whole-array input, identified by its `path`.
+A line row of a bill's whole-array input.
 
-A path the bill already holds keeps every key this row omits. A path it does
-not hold is projected from the purchase line named by that path, so a bill can
-take a line of another purchase of the same supplier under that purchase's
-divider. On a TIME line `price.rates` restates each unit rate; a flat line's
+The writer pairs each row to a stored one (exact path, then the row's uid and
+ancestry), and the paired row is the base for every key this row omits, so a
+row that moved keeps them. A row no stored row pairs with is, in order: a
+split's clone if it states {@link path_purchase_item}; a line of the purchase
+named by its path; or a line the bill itself authors, which states its name,
+account, quantity and money (and `uid_product` on a sale or rental).
+
+On a TIME line `price.rates` restates each unit rate; a flat line's
 `amount_cents` is stated directly (gross when a discount is set).
+
+`path_purchase_item` absent keeps the stored pointer, and there is no `null`
+form: the writer stamps every moved row's pointer and clears one a move back
+made pointless, so a stale client's identity-only rows cannot clear one.
+The writer assigns the tax class and a bill-authored line's flat formula.
 
 ```ts
 interface PurchaseBillLineInputType {
@@ -28766,7 +28845,13 @@ interface PurchaseBillLineInputType {
   description?: string;
   quantity?: number;
   amount_cents?: number;
-  ledger_account?: COACodeType;
+  ledger_account?: COACodeType | null;
+  uid_product?: string;
+  zero_priced?: boolean | null;
+  quantity_per_parent?: number | null;
+  uid_out_of_service?: string;
+  path_purchase_item?: string[];
+  substituted_for?: SubstitutedForEntryType[];
   uid_tax_class_override?: string | null;
   uid_tracking_category?: string | null;
   price?: typeLiteral;
@@ -29116,6 +29201,7 @@ interface PurchaseDocumentProductItem {
   type: PurchaseProductItemTypeType;
   uid_product: string;
   path_purchase_item?: string[];
+  substituted_for?: SubstitutedForEntryType[];
 }
 ```
 
@@ -29227,12 +29313,15 @@ const UpdatePurchaseBillInput: z.ZodType<UpdatePurchaseBillInputType>;
 
 ### `UpdatePurchaseBillInputType`
 
-Input for editing a PUSHED, unsettled bill (`PUT /purchase-bills/{uid}`).
-`items`, when present, is the WHOLE array in its new order, keyed by `path`, the
-invoice's shape (one-document-model Phase 5): a row it omits is removed. Refused
-on a linked bill apart from tracking (Xero is authoritative) and, per field
-class, once the bill is frozen (`INVOICE_FIELD_FREEZE`). An accepted edit is
-pushed to Xero through the ACCPAY edit push (D5).
+Input for editing a bill (`PUT /purchase-bills/{uid}`). `items`, when present,
+is the WHOLE array in its new order, the invoice's shape (one-document-model
+Phase 5): a row it omits is removed. Refused per field class once the bill is
+settled (`INVOICE_FIELD_FREEZE`); a settled linked bill takes a tracking edit
+alone. An accepted edit is pushed to Xero through the ACCPAY edit push (D5).
+
+`destinations`, when present, edits the pairs it names, each stated whole; a
+pair it leaves out is unchanged. A pair's membership follows its divider in
+`items`, as on an invoice.
 
 ```ts
 interface UpdatePurchaseBillInputType {
@@ -29241,6 +29330,7 @@ interface UpdatePurchaseBillInputType {
   due_date?: string;
   reference?: string | null;
   items?: PurchaseBillRowInputType[];
+  destinations?: PurchaseBillDestinationInputType[];
 }
 ```
 
@@ -35461,7 +35551,7 @@ Quota-gate arms (added 2026-07 with the daily-budget gate):
   a dropped write needing a human.
 
 ```ts
-const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_invoice_push_skipped" | "xero_invoice_twin_adopted" | "xero_invoice_twin_refused" | "xero_stock_adjustment_bill" | "xero_bill_pushed" | "xero_bill_push_skipped" | "xero_bill_twin_adopted" | "xero_bill_validation_rejected" | "xero_bill_terminal" | "xero_bill_enqueue_failed" | "purchase_bill_pushed" | "purchase_bill_push_skipped" | "purchase_bill_twin_adopted" | "purchase_bill_push_rejected" | "purchase_bill_enqueue_failed" | "purchase_bill_void_release_clamped" | "purchase_credit_pushed" | "purchase_credit_push_skipped" | "purchase_credit_twin_adopted" | "purchase_credit_push_rejected" | "purchase_credit_enqueue_failed" | "purchase_credit_allocation_pushed" | "purchase_credit_allocation_failed" | "xero_settlement_synced" | "xero_settlement_reaped" | "xero_settlement_resurrected" | "xero_manual_intervention_required" | "credit_note_counter_raised" | "xero_credit_note_refunds_synced" | "xero_payment_already_synced" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_locked" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_superseded" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_validation_rejected" | "xero_quota_exhausted" | "xero_rate_limit" | "xero_write_deferred" | "xero_defer_escalated" | "xero_tracking_option_create_failed" | "xero_tax_rate_create_failed" | "xero_tracking_option_unresolved" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice" | "xero_untracked_accpay" | "xero_bill_sweep_completed"[];
+const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_invoice_push_skipped" | "xero_invoice_twin_adopted" | "xero_invoice_twin_refused" | "xero_stock_adjustment_bill" | "xero_bill_pushed" | "xero_bill_push_skipped" | "xero_bill_twin_adopted" | "xero_bill_validation_rejected" | "xero_bill_terminal" | "xero_bill_enqueue_failed" | "purchase_bill_pushed" | "purchase_bill_push_skipped" | "purchase_bill_twin_adopted" | "purchase_bill_push_rejected" | "purchase_bill_enqueue_failed" | "purchase_bill_linked_sync_skipped" | "purchase_bill_void_release_clamped" | "purchase_credit_pushed" | "purchase_credit_push_skipped" | "purchase_credit_twin_adopted" | "purchase_credit_push_rejected" | "purchase_credit_enqueue_failed" | "purchase_credit_allocation_pushed" | "purchase_credit_allocation_failed" | "xero_settlement_synced" | "xero_settlement_reaped" | "xero_settlement_resurrected" | "xero_manual_intervention_required" | "credit_note_counter_raised" | "xero_credit_note_refunds_synced" | "xero_payment_already_synced" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_locked" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_superseded" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_validation_rejected" | "xero_quota_exhausted" | "xero_rate_limit" | "xero_write_deferred" | "xero_defer_escalated" | "xero_tracking_option_create_failed" | "xero_tax_rate_create_failed" | "xero_tracking_option_unresolved" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice" | "xero_untracked_accpay" | "xero_bill_sweep_completed"[];
 ```
 
 ### `XeroEventLogRecord`
@@ -40080,6 +40170,20 @@ interface ItemUniquenessIssue {
 }
 ```
 
+### `LineClaimSide`
+
+What {@link orderLineClaimIssues} needs to know about a SIDE: the pair
+{@link ScopedSyncSide} already carries, and whether a claim on a line that
+exists may still be refused.
+
+```ts
+interface LineClaimSide {
+  scopeType: "order" | "purchase";
+  pointerKey: keyof MovePointerCarrier;
+  lineClosed(line: L): boolean;
+}
+```
+
 ### `LineItem`
 
 A single item in an order/invoice/fulfillment array — product, divider,
@@ -40214,14 +40318,14 @@ interface OrderInvoiceSharedFields {
 
 ### `OrderLineClaimIssue`
 
-One `path_order_item` a write must refuse — see {@link orderLineClaimIssues}.
+One move pointer a write must refuse — see {@link orderLineClaimIssues}.
 
 ```ts
 interface OrderLineClaimIssue {
   index: number;
   path: string[];
-  path_order_item: string[];
-  reason: "outside_order_block" | "not_a_line" | "order_unknown";
+  claimed_path: string[];
+  reason: "outside_order_block" | "not_a_line" | "order_unknown" | "line_closed";
 }
 ```
 
@@ -40325,12 +40429,46 @@ interface PricingPrice {
 }
 ```
 
+### `RECEIVABLE_LINE_CLAIMS`
+
+The receivable side of {@link orderLineClaimIssues}: an invoice's `path_order_item`.
+
+```ts
+const RECEIVABLE_LINE_CLAIMS: LineClaimSide<typeLiteral>;
+```
+
 ### `RECEIVABLE_SCOPED_SYNC`
 
 The receivable side: order → invoice.
 
 ```ts
 const RECEIVABLE_SCOPED_SYNC: ScopedSyncSide;
+```
+
+### `ScopedDestinationSyncResult`
+
+What {@link syncScopedDestinations} returns.
+
+```ts
+interface ScopedDestinationSyncResult {
+  items: R[];
+  destinations: P[];
+  dropped: typeLiteral[];
+}
+```
+
+### `ScopedPairSide`
+
+**What the scoped pair sync needs to know about a SIDE**, the pair half of
+{@link ScopedSyncSide}: the shared pair fields, and an initiator pair in the
+billing document's shape.
+
+```ts
+interface ScopedPairSide {
+  scopeKey: "uid_order" | "uid_purchase";
+  fields(): readonly SharedField[];
+  project(pair: S, scopeUid: string): P;
+}
 ```
 
 ### `ScopedSyncSide`
@@ -40354,6 +40492,7 @@ interface ScopedSyncSide {
   project(item: LineItem, scopeUid: string): R;
   lineFields(item: LineItem): readonly SharedField[];
   isStructural(item: LineItem): boolean;
+  stillStored(path: readonly string[]): boolean;
 }
 ```
 
@@ -41471,10 +41610,10 @@ Check whether any pre-tax line item has taxes applied.
 
 {@link OrderInvoiceSharedFields}, classified once per process.
 
-### `orderLineClaimIssues(items: readonly InvoiceItem[], orderLines: fnOrConstructor, _: unknown): OrderLineClaimIssue[]`
+### `orderLineClaimIssues(items: readonly parenthesized[], orderLines: fnOrConstructor, _: unknown, _: unknown): OrderLineClaimIssue[]`
 
-The write-time check on `path_order_item` (core#125 D3): a pointer is legal
-only on a line inside an order block, naming a LINE of that block's order.
+The write-time check on a move pointer (core#125 D3): a pointer is legal
+only on a line inside a scope block, naming a LINE of that block's initiator.
 
 Several rows claiming one line is legal and not reported (owner, 2026-10-03):
 it is a split, or an over-bill the diff surfaces. A pointer equal to the
@@ -41484,9 +41623,10 @@ what answers that (Q2).
 
 **Parameters**
 
-- `items` — The invoice's full items array, as it is about to be written
-- `orderLines` — Each billed order's CURRENT `items` by order uid; `undefined` when unknown
-- `stored` — The invoice's stored items, if any — unchanged pointers are grandfathered
+- `items` — The billing document's full items array, as it is about to be written
+- `orderLines` — Each billed initiator's CURRENT `items` by uid; `undefined` when unknown
+- `stored` — The document's stored items, if any — unchanged pointers are grandfathered
+- `side` — Which pointer and scope to read; an invoice's by default
 
 ### `orderLineClaims(scopedInvoiceItems: readonly InvoiceItem[], orderDividerUid: string, _: unknown): Map<string, string[]>`
 
@@ -41998,12 +42138,13 @@ window's day counts — a PAIR concern. Items reach it through
 {@link syncOrderDestinationScope}, which owns both halves. An unused parameter here would
 read as "this path considers holidays" when it does not.
 
-### `syncScopedBillingItems(prevItems: LineItem[], nextItems: LineItem[], currentItems: R[], scopeUid: string, side: ScopedSyncSide<R>): R[]`
+### `syncScopedDestinations(prev: typeLiteral, next: typeLiteral, currentScopedItems: R[], currentDests: readonly P[], scopeUid: string, lineSide: ScopedSyncSide<R>, pairSide: ScopedPairSide<S, P>, holidays: readonly string[]): ScopedDestinationSyncResult<R, P>`
 
-{@link syncOrderToInvoiceSelective} for any side: the scoped three-way sync of
-one initiator's block on one billing document. `side` says which pointer,
-projector and field set apply; the rules are the order → invoice sync's,
-unchanged.
+{@link syncOrderDestinationScope} for any side: the scoped three-way sync of
+one initiator's block on one billing document, items and pairs together. A
+pair follows its destination divider, merged per field when both revisions
+hold it. `lineSide` and `pairSide` are all that differs between an invoice and
+a bill.
 
 ### `toInvoiceDestinationPair(uidOrder: string, pair: DocDestinationType): InvoiceDestinationPair`
 
@@ -49596,6 +49737,13 @@ It decides no money: price a period by metering the windows clipped to it.
 
 The formula uids a set of lines name — what a caller must load into {@link PricingFormulas}.
 
+### `meanTierCounts(rows: readonly typeLiteral[]): TierCount[]`
+
+**The quantity-weighted mean of several rows' tier counts**, exact: for each
+tier, Σ quantity × count ÷ Σ quantity. Rows that bill one line from two places
+on ONE document (a split) read as one billing of that line: 2 + 2 units over
+30 days is 30 days, not 60. A single row comes back as it is.
+
 ### `meterUnits(formula: PriceFormulaRule, input: MeterInput): MeteredUnits`
 
 **Metered time → per-tier counts.** Pure; throws on a malformed rule.
@@ -49902,7 +50050,7 @@ type PurchaseBillXeroFields = Pick<PurchaseBill, "items" | "date" | "due_date" |
 - `in_sync` — Xero carries this bill as it stands.
 - `out_of_sync` — it does not, or the bill never reached Xero at all.
 - `unknown` — no push has recorded a projection hash yet. Not a claim either way.
-- `not_applicable` — a linked bill (CFS never pushes it) or a void one.
+- `not_applicable` — a settled linked bill (CFS sends it nothing but tracking) or a void one.
 
 ```ts
 type PurchaseBillXeroSyncStatus = "in_sync" | "out_of_sync" | "unknown" | "not_applicable";
@@ -49972,6 +50120,15 @@ lived here (`unitWindowsForLine`, `coversForUnit`, `billedUnitCoverage`,
 `seedPurchaseLinesForWindows`) retired in one-document-model Phase 3, unused
 in either environment (Phase 0b census).
 
+### `PAYABLE_LINE_CLAIMS`
+
+The payable side of `orderLineClaimIssues`: a bill or credit's
+`path_purchase_item`. A canceled line cannot be billed.
+
+```ts
+const PAYABLE_LINE_CLAIMS: LineClaimSide<PurchaseRow>;
+```
+
 ### `ProjectBillLineOptions`
 
 {@link projectPurchaseLineToBillLine}'s inputs beside the purchase line.
@@ -50035,6 +50192,7 @@ interface RemainingTimeCountsArgs {
   documents: PurchaseBilledDocuments;
   formulas: PricingFormulas;
   holidays: readonly string[];
+  metered_over?: typeLiteral;
 }
 ```
 
@@ -50048,7 +50206,8 @@ interface SyncPurchaseToBillsArgs {
   next: Purchase;
   bills: readonly PurchaseBill[];
   tax: Omit<indexedAccess, "asOf">;
-  time?: typeLiteral;
+  time: typeLiteral;
+  linked_cleared?: ReadonlySet<string>;
 }
 ```
 
@@ -50060,17 +50219,19 @@ legal (D5) and still needs a default. A writer pricing anything against a
 line's `quantity_billed`, which may stand past `quantity`, prices through this
 and never through `cumulativeShareCents`, which throws there.
 
-### `payableScopedSync(prev: Purchase, next: Purchase): typeLiteral`
+### `payableScopedSync(prev: Purchase, next: Purchase, _: unknown): typeLiteral`
 
 **The payable side of the scoped initiator → billing sync**
-(`syncScopedBillingItems`, `@cfs/core/utils/invoices`): the purchase → bill
+(`syncScopedDestinations`, `@cfs/core/utils/invoices`): the purchase → bill
 sync IS the order → invoice sync, with a `purchase` scope divider, the
 `path_purchase_item` move pointer, {@link projectPurchaseRowForBill} and the
 purchase ↔ bill field set (one-document-model Phase 3).
 
 Built per sync over the two purchase revisions it converts
 ({@link asEngineSource}): the engine hands its projector the converted rows,
-and the side maps each back to the purchase row it came from.
+and the side maps each back to the purchase row it came from. `stored` is the
+purchase's whole row set, which a pointer at a line closed out of the sync's
+rows is judged against; it defaults to the revision being synced.
 
 ### `projectPurchaseLineForBill(item: PurchaseItem, quantity: number): Record<string, unknown>`
 
@@ -50127,6 +50288,10 @@ new shared key is compared by construction.
 The line fields the purchase → bill merge follows, read off the two schemas
 (fail-closed: an undeclared shared key throws, as on the order side).
 
+### `purchaseBillSharedPairFields(): readonly SharedField[]`
+
+The pair fields the purchase → bill merge follows, read off the two schemas.
+
 ### `purchaseCreditIsLive(credit: Pick<PurchaseCredit, "status">): boolean`
 
 Is this credit live — not voided? Every "already billed" reader asks it.
@@ -50149,9 +50314,14 @@ purchase divider, ahead of the first destination, so contiguity holds.
 ### `purchaseLineBilledCounts(path: readonly string[], documents: PurchaseBilledDocuments): TierCount[]`
 
 **The counts the live documents bill of one TIME purchase line, net of
-credits** — Σ live bill line `counts` − Σ live credit line `counts`, tier by
-tier (`combineTierCounts`), joined on the purchase line key as
+credits** — Σ live bill `counts` − Σ live credit `counts`, tier by tier
+(`combineTierCounts`), joined on the purchase line key as
 {@link purchaseLineBilledNet} is. Unfloored, like it.
+
+The rows of ONE document that bill the line fold first, into their
+quantity-weighted mean (`meanTierCounts`), so a split reads as one billing:
+4 units split 2 + 2 over 30 days have billed 30 days, not 60. Summing across
+documents is unchanged (core#149 tracks what that means for a partial bill).
 
 ### `purchaseLineBilledNet(path: readonly string[], documents: PurchaseBilledDocuments): PurchaseLineBilledNet`
 
@@ -50220,7 +50390,7 @@ bill, which the bill writer refuses by name.
 ### `syncPurchaseToBills(args: SyncPurchaseToBillsArgs): PurchaseBillSync[]`
 
 **The purchase → bill three-way sync** (D5): the order → invoice sync's
-engine (`syncScopedBillingItems`) run on each bill's block for this purchase,
+engine (`syncScopedDestinations`) run on each bill's block for this purchase,
 with {@link payableScopedSync}. Every rule is the invoice's — synced,
 overridden, new, left out, removed, moved — so a purchase edit reaches an
 untouched bill line, leaves an overridden one alone, and adds a new purchase
@@ -50228,10 +50398,11 @@ line to every bill it can (the New arm; billing it twice reads as billed >
 ordered, as on AR). Pure; the writer stores the `changed` bills in the
 purchase writer's transaction.
 
-Skipped whole: a linked bill (Xero is authoritative), a frozen one
-(`invoiceIsFrozen`), a voided one, and a bill with no block for this
-purchase. A changed bill is re-pathed and re-priced whole by `priceDocument`
-at its own date, and its total is the Σ.
+Skipped whole: a frozen bill (`invoiceIsFrozen`), a voided one, a linked one
+the writer did not clear ({@link SyncPurchaseToBillsArgs.linked_cleared}), and
+a bill with no block for this purchase. A changed bill is re-pathed and
+re-priced whole by `priceDocument` at its own date, and its total is the Σ.
+Pairs follow the invoice's rule, per field (`syncScopedDestinations`).
 
 `total_cents` and `amount_due_cents` move together (an unfrozen bill has no
 money settlement, so the identity holds with what is due).

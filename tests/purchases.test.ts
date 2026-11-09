@@ -1056,16 +1056,16 @@ Deno.test("PurchaseBillSchema: a line sits AT the purchase line it bills; `path_
   );
 });
 
-Deno.test("PurchaseBillSchema: a purchase line is billed by at most one row of a document; row identity is the path", () => {
+Deno.test("PurchaseBillSchema: several rows may bill one purchase line (a split); row identity is the path", () => {
   const linked = { origin: "linked", xero_id: XERO_ID };
   // Two rows at one path.
   assertEquals(issuePaths(PurchaseBillSchema, bill({ ...linked, items: [billItem(), billItem()] })), ["items.3.path"]);
   // Two rows of ONE product billing two purchase lines is fine (D2).
   assertEquals(issuePaths(PurchaseBillSchema, bill({ ...linked, items: [billItem(), billItem({ uid: iuid(9) })] })), []);
-  // A moved row pointing at the line another row already bills at its own path.
+  // A moved row billing the line another row bills at its own path: a split.
   assertEquals(
     issuePaths(PurchaseBillSchema, bill({ ...linked, items: [billItem(), billItem({ uid: iuid(9), path_purchase_item: [D, iuid(1)] })] })),
-    ["items"],
+    [],
   );
   // Two moved rows billing one line.
   assertEquals(
@@ -1073,7 +1073,7 @@ Deno.test("PurchaseBillSchema: a purchase line is billed by at most one row of a
       PurchaseBillSchema,
       bill({ ...linked, items: [billItem({ uid: iuid(8), path_purchase_item: [D, iuid(7)] }), billItem({ uid: iuid(9), path_purchase_item: [D, iuid(7)] })] }),
     ),
-    ["items.3.path_purchase_item"],
+    [],
   );
   assertEquals(issuePaths(PurchaseBillSchema, bill({ ...linked, items: [billItem({ path: [P, D, iuid(9)] })] })), ["items.2.path"]);
   // `.min(1)` and the value rule both name `items`; either is the refusal.

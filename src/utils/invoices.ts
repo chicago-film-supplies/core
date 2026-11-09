@@ -89,7 +89,7 @@ import {
 } from "./substitutions.ts";
 import { closestAncestor, mapPathsAcrossRebuild, pairItemsAcrossRebuild } from "./item-pairing.ts";
 import { interleaveStoredOnlyRows } from "./stored-only-rows.ts";
-import type { COARevenueType, CreditNoteStatusType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, SettlementReasonType, SettlementTargetType, SettlementTypeType, SubstitutedForEntryType, PurchaseCreditStatusType } from "../schemas/mod.ts";
+import type { COARevenueType, CreditNoteStatusType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDatesType, OrderDocDestinationItemType, SettlementReasonType, SettlementTargetType, SettlementTypeType, SubstitutedForEntryType, PurchaseCreditStatusType } from "../schemas/mod.ts";
 import {
   getSettlementMultiplier,
   INVOICE_FIELD_FREEZE,
@@ -1810,6 +1810,13 @@ export interface ScopedSyncSide<R extends InvoiceItem = InvoiceDocItemType> {
    * none does. A payable kit header does: it exists to hold its components' paths.
    */
   isStructural?(item: LineItem): boolean;
+  /**
+   * A claimed line that has left the initiator's rows the sync reads but is still
+   * stored on the initiator. A kept row's pointer at such a line stays. Absent
+   * means the sync's rows are all there is. A payable line closed to quantity 0
+   * is the case: the bill line still bills it.
+   */
+  stillStored?(path: readonly string[]): boolean;
 }
 
 /** The receivable side: order → invoice. */
@@ -1836,42 +1843,74 @@ function mergeScopedLine<R extends InvoiceItem>(
 }
 
 /**
- * {@link syncOrderToInvoiceSelective} for any side: the scoped three-way sync of
- * one initiator's block on one billing document. `side` says which pointer,
- * projector and field set apply; the rules are the order → invoice sync's,
- * unchanged.
+ * **What the scoped pair sync needs to know about a SIDE**, the pair half of
+ * {@link ScopedSyncSide}: the shared pair fields, and an initiator pair in the
+ * billing document's shape.
  */
-export function syncScopedBillingItems<R extends InvoiceItem>(
-  prevItems: LineItem[],
-  nextItems: LineItem[],
-  currentItems: R[],
-  scopeUid: string,
-  side: ScopedSyncSide<R>,
-): R[] {
-  return syncScopedItems(prevItems, nextItems, currentItems, scopeUid, side).items;
+export interface ScopedPairSide<S, P> {
+  /** The billing pair's scope key: `uid_order` on an invoice, `uid_purchase` on a bill. */
+  scopeKey: "uid_order" | "uid_purchase";
+  /** The shared pair fields, read off the two schemas. */
+  fields(): readonly SharedField[];
+  /** An initiator pair in the billing document's shape, scoped by the initiator's uid. */
+  project(pair: S, scopeUid: string): P;
+}
+
+/** The receivable pair side: order → invoice. */
+const RECEIVABLE_PAIR_SIDE: ScopedPairSide<DocDestinationType, InvoiceDestinationPair> = {
+  scopeKey: "uid_order",
+  fields: () => orderInvoiceSharedFields().pair,
+  project: (pair, scopeUid) => toInvoiceDestinationPair(scopeUid, pair),
+};
+
+/** Is any shared field of this billing pair different from the previous initiator pair? */
+function pairOverriddenOn<S, P>(side: ScopedPairSide<S, P>, prev: S, stored: P, scopeUid: string): boolean {
+  const p = side.project(prev, scopeUid);
+  return mergeSharedFields(side.fields(), p, p, stored).overridden.length > 0;
 }
 
 /** Is any shared field of this invoice pair different from the previous order pair? */
 function pairOverridden(prev: DocDestinationType, inv: InvoiceDestinationPair, uidOrder: string): boolean {
-  const p = toInvoiceDestinationPair(uidOrder, prev);
-  return mergeSharedFields(orderInvoiceSharedFields().pair, p, p, inv).overridden.length > 0;
+  return pairOverriddenOn(RECEIVABLE_PAIR_SIDE, prev, inv, uidOrder);
 }
 
 /**
  * The three-way rule on one matched pair, then its window's derived fields.
  *
  * The merge runs per `dates` leaf and leaves the derived `_fs` mirrors and day
- * counts as the invoice had them. So afterwards:
- * - window unchanged from the invoice's → nothing to recompute;
- * - window equal to the new order's → take the order's `dates` whole, whose
+ * counts as the billing pair had them. So afterwards:
+ * - window unchanged from the billing pair's → nothing to recompute;
+ * - window equal to the new initiator's → take its `dates` whole, whose
  *   derived fields were computed from exactly those boundaries;
  * - a mix of the two → each `_fs` from the side its boundary came from, and the
  *   day counts recomputed with `holidays`.
  *
  * 🔴 A mixed window can be invalid (the invoice moved delivery later, the order
- * moved collection earlier). Then the invoice keeps its WHOLE `dates` object and
- * the pair diff shows it. An invalid window is never written.
+ * moved collection earlier). Then the billing pair keeps its WHOLE `dates`
+ * object and the pair diff shows it. An invalid window is never written.
  */
+function mergePairOn<S, P extends { dates: OrderDocDatesType }>(
+  side: ScopedPairSide<S, P>,
+  prev: S,
+  next: S,
+  stored: P,
+  scopeUid: string,
+  holidays: readonly string[],
+): P {
+  const nextPair = side.project(next, scopeUid);
+  const { merged } = mergeSharedFields(side.fields(), side.project(prev, scopeUid), nextPair, stored);
+  const dates = resolveMergedPairDates(
+    merged.dates,
+    nextPair.dates,
+    stored.dates,
+    holidays,
+    canonicalChargeWindows,
+  );
+  // `null` means the merged window was invalid — keep the stored `dates` and let
+  // the pair diff show it. An invalid window is never written.
+  return dates === null ? { ...merged, dates: stored.dates } : { ...merged, dates };
+}
+
 function mergePair(
   prev: DocDestinationType,
   next: DocDestinationType,
@@ -1879,24 +1918,7 @@ function mergePair(
   uidOrder: string,
   holidays: readonly string[],
 ): InvoiceDestinationPair {
-  const nextPair = toInvoiceDestinationPair(uidOrder, next);
-  const { merged } = mergeSharedFields(
-    orderInvoiceSharedFields().pair,
-    toInvoiceDestinationPair(uidOrder, prev),
-    nextPair,
-    inv,
-  );
-
-  const dates = resolveMergedPairDates(
-    merged.dates,
-    nextPair.dates,
-    inv.dates,
-    holidays,
-    canonicalChargeWindows,
-  );
-  // `null` means the merged window was invalid — keep the invoice's whole
-  // `dates` and let the pair diff show it. An invalid window is never written.
-  return dates === null ? { ...merged, dates: inv.dates } : { ...merged, dates };
+  return mergePairOn(RECEIVABLE_PAIR_SIDE, prev, next, inv, uidOrder, holidays);
 }
 
 /**
@@ -2137,16 +2159,18 @@ function syncScopedItems<R extends InvoiceItem>(
       return out;
     };
     const prevX = prevByPath.get(itemPathKey(x));
+    // A kept row's pointer at a line that left the sync's rows but is still stored stays.
+    const keptPointer = side.stillStored?.(x) ? x : undefined;
     // X was not on the order this row was claimed against: the row is the
     // invoice's own, and a root's pointer names nothing.
-    if (prevX === undefined) return { keep: true, row: pointing(row, undefined) };
+    if (prevX === undefined) return { keep: true, row: pointing(row, keptPointer) };
     const nextPath = moved.toPath(x) ?? (newByPath.has(itemPathKey(x)) ? x : undefined);
     const nextX = nextPath === undefined ? undefined : newByPath.get(itemPathKey(nextPath));
     if (nextX !== undefined) {
       const merged = { ...mergeLine(prevX, nextX, row, orderDividerUid), path: row.path } as R;
       return { keep: true, row: pointing(merged, nextPath) };
     }
-    if (lineOverridden(prevX, row, orderDividerUid)) return { keep: true, row: pointing(row, undefined) };
+    if (lineOverridden(prevX, row, orderDividerUid)) return { keep: true, row: pointing(row, keptPointer) };
     return { keep: false, row };
   };
 
@@ -2939,26 +2963,45 @@ export function orderLineClaims(
   return claims;
 }
 
-/** One `path_order_item` a write must refuse — see {@link orderLineClaimIssues}. */
+/** One move pointer a write must refuse — see {@link orderLineClaimIssues}. */
 export interface OrderLineClaimIssue {
   /** Index of the claiming row in the items array. */
   index: number;
   /** The row's own path, as written. */
   path: string[];
-  /** The order-relative path it claims. */
-  path_order_item: string[];
+  /** The initiator-relative path it claims. */
+  claimed_path: string[];
   /**
-   * `outside_order_block` — the row hangs under no `order` divider, which
-   * includes every line of a standalone invoice; `not_a_line` — the order this
-   * row's block bills carries no line at the claimed path; `order_unknown` — the
-   * caller could not supply that order's items.
+   * `outside_order_block` — the row hangs under no scope divider, which
+   * includes every line of a standalone invoice; `not_a_line` — the initiator
+   * this row's block bills carries no line at the claimed path; `order_unknown`
+   * — the caller could not supply that initiator's items; `line_closed` — the
+   * side refuses a claim on that line ({@link LineClaimSide.lineClosed}).
    */
-  reason: "outside_order_block" | "not_a_line" | "order_unknown";
+  reason: "outside_order_block" | "not_a_line" | "order_unknown" | "line_closed";
 }
 
 /**
- * The write-time check on `path_order_item` (core#125 D3): a pointer is legal
- * only on a line inside an order block, naming a LINE of that block's order.
+ * What {@link orderLineClaimIssues} needs to know about a SIDE: the pair
+ * {@link ScopedSyncSide} already carries, and whether a claim on a line that
+ * exists may still be refused.
+ */
+export interface LineClaimSide<L> {
+  scopeType: "order" | "purchase";
+  pointerKey: keyof MovePointerCarrier;
+  /** A line the side does not let a row claim. Absent means none is closed. */
+  lineClosed?(line: L): boolean;
+}
+
+/** The receivable side of {@link orderLineClaimIssues}: an invoice's `path_order_item`. */
+export const RECEIVABLE_LINE_CLAIMS: LineClaimSide<{ type: string; path?: readonly string[] }> = {
+  scopeType: "order",
+  pointerKey: "path_order_item",
+};
+
+/**
+ * The write-time check on a move pointer (core#125 D3): a pointer is legal
+ * only on a line inside a scope block, naming a LINE of that block's initiator.
  *
  * Several rows claiming one line is legal and not reported (owner, 2026-10-03):
  * it is a split, or an over-bill the diff surfaces. A pointer equal to the
@@ -2966,32 +3009,36 @@ export interface OrderLineClaimIssue {
  * because the order may have moved on since and the sync — not a refusal — is
  * what answers that (Q2).
  *
- * @param items - The invoice's full items array, as it is about to be written
- * @param orderLines - Each billed order's CURRENT `items` by order uid; `undefined` when unknown
- * @param stored - The invoice's stored items, if any — unchanged pointers are grandfathered
+ * @param items - The billing document's full items array, as it is about to be written
+ * @param orderLines - Each billed initiator's CURRENT `items` by uid; `undefined` when unknown
+ * @param stored - The document's stored items, if any — unchanged pointers are grandfathered
+ * @param side - Which pointer and scope to read; an invoice's by default
  */
-export function orderLineClaimIssues(
-  items: readonly InvoiceItem[],
-  orderLines: (orderUid: string) => readonly LineItem[] | undefined,
-  stored: readonly InvoiceItem[] = [],
+export function orderLineClaimIssues<L extends { type: string; path?: readonly string[] }>(
+  items: readonly (InvoiceItem & MovePointerCarrier)[],
+  orderLines: (orderUid: string) => readonly L[] | undefined,
+  stored: readonly (InvoiceItem & MovePointerCarrier)[] = [],
+  side: LineClaimSide<L> = RECEIVABLE_LINE_CLAIMS,
 ): OrderLineClaimIssue[] {
-  const orderDividers = new Set(items.filter((it) => it.type === "order").map((it) => it.uid));
+  const orderDividers = new Set(items.filter((it) => it.type === side.scopeType).map((it) => it.uid));
   const storedPointer = new Map<string, string>();
   for (const it of stored) {
-    if (it.path_order_item?.length) storedPointer.set(itemPathKey(it.path ?? []), itemPathKey(it.path_order_item));
+    const x = movePointerOf(it, side.pointerKey);
+    if (x?.length) storedPointer.set(itemPathKey(it.path ?? []), itemPathKey(x));
   }
   const issues: OrderLineClaimIssue[] = [];
   items.forEach((it, index) => {
-    const x = it.path_order_item;
+    const x = movePointerOf(it, side.pointerKey);
     if (!x?.length) return;
     const path = it.path ?? [];
     if (storedPointer.get(itemPathKey(path)) === itemPathKey(x)) return;
-    const issue = (reason: OrderLineClaimIssue["reason"]) => issues.push({ index, path: [...path], path_order_item: [...x], reason });
+    const issue = (reason: OrderLineClaimIssue["reason"]) => issues.push({ index, path: [...path], claimed_path: [...x], reason });
     if (!isLineItemType(it.type) || !orderDividers.has(path[0])) return issue("outside_order_block");
     const lines = orderLines(path[0]);
     if (lines === undefined) return issue("order_unknown");
     const target = lines.find((l) => itemPathKey(l.path ?? []) === itemPathKey(x));
-    if (target === undefined || !isLineItemType(target.type)) issue("not_a_line");
+    if (target === undefined || !isLineItemType(target.type)) return issue("not_a_line");
+    if (side.lineClosed?.(target)) issue("line_closed");
   });
   return issues;
 }
@@ -3870,63 +3917,109 @@ export function syncOrderDestinationScope(
   orderUid: string,
   mode: OrderInvoiceFieldSync,
 ): OrderDestinationScopeSyncResult {
-  let scopedItems = syncScopedItems(prevOrder.items, nextOrder.items, currentScopedItems, orderUid, RECEIVABLE_SCOPED_SYNC).items;
-
-  const lastOf = (path: readonly string[]): string | undefined => path.length > 0 ? path[path.length - 1] : undefined;
-  const isDestinationDivider = (it: { type: string }) => it.type === "destination";
-  const dividerIn = (items: readonly InvoiceDocItemType[], uid: string) =>
-    items.find((it) => isDestinationDivider(it) && lastOf(stripOrderPrefix(it.path, orderUid)) === uid);
-
-  const prevByUid = new Map(prevOrder.destinations.map((p) => [p.uid, p]));
-  const nextUids = new Set(nextOrder.destinations.map((p) => p.uid));
-  const inScope = new Map<string | undefined, InvoiceDestinationPair>();
-  const outOfScope: InvoiceDestinationPair[] = [];
-  for (const pair of currentInvoiceDests) {
-    if (pair.uid_order === orderUid) inScope.set(pair.uid, pair);
-    else outOfScope.push(pair);
-  }
-
-  // A destination the order deleted whose PAIR the invoice overrode keeps its
-  // divider too — the item sync only asked about the divider.
-  for (const [uid, prev] of prevByUid) {
-    if (nextUids.has(uid)) continue;
-    const inv = inScope.get(uid);
-    const storedDivider = dividerIn(currentScopedItems, uid);
-    if (!inv || !storedDivider || dividerIn(scopedItems, uid)) continue;
-    if (pairOverridden(prev, inv, orderUid)) scopedItems = [...scopedItems, storedDivider];
-  }
-
-  const present = new Set<string | undefined>();
-  for (const it of scopedItems) if (isDestinationDivider(it)) present.add(lastOf(it.path));
-
-  const synced: InvoiceDestinationPair[] = [];
-  const decided = new Set<string | undefined>();
-  for (const next of nextOrder.destinations) {
-    decided.add(next.uid);
-    if (!present.has(next.uid)) continue;
-    const inv = inScope.get(next.uid);
-    const prev = prevByUid.get(next.uid);
-    if (!inv) synced.push(toInvoiceDestinationPair(orderUid, next));
-    else if (prev) synced.push(mergePair(prev, next, inv, orderUid, mode.holidays));
-    else synced.push(inv);
-  }
-  const dropped: DroppedInvoiceDestination[] = [];
-  for (const [uid, inv] of inScope) {
-    if (present.has(uid)) {
-      if (!decided.has(uid)) synced.push(inv);
-      continue;
-    }
-    dropped.push({
+  const { items, destinations, dropped } = syncScopedDestinations(
+    prevOrder,
+    nextOrder,
+    currentScopedItems,
+    currentInvoiceDests,
+    orderUid,
+    RECEIVABLE_SCOPED_SYNC,
+    RECEIVABLE_PAIR_SIDE,
+    mode.holidays,
+  );
+  return {
+    scopedItems: items,
+    destinations,
+    dropped: dropped.map(({ pair: inv, reason }) => ({
       uid_order: orderUid,
       uid: inv.uid ?? null,
       delivery_uid: inv.delivery?.uid ?? null,
       collection_uid: inv.collection?.uid ?? null,
       jurisdiction: inv.jurisdiction ?? null,
-      reason: nextUids.has(uid as string) ? "divider_absent" : "removed_from_order",
-    });
+      reason,
+    })),
+  };
+}
+
+/** What {@link syncScopedDestinations} returns. */
+export interface ScopedDestinationSyncResult<R, P> {
+  items: R[];
+  destinations: P[];
+  /** Pairs removed, with why; the receivable caller reports them. */
+  dropped: { pair: P; reason: DroppedInvoiceDestination["reason"] }[];
+}
+
+/**
+ * {@link syncOrderDestinationScope} for any side: the scoped three-way sync of
+ * one initiator's block on one billing document, items and pairs together. A
+ * pair follows its destination divider, merged per field when both revisions
+ * hold it. `lineSide` and `pairSide` are all that differs between an invoice and
+ * a bill.
+ */
+export function syncScopedDestinations<
+  R extends InvoiceItem,
+  S extends { uid?: string },
+  P extends { uid?: string; dates: OrderDocDatesType; uid_order?: string; uid_purchase?: string },
+>(
+  prev: { items: LineItem[]; destinations: readonly S[] },
+  next: { items: LineItem[]; destinations: readonly S[] },
+  currentScopedItems: R[],
+  currentDests: readonly P[],
+  scopeUid: string,
+  lineSide: ScopedSyncSide<R>,
+  pairSide: ScopedPairSide<S, P>,
+  holidays: readonly string[],
+): ScopedDestinationSyncResult<R, P> {
+  let scopedItems = syncScopedItems(prev.items, next.items, currentScopedItems, scopeUid, lineSide).items;
+
+  const lastOf = (path: readonly string[]): string | undefined => path.length > 0 ? path[path.length - 1] : undefined;
+  const isDestinationDivider = (it: { type: string }) => it.type === "destination";
+  const dividerIn = (items: readonly R[], uid: string | undefined) =>
+    items.find((it) => isDestinationDivider(it) && lastOf(stripOrderPrefix(it.path, scopeUid)) === uid);
+
+  const prevByUid = new Map(prev.destinations.map((p) => [p.uid, p]));
+  const nextUids = new Set(next.destinations.map((p) => p.uid));
+  const inScope = new Map<string | undefined, P>();
+  const outOfScope: P[] = [];
+  for (const pair of currentDests) {
+    if (pair[pairSide.scopeKey] === scopeUid) inScope.set(pair.uid, pair);
+    else outOfScope.push(pair);
   }
 
-  return { scopedItems, destinations: [...outOfScope, ...synced], dropped };
+  // A destination the initiator deleted whose PAIR the document overrode keeps
+  // its divider too — the item sync only asked about the divider.
+  for (const [uid, prevPair] of prevByUid) {
+    if (nextUids.has(uid)) continue;
+    const stored = inScope.get(uid);
+    const storedDivider = dividerIn(currentScopedItems, uid);
+    if (!stored || !storedDivider || dividerIn(scopedItems, uid)) continue;
+    if (pairOverriddenOn(pairSide, prevPair, stored, scopeUid)) scopedItems = [...scopedItems, storedDivider];
+  }
+
+  const present = new Set<string | undefined>();
+  for (const it of scopedItems) if (isDestinationDivider(it)) present.add(lastOf(it.path));
+
+  const synced: P[] = [];
+  const decided = new Set<string | undefined>();
+  for (const nextPair of next.destinations) {
+    decided.add(nextPair.uid);
+    if (!present.has(nextPair.uid)) continue;
+    const stored = inScope.get(nextPair.uid);
+    const prevPair = prevByUid.get(nextPair.uid);
+    if (!stored) synced.push(pairSide.project(nextPair, scopeUid));
+    else if (prevPair) synced.push(mergePairOn(pairSide, prevPair, nextPair, stored, scopeUid, holidays));
+    else synced.push(stored);
+  }
+  const dropped: ScopedDestinationSyncResult<R, P>["dropped"] = [];
+  for (const [uid, stored] of inScope) {
+    if (present.has(uid)) {
+      if (!decided.has(uid)) synced.push(stored);
+      continue;
+    }
+    dropped.push({ pair: stored, reason: nextUids.has(uid) ? "divider_absent" : "removed_from_order" });
+  }
+
+  return { items: scopedItems, destinations: [...outOfScope, ...synced], dropped };
 }
 
 /**

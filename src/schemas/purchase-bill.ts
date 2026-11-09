@@ -85,6 +85,8 @@ import {
   type PurchaseLinePrice,
   purchaseLineMoneyIssues,
   type PurchaseProductItemTypeType,
+  type PurchaseDestinationInputType,
+  purchaseDestinationInputIssues,
 } from "./purchase.ts";
 import {
   checkDestinationJoin,
@@ -93,6 +95,7 @@ import {
   type OrderDocGroupItemType,
   PairCore,
   type PairCoreType,
+  PairInputCore,
   Discount,
   DiscountInput,
   type DiscountInputType,
@@ -113,6 +116,9 @@ import {
   InvoiceStatusEnum,
   type InvoiceStatusType,
   type SettlementReasonType,
+  SubstitutedForList,
+  SubstitutedForListInput,
+  type SubstitutedForEntryType,
   TimestampFields,
   UidNameRef,
   type UidNameRefType,
@@ -252,8 +258,17 @@ export interface PurchaseDocumentProductItem extends Omit<PurchaseDocumentLineBa
    * A MOVE pointer (the `path_order_item` twin): the purchase item this line
    * bills when it sits at another path in its purchase's block, relative to
    * that purchase. Absent when the line sits at its purchase line's own path.
+   *
+   * Several rows may name one purchase line: a split bills it in two places.
    */
   path_purchase_item?: string[];
+  /**
+   * The purchase lines this row stands in for, with how many units: the
+   * invoice line's `substituted_for`. It records that the bill deliberately
+   * bills a DIFFERENT product, which is what makes the purchase read X as
+   * billed rather than still open.
+   */
+  substituted_for?: SubstitutedForEntryType[];
 }
 
 /**
@@ -433,6 +448,8 @@ const PurchaseDocumentProductItemInner = z.strictObject({
   uid_product: FirestoreId,
   // The move pointer, exactly as invoice's `path_order_item`.
   path_purchase_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
+  // Plain `.optional()`, matching the invoice line's. Only a substitute carries it.
+  substituted_for: SubstitutedForList.optional(),
 });
 
 const noCustodyLine = {
@@ -490,7 +507,6 @@ function documentItemsIssues(
   ctx: z.RefinementCtx,
 ): void {
   const paths = new Set<string>();
-  const projected = new Set<string>();
   doc.items.forEach((row, i) => {
     if (row.path.length === 0 || row.path.at(-1) !== row.uid) {
       ctx.addIssue({ code: "custom", path: ["items", i, "path"], message: "an item's path is self-inclusive: it ends in its own uid" });
@@ -505,38 +521,7 @@ function documentItemsIssues(
     for (const issue of documentLineIssues(item, doc.origin)) {
       ctx.addIssue({ code: "custom", path: ["items", i, ...issue.path], message: issue.message });
     }
-    // A purchase item is billed by at most one item of a document — the
-    // successor of the old "one line per product", which stopped being true
-    // when one product could sit on two purchase items. Keyed on the line a
-    // row BILLS (its move pointer, else its own path), so a moved row and an
-    // unmoved one cannot both bill one purchase line.
-    const key = item.path_purchase_item !== undefined ? purchaseLineKeyOf(item) : null;
-    if (key !== null) {
-      if (projected.has(key)) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["items", i, "path_purchase_item"],
-          message: "a purchase item is billed by at most one item of a document",
-        });
-      }
-      projected.add(key);
-    }
   });
-  // An unmoved row bills the line at its own path; a moved row may not point
-  // at one of those either.
-  for (const row of doc.items) {
-    if (!isPurchaseLine(row)) continue;
-    const item = row as PurchaseDocumentItem;
-    if (item.path_purchase_item !== undefined) continue;
-    const key = purchaseLineKeyOf(item);
-    if (key !== null && projected.has(key)) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["items"],
-        message: `purchase line ${key} is billed by a moved row and by the row at its own path`,
-      });
-    }
-  }
   // A document with value must say what it is for. A bill's `items` is also
   // `.min(1)` on its schema; a credit may be empty only at zero.
   const lines = purchaseDocumentLines(doc.items);
@@ -1214,13 +1199,22 @@ export interface PurchaseBillDividerInputType {
 }
 
 /**
- * A line row of a bill's whole-array input, identified by its `path`.
+ * A line row of a bill's whole-array input.
  *
- * A path the bill already holds keeps every key this row omits. A path it does
- * not hold is projected from the purchase line named by that path, so a bill can
- * take a line of another purchase of the same supplier under that purchase's
- * divider. On a TIME line `price.rates` restates each unit rate; a flat line's
+ * The writer pairs each row to a stored one (exact path, then the row's uid and
+ * ancestry), and the paired row is the base for every key this row omits, so a
+ * row that moved keeps them. A row no stored row pairs with is, in order: a
+ * split's clone if it states {@link path_purchase_item}; a line of the purchase
+ * named by its path; or a line the bill itself authors, which states its name,
+ * account, quantity and money (and `uid_product` on a sale or rental).
+ *
+ * On a TIME line `price.rates` restates each unit rate; a flat line's
  * `amount_cents` is stated directly (gross when a discount is set).
+ *
+ * `path_purchase_item` absent keeps the stored pointer, and there is no `null`
+ * form: the writer stamps every moved row's pointer and clears one a move back
+ * made pointless, so a stale client's identity-only rows cannot clear one.
+ * The writer assigns the tax class and a bill-authored line's flat formula.
  */
 export interface PurchaseBillLineInputType {
   type: SharedLineType;
@@ -1230,24 +1224,45 @@ export interface PurchaseBillLineInputType {
   description?: string;
   quantity?: number;
   amount_cents?: number;
-  ledger_account?: COACodeType;
+  /** `null` is a stored kit header echoed back; the writer decides what a `none` product holds. */
+  ledger_account?: COACodeType | null;
+  /** The product a bill-authored sale or rental bills. A stored line's product never changes. */
+  uid_product?: string;
+  /** A kit component's flag, as on an order line's input. */
+  zero_priced?: boolean | null;
+  /** A kit component's ratio to its direct parent. */
+  quantity_per_parent?: number | null;
+  /** The out-of-service record a bill-authored replacement line bills. */
+  uid_out_of_service?: string;
+  /** The purchase line this row bills from another position. See the docblock. */
+  path_purchase_item?: string[];
+  /** What this row stands in for ({@link PurchaseDocumentProductItem.substituted_for}). */
+  substituted_for?: SubstitutedForEntryType[];
   /** Absent keeps; `null` clears the operator's class, restoring the line's own. */
   uid_tax_class_override?: string | null;
   /** Absent keeps the line's category; a uid sets it; `null` restores its product's, the order/invoice line rule (none with no product). */
   uid_tracking_category?: string | null;
-  price?: { rates?: { rate_key: string; amount_cents: number }[]; discount?: DiscountInputType | null };
+  price?: {
+    /** A bill-authored time line's formula. A stored line's formula never changes here. */
+    uid_price_formula?: string;
+    rates?: { rate_key: string; amount_cents: number }[];
+    discount?: DiscountInputType | null;
+  };
 }
 
 /** One row of a bill's whole-array input. */
 export type PurchaseBillRowInputType = PurchaseBillDividerInputType | PurchaseBillLineInputType;
 
 /**
- * Input for editing a PUSHED, unsettled bill (`PUT /purchase-bills/{uid}`).
- * `items`, when present, is the WHOLE array in its new order, keyed by `path`, the
- * invoice's shape (one-document-model Phase 5): a row it omits is removed. Refused
- * on a linked bill apart from tracking (Xero is authoritative) and, per field
- * class, once the bill is frozen (`INVOICE_FIELD_FREEZE`). An accepted edit is
- * pushed to Xero through the ACCPAY edit push (D5).
+ * Input for editing a bill (`PUT /purchase-bills/{uid}`). `items`, when present,
+ * is the WHOLE array in its new order, the invoice's shape (one-document-model
+ * Phase 5): a row it omits is removed. Refused per field class once the bill is
+ * settled (`INVOICE_FIELD_FREEZE`); a settled linked bill takes a tracking edit
+ * alone. An accepted edit is pushed to Xero through the ACCPAY edit push (D5).
+ *
+ * `destinations`, when present, edits the pairs it names, each stated whole; a
+ * pair it leaves out is unchanged. A pair's membership follows its divider in
+ * `items`, as on an invoice.
  */
 export interface UpdatePurchaseBillInputType {
   version: number;
@@ -1255,7 +1270,23 @@ export interface UpdatePurchaseBillInputType {
   due_date?: string;
   reference?: string | null;
   items?: PurchaseBillRowInputType[];
+  destinations?: PurchaseBillDestinationInputType[];
 }
+
+/**
+ * A bill's pair as a client sends it: a purchase's pair input scoped by
+ * `uid_purchase`, the `InvoiceDocDestination` input's twin.
+ */
+export interface PurchaseBillDestinationInputType extends PurchaseDestinationInputType {
+  uid_purchase: string;
+}
+
+/** Zod schema for {@link PurchaseBillDestinationInputType}. */
+export const PurchaseBillDestinationInput: z.ZodType<PurchaseBillDestinationInputType> = z.object({
+  uid_purchase: FirestoreId,
+  uid: z.uuid(),
+  ...PairInputCore,
+}).superRefine(purchaseDestinationInputIssues);
 
 const billDividerInput = (type: "purchase" | "destination" | "group") =>
   z.object({ type: z.literal(type), uid: ItemUid, path: z.array(ItemUid).min(1), name: LineItemCore.name.optional() });
@@ -1269,10 +1300,17 @@ const billLineInput = (type: SharedLineType) =>
     description: LineItemCore.description.optional(),
     quantity: z.int().min(1).optional(),
     amount_cents: z.int().min(0).optional(),
-    ledger_account: COACode.optional(),
+    ledger_account: COACode.nullable().optional(),
+    uid_product: FirestoreId.optional(),
+    zero_priced: z.boolean().nullable().optional(),
+    quantity_per_parent: z.number().min(0).nullable().optional(),
+    uid_out_of_service: OutOfServiceId.optional(),
+    path_purchase_item: z.array(ItemUid).min(1).optional(),
+    substituted_for: SubstitutedForListInput.optional(),
     uid_tax_class_override: FirestoreId.nullable().optional(),
     uid_tracking_category: FirestoreId.nullable().optional(),
     price: z.object({
+      uid_price_formula: FirestoreId.optional(),
       rates: z.array(z.object({ rate_key: RateKey, amount_cents: z.int() })).optional(),
       discount: DiscountInput.nullable().optional(),
     }).optional(),
@@ -1296,6 +1334,7 @@ export const UpdatePurchaseBillInput: z.ZodType<UpdatePurchaseBillInputType> = z
   due_date: chicagoStartOfDay().optional(),
   reference: z.string().max(255).nullable().optional(),
   items: z.array(PurchaseBillRowInput).optional(),
+  destinations: z.array(PurchaseBillDestinationInput).optional(),
 }).superRefine((u, ctx) => {
   const seen = new Set<string>();
   u.items?.forEach((item, i) => {

@@ -870,6 +870,8 @@ export {
   PurchaseBillRowInput,
   type PurchaseBillRowInputType,
   type UpdatePurchaseBillInputType,
+  PurchaseBillDestinationInput,
+  type PurchaseBillDestinationInputType,
   type PurchaseDocumentItem,
   type PurchaseDocumentPostedItem,
   type PurchaseBillTotals,

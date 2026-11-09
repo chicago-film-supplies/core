@@ -295,7 +295,9 @@ Deno.test("purchaseBillPushRefusal: one row per reason, and the offer follows it
   assertEquals(pushes(live), [], "no status given, no offer");
 
   refuse(voidBill("a", [], { totals_over: { amount_void_cents: 1000, amount_due_cents: 0 } }), "is void");
-  refuse(voidBill("a", [], { origin: "linked" }), "linked");
+  // A linked bill may be pushed while unpaid, as a pushed one; a settled one may not.
+  assertEquals(purchaseBillPushRefusal(voidBill("a", [], { origin: "linked" }), "out_of_sync"), null);
+  refuse(voidBill("a", [], { origin: "linked", totals_over: { amount_paid_cents: 1000, amount_due_cents: 0 } }), "linked");
 
   // A settled bill may ask: Xero takes its tracking, and the task answers the rest.
   for (const settled of [{ amount_paid_cents: 1, amount_due_cents: 999 }, { amount_credited_cents: 1, amount_due_cents: 999 }]) {

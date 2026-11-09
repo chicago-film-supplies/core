@@ -19,7 +19,7 @@
  */
 import { type PurchaseBill, purchaseDocumentLines, type XeroSyncState } from "../schemas/mod.ts";
 import { canonicalJson, hash48 } from "./contentHash.ts";
-import { purchaseBillIsLive } from "./invoices.ts";
+import { invoiceIsFrozen, purchaseBillIsLive } from "./invoices.ts";
 
 /** The part of a bill the Xero body is built from. */
 export type PurchaseBillXeroFields = Pick<PurchaseBill, "items" | "date" | "due_date" | "reference">;
@@ -66,7 +66,7 @@ export function purchaseBillXeroProjectionHash(bill: PurchaseBillXeroFields): st
  * - `in_sync` — Xero carries this bill as it stands.
  * - `out_of_sync` — it does not, or the bill never reached Xero at all.
  * - `unknown` — no push has recorded a projection hash yet. Not a claim either way.
- * - `not_applicable` — a linked bill (CFS never pushes it) or a void one.
+ * - `not_applicable` — a settled linked bill (CFS sends it nothing but tracking) or a void one.
  */
 export type PurchaseBillXeroSyncStatus = "in_sync" | "out_of_sync" | "unknown" | "not_applicable";
 
@@ -81,7 +81,7 @@ export function purchaseBillXeroSyncStatus(
   bill: PurchaseBillXeroFields & Pick<PurchaseBill, "origin" | "xero_id" | "totals" | "status">,
   state: Pick<XeroSyncState, "pushed_projection_hash"> | null,
 ): PurchaseBillXeroSyncStatus {
-  if (bill.origin !== "pushed" || !purchaseBillIsLive(bill)) return "not_applicable";
+  if (!purchaseBillIsLive(bill) || (bill.origin === "linked" && invoiceIsFrozen(bill))) return "not_applicable";
   if (!bill.xero_id) return "out_of_sync";
   const pushed = state?.pushed_projection_hash ?? null;
   if (pushed === null) return "unknown";

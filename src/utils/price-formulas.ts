@@ -582,6 +582,27 @@ export function combineTierCounts(a: readonly TierCount[], b: readonly TierCount
   });
 }
 
+/**
+ * **The quantity-weighted mean of several rows' tier counts**, exact: for each
+ * tier, Σ quantity × count ÷ Σ quantity. Rows that bill one line from two places
+ * on ONE document (a split) read as one billing of that line: 2 + 2 units over
+ * 30 days is 30 days, not 60. A single row comes back as it is.
+ */
+export function meanTierCounts(rows: readonly { quantity: number; counts: readonly TierCount[] }[]): TierCount[] {
+  if (rows.length === 0) return [];
+  if (rows.length === 1) return rows[0].counts.map((t) => ({ ...t }));
+  const total = rows.reduce((s, r) => s + r.quantity, 0);
+  let sum: TierCount[] = [];
+  for (const r of rows) {
+    sum = combineTierCounts(sum, r.counts.map((t) => ({ ...t, num: t.num * r.quantity })), 1);
+  }
+  return sum.map((t) => {
+    const den = t.den * total;
+    const g = gcdN(t.num, den);
+    return { rate_key: t.rate_key, num: t.num / g, den: den / g };
+  });
+}
+
 // ── Money ────────────────────────────────────────────────────────────
 
 // The money step lives schema-side (`schemas/_line-money.ts`) so the stored

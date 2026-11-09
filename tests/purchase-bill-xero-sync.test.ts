@@ -65,7 +65,9 @@ Deno.test("purchaseBillXeroSyncStatus: each answer", () => {
   assertEquals(purchaseBillXeroSyncStatus(bill(), null), "unknown");
   assertEquals(purchaseBillXeroSyncStatus(bill(), {}), "unknown", "a watermark from before the field");
   assertEquals(purchaseBillXeroSyncStatus(bill({ xero_id: null }), null), "out_of_sync");
-  assertEquals(purchaseBillXeroSyncStatus(bill({ origin: "linked" }), current), "not_applicable");
+  assertEquals(purchaseBillXeroSyncStatus(bill({ origin: "linked" }), current), "in_sync", "an unpaid linked bill compares");
+  const settled = { origin: "linked", totals: { total_cents: 12345, amount_paid_cents: 12345, amount_credited_cents: 0, amount_void_cents: 0, amount_due_cents: 0 } };
+  assertEquals(purchaseBillXeroSyncStatus(bill(settled), current), "not_applicable", "a settled linked bill takes tracking alone");
 });
 
 Deno.test("purchaseBillXeroSyncStatus: a void bill is not applicable; a settled one still compares", () => {
