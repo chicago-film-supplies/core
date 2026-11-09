@@ -139,6 +139,10 @@ import {
   type TaxRefType,
   checkDestinationJoin,
   checkLeadingDivider,
+  type DestinationEndpointType,
+  leadingDividerViolations,
+  type OrderDatesType,
+  PairInputCore,
   type OrderDocDestinationItemType,
   type OrderDocGroupItemType,
   PairCore,
@@ -1057,14 +1061,19 @@ export type PurchaseDestination = PairCoreType;
 
 /** Zod schema for {@link PurchaseDestination}. */
 export const PurchaseDestinationSchema: z.ZodType<PurchaseDestination> = z.strictObject({ ...PairCore }).superRefine(
-  (pair, ctx) => {
-    const start = pair.dates.delivery_start;
-    const end = pair.dates.collection_end;
-    if (start !== null && end !== null && Date.parse(end) < Date.parse(start)) {
-      ctx.addIssue({ code: "custom", path: ["dates", "collection_end"], message: "a hire ends at or after it starts" });
-    }
-  },
+  (pair, ctx) => hireOrderIssue(pair.dates, ctx),
 );
+
+/** A hire's end is not before its start: the rule the stored and the input pair share. */
+function hireOrderIssue(
+  dates: { delivery_start: string | null; collection_end: string | null },
+  ctx: z.RefinementCtx,
+): void {
+  const { delivery_start: start, collection_end: end } = dates;
+  if (start !== null && end !== null && Date.parse(end) < Date.parse(start)) {
+    ctx.addIssue({ code: "custom", path: ["dates", "collection_end"], message: "a hire ends at or after it starts" });
+  }
+}
 
 /**
  * The pair a purchase line sits under — the destination divider at `path[0]`
@@ -1323,9 +1332,10 @@ export interface PurchaseLinePriceInputType {
 }
 
 /**
- * The keys every item input may carry. `uid` names a stored item to keep;
- * absent (or a uid the purchase does not hold) is a NEW item, minted by the
- * writer, so an update matches rows by identity rather than by product.
+ * The keys every item input carries. `uid` names a stored item to keep; a uid
+ * the purchase does not hold is a NEW item, so an update matches rows by identity
+ * rather than by product. Both `uid` and `path` are required: the client already
+ * holds the uid as the path's last segment.
  *
  * `uid_tracking_category` takes the SAME rule as an order or invoice line's
  * (`resolveLinePosting`, `api-cloudrun/src/lib/lineDenorms.ts`): absent KEEPS
@@ -1342,7 +1352,9 @@ export interface PurchaseLinePriceInputType {
  * `uid_tax_class` is the writer's, stamped from its type's default class.
  */
 interface PurchaseItemInputBase {
-  uid?: string;
+  uid: string;
+  /** The row's identity, its last segment the `uid`; the first names the pair it sits under. */
+  path: string[];
   description?: string;
   uid_tracking_category?: string | null;
   uid_tax_class_override?: string | null;
@@ -1368,19 +1380,17 @@ export interface PurchaseSaleItemInputType extends PurchaseItemInputBase {
   landed_costs?: PurchaseLandedCostInputType[];
 }
 
-/** A rental (Subrent) item as an operator orders it. `amount_cents` on a flat line only (gross when discounted). */
+/**
+ * A rental (Subrent) item as an operator orders it. `amount_cents` on a flat line
+ * only (gross when discounted). Its hire window is its pair's dates, stated on
+ * `destinations[]`, never on the line (one-document-model Phase 5b).
+ */
 export interface PurchaseRentalItemInputType extends PurchaseItemInputBase {
   type: "rental";
   uid_product: string;
   quantity: number;
   amount_cents?: number | null;
   ledger_account?: COACodeType;
-  /**
-   * The hire window. Stored on the line's PAIR, not the line: the writer puts
-   * the line under the pair holding this window, minting one when none does
-   * (one-document-model Phase 3).
-   */
-  dates: PurchaseItemDates;
   /** The orders the item was raised for. Absent is `[]`: the writer states it. */
   uid_orders?: string[];
   /** The units the line covers. Absent keeps the stored list on an amend, `[]` on a create. */
@@ -1394,8 +1404,6 @@ export interface PurchaseServiceItemInputType extends PurchaseItemInputBase {
   quantity?: number;
   amount_cents?: number | null;
   ledger_account: COACodeType;
-  /** The span a span-metered formula reads; stored on the line's pair, as a hire window is. */
-  dates?: PurchaseItemDates | null;
   /** See {@link PurchaseRentalItemInputType.uid_units}. */
   uid_units?: string[];
   uid_product?: string;
@@ -1414,25 +1422,19 @@ export type PurchaseItemInputType =
   | PurchaseServiceItemInputType
   | PurchaseReplacementItemInputType;
 
-const inputDates = z.object({ start: chicagoInstant(), end: chicagoInstant().nullable() });
 const PurchaseLinePriceInput: z.ZodType<PurchaseLinePriceInputType> = z.object({
   uid_price_formula: FirestoreId.optional(),
   rates: z.array(z.object({ rate_key: RateKey, amount_cents: z.int().min(0) })).optional(),
   discount: DiscountInput.nullable().optional(),
 });
 const inputHead = {
-  uid: ItemUid.optional(),
+  uid: ItemUid,
+  path: z.array(ItemUid).min(1),
   description: LineItemCore.description.optional(),
   uid_tracking_category: FirestoreId.nullable().optional(),
   uid_tax_class_override: FirestoreId.nullable().optional(),
   price: PurchaseLinePriceInput.optional(),
 };
-
-function datesOrderIssue(dates: PurchaseItemDates | null | undefined, ctx: z.RefinementCtx): void {
-  if (dates && dates.end !== null && Date.parse(dates.end) < Date.parse(dates.start)) {
-    ctx.addIssue({ code: "custom", path: ["dates", "end"], message: "a span ends at or after it starts" });
-  }
-}
 
 function inputPostingIssue(item: { type: SharedLineType; ledger_account?: number }, ctx: z.RefinementCtx): void {
   if (item.ledger_account !== undefined) addIssues(payablePostingIssues(item.type, item.ledger_account), ctx);
@@ -1444,7 +1446,6 @@ const noCustodyInput = {
   quantity: z.int().min(1).optional(),
   amount_cents: z.int().min(0).nullable().optional(),
   ledger_account: COACode,
-  dates: inputDates.nullable().optional(),
   uid_units: unitsKey.optional(),
   uid_product: FirestoreId.optional(),
 };
@@ -1453,66 +1454,191 @@ function noCustodyInputIssues(
   item: PurchaseServiceItemInputType | PurchaseReplacementItemInputType,
   ctx: z.RefinementCtx,
 ): void {
-  datesOrderIssue(item.dates, ctx);
   if (item.uid_units) uniqueUnitsIssue(item.uid_units, ctx);
   inputPostingIssue(item, ctx);
 }
 
+// Un-annotated so both unions below can list them flat: an annotated union cannot
+// nest inside another discriminated union (`order.ts`'s `OrderItem` arms).
+const saleItemInputArm = z.object({
+  type: z.literal("sale"),
+  ...inputHead,
+  uid_product: FirestoreId,
+  quantity: z.int().min(0),
+  amount_cents: z.int().min(0),
+  ledger_account: COACode.optional(),
+  expected_date: chicagoStartOfDay().nullable().optional(),
+  landed_costs: z.array(PurchaseLandedCostInput).optional(),
+}).superRefine((item, ctx) => {
+  inputPostingIssue(item, ctx);
+  const named = new Set<string>();
+  item.landed_costs?.forEach((entry, k) => {
+    if (entry.uid === undefined) return;
+    if (named.has(entry.uid)) {
+      ctx.addIssue({ code: "custom", path: ["landed_costs", k, "uid"], message: "a landed cost uid appears once per item" });
+    }
+    named.add(entry.uid);
+  });
+});
+
+const rentalItemInputArm = z.object({
+  type: z.literal("rental"),
+  ...inputHead,
+  uid_product: FirestoreId,
+  quantity: z.int().min(0),
+  amount_cents: z.int().min(0).nullable().optional(),
+  ledger_account: COACode.optional(),
+  uid_orders: z.array(FirestoreId).optional(),
+  uid_units: unitsKey.optional(),
+}).superRefine((item, ctx) => {
+  if (item.uid_units) uniqueUnitsIssue(item.uid_units, ctx);
+  inputPostingIssue(item, ctx);
+});
+
+const serviceItemInputArm = z.object({ type: z.literal("service"), ...noCustodyInput })
+  .superRefine((item, ctx) => noCustodyInputIssues(item, ctx));
+
+const replacementItemInputArm = z.object({
+  type: z.literal("replacement"),
+  ...noCustodyInput,
+  uid_out_of_service: OutOfServiceId,
+}).superRefine((item, ctx) => noCustodyInputIssues(item, ctx));
+
 /** Zod schema for PurchaseItemInputType — non-strict arms, so extra keys strip. */
 export const PurchaseItemInput: z.ZodType<PurchaseItemInputType> = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("sale"),
-    ...inputHead,
-    uid_product: FirestoreId,
-    quantity: z.int().min(0),
-    amount_cents: z.int().min(0),
-    ledger_account: COACode.optional(),
-    expected_date: chicagoStartOfDay().nullable().optional(),
-    landed_costs: z.array(PurchaseLandedCostInput).optional(),
-  }).superRefine((item, ctx) => {
-    inputPostingIssue(item, ctx);
-    const named = new Set<string>();
-    item.landed_costs?.forEach((entry, k) => {
-      if (entry.uid === undefined) return;
-      if (named.has(entry.uid)) {
-        ctx.addIssue({ code: "custom", path: ["landed_costs", k, "uid"], message: "a landed cost uid appears once per item" });
-      }
-      named.add(entry.uid);
-    });
-  }),
-  z.object({
-    type: z.literal("rental"),
-    ...inputHead,
-    uid_product: FirestoreId,
-    quantity: z.int().min(0),
-    amount_cents: z.int().min(0).nullable().optional(),
-    ledger_account: COACode.optional(),
-    dates: inputDates,
-    uid_orders: z.array(FirestoreId).optional(),
-    uid_units: unitsKey.optional(),
-  }).superRefine((item, ctx) => {
-    datesOrderIssue(item.dates, ctx);
-    if (item.uid_units) uniqueUnitsIssue(item.uid_units, ctx);
-    inputPostingIssue(item, ctx);
-  }),
-  z.object({ type: z.literal("service"), ...noCustodyInput }).superRefine((item, ctx) => noCustodyInputIssues(item, ctx)),
-  z.object({
-    type: z.literal("replacement"),
-    ...noCustodyInput,
-    uid_out_of_service: OutOfServiceId,
-  }).superRefine((item, ctx) => noCustodyInputIssues(item, ctx)),
+  saleItemInputArm,
+  rentalItemInputArm,
+  serviceItemInputArm,
+  replacementItemInputArm,
 ]);
 
-/** A stored item named twice in one write is ambiguous: which row is kept? */
-function uniqueNamedUids(items: readonly { uid?: string }[], ctx: z.RefinementCtx): void {
+/** A divider row as a client sends it on a purchase. */
+interface PurchaseDividerInputBase {
+  uid: string;
+  path: string[];
+  name?: string;
+  description?: string;
+}
+
+/** A destination divider as a client sends it on a purchase; `uid` is its pair's. */
+export interface PurchaseDestinationRowInputType extends PurchaseDividerInputBase {
+  type: "destination";
+}
+
+/** A group divider as a client sends it on a purchase. */
+export interface PurchaseGroupRowInputType extends PurchaseDividerInputBase {
+  type: "group";
+}
+
+/** One row of a purchase's `items` input: a line, or one of the two dividers. */
+export type PurchaseRowInputType =
+  | PurchaseItemInputType
+  | PurchaseDestinationRowInputType
+  | PurchaseGroupRowInputType;
+
+// Stripping `z.object`s, as the bill's are: the strict order and invoice divider
+// arms are a ruling for those two documents, and `tests/input-strictness.test.ts`
+// refuses a new strict input node. `uid` is `z.uuid()`, the stored arm's type;
+// `ItemUid` would parse here and then fail at storage. Name bounds are the stored
+// arms' (`_dividers.ts`).
+const destinationRowInputArm = z.object({
+  type: z.literal("destination"),
+  uid: z.uuid(),
+  path: z.array(ItemUid).min(1),
+  name: z.string().max(200).meta({ pii: "mask" }).optional(),
+  description: z.string().meta({ pii: "none" }).optional(),
+});
+
+const groupRowInputArm = z.object({
+  type: z.literal("group"),
+  uid: z.uuid(),
+  path: z.array(ItemUid).min(1),
+  name: z.string().min(1).max(100).meta({ pii: "none" }).optional(),
+  description: z.string().meta({ pii: "none" }).optional(),
+});
+
+/**
+ * Zod schema for {@link PurchaseRowInputType}. Line arms first, because
+ * `getInitialValues` resolves a union by its first arm.
+ */
+export const PurchaseRowInput: z.ZodType<PurchaseRowInputType> = z.discriminatedUnion("type", [
+  saleItemInputArm,
+  rentalItemInputArm,
+  serviceItemInputArm,
+  replacementItemInputArm,
+  destinationRowInputArm,
+  groupRowInputArm,
+]);
+
+/**
+ * A destination pair as a client sends it to a purchase: the side-neutral
+ * {@link PairInputCore} and a required `uid`, its destination divider's.
+ *
+ * The input twin of {@link PurchaseDestination}. `dates.delivery_start` →
+ * `dates.collection_end` is a subrent's hire window, and `charge_windows` what a
+ * time line meters.
+ *
+ * `delivery` is required and `collection` required-nullable, as on an order:
+ * `null` is no return leg, and the store is stated as `uid: null`.
+ */
+export interface PurchaseDestinationInputType {
+  uid: string;
+  dates: OrderDatesType;
+  delivery: DestinationEndpointType;
+  collection: DestinationEndpointType | null;
+}
+
+/**
+ * Zod schema for {@link PurchaseDestinationInputType}. `OrderDates` checks no
+ * boundary against another, and a `collection_end` left null reads as `+∞` supply,
+ * so a stated `collection_start` obliges an end here.
+ */
+export const PurchaseDestinationInput: z.ZodType<PurchaseDestinationInputType> = z.object({
+  uid: z.uuid(),
+  ...PairInputCore,
+}).superRefine((pair, ctx) => {
+  hireOrderIssue(pair.dates, ctx);
+  const { collection_start: start, collection_end: end } = pair.dates;
+  if (start === null) return;
+  if (end === null) {
+    ctx.addIssue({ code: "custom", path: ["dates", "collection_end"], message: "a hire with a collection start states its end" });
+  } else if (Date.parse(end) < Date.parse(start)) {
+    ctx.addIssue({ code: "custom", path: ["dates", "collection_end"], message: "a hire ends at or after its collection starts" });
+  }
+});
+
+/** A row named twice in one write is ambiguous: which one is kept? */
+function uniqueRowUids(items: readonly { uid: string }[], ctx: z.RefinementCtx): void {
   const seen = new Set<string>();
   items.forEach((item, i) => {
-    if (item.uid === undefined) return;
     if (seen.has(item.uid)) {
-      ctx.addIssue({ code: "custom", path: ["items", i, "uid"], message: "an item uid appears once per write" });
+      ctx.addIssue({ code: "custom", path: ["items", i, "uid"], message: "a row uid appears once per write" });
     }
     seen.add(item.uid);
   });
+}
+
+/**
+ * The whole-array rules a purchase's `items` input carries: it leads with a
+ * destination divider, and holds a line.
+ *
+ * ⚠️ **The leading-divider rule is also what refuses an old flat body.** A line's
+ * arm strips, so a stale `dates` is dropped rather than refused, and only this
+ * refine and the required `path` stop a hire window being lost silently. Neither
+ * may be relaxed.
+ */
+function purchaseRowsIssues(items: readonly PurchaseRowInputType[], ctx: z.RefinementCtx): void {
+  uniqueRowUids(items, ctx);
+  for (const v of leadingDividerViolations(items, "purchase", false)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["items", 0, "type"],
+      message: `a purchase must lead with a ${v.expected} divider, not ${v.found ?? "an untyped row"}`,
+    });
+  }
+  if (items.length > 0 && items.every((row) => row.type === "destination" || row.type === "group")) {
+    ctx.addIssue({ code: "custom", path: ["items"], message: "a purchase holds at least one line" });
+  }
 }
 
 /**
@@ -1528,7 +1654,13 @@ export interface CreatePurchaseInputType {
   date: string;
   reference?: string | null;
   notes?: string | null;
-  items: PurchaseItemInputType[];
+  /**
+   * The whole array in its order: dividers and lines. `computeItemPaths` authors
+   * each stored path from the rows' positions and parents.
+   */
+  items: PurchaseRowInputType[];
+  /** One per destination divider, joined `pair.uid === divider.uid`. */
+  destinations: PurchaseDestinationInputType[];
   /**
    * One per operator action, client-minted OUTSIDE any retry loop. The purchase
    * id is derived from it (`derivedId("purchase:{uuid_session}")`), so a retried
@@ -1544,15 +1676,16 @@ export const CreatePurchaseInput: z.ZodType<CreatePurchaseInputType> = z.object(
   date: chicagoStartOfDay(),
   reference: z.string().max(200).nullable().optional(),
   notes: z.string().meta({ pii: "mask" }).nullable().optional(),
-  items: z.array(PurchaseItemInput).min(1),
+  items: z.array(PurchaseRowInput).min(1),
+  destinations: z.array(PurchaseDestinationInput).min(1, "At least one destination is required"),
   uuid_session: z.uuid(),
-}).superRefine((p, ctx) => uniqueNamedUids(p.items, ctx));
+}).superRefine((p, ctx) => purchaseRowsIssues(p.items, ctx));
 
 /**
  * Input for amending a purchase — a PATCH.
  *
- * `items`, when present, is the complete next set, matched to the stored items
- * by `uid`. A stored item absent from it is removed — refused once it has any
+ * `items`, when present, is the complete next array of dividers and lines, matched
+ * to the stored rows by `uid`. A stored item absent from it is removed — refused once it has any
  * receipt, bill or return. A named item may not change `type`. On a buy the
  * writer refuses to cut `quantity` below what is received or billed, and to
  * change `amount_cents` once it has any receipt or bill: a price that moved
@@ -1562,14 +1695,18 @@ export const CreatePurchaseInput: z.ZodType<CreatePurchaseInputType> = z.object(
  *
  * ⚠️ **A SUBRENT item's price is not frozen by a receipt**, because its receipts
  * carry no cost (`subrent_in` is cost-forbidden). So on a subrent the writer lets
- * `amount_cents` and `dates.end` move after receipt — a paid hire extension —
- * with `quantity` still floored at what is received.
+ * `amount_cents` and its pair's `dates.collection_end` move after receipt — a
+ * paid hire extension — with `quantity` still floored at what is received.
+ *
+ * `destinations`, when present, states the listed pairs. Absent keeps every
+ * stored pair as it is.
  */
 export interface UpdatePurchaseInputType {
   date?: string;
   reference?: string | null;
   notes?: string | null;
-  items?: PurchaseItemInputType[];
+  items?: PurchaseRowInputType[];
+  destinations?: PurchaseDestinationInputType[];
   version: number;
 }
 
@@ -1578,10 +1715,11 @@ export const UpdatePurchaseInput: z.ZodType<UpdatePurchaseInputType> = z.object(
   date: chicagoStartOfDay().optional(),
   reference: z.string().max(200).nullable().optional(),
   notes: z.string().meta({ pii: "mask" }).nullable().optional(),
-  items: z.array(PurchaseItemInput).min(1).optional(),
+  items: z.array(PurchaseRowInput).min(1).optional(),
+  destinations: z.array(PurchaseDestinationInput).min(1, "At least one destination is required").optional(),
   version: z.int().min(0),
 }).superRefine((p, ctx) => {
-  if (p.items) uniqueNamedUids(p.items, ctx);
+  if (p.items) purchaseRowsIssues(p.items, ctx);
 });
 
 /**

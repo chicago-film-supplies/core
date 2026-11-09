@@ -4,6 +4,7 @@
 import { z } from "zod";
 import { AnyUid, FirestoreId, ItemUid } from "./_uid.ts";
 import { usState } from "./_usState.ts";
+import { extendChecked } from "./_extend.ts";
 
 // Re-export the id validators so consumers can import them from the package root.
 export { AnyUid, BookingId, CardId, EventCardId, FirestoreId, isProductShapedUid, ItemUid, ListId, MovementId, OutOfServiceId, QuoteId, RoleId, StatementDocumentId, SEEDED_ROLE_NAMES, type SeededRoleName, ThreadId, UnitId } from "./_uid.ts";
@@ -555,11 +556,13 @@ export interface CoordinatesType {
   longitude: number;
 }
 
-/** Zod schema for coordinates (latitude/longitude), nullable. */
-export const Coordinates: z.ZodType<CoordinatesType | null> = z.strictObject({
+const CoordinatesObject = z.strictObject({
   latitude: z.number(),
   longitude: z.number(),
-}).nullable();
+});
+
+/** Zod schema for coordinates (latitude/longitude), nullable. */
+export const Coordinates: z.ZodType<CoordinatesType | null> = CoordinatesObject.nullable();
 
 /**
  * Address object — shared between organizations and order destinations.
@@ -2516,7 +2519,7 @@ export const StoreBreakdownEntrySchema: z.ZodType<StoreBreakdownEntry> = z.stric
  * The identifying parts — `street`, `street2`, `full`, `name`, `postcode`, and
  * the two `Coordinates` — stay masked.
  */
-export const Address: z.ZodType<AddressType | null> = z.strictObject({
+const AddressObject = z.strictObject({
   city: z.string().meta({ pii: "none", column: true, label: "City" }),
   country_name: z.string().meta({ pii: "none" }),
   // The whole-address column. Labelled once here and prefixed by whatever key
@@ -2537,9 +2540,29 @@ export const Address: z.ZodType<AddressType | null> = z.strictObject({
   mapbox_id: z.string().optional(),
   address_coordinates: Coordinates.optional(),
   user_coordinates: Coordinates.optional(),
-}).nullable().meta({
+});
+
+/** See {@link AddressObject}'s docblock above for the masking rule. */
+export const Address: z.ZodType<AddressType | null> = AddressObject.nullable().meta({
   pii: "mask",
 });
+
+const CoordinatesInput = CoordinatesObject.strip().nullable();
+
+/**
+ * {@link Address} for an INPUT schema — unknown keys are stripped, not refused
+ * (§ *Document vs input schemas*), at every level, so the two coordinate blocks
+ * take their own stripping node. The leaves are the same instances and the
+ * object-level `pii: "mask"` is re-applied, because `.meta()` does not survive
+ * into a new wrapper.
+ */
+export const AddressInput: z.ZodType<AddressType | null> = extendChecked(AddressObject, {
+  address_coordinates: CoordinatesInput.optional(),
+  user_coordinates: CoordinatesInput.optional(),
+})
+  .strip()
+  .nullable()
+  .meta({ pii: "mask" });
 
 // ── Organization tree ───────────────────────────────────────────────
 

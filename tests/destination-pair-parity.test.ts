@@ -36,8 +36,14 @@
  * twice, so what is checked is what a consumer can actually parse with.
  */
 import { assert, assertEquals } from "@std/assert";
-import { DestinationPairCore } from "../src/schemas/order.ts";
-import { DocDestination, InvoiceDocDestination } from "../src/schemas/mod.ts";
+import { DestinationPairCore, DestinationPairInputCore, PairInputCore } from "../src/schemas/order.ts";
+import {
+  Destination,
+  DocDestination,
+  InvoiceDestinationInput,
+  InvoiceDocDestination,
+  PurchaseDestinationInput,
+} from "../src/schemas/mod.ts";
 import type { FirestoreTimestampType } from "../src/schemas/common.ts";
 
 /** `core` has no firebase-admin dependency — `FirestoreTimestamp` is a duck-typed
@@ -193,4 +199,117 @@ Deno.test("InvoiceDocDestination REFUSES a pair that omits customer_collecting/r
     assertEquals(stamped.data.customer_returning, false);
     assertEquals(stamped.data.uid_order, "testorder10000000000");
   }
+});
+
+// ── The input twins (one-document-model Phase 5b) ────────────────────
+
+const INPUT_GRAINS = [
+  ["Destination", Destination, DestinationPairInputCore],
+  ["InvoiceDestinationInput", InvoiceDestinationInput, DestinationPairInputCore],
+  ["PurchaseDestinationInput", PurchaseDestinationInput, PairInputCore],
+] as const;
+
+Deno.test("every input pair field is the SAME INSTANCE as its core", () => {
+  assert(Object.keys(PairInputCore).length >= 3, "PairInputCore has lost fields");
+  assert(Object.keys(DestinationPairInputCore).length >= 7, "DestinationPairInputCore has lost fields");
+  const drifted: string[] = [];
+  for (const [label, schema, core] of INPUT_GRAINS) {
+    const shape = shapeOf(schema, label);
+    for (const [key, canonical] of Object.entries(core)) {
+      if (shape[key] !== canonical) drifted.push(`${label}.${key}`);
+    }
+  }
+  assertEquals(drifted, [], "A pair input re-declared or SHADOWED a core field:\n" + drifted.join("\n"));
+});
+
+const ISO_START = "2026-01-05T08:00:00.000-06:00";
+const ISO_END = "2026-01-09T09:00:00.000-06:00";
+
+/** A stored pair's dates: every boundary, its `_fs` mirror and the derived day count. */
+const storedDates = () => ({
+  delivery_start: ISO_START,
+  delivery_start_fs: fsTs(ISO_START),
+  delivery_end: ISO_START,
+  delivery_end_fs: fsTs(ISO_START),
+  collection_start: ISO_END,
+  collection_start_fs: fsTs(ISO_END),
+  collection_end: ISO_END,
+  collection_end_fs: fsTs(ISO_END),
+  days_active: 5,
+  charge_windows: [{ start: ISO_START, end: ISO_END }],
+});
+
+const storedEndpoint = () => ({
+  uid: null,
+  address: {
+    city: "Chicago",
+    country_name: "United States",
+    full: "1 Main St",
+    name: "Stage",
+    postcode: "60601",
+    region: "IL",
+    street: "1 Main St",
+    address_coordinates: { latitude: 41.8, longitude: -87.6 },
+  },
+  instructions: null,
+  contact: null,
+});
+
+const STORED_CORE = () => ({
+  uid: "11111111-1111-4111-8111-111111111111",
+  dates: storedDates(),
+  delivery: storedEndpoint(),
+  collection: storedEndpoint(),
+});
+const CUSTOMER_KEYS = { customer_collecting: false, customer_returning: false, exchange: null };
+
+Deno.test("a stored pair echoed through each input parses with its derived keys gone", () => {
+  const stored = [
+    ["Destination", Destination, { ...STORED_CORE(), ...CUSTOMER_KEYS }],
+    ["InvoiceDestinationInput", InvoiceDestinationInput, { uid_order: "testorder10000000000", ...STORED_CORE(), ...CUSTOMER_KEYS }],
+    ["PurchaseDestinationInput", PurchaseDestinationInput, STORED_CORE()],
+  ] as const;
+  for (const [label, schema, pair] of stored) {
+    const parsed = schema.safeParse(pair);
+    assert(parsed.success, `${label}: ${!parsed.success && JSON.stringify(parsed.error.issues)}`);
+    const dates = parsed.data.dates as unknown as Record<string, unknown>;
+    assertEquals(
+      Object.keys(dates).sort(),
+      ["charge_windows", "collection_end", "collection_start", "delivery_end", "delivery_start"],
+      `${label}: only the authored boundaries survive`,
+    );
+  }
+});
+
+Deno.test("every pair input strips an unknown key at every level instead of refusing it", () => {
+  const planted = () => {
+    const delivery = storedEndpoint();
+    return {
+      ...STORED_CORE(),
+      ...CUSTOMER_KEYS,
+      uid_order: "testorder10000000000",
+      stray: 1,
+      delivery: {
+        ...delivery,
+        stray: 1,
+        address: { ...delivery.address, stray: 1, address_coordinates: { ...delivery.address.address_coordinates, stray: 1 } },
+      },
+      exchange: { uid_pair: "22222222-2222-4222-8222-222222222222", disposition: "same_trip", stray: 1 },
+    };
+  };
+  for (const [label, schema] of INPUT_GRAINS) {
+    const parsed = schema.safeParse(planted());
+    assert(parsed.success, `${label}: ${!parsed.success && JSON.stringify(parsed.error.issues)}`);
+    assertEquals(JSON.stringify(parsed.data).includes("stray"), false, `${label} kept a planted key`);
+  }
+});
+
+Deno.test("an invoice pair input requires its scope and identity; an order pair's uid stays optional", () => {
+  const base = { uid_order: "testorder10000000000", ...STORED_CORE(), ...CUSTOMER_KEYS };
+  const { uid_order: _o, ...noScope } = base;
+  assertEquals(InvoiceDestinationInput.safeParse(noScope).error?.issues.map((i) => i.path.join(".")), ["uid_order"]);
+  const { uid: _u, ...noUid } = base;
+  assertEquals(InvoiceDestinationInput.safeParse(noUid).error?.issues.map((i) => i.path.join(".")), ["uid"]);
+  const { uid: _v, ...orderPair } = { ...STORED_CORE(), ...CUSTOMER_KEYS };
+  assertEquals(Destination.safeParse(orderPair).success, true);
 });

@@ -19,7 +19,7 @@ import {
   purchaseItemCommittedCents,
   purchaseItemProduct,
   purchaseItemResolved,
-  type PurchaseItemInputType,
+  type PurchaseRowInputType,
   type PurchaseLandedCost,
   type StockMethodType,
   type PurchaseRentalItem,
@@ -341,7 +341,7 @@ export interface PurchaseExpansionRefusal {
 
 /** The result of {@link expandPurchaseItems}. */
 export type PurchaseExpansionResult =
-  | { ok: true; items: PurchaseItemInputType[] }
+  | { ok: true; items: PurchaseRowInputType[] }
   | { ok: false; refusal: PurchaseExpansionRefusal };
 
 /**
@@ -369,7 +369,7 @@ export type PurchaseExpansionResult =
  * purchase held one line per product. Items carry their own row identity now,
  * so a pack item keeps its `uid` and becomes its own item even when the stocked
  * product already has one; the ledger averages the cost either way.
- * Charge items pass through untouched.
+ * Charge items and dividers pass through untouched.
  *
  * Returns rather than throws: a refusal is an operator-facing 400, and core
  * throws plain `Error`, which a consumer's middleware reads as a 500.
@@ -378,10 +378,10 @@ export type PurchaseExpansionResult =
  *   reads them first, so a miss is its bug, not the operator's.
  */
 export function expandPurchaseItems(
-  items: readonly PurchaseItemInputType[],
+  items: readonly PurchaseRowInputType[],
   products: ReadonlyMap<string, PurchaseExpansionProduct>,
 ): PurchaseExpansionResult {
-  const expanded: PurchaseItemInputType[] = [];
+  const expanded: PurchaseRowInputType[] = [];
   for (const item of items) {
     if (item.type !== "sale" && item.type !== "rental") {
       expanded.push(item);
@@ -435,7 +435,6 @@ function expandOnto(
     ...item,
     uid_product: uidProduct,
     quantity,
-    dates: { ...item.dates },
     ...(item.uid_orders !== undefined ? { uid_orders: [...item.uid_orders] } : {}),
   };
 }

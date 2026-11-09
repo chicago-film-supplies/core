@@ -11,6 +11,7 @@ import { type BookingBreakdown, breakdownObjectSchema } from "./_breakdown.ts";
 import type { BookingStatusType } from "./booking.ts";
 import {
   Address,
+  AddressInput,
   DocumentOrganizationSnapshot,
   type DocumentOrganizationSnapshotType,
   type AddressType,
@@ -498,10 +499,10 @@ export interface DestinationEndpointType {
   contact?: DestinationContactType | null;
 }
 
-/** Zod schema for a destination endpoint. */
+/** Zod schema for a destination endpoint. An input node, so its address strips too. */
 export const DestinationEndpoint: z.ZodType<DestinationEndpointType> = z.object({
   uid: FirestoreId.nullable().optional(),
-  address: Address.optional(),
+  address: AddressInput.optional(),
   // Free-text operator notes ("key under the mat", "ask for John") routinely
   // carry PII — tagged so the fixture sanitizer + logger masks them.
   instructions: z.string().meta({ pii: "mask" }).nullable().optional(),
@@ -572,13 +573,18 @@ export interface DestinationExchangeType {
   disposition: ExchangeDispositionType;
 }
 
-/** Zod schema for {@link DestinationExchangeType}. */
-export const DestinationExchange: z.ZodType<DestinationExchangeType> = z.strictObject({
+const DestinationExchangeObject = z.strictObject({
   // The parent pair's uid — a destination divider uid, `z.uuid()` exactly as
   // `DestinationPairCore.uid` is.
   uid_pair: z.uuid().meta({ propagate: true }),
   disposition: ExchangeDispositionEnum.meta({ propagate: true }),
 });
+
+/** Zod schema for {@link DestinationExchangeType}. */
+export const DestinationExchange: z.ZodType<DestinationExchangeType> = DestinationExchangeObject;
+
+/** {@link DestinationExchange} for an INPUT schema: unknown keys strip, the leaves are the same instances. */
+const DestinationExchangeInput: z.ZodType<DestinationExchangeType> = DestinationExchangeObject.strip();
 
 /**
  * Every exchange pair names a parent pair of the same document, and that parent
@@ -1203,6 +1209,52 @@ export interface DestinationType {
   exchange?: DestinationExchangeType | null;
 }
 
+/**
+ * The side-neutral half of a destination pair as a client sends it — the input
+ * twin of {@link PairCore} (one-document-model Phase 5b). Every node strips, so a
+ * stored pair echoed back loses its `_fs` mirrors and `days_active` at the
+ * boundary instead of carrying a client's `{seconds, nanoseconds}` to a writer.
+ *
+ * One standard on all four documents: `z.object` for input, `z.strictObject` for
+ * stored. `uid` is left out because it differs per grain: required on a purchase
+ * or invoice pair, optional on an order's until its endpoint derivation retires.
+ *
+ * ⚠️ Separate composed types rather than one type with refines, because a refine
+ * does not narrow the TypeScript type. `tests/destination-pair-parity.test.ts`
+ * asserts instance identity on each input: a spread cannot see a shadowed key.
+ *
+ * ⚠️ Not on the `@cfs/core/schemas` barrel, for the reason {@link PairCore} is not.
+ */
+export const PairInputCore: {
+  dates: z.ZodType<OrderDatesType>;
+  delivery: z.ZodType<DestinationEndpointType>;
+  collection: z.ZodType<DestinationEndpointType | null>;
+} = {
+  dates: OrderDates,
+  delivery: DestinationEndpoint,
+  collection: DestinationEndpoint.nullable(),
+};
+
+/**
+ * The receivable pair as a client sends it: {@link PairInputCore} plus the keys
+ * only a CUSTOMER leg has. The input twin of {@link DestinationPairCore}.
+ */
+export const DestinationPairInputCore: {
+  dates: z.ZodType<OrderDatesType>;
+  delivery: z.ZodType<DestinationEndpointType>;
+  collection: z.ZodType<DestinationEndpointType | null>;
+  customer_collecting: z.ZodType<boolean>;
+  customer_returning: z.ZodType<boolean | null>;
+  jurisdiction: z.ZodOptional<z.ZodNullable<z.ZodType<JurisdictionType>>>;
+  exchange: z.ZodOptional<z.ZodNullable<z.ZodType<DestinationExchangeType>>>;
+} = {
+  ...PairInputCore,
+  customer_collecting: z.boolean(),
+  customer_returning: z.boolean().nullable(),
+  jurisdiction: JurisdictionEnum.nullable().optional(),
+  exchange: DestinationExchangeInput.nullable().optional(),
+};
+
 /** Zod schema for a destination pair. */
 export const Destination: z.ZodType<DestinationType> = z.object({
   // `z.uuid()`, matching the STORED pair (`DocDestination.uid`) and the divider
@@ -1212,13 +1264,7 @@ export const Destination: z.ZodType<DestinationType> = z.object({
   // All 2,980 prod destination dividers are uuid-shaped. See
   // {@link DestinationType.uid}.
   uid: z.uuid().optional(),
-  dates: OrderDates,
-  delivery: DestinationEndpoint,
-  collection: DestinationEndpoint.nullable(),
-  customer_collecting: z.boolean(),
-  customer_returning: z.boolean().nullable(),
-  jurisdiction: JurisdictionEnum.nullable().optional(),
-  exchange: DestinationExchange.nullable().optional(),
+  ...DestinationPairInputCore,
 });
 
 /**

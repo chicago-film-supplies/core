@@ -57,6 +57,8 @@ import {
   checkLeadingDivider,
   checkStoredEndpoints,
   DestinationPairCore,
+  DestinationPairInputCore,
+  type DestinationType,
   Discount,
   DiscountInput,
   type DiscountInputType,
@@ -1012,6 +1014,27 @@ export const InvoiceDocDestination: z.ZodType<InvoiceDocDestinationType> = z
     ...DestinationPairCore,
   });
 
+/**
+ * A destination pair as a client sends it to an invoice: the receivable pair
+ * input ({@link DestinationPairInputCore}) scoped to its source order. `uid` is
+ * required, because a pair is addressed by `(uid_order, uid)`.
+ *
+ * The input twin of {@link InvoiceDocDestination}. It strips rather than refuses,
+ * so a stored pair echoed back loses its `_fs` mirrors and `days_active` at the
+ * boundary, and a writer must read neither off it.
+ */
+export interface InvoiceDestinationInputType extends DestinationType {
+  uid_order: string;
+  uid: string;
+}
+
+/** Zod schema for {@link InvoiceDestinationInputType}. */
+export const InvoiceDestinationInput: z.ZodType<InvoiceDestinationInputType> = z.object({
+  uid_order: FirestoreId,
+  uid: z.uuid(),
+  ...DestinationPairInputCore,
+});
+
 // ── Document schema ──────────────────────────────────────────────
 
 /** An invoice document in the invoices Firestore collection. */
@@ -1725,7 +1748,7 @@ export interface CreateInvoiceInputType {
    */
   uid_store?: string | null;
   items?: InvoiceItemInputType[];
-  destinations?: InvoiceDocDestinationType[];
+  destinations?: InvoiceDestinationInputType[];
   date?: string;
   due_date?: string;
   subject?: string;
@@ -1745,7 +1768,7 @@ export const CreateInvoiceInput: z.ZodType<CreateInvoiceInputType> = z.object({
   tax_exempt: z.boolean().optional(),
   uid_store: FirestoreId.nullable().optional(),
   items: z.array(InvoiceItemInputSchema).optional(),
-  destinations: z.array(InvoiceDocDestination).optional(),
+  destinations: z.array(InvoiceDestinationInput).optional(),
   date: chicagoStartOfDay().optional(),
   due_date: chicagoStartOfDay().optional(),
   subject: z.string().optional(),
@@ -1836,7 +1859,7 @@ export interface UpdateInvoiceInputType {
    * api-cloudrun#630 — a wrong jurisdiction on an invoice could not be
    * corrected by any call.
    */
-  destinations?: InvoiceDocDestinationType[];
+  destinations?: InvoiceDestinationInputType[];
   date?: string;
   /**
    * Explicit `null` **clears** the due date; an absent key preserves it.
@@ -1874,7 +1897,7 @@ export const UpdateInvoiceInput: z.ZodType<UpdateInvoiceInputType> = z.object({
   tax_exempt: z.boolean().optional(),
   uid_store: FirestoreId.nullable().optional(),
   items: z.array(InvoiceItemInputSchema).optional(),
-  destinations: z.array(InvoiceDocDestination).optional(),
+  destinations: z.array(InvoiceDestinationInput).optional(),
   date: chicagoStartOfDay().optional(),
   // `.nullish()`, not `.optional()` — null is the clear verb. See the interface.
   // `""` stays rejected, which is what manager#326 needs: an empty control must

@@ -349,16 +349,7 @@ interface ActorRefType {
 
 ### `Address`
 
-Zod schema for Address, nullable.
-
-The object carries the `pii: "mask"` tag and every leaf inherits it, so a
-new field added here is masked by default — the safe direction. The three
-coarse-geography leaves opt OUT explicitly: a city / state / country cannot
-identify anyone on their own, they are what makes a sanitized fixture still
-look like a plausible address, and faking them produces nonsense (the mask
-transform reads `"United States"` as a person's name and `"IL"` as a city).
-The identifying parts — `street`, `street2`, `full`, `name`, `postcode`, and
-the two `Coordinates` — stay masked.
+See {@link AddressObject}'s docblock above for the masking rule.
 
 ```ts
 const Address: z.ZodType<AddressType | null>;
@@ -3048,7 +3039,7 @@ interface CreateInvoiceInputType {
   tax_exempt?: boolean;
   uid_store?: string | null;
   items?: InvoiceItemInputType[];
-  destinations?: InvoiceDocDestinationType[];
+  destinations?: InvoiceDestinationInputType[];
   date?: string;
   due_date?: string;
   subject?: string;
@@ -3346,7 +3337,8 @@ interface CreatePurchaseInputType {
   date: string;
   reference?: string | null;
   notes?: string | null;
-  items: PurchaseItemInputType[];
+  items: PurchaseRowInputType[];
+  destinations: PurchaseDestinationInputType[];
   uuid_session: string;
 }
 ```
@@ -4094,7 +4086,7 @@ interface DestinationDoc {
 
 ### `DestinationEndpoint`
 
-Zod schema for a destination endpoint.
+Zod schema for a destination endpoint. An input node, so its address strips too.
 
 ```ts
 const DestinationEndpoint: z.ZodType<DestinationEndpointType>;
@@ -5832,6 +5824,31 @@ interface InvoiceAging {
 
 ```ts
 type InvoiceCreated = EventEnvelope<Invoice> & typeLiteral;
+```
+
+### `InvoiceDestinationInput`
+
+Zod schema for {@link InvoiceDestinationInputType}.
+
+```ts
+const InvoiceDestinationInput: z.ZodType<InvoiceDestinationInputType>;
+```
+
+### `InvoiceDestinationInputType`
+
+A destination pair as a client sends it to an invoice: the receivable pair
+input ({@link DestinationPairInputCore}) scoped to its source order. `uid` is
+required, because a pair is addressed by `(uid_order, uid)`.
+
+The input twin of {@link InvoiceDocDestination}. It strips rather than refuses,
+so a stored pair echoed back loses its `_fs` mirrors and `days_active` at the
+boundary, and a writer must read neither off it.
+
+```ts
+interface InvoiceDestinationInputType {
+  uid_order: string;
+  uid: string;
+}
 ```
 
 ### `InvoiceDocDestination`
@@ -10747,6 +10764,47 @@ no customer flags, jurisdiction or exchange leg (one-document-model Phase 3).
 type PurchaseDestination = PairCoreType;
 ```
 
+### `PurchaseDestinationInput`
+
+Zod schema for {@link PurchaseDestinationInputType}. `OrderDates` checks no
+boundary against another, and a `collection_end` left null reads as `+∞` supply,
+so a stated `collection_start` obliges an end here.
+
+```ts
+const PurchaseDestinationInput: z.ZodType<PurchaseDestinationInputType>;
+```
+
+### `PurchaseDestinationInputType`
+
+A destination pair as a client sends it to a purchase: the side-neutral
+{@link PairInputCore} and a required `uid`, its destination divider's.
+
+The input twin of {@link PurchaseDestination}. `dates.delivery_start` →
+`dates.collection_end` is a subrent's hire window, and `charge_windows` what a
+time line meters.
+
+`delivery` is required and `collection` required-nullable, as on an order:
+`null` is no return leg, and the store is stated as `uid: null`.
+
+```ts
+interface PurchaseDestinationInputType {
+  uid: string;
+  dates: OrderDatesType;
+  delivery: DestinationEndpointType;
+  collection: DestinationEndpointType | null;
+}
+```
+
+### `PurchaseDestinationRowInputType`
+
+A destination divider as a client sends it on a purchase; `uid` is its pair's.
+
+```ts
+interface PurchaseDestinationRowInputType {
+  type: "destination";
+}
+```
+
 ### `PurchaseDestinationSchema`
 
 Zod schema for {@link PurchaseDestination}.
@@ -11002,6 +11060,16 @@ Zod schema for PurchaseDocumentServiceItem.
 
 ```ts
 const PurchaseDocumentServiceItemSchema: z.ZodType<PurchaseDocumentServiceItem>;
+```
+
+### `PurchaseGroupRowInputType`
+
+A group divider as a client sends it on a purchase.
+
+```ts
+interface PurchaseGroupRowInputType {
+  type: "group";
+}
 ```
 
 ### `PurchaseItem`
@@ -11289,7 +11357,9 @@ interface PurchaseRentalItem {
 
 ### `PurchaseRentalItemInputType`
 
-A rental (Subrent) item as an operator orders it. `amount_cents` on a flat line only (gross when discounted).
+A rental (Subrent) item as an operator orders it. `amount_cents` on a flat line
+only (gross when discounted). Its hire window is its pair's dates, stated on
+`destinations[]`, never on the line (one-document-model Phase 5b).
 
 ```ts
 interface PurchaseRentalItemInputType {
@@ -11298,7 +11368,6 @@ interface PurchaseRentalItemInputType {
   quantity: number;
   amount_cents?: number | null;
   ledger_account?: COACodeType;
-  dates: PurchaseItemDates;
   uid_orders?: string[];
   uid_units?: string[];
 }
@@ -11355,6 +11424,23 @@ sits under a destination divider, which its pair in `destinations` answers
 
 ```ts
 type PurchaseRow = PurchaseItem | OrderDocDestinationItemType | OrderDocGroupItemType;
+```
+
+### `PurchaseRowInput`
+
+Zod schema for {@link PurchaseRowInputType}. Line arms first, because
+`getInitialValues` resolves a union by its first arm.
+
+```ts
+const PurchaseRowInput: z.ZodType<PurchaseRowInputType>;
+```
+
+### `PurchaseRowInputType`
+
+One row of a purchase's `items` input: a line, or one of the two dividers.
+
+```ts
+type PurchaseRowInputType = PurchaseItemInputType | PurchaseDestinationRowInputType | PurchaseGroupRowInputType;
 ```
 
 ### `PurchaseRowSchema`
@@ -11445,7 +11531,6 @@ interface PurchaseServiceItemInputType {
   quantity?: number;
   amount_cents?: number | null;
   ledger_account: COACodeType;
-  dates?: PurchaseItemDates | null;
   uid_units?: string[];
   uid_product?: string;
 }
@@ -15340,7 +15425,7 @@ interface UpdateInvoiceInputType {
   tax_exempt?: boolean;
   uid_store?: string | null;
   items?: InvoiceItemInputType[];
-  destinations?: InvoiceDocDestinationType[];
+  destinations?: InvoiceDestinationInputType[];
   date?: string;
   due_date?: string | null;
   subject?: string;
@@ -15645,8 +15730,8 @@ const UpdatePurchaseInput: z.ZodType<UpdatePurchaseInputType>;
 
 Input for amending a purchase — a PATCH.
 
-`items`, when present, is the complete next set, matched to the stored items
-by `uid`. A stored item absent from it is removed — refused once it has any
+`items`, when present, is the complete next array of dividers and lines, matched
+to the stored rows by `uid`. A stored item absent from it is removed — refused once it has any
 receipt, bill or return. A named item may not change `type`. On a buy the
 writer refuses to cut `quantity` below what is received or billed, and to
 change `amount_cents` once it has any receipt or bill: a price that moved
@@ -15656,15 +15741,19 @@ facts the writer holds, so they are not refined here.
 
 ⚠️ **A SUBRENT item's price is not frozen by a receipt**, because its receipts
 carry no cost (`subrent_in` is cost-forbidden). So on a subrent the writer lets
-`amount_cents` and `dates.end` move after receipt — a paid hire extension —
-with `quantity` still floored at what is received.
+`amount_cents` and its pair's `dates.collection_end` move after receipt — a
+paid hire extension — with `quantity` still floored at what is received.
+
+`destinations`, when present, states the listed pairs. Absent keeps every
+stored pair as it is.
 
 ```ts
 interface UpdatePurchaseInputType {
   date?: string;
   reference?: string | null;
   notes?: string | null;
-  items?: PurchaseItemInputType[];
+  items?: PurchaseRowInputType[];
+  destinations?: PurchaseDestinationInputType[];
   version: number;
 }
 ```
@@ -18395,19 +18484,22 @@ interface ActorRefType {
 
 ### `Address`
 
-Zod schema for Address, nullable.
-
-The object carries the `pii: "mask"` tag and every leaf inherits it, so a
-new field added here is masked by default — the safe direction. The three
-coarse-geography leaves opt OUT explicitly: a city / state / country cannot
-identify anyone on their own, they are what makes a sanitized fixture still
-look like a plausible address, and faking them produces nonsense (the mask
-transform reads `"United States"` as a person's name and `"IL"` as a city).
-The identifying parts — `street`, `street2`, `full`, `name`, `postcode`, and
-the two `Coordinates` — stay masked.
+See {@link AddressObject}'s docblock above for the masking rule.
 
 ```ts
 const Address: z.ZodType<AddressType | null>;
+```
+
+### `AddressInput`
+
+{@link Address} for an INPUT schema — unknown keys are stripped, not refused
+(§ *Document vs input schemas*), at every level, so the two coordinate blocks
+take their own stripping node. The leaves are the same instances and the
+object-level `pii: "mask"` is re-applied, because `.meta()` does not survive
+into a new wrapper.
+
+```ts
+const AddressInput: z.ZodType<AddressType | null>;
 ```
 
 ### `AddressType`
@@ -22695,7 +22787,7 @@ interface CreateInvoiceInputType {
   tax_exempt?: boolean;
   uid_store?: string | null;
   items?: InvoiceItemInputType[];
-  destinations?: InvoiceDocDestinationType[];
+  destinations?: InvoiceDestinationInputType[];
   date?: string;
   due_date?: string;
   subject?: string;
@@ -22792,6 +22884,31 @@ interface Invoice {
   updated_by: ActorRefType;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
+}
+```
+
+### `InvoiceDestinationInput`
+
+Zod schema for {@link InvoiceDestinationInputType}.
+
+```ts
+const InvoiceDestinationInput: z.ZodType<InvoiceDestinationInputType>;
+```
+
+### `InvoiceDestinationInputType`
+
+A destination pair as a client sends it to an invoice: the receivable pair
+input ({@link DestinationPairInputCore}) scoped to its source order. `uid` is
+required, because a pair is addressed by `(uid_order, uid)`.
+
+The input twin of {@link InvoiceDocDestination}. It strips rather than refuses,
+so a stored pair echoed back loses its `_fs` mirrors and `days_active` at the
+boundary, and a writer must read neither off it.
+
+```ts
+interface InvoiceDestinationInputType {
+  uid_order: string;
+  uid: string;
 }
 ```
 
@@ -23249,7 +23366,7 @@ interface UpdateInvoiceInputType {
   tax_exempt?: boolean;
   uid_store?: string | null;
   items?: InvoiceItemInputType[];
-  destinations?: InvoiceDocDestinationType[];
+  destinations?: InvoiceDestinationInputType[];
   date?: string;
   due_date?: string | null;
   subject?: string;
@@ -23786,7 +23903,7 @@ interface DestinationContactType {
 
 ### `DestinationEndpoint`
 
-Zod schema for a destination endpoint.
+Zod schema for a destination endpoint. An input node, so its address strips too.
 
 ```ts
 const DestinationEndpoint: z.ZodType<DestinationEndpointType>;
@@ -23860,6 +23977,15 @@ pair is a spread and why the parity test stays.
 
 ```ts
 const DestinationPairCore: typeLiteral;
+```
+
+### `DestinationPairInputCore`
+
+The receivable pair as a client sends it: {@link PairInputCore} plus the keys
+only a CUSTOMER leg has. The input twin of {@link DestinationPairCore}.
+
+```ts
+const DestinationPairInputCore: typeLiteral;
 ```
 
 ### `DestinationType`
@@ -24775,6 +24901,27 @@ so the two cannot drift.
 
 ```ts
 type PairCoreType = Pick<DocDestinationType, "uid" | "dates" | "delivery" | "collection">;
+```
+
+### `PairInputCore`
+
+The side-neutral half of a destination pair as a client sends it — the input
+twin of {@link PairCore} (one-document-model Phase 5b). Every node strips, so a
+stored pair echoed back loses its `_fs` mirrors and `days_active` at the
+boundary instead of carrying a client's `{seconds, nanoseconds}` to a writer.
+
+One standard on all four documents: `z.object` for input, `z.strictObject` for
+stored. `uid` is left out because it differs per grain: required on a purchase
+or invoice pair, optional on an order's until its endpoint derivation retires.
+
+⚠️ Separate composed types rather than one type with refines, because a refine
+does not narrow the TypeScript type. `tests/destination-pair-parity.test.ts`
+asserts instance identity on each input: a spread cannot see a shadowed key.
+
+⚠️ Not on the `@cfs/core/schemas` barrel, for the reason {@link PairCore} is not.
+
+```ts
+const PairInputCore: typeLiteral;
 ```
 
 ### `PlaceablePair`
@@ -27306,7 +27453,8 @@ interface CreatePurchaseInputType {
   date: string;
   reference?: string | null;
   notes?: string | null;
-  items: PurchaseItemInputType[];
+  items: PurchaseRowInputType[];
+  destinations: PurchaseDestinationInputType[];
   uuid_session: string;
 }
 ```
@@ -27439,12 +27587,63 @@ no customer flags, jurisdiction or exchange leg (one-document-model Phase 3).
 type PurchaseDestination = PairCoreType;
 ```
 
+### `PurchaseDestinationInput`
+
+Zod schema for {@link PurchaseDestinationInputType}. `OrderDates` checks no
+boundary against another, and a `collection_end` left null reads as `+∞` supply,
+so a stated `collection_start` obliges an end here.
+
+```ts
+const PurchaseDestinationInput: z.ZodType<PurchaseDestinationInputType>;
+```
+
+### `PurchaseDestinationInputType`
+
+A destination pair as a client sends it to a purchase: the side-neutral
+{@link PairInputCore} and a required `uid`, its destination divider's.
+
+The input twin of {@link PurchaseDestination}. `dates.delivery_start` →
+`dates.collection_end` is a subrent's hire window, and `charge_windows` what a
+time line meters.
+
+`delivery` is required and `collection` required-nullable, as on an order:
+`null` is no return leg, and the store is stated as `uid: null`.
+
+```ts
+interface PurchaseDestinationInputType {
+  uid: string;
+  dates: OrderDatesType;
+  delivery: DestinationEndpointType;
+  collection: DestinationEndpointType | null;
+}
+```
+
+### `PurchaseDestinationRowInputType`
+
+A destination divider as a client sends it on a purchase; `uid` is its pair's.
+
+```ts
+interface PurchaseDestinationRowInputType {
+  type: "destination";
+}
+```
+
 ### `PurchaseDestinationSchema`
 
 Zod schema for {@link PurchaseDestination}.
 
 ```ts
 const PurchaseDestinationSchema: z.ZodType<PurchaseDestination>;
+```
+
+### `PurchaseGroupRowInputType`
+
+A group divider as a client sends it on a purchase.
+
+```ts
+interface PurchaseGroupRowInputType {
+  type: "group";
+}
 ```
 
 ### `PurchaseItem`
@@ -27732,7 +27931,9 @@ interface PurchaseRentalItem {
 
 ### `PurchaseRentalItemInputType`
 
-A rental (Subrent) item as an operator orders it. `amount_cents` on a flat line only (gross when discounted).
+A rental (Subrent) item as an operator orders it. `amount_cents` on a flat line
+only (gross when discounted). Its hire window is its pair's dates, stated on
+`destinations[]`, never on the line (one-document-model Phase 5b).
 
 ```ts
 interface PurchaseRentalItemInputType {
@@ -27741,7 +27942,6 @@ interface PurchaseRentalItemInputType {
   quantity: number;
   amount_cents?: number | null;
   ledger_account?: COACodeType;
-  dates: PurchaseItemDates;
   uid_orders?: string[];
   uid_units?: string[];
 }
@@ -27798,6 +27998,23 @@ sits under a destination divider, which its pair in `destinations` answers
 
 ```ts
 type PurchaseRow = PurchaseItem | OrderDocDestinationItemType | OrderDocGroupItemType;
+```
+
+### `PurchaseRowInput`
+
+Zod schema for {@link PurchaseRowInputType}. Line arms first, because
+`getInitialValues` resolves a union by its first arm.
+
+```ts
+const PurchaseRowInput: z.ZodType<PurchaseRowInputType>;
+```
+
+### `PurchaseRowInputType`
+
+One row of a purchase's `items` input: a line, or one of the two dividers.
+
+```ts
+type PurchaseRowInputType = PurchaseItemInputType | PurchaseDestinationRowInputType | PurchaseGroupRowInputType;
 ```
 
 ### `PurchaseRowSchema`
@@ -27888,7 +28105,6 @@ interface PurchaseServiceItemInputType {
   quantity?: number;
   amount_cents?: number | null;
   ledger_account: COACodeType;
-  dates?: PurchaseItemDates | null;
   uid_units?: string[];
   uid_product?: string;
 }
@@ -28072,8 +28288,8 @@ const UpdatePurchaseInput: z.ZodType<UpdatePurchaseInputType>;
 
 Input for amending a purchase — a PATCH.
 
-`items`, when present, is the complete next set, matched to the stored items
-by `uid`. A stored item absent from it is removed — refused once it has any
+`items`, when present, is the complete next array of dividers and lines, matched
+to the stored rows by `uid`. A stored item absent from it is removed — refused once it has any
 receipt, bill or return. A named item may not change `type`. On a buy the
 writer refuses to cut `quantity` below what is received or billed, and to
 change `amount_cents` once it has any receipt or bill: a price that moved
@@ -28083,15 +28299,19 @@ facts the writer holds, so they are not refined here.
 
 ⚠️ **A SUBRENT item's price is not frozen by a receipt**, because its receipts
 carry no cost (`subrent_in` is cost-forbidden). So on a subrent the writer lets
-`amount_cents` and `dates.end` move after receipt — a paid hire extension —
-with `quantity` still floored at what is received.
+`amount_cents` and its pair's `dates.collection_end` move after receipt — a
+paid hire extension — with `quantity` still floored at what is received.
+
+`destinations`, when present, states the listed pairs. Absent keeps every
+stored pair as it is.
 
 ```ts
 interface UpdatePurchaseInputType {
   date?: string;
   reference?: string | null;
   notes?: string | null;
-  items?: PurchaseItemInputType[];
+  items?: PurchaseRowInputType[];
+  destinations?: PurchaseDestinationInputType[];
   version: number;
 }
 ```
@@ -50077,7 +50297,7 @@ of the mirror, called by every writer.
 
 Derive `query_by_units` — the distinct units the rental, service and replacement lines cover, sorted.
 
-### `expandPurchaseItems(items: readonly PurchaseItemInputType[], products: ReadonlyMap<string, PurchaseExpansionProduct>): PurchaseExpansionResult`
+### `expandPurchaseItems(items: readonly PurchaseRowInputType[], products: ReadonlyMap<string, PurchaseExpansionProduct>): PurchaseExpansionResult`
 
 Replace every pack on a buy or subrent item with the stocked product it is a
 pack of, so a stored purchase only ever names a product that can be RECEIVED.
@@ -50103,7 +50323,7 @@ quantities and amounts summed, one hire window per product — only because a
 purchase held one line per product. Items carry their own row identity now,
 so a pack item keeps its `uid` and becomes its own item even when the stocked
 product already has one; the ledger averages the cost either way.
-Charge items pass through untouched.
+Charge items and dividers pass through untouched.
 
 Returns rather than throws: a refusal is an operator-facing 400, and core
 throws plain `Error`, which a consumer's middleware reads as a 500.
