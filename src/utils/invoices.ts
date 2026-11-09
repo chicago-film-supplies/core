@@ -1804,6 +1804,12 @@ export interface ScopedSyncSide<R extends InvoiceItem = InvoiceDocItemType> {
    * derived from its counts, so it is no shared field there.
    */
   lineFields(item: LineItem): readonly SharedField[];
+  /**
+   * A line that behaves as a divider in this sync: a row left out of the document
+   * stays out unless a new row lands beneath it, which re-opens it. Absent means
+   * none does. A payable kit header does: it exists to hold its components' paths.
+   */
+  isStructural?(item: LineItem): boolean;
 }
 
 /** The receivable side: order → invoice. */
@@ -2209,7 +2215,7 @@ function syncScopedItems<R extends InvoiceItem>(
       // was left out on purpose: keep it out. A line that MOVED here counts as
       // left out only if the invoice did not carry it at its old path either —
       // otherwise this is the invoice's own line following a reparent.
-      if (isLineItemType(newItem.type)) {
+      if (isLineItemType(newItem.type) && !side.isStructural?.(newItem)) {
         const movedFrom = prevItem ? undefined : moved.fromPath(newItem.path);
         const movedFromKey = movedFrom !== undefined ? itemPathKey(movedFrom) : undefined;
         const carriedBefore = movedFromKey !== undefined && invoiceByPath.has(movedFromKey);

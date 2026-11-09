@@ -38,6 +38,7 @@ import { fdwPrice } from "./helpers/formulas.ts";
 import {
   LEDGER_POSTING_FIELDS,
   LedgerPostingCore,
+  PayableKitLedgerAccount,
   LINE_POSTING_FIELDS,
   LINE_TAX_FIELDS,
   LineItemCore,
@@ -352,6 +353,12 @@ const PAYABLE_GRAINS = ["purchases", "purchase-bills", "purchase-credits"] as co
  */
 const PAYABLE_OWN_QUANTITY = "quantity";
 
+/** Only these arms may mark a kit header, on the one nullable instance. */
+const KIT_HEADER_TYPES: ReadonlySet<string> = new Set(["sale", "rental"]);
+
+// deno-lint-ignore no-explicit-any
+const armTypes = (shape: any): string[] => shape.type._zod.def.values ?? Object.values(shape.type._zod.def.entries ?? {});
+
 // deno-lint-ignore no-explicit-any
 function payableArmShapes(collection: (typeof PAYABLE_GRAINS)[number]): Record<string, any>[] {
   // deno-lint-ignore no-explicit-any
@@ -385,6 +392,8 @@ Deno.test("payable grains: every shared head, posting and tax field is the SAME 
           drifted.push(`${grain}.items[${type}].${key} — absent`);
         } else if (key === PAYABLE_OWN_QUANTITY) {
           if (shape[key] === canonical) drifted.push(`${grain}.items[${type}].quantity — the shared instance cannot carry the payable group`);
+        } else if (key === "ledger_account" && armTypes(shape).some((t) => KIT_HEADER_TYPES.has(t))) {
+          if (shape[key] !== PayableKitLedgerAccount) drifted.push(`${grain}.items[${type}].ledger_account — not the shared nullable instance`);
         } else if (shape[key] !== canonical) {
           drifted.push(`${grain}.items[${type}].${key} — re-declared instead of referencing the shared core`);
         }

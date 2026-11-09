@@ -23,6 +23,7 @@ import {
   type Purchase,
   purchaseHireWindow,
   type PurchaseRentalItem,
+  isKitHeaderLine,
 } from "../schemas/mod.ts";
 import { sumBreakdownKeys, terminalQuantity } from "./bookings.ts";
 
@@ -307,7 +308,7 @@ export const PURCHASE_CARD_LOCKED: readonly CardLockKey[] = ["card", "subject", 
 
 /** The purchase's subrent items — the only ones a return card is about. */
 function subrentItems(purchase: Pick<Purchase, "items">): PurchaseRentalItem[] {
-  return purchase.items.filter((i): i is PurchaseRentalItem => i.type === "rental");
+  return purchase.items.filter((i): i is PurchaseRentalItem => i.type === "rental" && !isKitHeaderLine(i));
 }
 
 /** Does any subrent item hold units received and not yet returned? */

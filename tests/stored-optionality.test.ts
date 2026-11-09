@@ -193,6 +193,7 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["orders.items[].inclusion_type", "array-member-uncensusable"],
   ["orders.items[].price.base_percent", "array-member-uncensusable"],
   ["orders.items[].price.replacement_cents", "array-member-uncensusable"],
+  ["purchases.items[].price.replacement_cents", "array-member-uncensusable"],
   ["out-of-service.sources[].label", "array-member-uncensusable"],
   ["purchase-credits.sources[].label", "array-member-uncensusable"],
   // one-document-model Phase 1 — the payable lines spread the SHARED head and

@@ -148,7 +148,7 @@ import {
   PairCore,
   type PairCoreType,
 } from "./order.ts";
-import { LedgerPostingCore, LineItemCore, LineTaxCore } from "./_items.ts";
+import { LedgerPostingCore, LineItemCore, LineTaxCore, PayableKitLedgerAccount } from "./_items.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import { SIDE_CONTRACTS, type SharedLineType } from "./side.ts";
 import {
@@ -293,6 +293,8 @@ export interface PurchaseLinePrice {
   taxes: PriceModifierType[];
   /** The class's taxes before the exemption; the order line's key. */
   taxes_base?: TaxRefType[];
+  /** What this supplier charges CFS for a lost unit. A subrent line only; `null` when none was stated. */
+  replacement_cents?: number | null;
   /** The gross: `amount_cents + discount.amount_cents`. Computed by `priceDocument`. */
   subtotal_cents: number;
   /** The net: equal to the line's `amount_cents`. Computed by `priceDocument`. */
@@ -332,6 +334,10 @@ export const PurchaseLinePriceSchema: z.ZodType<PurchaseLinePrice> = z.strictObj
   // declarations (`schemas/order.ts`, `ItemPrice`).
   taxes: z.array(PriceModifier).meta({ label: "Tax", derived: true }),
   taxes_base: z.array(TaxRef).optional().meta({ label: "Base Tax", derived: true }),
+  // What this supplier charges CFS for a lost unit, on a subrent line only: the
+  // order line's declaration (`schemas/order.ts`, `ItemPrice`). A bill's price
+  // has none, as an invoice's has none.
+  replacement_cents: z.int().nullable().optional().meta({ column: true, label: "Replacement" }),
   ...PayablePriceMoneyCore,
 });
 
@@ -499,8 +505,9 @@ export const PurchaseLandedCostSchema: z.ZodType<PurchaseLandedCost> = z.strictO
  *
  * `name` is the product's name when ordered (or a charge's text), a
  * point-in-time snapshot like `Movement.supplier`; `description` is free text.
- * `zero_priced` and `quantity_per_parent` are a kit component's keys and are
- * `null` / absent on a purchase line, which has no kits.
+ * `zero_priced` and `quantity_per_parent` are a kit component's keys, as on an
+ * order line. A `stock_method: "none"` kit parent is a ROW, not a line: see
+ * {@link isKitHeaderLine}.
  */
 /** Whether a close has stopped a purchase line. */
 export const PURCHASE_LINE_STATUSES = ["open", "canceled"] as const;
@@ -540,8 +547,10 @@ interface PurchaseItemBase {
 }
 
 /** A SALE (Buy) item — ownership of `quantity` units of one product. Always flat. */
-export interface PurchaseSaleItem extends PurchaseItemBase {
+export interface PurchaseSaleItem extends Omit<PurchaseItemBase, "ledger_account"> {
   type: "sale";
+  /** `null` marks a kit header ({@link isKitHeaderLine}). */
+  ledger_account: COACodeType | null;
   uid_product: string;
   /** What the whole item costs, net, integer cents. */
   amount_cents: number;
@@ -569,7 +578,9 @@ export interface PurchaseSaleItem extends PurchaseItemBase {
 }
 
 /** A RENTAL (Subrent) item — `quantity` units borrowed for a hire window and given back. Flat or time. */
-export interface PurchaseRentalItem extends PurchaseItemBase {
+export interface PurchaseRentalItem extends Omit<PurchaseItemBase, "ledger_account"> {
+  /** `null` marks a kit header ({@link isKitHeaderLine}). */
+  ledger_account: COACodeType | null;
   type: "rental";
   uid_product: string;
   /** Net whole cost on a flat line; `null` on a time line (its bills decide it). */
@@ -657,9 +668,24 @@ export function isPurchaseLine<T extends { type: string }>(row: T): row is Exclu
   return row.type !== "destination" && row.type !== "group" && row.type !== "purchase";
 }
 
-/** The lines of a purchase's rows, dividers dropped. */
-export function purchaseLines(rows: readonly PurchaseRow[]): PurchaseItem[] {
-  return rows.filter((r): r is PurchaseItem => isPurchaseLine(r));
+/**
+ * **Is this row a kit header?** A `stock_method: "none"` kit parent on a payable
+ * document: stored as a sale or rental row with `ledger_account: null`, no money
+ * and a flat formula, so that a kit reads the same as it does on an order. It is a
+ * ROW and not a LINE: it holds no money, posts nothing and receives nothing, so
+ * {@link purchaseLines} and `purchaseDocumentLines` drop it as they drop a divider.
+ * A counted parent (a makeup mirror over its adapter) is an ordinary line.
+ */
+export function isKitHeaderLine(row: object): boolean {
+  return "ledger_account" in row && row.ledger_account === null;
+}
+
+/** A purchase line that can be received, billed and posted: never a kit header. */
+export type PurchasePostedItem = PurchaseItem & { ledger_account: COACodeType };
+
+/** The lines of a purchase's rows, with dividers and kit headers dropped. */
+export function purchaseLines(rows: readonly PurchaseRow[]): PurchasePostedItem[] {
+  return rows.filter((r): r is PurchasePostedItem => isPurchaseLine(r) && !isKitHeaderLine(r));
 }
 
 // The shared head (one instance per key, `schemas/_items.ts`) — every key but
@@ -711,8 +737,9 @@ const unitsKey = z.array(UnitId);
  */
 export function payablePostingIssues(
   type: SharedLineType,
-  account: number,
+  account: number | null,
 ): { path: (string | number)[]; message: string }[] {
+  if (account === null) return [];
   const cls = SIDE_CONTRACTS.payable.posting_class[type];
   const allowed: readonly number[] | null = cls === "asset_or_expensed"
     ? [...COA_ASSET_CODES, ...COA_EXPENSED_ASSET_CODES]
@@ -726,6 +753,38 @@ export function payablePostingIssues(
     path: ["ledger_account"],
     message: `a payable ${type} line posts to one of ${allowed.join(", ")}, not ${account}`,
   }];
+}
+
+/** A kit header holds no money: a `null` account requires a flat line stating $0. */
+export function kitHeaderIssues(
+  item: { ledger_account: number | null; amount_cents: number | null; price: { price_formula: { basis: string } } },
+): { path: (string | number)[]; message: string }[] {
+  if (item.ledger_account !== null) return [];
+  const issues: { path: (string | number)[]; message: string }[] = [];
+  if (item.amount_cents !== 0) issues.push({ path: ["amount_cents"], message: "a kit header holds no money" });
+  if (item.price.price_formula.basis !== "flat") issues.push({ path: ["price", "price_formula"], message: "a kit header is flat" });
+  return issues;
+}
+
+/**
+ * A `zero_priced` payable line carries no charge. `checkZeroPricedAmount` reads
+ * `rates`, which a flat payable line does not have, so it would pass vacuously here.
+ */
+export function zeroPricedMoneyIssues(
+  item: { zero_priced: boolean | null; amount_cents: number | null; price: { rates: readonly { amount_cents: number }[] } },
+): { path: (string | number)[]; message: string }[] {
+  if (item.zero_priced !== true) return [];
+  if (item.price.rates.some((r) => r.amount_cents !== 0) || (item.amount_cents !== null && item.amount_cents !== 0)) {
+    return [{ path: ["amount_cents"], message: "a zero-priced line carries no charge" }];
+  }
+  return [];
+}
+
+/** Only a subrent states what its supplier charges for a lost unit. */
+function replacementIssues(item: { price: { replacement_cents?: number | null } }): { path: (string | number)[]; message: string }[] {
+  return item.price.replacement_cents != null
+    ? [{ path: ["price", "replacement_cents"], message: "only a subrent line states a replacement" }]
+    : [];
 }
 
 function uniqueUnitsIssue(units: readonly string[], ctx: z.RefinementCtx): void {
@@ -762,6 +821,7 @@ const SaleItemInner = z.strictObject({
   ...itemHead,
   quantity: quantityKey,
   ...itemShape,
+  ledger_account: PayableKitLedgerAccount,
   uid_product: productKey,
   amount_cents: amountKey,
   price: PurchaseLinePriceSchema,
@@ -774,6 +834,9 @@ const SaleItemInner = z.strictObject({
   bucketIssues(item, ctx);
   addIssues(purchaseLineMoneyIssues(item), ctx);
   addIssues(payablePostingIssues(item.type, item.ledger_account), ctx);
+  addIssues(kitHeaderIssues(item), ctx);
+  addIssues(zeroPricedMoneyIssues(item), ctx);
+  addIssues(replacementIssues(item), ctx);
   const entryUids = new Set<string>();
   item.landed_costs.forEach((entry, k) => {
     if (entryUids.has(entry.uid)) {
@@ -800,6 +863,7 @@ const RentalItemInner = z.strictObject({
   ...itemHead,
   quantity: quantityKey,
   ...itemShape,
+  ledger_account: PayableKitLedgerAccount,
   uid_product: productKey,
   amount_cents: amountKey.nullable(),
   price: PurchaseLinePriceSchema,
@@ -814,6 +878,8 @@ const RentalItemInner = z.strictObject({
   uniqueUnitsIssue(item.uid_units, ctx);
   addIssues(purchaseLineMoneyIssues(item), ctx);
   addIssues(payablePostingIssues(item.type, item.ledger_account), ctx);
+  addIssues(kitHeaderIssues(item), ctx);
+  addIssues(zeroPricedMoneyIssues(item), ctx);
   // A unit can only go back to the supplier once it has come in.
   if (item.quantity_returned > item.quantity_received) {
     ctx.addIssue({
@@ -845,6 +911,7 @@ function noCustodyIssues(
   uniqueUnitsIssue(item.uid_units, ctx);
   addIssues(purchaseLineMoneyIssues(item), ctx);
   addIssues(payablePostingIssues(item.type, item.ledger_account), ctx);
+  addIssues(replacementIssues(item), ctx);
 }
 
 const ServiceItemInner = z.strictObject({
@@ -1329,6 +1396,8 @@ export interface PurchaseLinePriceInputType {
   uid_price_formula?: string;
   rates?: RateSnapshotType[];
   discount?: DiscountInputType | null;
+  /** What this supplier charges CFS for a lost unit. A subrent line only. */
+  replacement_cents?: number | null;
 }
 
 /**
@@ -1356,6 +1425,10 @@ interface PurchaseItemInputBase {
   /** The row's identity, its last segment the `uid`; the first names the pair it sits under. */
   path: string[];
   description?: string;
+  /** A kit component's flag, as on an order line's input. The writer states `false` for a component that leaves it out. */
+  zero_priced?: boolean | null;
+  /** A kit component's ratio to its direct parent. */
+  quantity_per_parent?: number | null;
   uid_tracking_category?: string | null;
   uid_tax_class_override?: string | null;
   price?: PurchaseLinePriceInputType;
@@ -1368,7 +1441,8 @@ export interface PurchaseSaleItemInputType extends PurchaseItemInputBase {
   quantity: number;
   /** The whole cost — GROSS when `price.discount` is set. */
   amount_cents: number;
-  ledger_account?: COACodeType;
+  /** `null` is a stored kit header echoed back; the writer decides what a `none` product holds. */
+  ledger_account?: COACodeType | null;
   expected_date?: string | null;
   /**
    * The item's WHOLE landed-cost set. Absent keeps what is stored, so a client
@@ -1390,7 +1464,8 @@ export interface PurchaseRentalItemInputType extends PurchaseItemInputBase {
   uid_product: string;
   quantity: number;
   amount_cents?: number | null;
-  ledger_account?: COACodeType;
+  /** `null` is a stored kit header echoed back; the writer decides what a `none` product holds. */
+  ledger_account?: COACodeType | null;
   /** The orders the item was raised for. Absent is `[]`: the writer states it. */
   uid_orders?: string[];
   /** The units the line covers. Absent keeps the stored list on an amend, `[]` on a create. */
@@ -1426,18 +1501,27 @@ const PurchaseLinePriceInput: z.ZodType<PurchaseLinePriceInputType> = z.object({
   uid_price_formula: FirestoreId.optional(),
   rates: z.array(z.object({ rate_key: RateKey, amount_cents: z.int().min(0) })).optional(),
   discount: DiscountInput.nullable().optional(),
+  replacement_cents: z.int().nullable().optional(),
 });
 const inputHead = {
   uid: ItemUid,
   path: z.array(ItemUid).min(1),
   description: LineItemCore.description.optional(),
+  zero_priced: z.boolean().nullable().optional(),
+  quantity_per_parent: z.number().min(0).nullable().optional(),
   uid_tracking_category: FirestoreId.nullable().optional(),
   uid_tax_class_override: FirestoreId.nullable().optional(),
   price: PurchaseLinePriceInput.optional(),
 };
 
-function inputPostingIssue(item: { type: SharedLineType; ledger_account?: number }, ctx: z.RefinementCtx): void {
+function inputPostingIssue(
+  item: { type: SharedLineType; ledger_account?: number | null; price?: PurchaseLinePriceInputType },
+  ctx: z.RefinementCtx,
+): void {
   if (item.ledger_account !== undefined) addIssues(payablePostingIssues(item.type, item.ledger_account), ctx);
+  if (item.type !== "rental" && item.price?.replacement_cents != null) {
+    ctx.addIssue({ code: "custom", path: ["price", "replacement_cents"], message: "only a subrent line states a replacement" });
+  }
 }
 
 const noCustodyInput = {
@@ -1466,7 +1550,7 @@ const saleItemInputArm = z.object({
   uid_product: FirestoreId,
   quantity: z.int().min(0),
   amount_cents: z.int().min(0),
-  ledger_account: COACode.optional(),
+  ledger_account: COACode.nullable().optional(),
   expected_date: chicagoStartOfDay().nullable().optional(),
   landed_costs: z.array(PurchaseLandedCostInput).optional(),
 }).superRefine((item, ctx) => {
@@ -1487,7 +1571,7 @@ const rentalItemInputArm = z.object({
   uid_product: FirestoreId,
   quantity: z.int().min(0),
   amount_cents: z.int().min(0).nullable().optional(),
-  ledger_account: COACode.optional(),
+  ledger_account: COACode.nullable().optional(),
   uid_orders: z.array(FirestoreId).optional(),
   uid_units: unitsKey.optional(),
 }).superRefine((item, ctx) => {

@@ -40,6 +40,7 @@ import {
   type PurchaseReplacementItem,
   type PurchaseSaleItem,
   type PurchaseServiceItem,
+  isKitHeaderLine,
 } from "../schemas/mod.ts";
 import {
   type PurchaseBilledDocuments,
@@ -101,7 +102,7 @@ export function purchaseBilledPaths(
   return new Set(
     bills.filter(purchaseBillIsLive).flatMap((b) =>
       b.items.flatMap((row) => {
-        if (!isPurchaseLine(row)) return [];
+        if (!isPurchaseLine(row) || isKitHeaderLine(row)) return [];
         const key = purchaseLineKeyOf(row as PurchaseDocumentItem);
         return key !== null && key.startsWith(prefix) ? [key.slice(prefix.length)] : [];
       })
@@ -189,7 +190,8 @@ export function purchaseActionsFor(
 ): PurchaseActionOffer[] {
   const offers: PurchaseActionOffer[] = [];
   const { status } = purchase;
-  const items = purchase.items.filter((i): i is PurchaseActionItem => isPurchaseLine(i));
+  const rows = purchase.items.filter((i): i is PurchaseActionItem => isPurchaseLine(i));
+  const items = rows.filter((i) => !isKitHeaderLine(i));
   const active = status === "active";
   const unitsOut = items.some((i) => i.type === "rental" && remainingToReturn(i) > 0);
   if (active && !unitsOut && items.some(purchaseItemClosable)) {
@@ -211,6 +213,14 @@ export function purchaseActionsFor(
     if (!purchaseItemTouched(item, billedPaths)) {
       line("remove_item");
       line("change_basis");
+    }
+  }
+  // A kit header has no receipt, bill or close of its own. It may be removed
+  // while nothing under it has happened, and the removal takes its subtree.
+  for (const header of rows.filter(isKitHeaderLine)) {
+    const under = (i: PurchaseActionItem) => i.path.length > header.path.length && header.path.every((seg, k) => i.path[k] === seg);
+    if (!items.some((i) => under(i) && purchaseItemTouched(i, billedPaths))) {
+      offers.push({ key: `remove_item:${header.uid}`, action: "remove_item", uid_item: header.uid });
     }
   }
   return offers;

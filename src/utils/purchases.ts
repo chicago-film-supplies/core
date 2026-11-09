@@ -27,6 +27,7 @@ import {
   purchaseItemBasis,
   type PurchaseItem,
   type PurchaseLineStatusType,
+  isPurchaseLine,
 } from "../schemas/mod.ts";
 import { apportionCents, roundDivHalfUp, toCentsBig } from "./money.ts";
 import { type FormulaDiscount, priceFromFormula } from "../schemas/_line-money.ts";
@@ -369,7 +370,9 @@ export type PurchaseExpansionResult =
  * purchase held one line per product. Items carry their own row identity now,
  * so a pack item keeps its `uid` and becomes its own item even when the stocked
  * product already has one; the ledger averages the cost either way.
- * Charge items and dividers pass through untouched.
+ * Charge items and dividers pass through untouched, and so does a line that
+ * states its kit in the rows: this rewrite serves only a client still sending a
+ * bare pack (one-document-model Phase 6a-K), and is deleted once none does.
  *
  * Returns rather than throws: a refusal is an operator-facing 400, and core
  * throws plain `Error`, which a consumer's middleware reads as a 500.
@@ -389,7 +392,7 @@ export function expandPurchaseItems(
     }
     const product = products.get(item.uid_product);
     if (!product) throw new Error(`expandPurchaseItems: product ${item.uid_product} was not read`);
-    if (product.stock_method !== "none") {
+    if (product.stock_method !== "none" || isInKitRows(item, items)) {
       expanded.push(item);
       continue;
     }
@@ -416,6 +419,12 @@ export function expandPurchaseItems(
     expanded.push(expandOnto(item, leaf.uid, leaf.quantity));
   }
   return { ok: true, items: expanded };
+}
+
+/** Does this line sit in a kit the rows already state: a line above it, or any row beneath it? */
+function isInKitRows(item: PurchaseRowInputType, rows: readonly PurchaseRowInputType[]): boolean {
+  const prefix = (short: readonly string[], long: readonly string[]) => short.length < long.length && short.every((seg, k) => long[k] === seg);
+  return rows.some((row) => prefix(item.path, row.path) || (isPurchaseLine(row) && prefix(row.path, item.path)));
 }
 
 function expandOnto(

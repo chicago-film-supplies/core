@@ -81,7 +81,7 @@
  * `returned > 0`**, i.e. the path has never been exercised end to end, and
  * fulfillment support for it is incomplete (api-cloudrun#513).
  */
-import { OOS_BREAKDOWN_TERMINAL_KEYS, ownsKey, sumOOSBuckets } from "../schemas/mod.ts";
+import { isKitHeaderLine, OOS_BREAKDOWN_TERMINAL_KEYS, ownsKey, sumOOSBuckets } from "../schemas/mod.ts";
 import type {
   BookingBreakdown,
   BookingBreakdownKeyType,
@@ -507,6 +507,7 @@ export function supplyFromPurchase(p: StockPurchaseSource, uidProduct: string): 
   if (p.status !== "active") return [];
   const entries: StockSupplyEntry[] = [];
   for (const item of p.items) {
+    if (isKitHeaderLine(item)) continue; // A header holds no units; its components supply.
     switch (item.type) {
       case "rental": {
         if (item.uid_product !== uidProduct) break;

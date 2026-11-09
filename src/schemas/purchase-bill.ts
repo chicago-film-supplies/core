@@ -75,7 +75,10 @@ import { FirestoreId, ItemUid, OutOfServiceId, ThreadId } from "./_uid.ts";
 import { chicagoStartOfDay } from "./_datetime.ts";
 import { COACode, type COACodeType } from "./chart-of-accounts.ts";
 import {
+  isKitHeaderLine,
   isPurchaseLine,
+  kitHeaderIssues,
+  zeroPricedMoneyIssues,
   PayablePriceMoneyCore,
   payablePostingIssues,
   PURCHASE_PRODUCT_ITEM_TYPES,
@@ -96,7 +99,7 @@ import {
   PriceModifier,
   TaxRef,
 } from "./order.ts";
-import { LedgerPostingCore, LineItemCore, LineTaxCore } from "./_items.ts";
+import { LedgerPostingCore, LineItemCore, LineTaxCore, PayableKitLedgerAccount } from "./_items.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import { PriceFormulaRefSchema, RateKey, RateSnapshotSchema, TierCountSchema, type TierCountType } from "./price-formula.ts";
 import { deriveInvoiceStatus } from "./_invoice-freeze.ts";
@@ -151,7 +154,7 @@ export const PurchaseBillXeroDocumentEnum: z.ZodType<PurchaseBillXeroDocumentTyp
  * A LINKED document's `amount_cents` is Xero's money, stamped by the link
  * writer; the computed money follows from it like any other stated total.
  */
-export interface PurchaseDocumentLinePrice extends PurchaseLinePrice {
+export interface PurchaseDocumentLinePrice extends Omit<PurchaseLinePrice, "replacement_cents"> {
   counts: TierCountType[];
 }
 
@@ -240,7 +243,9 @@ interface PurchaseDocumentLineBase {
  * field difference between projection and source. The account still has to
  * sit in the type's class (`payablePostingIssues`).
  */
-export interface PurchaseDocumentProductItem extends PurchaseDocumentLineBase {
+export interface PurchaseDocumentProductItem extends Omit<PurchaseDocumentLineBase, "ledger_account"> {
+  /** `null` marks a kit header (`isKitHeaderLine`). */
+  ledger_account: COACodeType | null;
   type: PurchaseProductItemTypeType;
   uid_product: string;
   /**
@@ -324,9 +329,12 @@ export type PurchaseDocumentRow =
   | OrderDocDestinationItemType
   | OrderDocGroupItemType;
 
-/** The lines of a bill's or credit's rows, dividers dropped. */
-export function purchaseDocumentLines(rows: readonly PurchaseDocumentRow[]): PurchaseDocumentItem[] {
-  return rows.filter((r): r is PurchaseDocumentItem => isPurchaseLine(r));
+/** A bill or credit line that bills and posts: never a kit header. */
+export type PurchaseDocumentPostedItem = PurchaseDocumentItem & { ledger_account: COACodeType };
+
+/** The lines of a bill's or credit's rows, with dividers and kit headers dropped. */
+export function purchaseDocumentLines(rows: readonly PurchaseDocumentRow[]): PurchaseDocumentPostedItem[] {
+  return rows.filter((r): r is PurchaseDocumentPostedItem => isPurchaseLine(r) && !isKitHeaderLine(r));
 }
 
 /**
@@ -399,7 +407,7 @@ function documentLineIssues(
   origin: PurchaseDocumentOriginType,
 ): { path: (string | number)[]; message: string }[] {
   const issues = purchaseLineMoneyIssues({ price: item.price, amount_cents: item.amount_cents }, "document");
-  issues.push(...payablePostingIssues(item.type, item.ledger_account));
+  issues.push(...payablePostingIssues(item.type, item.ledger_account), ...kitHeaderIssues(item), ...zeroPricedMoneyIssues(item));
   const counts = item.price?.counts.length ?? 0;
   const time = item.price?.price_formula.basis === "time";
   if (!time && counts > 0) issues.push({ path: ["price", "counts"], message: "a flat line meters no counts" });
@@ -421,6 +429,7 @@ const PurchaseDocumentProductItemInner = z.strictObject({
   type: z.enum(PURCHASE_PRODUCT_ITEM_TYPES).meta({ column: true, label: "Type" }),
   ...docItemHead,
   ...docItemShape,
+  ledger_account: PayableKitLedgerAccount,
   uid_product: FirestoreId,
   // The move pointer, exactly as invoice's `path_order_item`.
   path_purchase_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),

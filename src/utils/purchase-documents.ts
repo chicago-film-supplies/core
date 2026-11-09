@@ -56,6 +56,7 @@ import {
   PurchaseSchema,
   isPurchaseLine,
   purchaseDocumentLines,
+  isKitHeaderLine,
 } from "../schemas/mod.ts";
 import { cumulativeShareCents } from "./purchases.ts";
 import { roundDivHalfUp } from "./money.ts";
@@ -433,9 +434,9 @@ function projectTimeLine(item: PurchaseItem, opts: ProjectBillLineOptions): Purc
     case "rental":
       return { type: item.type, ...head, uid_product: item.uid_product };
     case "service":
-      return { type: "service", ...head };
+      return { type: "service", ...head, ledger_account: item.ledger_account };
     case "replacement":
-      return { type: "replacement", ...head, uid_out_of_service: item.uid_out_of_service };
+      return { type: "replacement", ...head, ledger_account: item.ledger_account, uid_out_of_service: item.uid_out_of_service };
     default: {
       const unreachable: never = item;
       throw new Error(`projectTimeLine: unknown purchase item ${JSON.stringify(unreachable)}`);
@@ -483,6 +484,7 @@ export function purchaseDocumentScope(
     const parts = local.split("/");
     for (let k = 1; k < parts.length; k++) wanted.add(parts.slice(0, k).join("/"));
   }
+  const held = new Map(purchase.items.map((r) => [r.path.join("/"), r]));
   const rows: PurchaseDocumentRow[] = [purchaseScopeDivider(purchase), ...own];
   for (const row of purchase.items) {
     const local = row.path.join("/");
@@ -491,7 +493,18 @@ export function purchaseDocumentScope(
       continue;
     }
     const line = byLocal.get(local);
-    if (line) rows.push(line);
+    if (line) {
+      // A counted ancestor this document leaves out cannot hold the line's path,
+      // so the line names where it came from by the move pointer.
+      const strandedUnderLine = row.path.slice(0, -1).some((_, k) => {
+        const ancestor = row.path.slice(0, k + 1).join("/");
+        const above = held.get(ancestor);
+        return above !== undefined && isPurchaseLine(above) && !isKitHeaderLine(above) && !byLocal.has(ancestor);
+      });
+      rows.push(strandedUnderLine ? { ...line, path_purchase_item: row.path } : line);
+    } else if (isKitHeaderLine(row) && wanted.has(local) && row.quantity > 0) {
+      rows.push(projectPurchaseLineToBillLine(row, { uid_purchase: purchase.uid, quantity: row.quantity, from: 0 }));
+    }
   }
   const dividers = new Set(rows.filter((r) => r.type === "destination").map((r) => r.uid));
   return {
@@ -636,6 +649,7 @@ export function payableScopedSync(prev: Purchase, next: Purchase): {
   const side: ScopedSyncSide<PurchaseDocumentRow> = {
     scopeType: "purchase",
     pointerKey: "path_purchase_item",
+    isStructural: (item) => isKitHeaderLine(item),
     project: (item, scopeUid) => {
       const row = original.get(item);
       if (row === undefined) throw new Error(`payableScopedSync: row ${item.uid} is not one of the purchase's`);

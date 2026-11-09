@@ -340,8 +340,9 @@ export const LinePostingCore: {
  * {@link LinePostingCore} until that plan's Phase 8 renames `coa_revenue` onto
  * this core and deletes the other.
  *
- * - `ledger_account` — REQUIRED and non-null (owner, 2026-11-07). Which accounts
- *   a line may name is a per-ARM refine reading
+ * - `ledger_account` — REQUIRED (owner, 2026-11-07), and non-null except on a
+ *   payable `sale` or `rental` row, where `null` marks a kit header
+ *   ({@link PayableKitLedgerAccount}). Which accounts a line may name is a per-ARM refine reading
  *   `SIDE_CONTRACTS[side].posting_class[type]` (`schemas/side.ts`), because one
  *   shared instance cannot hold a per-type class.
  * - `uid_tracking_category` — the SAME instance as {@link LinePostingCore}'s,
@@ -357,6 +358,15 @@ export const LedgerPostingCore: {
   ledger_account: COACode.meta({ propagate: true }),
   uid_tracking_category: LinePostingCore.uid_tracking_category,
 };
+
+/**
+ * `ledger_account` on a payable `sale` or `rental` row. `null` marks a `stock_method:
+ * "none"` kit parent: a row that holds no money, posts nothing and receives
+ * nothing (`isKitHeaderLine`, `schemas/purchase.ts`). One instance, re-declared
+ * over the shared core only on those arms, and pinned by
+ * `tests/item-shape-parity.test.ts`.
+ */
+export const PayableKitLedgerAccount: z.ZodNullable<z.ZodType<COACodeType>> = COACode.nullable().meta({ propagate: true });
 
 /** The {@link LedgerPostingCore} keys, for code that copies the posting between grains. */
 export const LEDGER_POSTING_FIELDS: readonly ["ledger_account", "uid_tracking_category"] = [

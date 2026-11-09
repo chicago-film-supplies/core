@@ -40,7 +40,15 @@ import {
   type PurchaseItem,
   type PurchaseRentalItem,
   purchaseDocumentLines,
+  derivePurchaseStatus,
+  PurchaseItemInput,
+  purchaseLineKeyOf,
+  purchaseLines,
+  PurchaseSaleItemSchema,
 } from "../src/schemas/mod.ts";
+import { computeItemPaths } from "../src/utils/orders.ts";
+import { purchaseActionsFor } from "../src/utils/purchase-actions.ts";
+import { supplyFromPurchase } from "../src/utils/stock.ts";
 import { FIXED, VISION } from "./helpers/formulas.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
@@ -825,4 +833,106 @@ Deno.test("diff: a live credit with no live bill left under it reads as a negati
   // A voided credit beside it leaves nothing to say.
   const quiet = { ...sources, credits: [credit([creditLine], "void")] };
   assertEquals(poDiffs(quiet).lines.size, 0);
+});
+
+// ── Kits: a `none` parent is a row, not a line (one-document-model Phase 6a-K) ──
+
+const KIT = iuid(20);
+const VEST = iuid(21);
+const BAG = iuid(22);
+const header = (over: Partial<PurchaseItem> = {}) =>
+  buyLine({ uid: KIT, path: [DIV, KIT], quantity: 2, amount_cents: 0, ledger_account: null, ...over } as Partial<PurchaseItem>);
+const part = (uid: string, over: Partial<PurchaseItem> = {}) =>
+  buyLine({ uid, path: [DIV, KIT, uid], quantity: 100, amount_cents: 30000, zero_priced: false, ...over } as Partial<PurchaseItem>);
+
+Deno.test("kit header: it is a row, so purchaseLines drops it and the purchase completes without it", () => {
+  const done = part(VEST, { quantity_received: 100, quantity_billed: 100 } as Partial<PurchaseItem>);
+  const items = [purchaseDivider(DIV), header(), done];
+  assertEquals(purchaseLines(items).map((l) => l.uid), [VEST]);
+  assertEquals(derivePurchaseStatus({ items }), "complete");
+});
+
+Deno.test("kit header: the schema takes a null account only on a flat row holding no money", () => {
+  assert(PurchaseSaleItemSchema.safeParse(header()).success);
+  assert(!PurchaseSaleItemSchema.safeParse(header({ amount_cents: 5 } as Partial<PurchaseItem>)).success);
+  assert(PurchaseSaleItemSchema.safeParse(buyLine()).success, "control: an ordinary buy still parses");
+});
+
+Deno.test("zero_priced on a payable line carries no charge", () => {
+  assert(!PurchaseSaleItemSchema.safeParse(part(VEST, { zero_priced: true })).success);
+  assert(PurchaseSaleItemSchema.safeParse(part(VEST, { zero_priced: true, amount_cents: 0 } as Partial<PurchaseItem>)).success);
+});
+
+Deno.test("replacement_cents: only a subrent line states one", () => {
+  const withReplacement = (line: PurchaseItem) => ({ ...line, price: { ...line.price, replacement_cents: 4500 } });
+  assert(!PurchaseSaleItemSchema.safeParse(withReplacement(buyLine())).success);
+  assert(PurchaseSaleItemSchema.safeParse(buyLine()).success, "control");
+  assert(!PurchaseItemInput.safeParse({ type: "sale", uid: VEST, path: [DIV, VEST], uid_product: PRODUCT, quantity: 1, amount_cents: 0, price: { replacement_cents: 1 } }).success);
+  assert(PurchaseItemInput.safeParse({ type: "rental", uid: VEST, path: [DIV, VEST], uid_product: PRODUCT, quantity: 1, amount_cents: 0, price: { replacement_cents: 1 } }).success);
+});
+
+Deno.test("line input: a stored header echoes its null account, and a component states its kit keys", () => {
+  const out = PurchaseItemInput.parse({ type: "sale", uid: VEST, path: [DIV, KIT, VEST], uid_product: PRODUCT, quantity: 1, amount_cents: 0, ledger_account: null, zero_priced: true, quantity_per_parent: 50 });
+  assertEquals([out.ledger_account, out.zero_priced, out.quantity_per_parent], [null, true, 50]);
+});
+
+Deno.test("computeItemPaths on a purchase: a nested component resolves by the row uid of its parent", () => {
+  const inner = iuid(23);
+  const rows = [
+    purchaseDivider(DIV),
+    { uid: KIT, type: "sale", path: [DIV, KIT] },
+    { uid: inner, type: "sale", path: [DIV, KIT, inner] },
+    { uid: VEST, type: "sale", path: [DIV, KIT, inner, VEST] },
+  ];
+  assertEquals(computeItemPaths(rows as never as Parameters<typeof computeItemPaths>[0]).map((r) => r.path), [
+    [DIV],
+    [DIV, KIT],
+    [DIV, KIT, inner],
+    [DIV, KIT, inner, VEST],
+  ]);
+});
+
+Deno.test("purchaseDocumentScope: a billed component brings its header, at $0 and with no account", () => {
+  const vest = part(VEST);
+  const purchase = purchaseDoc([header(), vest]);
+  const scope = purchaseDocumentScope(purchase, [project(vest, 0, 10)]);
+  assertEquals(scope.items.map((r) => r.path.join("/")), [PURCHASE, `${PURCHASE}/${DIV}`, `${PURCHASE}/${DIV}/${KIT}`, `${PURCHASE}/${DIV}/${KIT}/${VEST}`]);
+  const carried = scope.items[2] as PurchaseDocumentItem;
+  assertEquals([carried.ledger_account, carried.amount_cents, carried.quantity], [null, 0, 2]);
+  assertEquals(purchaseDocumentLines(scope.items).map((l) => l.uid), [VEST]);
+});
+
+Deno.test("purchaseDocumentScope: a component whose COUNTED parent is not billed keeps its join by the move pointer", () => {
+  const mirror = buyLine({ uid: KIT, path: [DIV, KIT], quantity: 2, amount_cents: 4000 });
+  const adapter = part(VEST, { zero_priced: true, amount_cents: 0, quantity: 2 } as Partial<PurchaseItem>);
+  const scope = purchaseDocumentScope(purchaseDoc([mirror, adapter]), [project(adapter, 0, 2)]);
+  const billed = purchaseDocumentLines(scope.items)[0];
+  assertEquals(billed.path_purchase_item, [DIV, KIT, VEST]);
+  assertEquals(purchaseLineKeyOf(billed), `${PURCHASE}/${DIV}/${KIT}/${VEST}`);
+});
+
+Deno.test("purchase → bill sync: a left-out header stays out until a new component lands beneath it", () => {
+  const other = buyLine({ uid: iuid(30), path: [DIV, iuid(30)], quantity: 1, amount_cents: 100 });
+  const bill = billDoc(7, [project(other, 0, 1)], { items: purchaseDocumentScope(purchaseDoc([other]), [project(other, 0, 1)]).items });
+  const prev = [other, header(), part(VEST)];
+  const uidsOf = (b: PurchaseBill) => b.items.map((r) => r.uid);
+
+  const [untouched] = syncPurchaseToBillsOver(prev, prev, [bill]);
+  assert(!uidsOf(untouched.bill).includes(KIT), "no new row: the header stays out");
+
+  const [reopened] = syncPurchaseToBillsOver(prev, [...prev, part(BAG, { quantity: 2, amount_cents: 400 } as Partial<PurchaseItem>)], [bill]);
+  assert(uidsOf(reopened.bill).includes(KIT), "a new component re-opens its header");
+  assert(uidsOf(reopened.bill).includes(BAG));
+});
+
+Deno.test("purchaseActionsFor: a header offers removal only, and not once anything beneath it has happened", () => {
+  const offersOn = (lines: PurchaseItem[]) => purchaseActionsFor({ status: "active", query_by_bills: [], items: [header(), ...lines] }).filter((o) => o.uid_item === KIT).map((o) => o.action);
+  assertEquals(offersOn([part(VEST)]), ["remove_item"]);
+  assertEquals(offersOn([part(VEST, { quantity_received: 1 } as Partial<PurchaseItem>)]), []);
+});
+
+Deno.test("supplyFromPurchase: a header supplies nothing even when it names the product asked about", () => {
+  const dated = header({ expected_date: jan(5) } as Partial<PurchaseItem>);
+  assertEquals(supplyFromPurchase({ status: "active", items: [dated], destinations: [] }, PRODUCT), []);
+  assertEquals(supplyFromPurchase({ status: "active", items: [buyLine({ expected_date: jan(5) } as Partial<PurchaseItem>)], destinations: [] }, PRODUCT).length, 1, "control");
 });

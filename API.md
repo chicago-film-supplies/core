@@ -6503,8 +6503,9 @@ replacing their `coa_posting`. The receivable grains still spread
 {@link LinePostingCore} until that plan's Phase 8 renames `coa_revenue` onto
 this core and deletes the other.
 
-- `ledger_account` — REQUIRED and non-null (owner, 2026-11-07). Which accounts
-  a line may name is a per-ARM refine reading
+- `ledger_account` — REQUIRED (owner, 2026-11-07), and non-null except on a
+  payable `sale` or `rental` row, where `null` marks a kit header
+  ({@link PayableKitLedgerAccount}). Which accounts a line may name is a per-ARM refine reading
   `SIDE_CONTRACTS[side].posting_class[type]` (`schemas/side.ts`), because one
   shared instance cannot hold a per-type class.
 - `uid_tracking_category` — the SAME instance as {@link LinePostingCore}'s,
@@ -10960,6 +10961,14 @@ One {@link PURCHASE_DOCUMENT_ORIGINS} member.
 type PurchaseDocumentOriginType = indexedAccess;
 ```
 
+### `PurchaseDocumentPostedItem`
+
+A bill or credit line that bills and posts: never a kit header.
+
+```ts
+type PurchaseDocumentPostedItem = PurchaseDocumentItem & typeLiteral;
+```
+
 ### `PurchaseDocumentProductItem`
 
 A bill or credit item that PROJECTS a purchase item — some quantity of one
@@ -10978,6 +10987,7 @@ sit in the type's class (`payablePostingIssues`).
 
 ```ts
 interface PurchaseDocumentProductItem {
+  ledger_account: COACodeType | null;
   type: PurchaseProductItemTypeType;
   uid_product: string;
   path_purchase_item?: string[];
@@ -11265,6 +11275,7 @@ interface PurchaseLinePrice {
   discount: DiscountType | null;
   taxes: PriceModifierType[];
   taxes_base?: TaxRefType[];
+  replacement_cents?: number | null;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   total_cents: number;
@@ -11289,6 +11300,7 @@ interface PurchaseLinePriceInputType {
   uid_price_formula?: string;
   rates?: RateSnapshotType[];
   discount?: DiscountInputType | null;
+  replacement_cents?: number | null;
 }
 ```
 
@@ -11329,6 +11341,14 @@ One {@link PURCHASE_LINE_STATUSES} member.
 type PurchaseLineStatusType = indexedAccess;
 ```
 
+### `PurchasePostedItem`
+
+A purchase line that can be received, billed and posted: never a kit header.
+
+```ts
+type PurchasePostedItem = PurchaseItem & typeLiteral;
+```
+
 ### `PurchaseProductItemTypeType`
 
 One {@link PURCHASE_PRODUCT_ITEM_TYPES} member.
@@ -11343,6 +11363,7 @@ A RENTAL (Subrent) item — `quantity` units borrowed for a hire window and give
 
 ```ts
 interface PurchaseRentalItem {
+  ledger_account: COACodeType | null;
   type: "rental";
   uid_product: string;
   amount_cents: number | null;
@@ -11367,7 +11388,7 @@ interface PurchaseRentalItemInputType {
   uid_product: string;
   quantity: number;
   amount_cents?: number | null;
-  ledger_account?: COACodeType;
+  ledger_account?: COACodeType | null;
   uid_orders?: string[];
   uid_units?: string[];
 }
@@ -11458,6 +11479,7 @@ A SALE (Buy) item — ownership of `quantity` units of one product. Always flat.
 ```ts
 interface PurchaseSaleItem {
   type: "sale";
+  ledger_account: COACodeType | null;
   uid_product: string;
   amount_cents: number;
   price: PurchaseLinePrice;
@@ -11478,7 +11500,7 @@ interface PurchaseSaleItemInputType {
   uid_product: string;
   quantity: number;
   amount_cents: number;
-  ledger_account?: COACodeType;
+  ledger_account?: COACodeType | null;
   expected_date?: string | null;
   landed_costs?: PurchaseLandedCostInputType[];
 }
@@ -17518,6 +17540,15 @@ or reads by `uid_credit_note`, holds refunds too and MUST filter — a refund
 folded into an invoice is money from nowhere. A payable row has a `null`
 `uid_invoice`, so this excludes the whole payable side as well.
 
+### `isKitHeaderLine(row: object): boolean`
+
+**Is this row a kit header?** A `stock_method: "none"` kit parent on a payable
+document: stored as a sale or rental row with `ledger_account: null`, no money
+and a flat formula, so that a kit reads the same as it does on an order. It is a
+ROW and not a LINE: it holds no money, posts nothing and receives nothing, so
+{@link purchaseLines} and `purchaseDocumentLines` drop it as they drop a divider.
+A counted parent (a makeup mirror over its adapter) is an ordinary line.
+
 ### `isLineItem(item: OrderDocItemType): item is OrderDocLineItemType`
 
 Type guard that narrows an order doc item to a line item (excludes
@@ -17738,7 +17769,7 @@ as `active` while `isBookingClosed` read it closed).
 `liveCustody` read it terminal. Neither type carries an inventory ledger, so
 no availability answer moves; the rule just stops having two answers.
 
-### `payablePostingIssues(type: SharedLineType, account: number): typeLiteral[]`
+### `payablePostingIssues(type: SharedLineType, account: number | null): typeLiteral[]`
 
 May a payable line of `type` post to `account`? The class is
 `SIDE_CONTRACTS.payable.posting_class[type]` (`schemas/side.ts`):
@@ -17824,9 +17855,9 @@ Returns `{ path, message }[]`; empty means the rule is well-formed.
 
 The purchase a credit was raised on, or `undefined` when its sources name none.
 
-### `purchaseDocumentLines(rows: readonly PurchaseDocumentRow[]): PurchaseDocumentItem[]`
+### `purchaseDocumentLines(rows: readonly PurchaseDocumentRow[]): PurchaseDocumentPostedItem[]`
 
-The lines of a bill's or credit's rows, dividers dropped.
+The lines of a bill's or credit's rows, with dividers and kit headers dropped.
 
 ### `purchaseHireWindow(purchase: Pick<Purchase, "destinations">, item: Pick<PurchaseItem, "path">): PurchaseItemDates | null`
 
@@ -17897,9 +17928,9 @@ line types.
 The pair a purchase line sits under — the destination divider at `path[0]`
 — or `undefined` when the document carries no such pair.
 
-### `purchaseLines(rows: readonly PurchaseRow[]): PurchaseItem[]`
+### `purchaseLines(rows: readonly PurchaseRow[]): PurchasePostedItem[]`
 
-The lines of a purchase's rows, dividers dropped.
+The lines of a purchase's rows, with dividers and kit headers dropped.
 
 ### `resolveFieldMeta(schema: z.ZodType, fieldPath: string): Record<string, unknown> | null`
 
@@ -27839,6 +27870,7 @@ interface PurchaseLinePrice {
   discount: DiscountType | null;
   taxes: PriceModifierType[];
   taxes_base?: TaxRefType[];
+  replacement_cents?: number | null;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   total_cents: number;
@@ -27863,6 +27895,7 @@ interface PurchaseLinePriceInputType {
   uid_price_formula?: string;
   rates?: RateSnapshotType[];
   discount?: DiscountInputType | null;
+  replacement_cents?: number | null;
 }
 ```
 
@@ -27903,6 +27936,14 @@ One {@link PURCHASE_LINE_STATUSES} member.
 type PurchaseLineStatusType = indexedAccess;
 ```
 
+### `PurchasePostedItem`
+
+A purchase line that can be received, billed and posted: never a kit header.
+
+```ts
+type PurchasePostedItem = PurchaseItem & typeLiteral;
+```
+
 ### `PurchaseProductItemTypeType`
 
 One {@link PURCHASE_PRODUCT_ITEM_TYPES} member.
@@ -27917,6 +27958,7 @@ A RENTAL (Subrent) item — `quantity` units borrowed for a hire window and give
 
 ```ts
 interface PurchaseRentalItem {
+  ledger_account: COACodeType | null;
   type: "rental";
   uid_product: string;
   amount_cents: number | null;
@@ -27941,7 +27983,7 @@ interface PurchaseRentalItemInputType {
   uid_product: string;
   quantity: number;
   amount_cents?: number | null;
-  ledger_account?: COACodeType;
+  ledger_account?: COACodeType | null;
   uid_orders?: string[];
   uid_units?: string[];
 }
@@ -28032,6 +28074,7 @@ A SALE (Buy) item — ownership of `quantity` units of one product. Always flat.
 ```ts
 interface PurchaseSaleItem {
   type: "sale";
+  ledger_account: COACodeType | null;
   uid_product: string;
   amount_cents: number;
   price: PurchaseLinePrice;
@@ -28052,7 +28095,7 @@ interface PurchaseSaleItemInputType {
   uid_product: string;
   quantity: number;
   amount_cents: number;
-  ledger_account?: COACodeType;
+  ledger_account?: COACodeType | null;
   expected_date?: string | null;
   landed_costs?: PurchaseLandedCostInputType[];
 }
@@ -28348,11 +28391,24 @@ of the mirror, called by every writer.
 
 Derive `query_by_units` — the distinct units the rental, service and replacement lines cover, sorted.
 
+### `isKitHeaderLine(row: object): boolean`
+
+**Is this row a kit header?** A `stock_method: "none"` kit parent on a payable
+document: stored as a sale or rental row with `ledger_account: null`, no money
+and a flat formula, so that a kit reads the same as it does on an order. It is a
+ROW and not a LINE: it holds no money, posts nothing and receives nothing, so
+{@link purchaseLines} and `purchaseDocumentLines` drop it as they drop a divider.
+A counted parent (a makeup mirror over its adapter) is an ordinary line.
+
 ### `isPurchaseLine(row: T): row is Exclude`
 
 Is this row a line (not a divider)?
 
-### `payablePostingIssues(type: SharedLineType, account: number): typeLiteral[]`
+### `kitHeaderIssues(item: typeLiteral): typeLiteral[]`
+
+A kit header holds no money: a `null` account requires a flat line stating $0.
+
+### `payablePostingIssues(type: SharedLineType, account: number | null): typeLiteral[]`
 
 May a payable line of `type` post to `account`? The class is
 `SIDE_CONTRACTS.payable.posting_class[type]` (`schemas/side.ts`):
@@ -28430,9 +28486,14 @@ line types.
 The pair a purchase line sits under — the destination divider at `path[0]`
 — or `undefined` when the document carries no such pair.
 
-### `purchaseLines(rows: readonly PurchaseRow[]): PurchaseItem[]`
+### `purchaseLines(rows: readonly PurchaseRow[]): PurchasePostedItem[]`
 
-The lines of a purchase's rows, dividers dropped.
+The lines of a purchase's rows, with dividers and kit headers dropped.
+
+### `zeroPricedMoneyIssues(item: typeLiteral): typeLiteral[]`
+
+A `zero_priced` payable line carries no charge. `checkZeroPricedAmount` reads
+`rates`, which a flat payable line does not have, so it would pass vacuously here.
 
 ## `@cfs/core/schemas/purchase-bill`
 
@@ -29025,6 +29086,14 @@ One {@link PURCHASE_DOCUMENT_ORIGINS} member.
 type PurchaseDocumentOriginType = indexedAccess;
 ```
 
+### `PurchaseDocumentPostedItem`
+
+A bill or credit line that bills and posts: never a kit header.
+
+```ts
+type PurchaseDocumentPostedItem = PurchaseDocumentItem & typeLiteral;
+```
+
 ### `PurchaseDocumentProductItem`
 
 A bill or credit item that PROJECTS a purchase item — some quantity of one
@@ -29043,6 +29112,7 @@ sit in the type's class (`payablePostingIssues`).
 
 ```ts
 interface PurchaseDocumentProductItem {
+  ledger_account: COACodeType | null;
   type: PurchaseProductItemTypeType;
   uid_product: string;
   path_purchase_item?: string[];
@@ -29229,9 +29299,9 @@ one author of `PurchaseBill.query_by_purchases`.
 
 The purchase a credit was raised on, or `undefined` when its sources name none.
 
-### `purchaseDocumentLines(rows: readonly PurchaseDocumentRow[]): PurchaseDocumentItem[]`
+### `purchaseDocumentLines(rows: readonly PurchaseDocumentRow[]): PurchaseDocumentPostedItem[]`
 
-The lines of a bill's or credit's rows, dividers dropped.
+The lines of a bill's or credit's rows, with dividers and kit headers dropped.
 
 ### `purchaseLineKeyOf(row: Pick<PurchaseDocumentItem, "path" | "path_purchase_item">): string | null`
 
@@ -40283,6 +40353,7 @@ interface ScopedSyncSide {
   pointerKey: keyof MovePointerCarrier;
   project(item: LineItem, scopeUid: string): R;
   lineFields(item: LineItem): readonly SharedField[];
+  isStructural(item: LineItem): boolean;
 }
 ```
 
@@ -50323,7 +50394,9 @@ quantities and amounts summed, one hire window per product — only because a
 purchase held one line per product. Items carry their own row identity now,
 so a pack item keeps its `uid` and becomes its own item even when the stocked
 product already has one; the ledger averages the cost either way.
-Charge items and dividers pass through untouched.
+Charge items and dividers pass through untouched, and so does a line that
+states its kit in the rows: this rewrite serves only a client still sending a
+bare pack (one-document-model Phase 6a-K), and is deleted once none does.
 
 Returns rather than throws: a refusal is an operator-facing 400, and core
 throws plain `Error`, which a consumer's middleware reads as a 500.
