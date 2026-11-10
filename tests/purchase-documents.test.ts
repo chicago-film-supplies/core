@@ -12,6 +12,7 @@ import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
   flatShareCents,
   PAYABLE_LINE_CLAIMS,
+  purchaseDocumentsBefore,
   purchaseLineBilledCounts,
   remainingTimeCounts,
   type PurchaseBilledDocuments,
@@ -1159,4 +1160,21 @@ Deno.test("remainingTimeCounts: metered_over bills the BILL's pair, and a later 
   assert(JSON.stringify(onBill) !== JSON.stringify(onPurchase), "the bill's window is the one metered");
   // Companion: a window the bill does not state meters nothing, where the purchase's would.
   assertEquals(remainingTimeCounts({ ...base, metered_over: { path: [PURCHASE, DIV, item.uid], destinations: [] } }), null);
+});
+
+Deno.test("purchaseDocumentsBefore: earlier by date, then by number on the same date; the bill itself and later ones are out", () => {
+  const d = (uid: string, date: string, number: number) => ({ uid, date, number });
+  const bill = d("this", "2026-11-10T00:00:00.000-06:00", 20);
+  const bills = [
+    d("earlier", "2026-11-09T00:00:00.000-06:00", 30),
+    d("same-day-lower", "2026-11-10T00:00:00.000-06:00", 19),
+    d("same-day-higher", "2026-11-10T00:00:00.000-06:00", 21),
+    d("this", "2026-11-10T00:00:00.000-06:00", 20),
+    d("later", "2026-11-11T00:00:00.000-06:00", 1),
+  ];
+  const credits = [d("c-early", "2026-11-01T00:00:00.000-05:00", 1), d("c-late", "2026-12-01T00:00:00.000-06:00", 2)];
+  const out = purchaseDocumentsBefore(bill, "po", bills, credits);
+  assertEquals(out.uid_purchase, "po");
+  assertEquals(out.bills.map((b) => b.uid), ["earlier", "same-day-lower"]);
+  assertEquals(out.credits.map((c) => c.uid), ["c-early"]);
 });

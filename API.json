@@ -24105,6 +24105,14 @@
         },
         {
           "kind": "function",
+          "name": "purchaseDocumentsBefore",
+          "signature": "purchaseDocumentsBefore(bill: Pick<PurchaseBill, \"uid\" | \"date\" | \"number\">, uidPurchase: string, bills: readonly B[], credits: readonly C[]): typeLiteral",
+          "doc": "**The documents of one purchase dated before `bill`** — by date, then number —\nwith `bill` itself left out. A time line re-seeded on `bill` is billed for its\npair's time less what THESE documents bill (one-document-model item 5): a later\ndocument's billing does not limit what an earlier one may bill. The bill writer\nand the manager's optimistic reprice both read it, so the two cannot disagree.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "purchaseLineBilledCounts",
           "signature": "purchaseLineBilledCounts(path: readonly string[], documents: PurchaseBilledDocuments): TierCount[]",
           "doc": "**The counts the live documents bill of one TIME purchase line, net of\ncredits** — Σ live bill `counts` − Σ live credit `counts`, tier by tier\n(`combineTierCounts`), joined on the purchase line key as\n{@link purchaseLineBilledNet} is. Unfloored, like it.\n\nThe rows of ONE document that bill the line fold first, into their\nquantity-weighted mean (`meanTierCounts`), so a split reads as one billing:\n4 units split 2 + 2 over 30 days have billed 30 days, not 60. Summing across\ndocuments is unchanged (core#149 tracks what that means for a partial bill).",

@@ -50312,6 +50312,14 @@ projectPurchaseLineToBillLine}); a line at a path the purchase does not carry
 (a document-only charge, `[purchase uid, uid]`) sits directly under the
 purchase divider, ahead of the first destination, so contiguity holds.
 
+### `purchaseDocumentsBefore(bill: Pick<PurchaseBill, "uid" | "date" | "number">, uidPurchase: string, bills: readonly B[], credits: readonly C[]): typeLiteral`
+
+**The documents of one purchase dated before `bill`** — by date, then number —
+with `bill` itself left out. A time line re-seeded on `bill` is billed for its
+pair's time less what THESE documents bill (one-document-model item 5): a later
+document's billing does not limit what an earlier one may bill. The bill writer
+and the manager's optimistic reprice both read it, so the two cannot disagree.
+
 ### `purchaseLineBilledCounts(path: readonly string[], documents: PurchaseBilledDocuments): TierCount[]`
 
 **The counts the live documents bill of one TIME purchase line, net of

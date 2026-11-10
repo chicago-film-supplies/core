@@ -306,6 +306,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   ],
   "purchase-documents": [
     { name: "purchaseBillSharedDocFields", expr: "it.purchase-documents.purchaseBillSharedDocFields()", desc: "The document-level fields a purchase and its bill share, read off the two schemas as the line fields are. Every entry comes off the classification, so a new shared key is compared by construction.", returns: "readonly SharedField[]" },
+    { name: "purchaseDocumentsBefore", expr: "it.purchase-documents.purchaseDocumentsBefore(bill, uidPurchase, bills, credits)", desc: "**The documents of one purchase dated before `bill`** — by date, then number — with `bill` itself left out. A time line re-seeded on `bill` is billed for its pair's time less what THESE documents bill (one-document-model item 5): a later document's billing does not limit what an earlier one may bill. The bill writer and the manager's optimistic reprice both read it, so the two cannot disagree.", returns: "typeLiteral" },
   ],
   "purchases": [
     { name: "allocateLandedCostCents", expr: "it.purchases.allocateLandedCostCents(amountCents, lines)", desc: "Spread one landed amount over several buy lines, in proportion to each line's value still to arrive ({@link landedCostWeightCents}), with {@link apportionCents}. Σ is exactly `amountCents`.", returns: "number[]" },

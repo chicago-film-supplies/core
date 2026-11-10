@@ -99,6 +99,30 @@ export interface PurchaseBilledDocuments {
   credits: readonly Pick<PurchaseCredit, "status" | "items">[];
 }
 
+/**
+ * **The documents of one purchase dated before `bill`** — by date, then number —
+ * with `bill` itself left out. A time line re-seeded on `bill` is billed for its
+ * pair's time less what THESE documents bill (one-document-model item 5): a later
+ * document's billing does not limit what an earlier one may bill. The bill writer
+ * and the manager's optimistic reprice both read it, so the two cannot disagree.
+ */
+export function purchaseDocumentsBefore<
+  B extends Pick<PurchaseBill, "uid" | "date" | "number">,
+  C extends Pick<PurchaseCredit, "date" | "number">,
+>(
+  bill: Pick<PurchaseBill, "uid" | "date" | "number">,
+  uidPurchase: string,
+  bills: readonly B[],
+  credits: readonly C[],
+): { uid_purchase: string; bills: B[]; credits: C[] } {
+  const at = Date.parse(bill.date);
+  const before = (d: { date: string; number: number }): boolean => {
+    const t = Date.parse(d.date);
+    return t < at || (t === at && d.number < bill.number);
+  };
+  return { uid_purchase: uidPurchase, bills: bills.filter((b) => b.uid !== bill.uid && before(b)), credits: credits.filter(before) };
+}
+
 // ── Reading existing coverage ──────────────────────────────────
 
 /** Is this credit live — not voided? Every "already billed" reader asks it. */
