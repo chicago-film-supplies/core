@@ -120,6 +120,10 @@ import {
   SubstitutedForList,
   SubstitutedForListInput,
   type SubstitutedForEntryType,
+  OutOfServiceList,
+  OutOfServiceListInput,
+  type OutOfServiceEntryType,
+  outOfServiceLinkIssues,
   TimestampFields,
   UidNameRef,
   type UidNameRefType,
@@ -295,13 +299,23 @@ export interface PurchaseDocumentServiceItem extends PurchaseDocumentLineBase {
 
 /**
  * A bill or credit REPLACEMENT line — the supplier billing CFS for its unit
- * lost or damaged in CFS's hands, naming the out-of-service record (until
+ * lost or damaged in CFS's hands, naming the out-of-service record(s) (until
  * 2026-11 a `charge` with `uid_out_of_service`). A `mark_lost` record's id is a
  * `MovementId`, hence `OutOfServiceId`.
+ *
+ * `uid_product` is the lost rental's money-only twin, never the rental (owner
+ * ruling 15; see `PurchaseReplacementItem`).
  */
 export interface PurchaseDocumentReplacementItem extends Omit<PurchaseDocumentServiceItem, "type"> {
   type: "replacement";
-  uid_out_of_service: string;
+  /** The pre-W4R single link: exactly one of this and {@link out_of_service} while W4R migrates. */
+  uid_out_of_service?: string;
+  /**
+   * The records this line bills, each with its share of `quantity` (ruling 16).
+   * Follows its purchase line's with `quantity` and `amount_cents` as one unit
+   * (`PurchaseReplacementItem.out_of_service`).
+   */
+  out_of_service?: OutOfServiceEntryType[];
 }
 
 /** Union of a bill or credit LINE's arms, discriminated on `type`. */
@@ -471,7 +485,13 @@ const PurchaseDocumentServiceItemInner = z.strictObject({
 const PurchaseDocumentReplacementItemInner = z.strictObject({
   type: z.literal("replacement").meta({ column: true, label: "Type" }),
   ...noCustodyLine,
-  uid_out_of_service: OutOfServiceId,
+  // Optional while W4R migrates; the refine below requires exactly one.
+  uid_out_of_service: OutOfServiceId.optional(),
+  out_of_service: OutOfServiceList.optional().meta({ seed: false }),
+}).superRefine((item, ctx) => {
+  for (const [path, message] of outOfServiceLinkIssues(item, { required: true })) {
+    ctx.addIssue({ code: "custom", path, message });
+  }
 });
 
 /** Zod schema for PurchaseDocumentProductItem. */
@@ -1033,8 +1053,15 @@ export interface PurchaseDocumentChargeItemInputType {
   description?: string;
   ledger_account: COACodeType;
   amount_cents: number;
+  /**
+   * The product the charge attributes. On a replacement charge it is the lost
+   * rental's money-only twin (`uid_linked_replacement`), which the writer
+   * derives from the record — never the rental itself (owner ruling 15).
+   */
   uid_product?: string;
   uid_out_of_service?: string;
+  /** The records a replacement charge bills; never with `uid_out_of_service`, and its shares sum to 1. */
+  out_of_service?: OutOfServiceEntryType[];
   uid_tracking_category?: string | null;
 }
 
@@ -1047,7 +1074,15 @@ const PurchaseDocumentChargeItemInput: z.ZodType<PurchaseDocumentChargeItemInput
   amount_cents: z.int().min(0),
   uid_product: FirestoreId.optional(),
   uid_out_of_service: OutOfServiceId.optional(),
+  // The stripping twin, as `tests/input-strictness.test.ts` requires of a new
+  // node: the charge node itself stays strict (see the docblock above).
+  out_of_service: OutOfServiceListInput.optional(),
   uid_tracking_category: FirestoreId.nullable().optional(),
+}).superRefine((item, ctx) => {
+  // The writer stamps `quantity: 1` on a charge, so its shares sum to 1.
+  for (const [path, message] of outOfServiceLinkIssues(item, { quantity: 1 })) {
+    ctx.addIssue({ code: "custom", path, message });
+  }
 });
 
 /**
@@ -1241,8 +1276,10 @@ export interface PurchaseBillLineInputType {
   zero_priced?: boolean | null;
   /** A kit component's ratio to its direct parent. */
   quantity_per_parent?: number | null;
-  /** The out-of-service record a bill-authored replacement line bills. */
+  /** The out-of-service record a bill-authored replacement line bills (pre-W4R). */
   uid_out_of_service?: string;
+  /** The records a replacement row bills, shares summing to `quantity`; never with `uid_out_of_service`. */
+  out_of_service?: OutOfServiceEntryType[];
   /** The purchase line this row bills from another position. See the docblock. */
   path_purchase_item?: string[];
   /** What this row stands in for ({@link PurchaseDocumentProductItem.substituted_for}). */
@@ -1314,6 +1351,7 @@ const billLineInput = (type: SharedLineType) =>
     zero_priced: z.boolean().nullable().optional(),
     quantity_per_parent: z.number().min(0).nullable().optional(),
     uid_out_of_service: OutOfServiceId.optional(),
+    out_of_service: OutOfServiceListInput.optional().meta({ seed: false }),
     path_purchase_item: z.array(ItemUid).min(1).optional(),
     substituted_for: SubstitutedForListInput.optional(),
     uid_tax_class_override: FirestoreId.nullable().optional(),
@@ -1327,6 +1365,7 @@ const billLineInput = (type: SharedLineType) =>
     // A row naming its product is keyed by it (W4K), as a purchase line input is.
     const message = payableInputUidIssue(row);
     if (message !== null) ctx.addIssue({ code: "custom", path: ["uid"], message });
+    for (const [path, msg] of outOfServiceLinkIssues(row)) ctx.addIssue({ code: "custom", path, message: msg });
   });
 
 /** Zod schema for one {@link PurchaseBillRowInputType}. */

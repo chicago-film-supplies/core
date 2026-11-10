@@ -1,6 +1,11 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import {
   billedOutOfService,
+  billsOutOfService,
+  fitOutOfServiceEntries,
+  mergeOutOfServiceEntries,
+  outOfServiceEntries,
+  splitOutOfServiceEntries,
   BILLABLE_OOS_REASONS,
   isBillableOutOfService,
   isOnRequestBillableOutOfService,
@@ -290,4 +295,66 @@ Deno.test("on-request seed: a record with no booking sits at the order level, an
   const [seed] = seedOnRequestLines(order, [attached], [], both, chargeProducts);
   assertEquals(seed.uid_pair, null);
   assertEquals(seed.rental_name, "ghost");
+});
+
+// ── W4R: a line bills a LIST of records (owner ruling 16, 2026-11-10) ──
+
+Deno.test("W4R outOfServiceEntries: the pre-W4R single link and its migrated list read identically", () => {
+  const before = { quantity: 3, uid_out_of_service: "oosVest" };
+  const after = { quantity: 3, out_of_service: [{ uid: "oosVest", quantity: 3 }] };
+  assertEquals(outOfServiceEntries(before), outOfServiceEntries(after));
+  assertEquals(outOfServiceEntries({ quantity: 3 }), []);
+  assertEquals(outOfServiceEntries({ quantity: 3, uid_out_of_service: null }), []);
+  assertEquals([billsOutOfService(before), billsOutOfService(after), billsOutOfService({ quantity: 1 })], [true, true, false]);
+  // And through the billed sum, which is what the offer and the advisory read.
+  const inv = (items: Record<string, unknown>[]) => [{ uid: "inv1", status: "issued", items: items.map((i) => ({ type: "replacement", ...i })) }];
+  assertEquals(billedOutOfService(inv([before])), billedOutOfService(inv([after])));
+});
+
+Deno.test("W4R: a line merging two records bills EACH its own share — no re-offer, no over-bill", () => {
+  const vests = { uid: "oosVest", quantity: 2 };
+  const cones = { uid: "oosCone", quantity: 1 };
+  const merged = { type: "replacement", quantity: 3, out_of_service: [{ uid: "oosVest", quantity: 2 }, { uid: "oosCone", quantity: 1 }] };
+  const billed = billedOutOfService([{ uid: "inv1", status: "issued", items: [merged] }]);
+  assertEquals([billed.get("oosVest"), billed.get("oosCone")], [2, 1]);
+  // Read by the pre-W4R rule (the line's whole quantity per record named) it would be 3 and 3.
+  assertEquals(overbilledOutOfService([merged], [vests, cones], [], "inv1"), []);
+  // A void invoice bills nothing, list or not.
+  assertEquals(billedOutOfService([{ uid: "inv1", status: "void", items: [merged] }]).size, 0);
+  // One unit past the vest record is reported for the vest alone.
+  const past = { ...merged, quantity: 4, out_of_service: [{ uid: "oosVest", quantity: 3 }, { uid: "oosCone", quantity: 1 }] };
+  assertEquals(overbilledOutOfService([past], [vests, cones], [], "inv1"), [
+    { uid_out_of_service: "oosVest", quantity: 2, billed_elsewhere: 0, billing_here: 3 },
+  ]);
+});
+
+Deno.test("W4R mergeOutOfServiceEntries: accumulates by record, first appearance first", () => {
+  assertEquals(
+    mergeOutOfServiceEntries([{ uid: "a", quantity: 1 }, { uid: "b", quantity: 2 }], [{ uid: "c", quantity: 1 }, { uid: "a", quantity: 3 }]),
+    [{ uid: "a", quantity: 4 }, { uid: "b", quantity: 2 }, { uid: "c", quantity: 1 }],
+  );
+});
+
+Deno.test("W4R fitOutOfServiceEntries: re-shares a quantity first-come, pads the LAST entry, never drops one", () => {
+  const two = [{ uid: "a", quantity: 2 }, { uid: "b", quantity: 2 }];
+  assertEquals(fitOutOfServiceEntries(two, 4), two, "unchanged quantity: equal entries");
+  assertEquals(fitOutOfServiceEntries(two, 3), [{ uid: "a", quantity: 2 }, { uid: "b", quantity: 1 }]);
+  assertEquals(fitOutOfServiceEntries(two, 1), [{ uid: "a", quantity: 1 }, { uid: "b", quantity: 0 }]);
+  assertEquals(fitOutOfServiceEntries(two, 0), [{ uid: "a", quantity: 0 }, { uid: "b", quantity: 0 }], "a close to 0 keeps naming both");
+  assertEquals(fitOutOfServiceEntries(two, 6), [{ uid: "a", quantity: 2 }, { uid: "b", quantity: 4 }], "excess lands on the last");
+  for (const q of [0, 1, 3, 4, 9]) {
+    assertEquals(fitOutOfServiceEntries(two, q).reduce((s, e) => s + e.quantity, 0), q);
+  }
+  assertThrows(() => fitOutOfServiceEntries([], 1));
+});
+
+Deno.test("W4R splitOutOfServiceEntries: both sides sum to their units, and each names at least one record", () => {
+  const two = [{ uid: "a", quantity: 2 }, { uid: "b", quantity: 2 }];
+  assertEquals(splitOutOfServiceEntries(two, 1), { moved: [{ uid: "a", quantity: 1 }], kept: [{ uid: "a", quantity: 1 }, { uid: "b", quantity: 2 }] });
+  assertEquals(splitOutOfServiceEntries(two, 2), { moved: [{ uid: "a", quantity: 2 }], kept: [{ uid: "b", quantity: 2 }] });
+  assertEquals(splitOutOfServiceEntries(two, 3), { moved: [{ uid: "a", quantity: 2 }, { uid: "b", quantity: 1 }], kept: [{ uid: "b", quantity: 1 }] });
+  // One record split in two: both sides name it.
+  assertEquals(splitOutOfServiceEntries([{ uid: "a", quantity: 5 }], 2), { moved: [{ uid: "a", quantity: 2 }], kept: [{ uid: "a", quantity: 3 }] });
+  assertThrows(() => splitOutOfServiceEntries(two, 0));
+  assertThrows(() => splitOutOfServiceEntries(two, 4));
 });

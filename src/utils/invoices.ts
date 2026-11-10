@@ -90,7 +90,10 @@ import {
 import { closestAncestor, mapPathsAcrossRebuild, pairItemsAcrossRebuild } from "./item-pairing.ts";
 import { interleaveStoredOnlyRows } from "./stored-only-rows.ts";
 import type { COARevenueType, CreditNoteStatusType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDatesType, OrderDocDestinationItemType, SettlementReasonType, SettlementTargetType, SettlementTypeType, SubstitutedForEntryType, PurchaseCreditStatusType } from "../schemas/mod.ts";
+import { fitOutOfServiceEntries } from "./replacements.ts";
 import {
+  billsOutOfService,
+  type OutOfServiceEntryType,
   getSettlementMultiplier,
   INVOICE_FIELD_FREEZE,
   type InvoiceFieldClass,
@@ -172,6 +175,8 @@ export interface InvoiceItem extends LineItem {
   substituted_for?: SubstitutedForEntryType[];
   /** @see `InvoiceDocLineItemType.uid_out_of_service` — a `replacement` or `service` line's only. */
   uid_out_of_service?: string | null;
+  /** @see `InvoiceDocLineItemType.out_of_service` — its W4R successor, read through `outOfServiceEntries`. */
+  out_of_service?: OutOfServiceEntryType[];
   /** @see `InvoiceDocDestinationItemType.path_extension_for` — a destination divider's only. */
   path_extension_for?: string[];
   /** @see `InvoiceDocLineItemType.path_order_item` — a moved line's root row only (core#125). */
@@ -775,8 +780,9 @@ const INVOICE_ONLY_ITEM_FIELDS = [
   "substituted_for",
   // The lost/damaged record a `replacement` line bills. Invoice-authored and
   // never on the order, so it must be carried across a rebuild, and it is not
-  // drift.
+  // drift. Both spellings while W4R migrates.
   "uid_out_of_service",
+  "out_of_service",
   // 🔴 Type-checked against the STORED shape, not derived from it. Derivation is
   // wrong here and the distinction is the whole point: this is an OVERRIDE
   // POLICY, not a structural difference — `crms_id` is on the order line too
@@ -1778,6 +1784,21 @@ function movePointerOf(row: MovePointerCarrier, key: keyof MovePointerCarrier): 
 }
 
 /**
+ * A row whose `quantity` the engine just moved, with its out-of-service shares
+ * re-shared to match (`fitOutOfServiceEntries`, W4R): the shares sum to the
+ * line's quantity on every stored grain, and a substitution's offset or a
+ * normalize step is the one place the scoped sync changes a quantity itself.
+ * A row with no list (or none to move) comes back as it was.
+ */
+function refitOutOfService<R>(row: R): R {
+  const line = row as { quantity?: number | null; out_of_service?: OutOfServiceEntryType[] };
+  if (line.out_of_service === undefined || line.out_of_service.length === 0) return row;
+  const quantity = line.quantity ?? 0;
+  if (line.out_of_service.reduce((sum, e) => sum + e.quantity, 0) === quantity) return row;
+  return { ...row, out_of_service: fitOutOfServiceEntries(line.out_of_service, quantity) };
+}
+
+/**
  * **What the scoped initiator → billing sync needs to know about a SIDE**
  * (one-document-model Phase 3). The order → invoice sync and the purchase →
  * bill sync are one engine, {@link syncOrderToInvoiceSelective}'s body; this is
@@ -2156,8 +2177,8 @@ function syncScopedItems<R extends InvoiceItem>(
     const rel = relOf(row);
     const quantity = resync.orderEquivalent(rel, row as InvoiceItem);
     if (quantity === ((row as InvoiceItem).quantity ?? 0)) return row;
-    if (side.requantify) return side.requantify(row, quantity, { source: prevByPath.get(itemPathKey(rel)) });
-    return { ...row, quantity } as R;
+    if (side.requantify) return refitOutOfService(side.requantify(row, quantity, { source: prevByPath.get(itemPathKey(rel)) }));
+    return refitOutOfService({ ...row, quantity } as R);
   };
   const currentInvoiceItems = storedInvoiceItems.map(normalize);
 
@@ -2405,7 +2426,7 @@ function syncScopedItems<R extends InvoiceItem>(
     // order can never have removed it: it is the invoice's own row, kept the
     // way a substitution row is. (Subsumed by the next arm whenever no order
     // line ever sat at its path; kept because it states WHY the row is safe.)
-    if ((invoiceItem as { uid_out_of_service?: string | null }).uid_out_of_service != null) {
+    if (billsOutOfService(invoiceItem as InvoiceItem)) {
       survivors.add(invoiceItem);
       continue;
     }
@@ -2493,9 +2514,11 @@ function syncScopedItems<R extends InvoiceItem>(
       continue;
     }
     const relKey = itemPathKey(rel);
-    const requantified = side.requantify
-      ? side.requantify(row, quantity, { source: newByPath.get(relKey), scaleFrom: storedQuantityAt.get(relKey) })
-      : { ...row, quantity };
+    const requantified = refitOutOfService(
+      side.requantify
+        ? side.requantify(row, quantity, { source: newByPath.get(relKey), scaleFrom: storedQuantityAt.get(relKey) })
+        : { ...row, quantity },
+    );
     const out = { ...requantified } as R & { substituted_for?: SubstitutedForEntryType[] };
     if (substituted_for) out.substituted_for = substituted_for as SubstitutedForEntryType[];
     else delete out.substituted_for;
@@ -3244,9 +3267,7 @@ export function syncOrderItems(
   const withOverrides = [
     ...carryForwardOverrides(rebuilt, existingScoped),
     // The invoice's own L&D rows, in their stored order, after the rebuilt ones.
-    ...existingScoped.filter((i) =>
-      (i as { uid_out_of_service?: string | null }).uid_out_of_service != null
-    ) as InvoiceDocItemType[],
+    ...existingScoped.filter((i) => billsOutOfService(i as InvoiceItem)) as InvoiceDocItemType[],
   ];
 
   // Reconstruct: find the order divider in the original to get its metadata

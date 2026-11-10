@@ -165,6 +165,7 @@ import type {
   OutOfService,
 } from "../schemas/mod.ts";
 import {
+  billsOutOfService,
   deriveQueryByPurchases,
   exchangedForKey,
   exchangedForOf,
@@ -683,8 +684,8 @@ function scopeInvoice(invoice: Invoice, orderUid: string): ScopedLines {
     if (isInExtensionSection(it.path, orderUid, extensionTargets)) continue;
     // A lost/damaged billing line is no presence row: it bills a RECORD, not an
     // order line, and its record's `quantity` entry is its answer (decision 9).
-    // Keyed on `uid_out_of_service`, never on the `replacement` type.
-    if ((it as { uid_out_of_service?: string | null }).uid_out_of_service != null) continue;
+    // Keyed on the link (`billsOutOfService`), never on the `replacement` type.
+    if (billsOutOfService(it as InvoiceItem)) continue;
     const relPath = it.path.slice(1);
     byKey.set(key(relPath), it as unknown as LineItem);
     const line = it as InvoiceItem;
@@ -1500,10 +1501,13 @@ function billLineFields(line: PurchaseDocumentItem, item: PurchaseItem): Documen
   const isObj = (v: unknown) => v !== null && typeof v === "object" && !Array.isArray(v);
   for (const f of purchaseBillSharedLineFields()) {
     if (f.kind === "derived" || f.kind === "homonym") continue;
-    // `{quantity, amount_cents}` (the `flat_money` group) is what the `quantity`
-    // entry states, summed over every bill; a per-bill field entry would report
-    // every partial bill as a difference.
-    if (f.group !== undefined) continue;
+    // `quantity` and `amount_cents` (in the `flat_money` group) are what the
+    // `quantity` entry states, summed over every bill; a per-bill field entry
+    // would report every partial bill as a difference. The group's third
+    // member, a replacement line's `out_of_service` (W4R), IS compared: `there`
+    // is fitted to this bill's quantity, so only a bill naming different
+    // records from its purchase line reports.
+    if (f.path === "quantity" || f.path === "amount_cents") continue;
     const segs = f.path.split(".");
     let unit = f.path;
     for (let i = 1; i < segs.length; i++) {

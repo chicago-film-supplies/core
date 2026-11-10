@@ -33,6 +33,11 @@ import {
   isLineItemType,
   SubstitutedForList,
   type SubstitutedForEntryType,
+  OutOfServiceList,
+  OutOfServiceListInput,
+  type OutOfServiceEntryType,
+  outOfServiceEntries,
+  outOfServiceLinkIssues,
   TimestampFields,
 } from "./common.ts";
 import {
@@ -609,8 +614,26 @@ export interface InvoiceDocLineItemType {
    * write. A nullable one seeds `null`. Catalogued in
    * `tests/stored-optionality.test.ts` as array-member-uncensusable — it sits in
    * an array of maps, which `orderBy` key-presence cannot reach.
+   *
+   * ⚠️ **Being replaced by {@link out_of_service}** (one-document-model W4R):
+   * either is accepted, never both on one line, and every reader goes through
+   * `outOfServiceEntries`. Removed at W4K's contract publish.
    */
   uid_out_of_service?: string | null;
+  /**
+   * The `out-of-service` records this line bills, each with its share of the
+   * line's `quantity` (`OutOfServiceList`; ruling 16, 2026-11-10). It replaced
+   * {@link uid_out_of_service} so that two records of one replacement twin
+   * under one parent MERGE into one line: what a record has been billed is
+   * now Σ the SHARES naming it, not Σ the quantities of the lines naming it.
+   * Everything said of `uid_out_of_service` above holds: valid on a
+   * `replacement` or `service` line only, mirrored into
+   * `Invoice.query_by_out_of_service`, and what keeps the line through an order
+   * sync. The shares sum to `quantity`.
+   *
+   * `.optional()` with `seed: false`, as `path_order_item` (array-member-uncensusable).
+   */
+  out_of_service?: OutOfServiceEntryType[];
   /**
    * The ORDER line this row bills, when the row sits somewhere else (core#125):
    * an operator dragged it into another group or destination inside its own
@@ -653,18 +676,26 @@ export interface InvoiceDocLineItemType {
  * stored line and the input line.
  */
 function checkOutOfServiceLineType(
-  line: { type: string; uid_out_of_service?: string | null },
+  line: {
+    type: string;
+    quantity?: number | null;
+    uid_out_of_service?: string | null;
+    out_of_service?: readonly OutOfServiceEntryType[];
+  },
   ctx: z.RefinementCtx,
 ): void {
   // `null` is "this line bills no record" — the form seed and the ordinary
-  // state — so only a stated uid is constrained.
-  if (line.uid_out_of_service != null && line.type !== "replacement" && line.type !== "service") {
+  // state — so only a stated link is constrained.
+  const key = line.out_of_service !== undefined ? "out_of_service" : "uid_out_of_service";
+  if (outOfServiceEntries(line).length > 0 && line.type !== "replacement" && line.type !== "service") {
     ctx.addIssue({
       code: "custom",
-      path: ["uid_out_of_service"],
-      message: `uid_out_of_service is valid only on a replacement or service line, not "${line.type}"`,
+      path: [key],
+      message: `${key} is valid only on a replacement or service line, not "${line.type}"`,
     });
   }
+  // Never both spellings; the list's shares sum to the line's quantity (W4R).
+  for (const [path, message] of outOfServiceLinkIssues(line)) ctx.addIssue({ code: "custom", path, message });
 }
 
 // Un-annotated so `_zod.propValues` survives for the discriminated union below
@@ -697,6 +728,8 @@ const InvoiceDocLineItemInner = z.strictObject({
   // exactly — see the interface docblock for why this one is not `.nullable()`.
   substituted_for: SubstitutedForList.optional(),
   uid_out_of_service: OutOfServiceId.nullable().optional(),
+  // `seed: false`: `[]` fails `.min(1)`, as `path_order_item` just below.
+  out_of_service: OutOfServiceList.optional().meta({ seed: false }),
   // See the interface docblock (core#125). The credit note's
   // `path_invoice_item` is its twin one grain down.
   // `seed: false`: `[]` fails `.min(1)`, so the form seed must omit the key.
@@ -1045,7 +1078,8 @@ export interface Invoice {
   query_by_orders: string[];
   number_orders: number[];
   /**
-   * Flat mirror of every line's `uid_out_of_service`, deduplicated — written by
+   * Flat mirror of every record a line bills (`out_of_service[].uid`, or a
+   * pre-W4R line's `uid_out_of_service`), deduplicated — written by
    * the invoice writer, never sent by a client. It exists so "which invoices
    * bill this lost/damaged record" is one `array-contains-any` query rather
    * than a scan of every line of every invoice.
@@ -1379,14 +1413,13 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   (inv) => {
     const fromLines = new Set<string>();
     for (const item of inv.items) {
-      const uid = (item as { uid_out_of_service?: string | null }).uid_out_of_service;
-      if (uid != null) fromLines.add(uid);
+      for (const entry of outOfServiceEntries(item as { quantity?: number | null })) fromLines.add(entry.uid);
     }
     const mirror = inv.query_by_out_of_service ?? [];
     return mirror.length === fromLines.size && mirror.every((u) => fromLines.has(u));
   },
   {
-    message: "query_by_out_of_service must list exactly the distinct uid_out_of_service values on items",
+    message: "query_by_out_of_service must list exactly the distinct out-of-service records on items",
     path: ["query_by_out_of_service"],
   },
 ).refine(
@@ -1529,6 +1562,8 @@ export interface InvoiceItemInputLineType {
    * from typed fields, so a key absent here is dropped on every PUT.
    */
   uid_out_of_service?: string | null;
+  /** @see `InvoiceDocLineItemType.out_of_service`. Either it or `uid_out_of_service`, never both. */
+  out_of_service?: OutOfServiceEntryType[];
   /**
    * @see `InvoiceDocLineItemType.path_order_item`. Operator-authored (a drop or
    * a split in the manager), so it needs an input channel for the
@@ -1582,6 +1617,7 @@ const InvoiceItemInputLineInner = z.object({
   zero_priced: z.boolean().nullable().optional(),
   quantity_per_parent: z.number().min(0).nullable().optional(),
   uid_out_of_service: OutOfServiceId.nullable().optional(),
+  out_of_service: OutOfServiceListInput.optional().meta({ seed: false }),
   path_order_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
 }).superRefine(checkItemPriceFormula).superRefine(checkOutOfServiceLineType);
 

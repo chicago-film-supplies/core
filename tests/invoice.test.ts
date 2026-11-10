@@ -1572,3 +1572,59 @@ Deno.test("InvoiceItemInputLine: a stored-form price echo keeps price_formula", 
   assertEquals(price.price_formula, formula);
   assertEquals("counts" in price, false);
 });
+
+// ── W4R: the out-of-service link as a list (owner ruling 16, 2026-11-10) ──
+
+Deno.test("W4R: out_of_service shares sum to the line's quantity, are unique by record, and stand beside uid_out_of_service never with it", () => {
+  const line: Record<string, unknown> = validLine; // quantity 1
+  const A = "Oos00000000000000001";
+  const B = "Oos00000000000000002";
+  const lost = (link: Record<string, unknown>) => ({ ...line, uid: "item2000000000000000", type: "replacement", ...link });
+  const paths = (link: Record<string, unknown>, mirror: string[]) => {
+    const r = InvoiceSchema.safeParse({ ...validInvoice, items: [ORDER_DIVIDER, line, lost(link)], query_by_out_of_service: mirror });
+    return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
+  };
+
+  // Two records on one line, one of them at a zero share: legal, and the mirror lists BOTH.
+  assertEquals(paths({ out_of_service: [{ uid: A, quantity: 0 }, { uid: B, quantity: 1 }] }, [A, B]), []);
+  assertEquals(paths({ out_of_service: [{ uid: A, quantity: 0 }, { uid: B, quantity: 1 }] }, [B]), ["query_by_out_of_service"]);
+  // Shares summing to more than the line: refused at the list.
+  assertEquals(paths({ out_of_service: [{ uid: A, quantity: 1 }, { uid: B, quantity: 1 }] }, [A, B]), ["items.2.out_of_service"]);
+  // A record twice: refused at the second entry's uid.
+  assertEquals(paths({ out_of_service: [{ uid: A, quantity: 0 }, { uid: A, quantity: 1 }] }, [A]), ["items.2.out_of_service.1.uid"]);
+  // Empty: refused (absent is "bills no record").
+  assertEquals(paths({ out_of_service: [] }, []), ["items.2.out_of_service"]);
+  // Both spellings on one line: refused at the old one.
+  assertEquals(paths({ uid_out_of_service: A, out_of_service: [{ uid: A, quantity: 1 }] }, [A]), ["items.2.uid_out_of_service"]);
+  // The pre-W4R spelling alone still parses (expand).
+  assertEquals(paths({ uid_out_of_service: A }, [A]), []);
+  // The list is still a replacement/service line's only.
+  const rental = InvoiceSchema.safeParse({
+    ...validInvoice,
+    items: [ORDER_DIVIDER, line, { ...lost({ out_of_service: [{ uid: A, quantity: 1 }] }), type: "rental" }],
+    query_by_out_of_service: [A],
+  });
+  assertEquals(rental.success ? [] : rental.error.issues.map((i) => i.path.join(".")), ["items.2.out_of_service"]);
+
+  // The input line: the same rules, and a line stating no quantity is not summed (the writer fills it).
+  const input = (link: Record<string, unknown>, quantity?: number) =>
+    InvoiceItemInputLine.safeParse({
+      uid: "item2000000000000000",
+      type: "replacement",
+      path: ["item2000000000000000"],
+      ...(quantity === undefined ? {} : { quantity }),
+      ...link,
+    });
+  const inputPaths = (link: Record<string, unknown>, quantity?: number) => {
+    const r = input(link, quantity);
+    return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
+  };
+  assertEquals(inputPaths({ out_of_service: [{ uid: A, quantity: 2 }, { uid: B, quantity: 1 }] }, 3), []);
+  assertEquals(inputPaths({ out_of_service: [{ uid: A, quantity: 2 }] }, 3), ["out_of_service"]);
+  assertEquals(inputPaths({ out_of_service: [{ uid: A, quantity: 2 }] }), []);
+  assertEquals(inputPaths({ uid_out_of_service: A, out_of_service: [{ uid: A, quantity: 2 }] }, 2), ["uid_out_of_service"]);
+  // An input entry strips an unknown key rather than refusing it.
+  const stripped = input({ out_of_service: [{ uid: A, quantity: 1, note: "x" }] }, 1);
+  assert(stripped.success);
+  assertEquals(stripped.data.out_of_service, [{ uid: A, quantity: 1 }]);
+});

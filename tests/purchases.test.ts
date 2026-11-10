@@ -1065,10 +1065,11 @@ Deno.test("PurchaseBillSchema: a replacement item names its record (a mark_lost 
     uid_out_of_service: movementId,
   });
   assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [billItem(), loss], totals: T_WITH_FREIGHT })), []);
-  // The record is what makes it a replacement: required there…
+  // The record is what makes it a replacement: required there (in either W4R
+  // spelling; the issue names the list, the spelling that survives)…
   const { uid_out_of_service: _r, ...unnamed } = loss as Record<string, unknown>;
   assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [billItem(), unnamed], totals: T_WITH_FREIGHT })), [
-    "items.3.uid_out_of_service",
+    "items.3.out_of_service",
   ]);
   // …and refused on a service line, which the strict arm does not declare it on.
   assertEquals(

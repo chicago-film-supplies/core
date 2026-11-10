@@ -62,6 +62,8 @@ import {
   payableLineUid,
 } from "../schemas/mod.ts";
 import { cumulativeShareCents } from "./purchases.ts";
+import { fitOutOfServiceEntries } from "./replacements.ts";
+import type { OutOfServiceEntryType } from "../schemas/mod.ts";
 import { roundDivHalfUp } from "./money.ts";
 import {
   collectSubstitutionAnchors,
@@ -470,9 +472,20 @@ function projectedLineHead(item: PurchaseItem, uidPurchase: string) {
 
 /**
  * What a purchase line's bill line attributes: the product a sale or rental
- * orders, or a service's optional product, and a replacement's record.
+ * orders, or a service's optional product, and a replacement's record(s).
+ *
+ * A replacement's `out_of_service` list is re-shared over the bill line's
+ * `quantity` (`fitOutOfServiceEntries`), so a partial bill's shares sum to its
+ * own quantity and an untouched partial bill compares equal to its projection.
+ * The re-share is first-come from the line's first unit for every bill, so a
+ * second partial bill of a two-record line names the records in the same order
+ * as the first. Nothing reads per-record billing on this side (W4R), so that is
+ * attribution, not money.
  */
-function attributionOf(item: PurchaseItem): { uid_product?: string; uid_out_of_service?: string } {
+function attributionOf(
+  item: PurchaseItem,
+  quantity: number,
+): { uid_product?: string; uid_out_of_service?: string; out_of_service?: OutOfServiceEntryType[] } {
   switch (item.type) {
     case "sale":
     case "rental":
@@ -482,7 +495,11 @@ function attributionOf(item: PurchaseItem): { uid_product?: string; uid_out_of_s
     case "replacement":
       return {
         ...(item.uid_product !== undefined ? { uid_product: item.uid_product } : {}),
-        uid_out_of_service: item.uid_out_of_service,
+        ...(item.out_of_service !== undefined
+          ? { out_of_service: fitOutOfServiceEntries(item.out_of_service, quantity) }
+          : item.uid_out_of_service !== undefined
+          ? { uid_out_of_service: item.uid_out_of_service }
+          : {}),
       };
     default: {
       const unreachable: never = item;
@@ -550,7 +567,7 @@ export function projectPurchaseLineToBillLine(
   return {
     type: item.type,
     ...projectedLineHead(item, opts.uid_purchase),
-    ...attributionOf(item),
+    ...attributionOf(item, opts.quantity),
     quantity: opts.quantity,
     amount_cents,
     price,
@@ -576,7 +593,7 @@ function projectTimeLine(item: PurchaseItem, opts: ProjectBillLineOptions): Purc
     subtotal_discounted_cents: 0,
     total_cents: 0,
   };
-  const head = { ...projectedLineHead(item, opts.uid_purchase), ...attributionOf(item), quantity: opts.quantity, amount_cents: 0, price };
+  const head = { ...projectedLineHead(item, opts.uid_purchase), ...attributionOf(item, opts.quantity), quantity: opts.quantity, amount_cents: 0, price };
   switch (item.type) {
     case "sale":
     case "rental":
@@ -584,7 +601,8 @@ function projectTimeLine(item: PurchaseItem, opts: ProjectBillLineOptions): Purc
     case "service":
       return { type: "service", ...head, ledger_account: item.ledger_account };
     case "replacement":
-      return { type: "replacement", ...head, ledger_account: item.ledger_account, uid_out_of_service: item.uid_out_of_service };
+      // The link is in `head` (`attributionOf`), in whichever spelling the line states.
+      return { type: "replacement", ...head, ledger_account: item.ledger_account };
     default: {
       const unreachable: never = item;
       throw new Error(`projectTimeLine: unknown purchase item ${JSON.stringify(unreachable)}`);
@@ -697,17 +715,19 @@ export function purchaseBillSharedDocFields(): readonly SharedField[] {
 let timeFields: readonly SharedField[] | null = null;
 
 /**
- * The fields a TIME line merges: the shared set without `amount_cents`, and
- * with `quantity` out of the `flat_money` group. A time line's amount is
- * DERIVED from its counts (`priceDocument`'s pushed time arm), as an order
- * line's money is, so it is re-priced rather than compared, and its quantity
- * follows on its own as an order line's does.
+ * The fields a TIME line merges: the shared set without `amount_cents`. A time
+ * line's amount is DERIVED from its counts (`priceDocument`'s pushed time arm),
+ * as an order line's money is, so it is re-priced rather than compared.
+ *
+ * The rest of the `flat_money` group stays a group: `quantity` and a
+ * replacement line's `out_of_service` (W4R), whose shares sum to the quantity,
+ * so they follow or stay together. On every other line `out_of_service` is
+ * absent from all three sides and the group decides exactly as `quantity`
+ * alone did before W4R.
  */
 function timeLineFields(): readonly SharedField[] {
   if (timeFields !== null) return timeFields;
-  timeFields = purchaseBillSharedLineFields()
-    .filter((f) => f.path !== "amount_cents")
-    .map((f) => (f.group === undefined ? f : { path: f.path, kind: f.kind }));
+  timeFields = purchaseBillSharedLineFields().filter((f) => f.path !== "amount_cents");
   return timeFields;
 }
 
@@ -739,7 +759,7 @@ export function projectPurchaseLineForBill(item: PurchaseItem, quantity: number)
         ? { ...item.price.discount, amount_cents: flatDiscountShare(item.price.discount, quantity, item.quantity) }
         : null,
     },
-    ...attributionOf(item),
+    ...attributionOf(item, quantity),
   };
 }
 

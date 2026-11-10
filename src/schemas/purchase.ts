@@ -124,6 +124,10 @@ import {
   COA_REVENUE_CODES,
   FirestoreTimestamp,
   type FirestoreTimestampType,
+  OutOfServiceList,
+  OutOfServiceListInput,
+  type OutOfServiceEntryType,
+  outOfServiceLinkIssues,
   TimestampFields,
   UidNameRef,
   type UidNameRefType,
@@ -643,15 +647,37 @@ export interface PurchaseServiceItem extends PurchaseItemBase {
 
 /**
  * A REPLACEMENT item — the supplier billing CFS for one of ITS units lost or
- * damaged in CFS's hands, naming the out-of-service record the loss opened
+ * damaged in CFS's hands, naming the out-of-service record(s) the loss opened
  * (until 2026-11 a `charge` with `uid_out_of_service`). No custody: the
  * settlement movement (`return_to_supplier`) moves the units, not this line.
  * Otherwise a {@link PurchaseServiceItem}.
+ *
+ * ⚠️ **`uid_product` is the lost rental's money-only TWIN, never the rental**
+ * (owner ruling 15, 2026-11-10): the rental's `uid_linked_replacement`, a
+ * `stock_method: "none"` product, which the writer derives from the record —
+ * as an invoice's replacement line names its twin. The line is keyed by it
+ * ({@link payableLineUid}), so naming the rental itself would sit the line at
+ * the subrent line's own path. With no twin it names no product and keys
+ * `custom-`. The lost rental stays reachable through the record's `uid_product`.
  */
 export interface PurchaseReplacementItem extends Omit<PurchaseServiceItem, "type"> {
   type: "replacement";
-  /** A `mark_lost` record's id is a MovementId, so `OutOfServiceId`. */
-  uid_out_of_service: string;
+  /**
+   * The pre-W4R single link — a `mark_lost` record's id is a MovementId, so
+   * `OutOfServiceId`. Exactly one of this and {@link out_of_service} during
+   * the W4R migration; removed (and `out_of_service` required) at W4K's
+   * contract publish.
+   */
+  uid_out_of_service?: string;
+  /**
+   * The records this line bills, each with its share of `quantity` (ruling 16):
+   * two records of one twin under one parent merge into one line. Follows the
+   * purchase onto its bills in the `flat_money` group with `quantity` and
+   * `amount_cents`, so a bill line either holds all three as the purchase does
+   * or keeps all three of its own, and its shares always sum to its quantity.
+   * A close that lowers `quantity` re-shares it (`fitOutOfServiceEntries`).
+   */
+  out_of_service?: OutOfServiceEntryType[];
 }
 
 /** Union of every purchase LINE arm, discriminated on `type`. */
@@ -917,6 +943,11 @@ function noCustodyIssues(
   addIssues(purchaseLineMoneyIssues(item), ctx);
   addIssues(payablePostingIssues(item.type, item.ledger_account), ctx);
   addIssues(replacementIssues(item), ctx);
+  if (item.type === "replacement") {
+    for (const [path, message] of outOfServiceLinkIssues(item, { required: true })) {
+      ctx.addIssue({ code: "custom", path, message });
+    }
+  }
 }
 
 const ServiceItemInner = z.strictObject({
@@ -930,7 +961,11 @@ const ReplacementItemInner = z.strictObject({
   ...itemHead,
   ...noCustodyShape,
   // A `mark_lost` record's id is a MovementId, so the union, not FirestoreId.
-  uid_out_of_service: OutOfServiceId.meta({ propagate: true }),
+  // Optional while W4R migrates; `noCustodyIssues` requires exactly one of the two.
+  uid_out_of_service: OutOfServiceId.optional().meta({ propagate: true }),
+  // A whole value in the `flat_money` group: it follows with `quantity` and
+  // `amount_cents` as one unit, so a bill line's shares stay its quantity's.
+  out_of_service: OutOfServiceList.optional().meta({ seed: false, shared: "value", ...flatMoney }),
 }).superRefine((item, ctx) => noCustodyIssues(item, ctx));
 
 /** Zod schema for PurchaseSaleItem. */
@@ -1091,7 +1126,10 @@ export interface PayableLineUidFields {
  *
  * - `sale` / `rental` → `uid_product`.
  * - `replacement` → `uid_product` when stated, as an invoice's replacement
- *   line takes its replacement product's uid (`utils/replacements.ts`).
+ *   line takes its replacement product's uid (`utils/replacements.ts`). That
+ *   product is the lost rental's money-only TWIN (`uid_linked_replacement`),
+ *   which the writer derives from the out-of-service record — never the
+ *   rental itself, whose uid keys the subrent line (owner ruling 15).
  * - `service`, and a `replacement` naming no product → a `custom-` uid. A line
  *   already carrying one keeps it; any other becomes `custom-` + its old uid,
  *   so a re-key is deterministic and repeatable, and a purchase line and the
@@ -1565,10 +1603,16 @@ export interface PurchaseServiceItemInputType extends PurchaseItemInputBase {
   uid_product?: string;
 }
 
-/** A replacement item as an operator raises it: a {@link PurchaseServiceItemInputType} naming its record. */
+/**
+ * A replacement item as an operator raises it: a {@link PurchaseServiceItemInputType}
+ * naming its record(s) — exactly one of `out_of_service` and the pre-W4R
+ * `uid_out_of_service`. `uid_product` is the lost rental's twin (ruling 15).
+ */
 export interface PurchaseReplacementItemInputType extends Omit<PurchaseServiceItemInputType, "type"> {
   type: "replacement";
-  uid_out_of_service: string;
+  uid_out_of_service?: string;
+  /** Shares sum to `quantity` when it is stated. */
+  out_of_service?: OutOfServiceEntryType[];
 }
 
 /** Union of every item input arm. */
@@ -1675,8 +1719,14 @@ const serviceItemInputArm = z.object({ type: z.literal("service"), ...noCustodyI
 const replacementItemInputArm = z.object({
   type: z.literal("replacement"),
   ...noCustodyInput,
-  uid_out_of_service: OutOfServiceId,
-}).superRefine((item, ctx) => noCustodyInputIssues(item, ctx));
+  uid_out_of_service: OutOfServiceId.optional(),
+  out_of_service: OutOfServiceListInput.optional().meta({ seed: false }),
+}).superRefine((item, ctx) => {
+  noCustodyInputIssues(item, ctx);
+  for (const [path, message] of outOfServiceLinkIssues(item, { required: true })) {
+    ctx.addIssue({ code: "custom", path, message });
+  }
+});
 
 /** Zod schema for PurchaseItemInputType — non-strict arms, so extra keys strip. */
 export const PurchaseItemInput: z.ZodType<PurchaseItemInputType> = z.discriminatedUnion("type", [

@@ -7,16 +7,24 @@
  *
  * ## Billed is DERIVED, never stored on the record
  *
- * An invoice line bills a record by carrying its uid
- * (`InvoiceDocLineItemType.uid_out_of_service`, valid on `type: "replacement"`
- * and `type: "service"`). What a record has been billed is the sum of those lines' quantities
- * across every invoice that is not `void`:
+ * An invoice line bills records by naming them with a share each
+ * (`InvoiceDocLineItemType.out_of_service`, valid on `type: "replacement"` and
+ * `type: "service"`; a pre-W4R line's single `uid_out_of_service` reads as one
+ * entry holding the line's whole quantity — {@link outOfServiceEntries}). What
+ * a record has been billed is the sum of its shares across every invoice that
+ * is not `void`:
  *
  * ```
- * billed(record)   = Σ line.quantity  where line.uid_out_of_service === record.uid
- *                                     and invoice.status !== "void"
+ * billed(record)   = Σ entry.quantity  over every line's out_of_service entry naming record.uid,
+ *                                      on invoices whose status !== "void"
  * unbilled(record) = record.quantity − billed(record)
  * ```
+ *
+ * A line may bill several records (W4R, owner ruling 16): two records of one
+ * replacement twin under one parent merge into one line, and each still bills
+ * its own share. {@link mergeOutOfServiceEntries}, {@link fitOutOfServiceEntries}
+ * and {@link splitOutOfServiceEntries} are the one author of a line's entries
+ * when lines merge, change quantity or split.
  *
  * So there is no marker to release when an invoice is voided or a line is
  * deleted — the sum simply stops counting it.
@@ -42,7 +50,13 @@
 import { componentSignatureHash, parseBookingId } from "./booking-id.ts";
 import { formatUnitRanges, serialAt } from "./units.ts";
 import { type CatalogRateLike, catalogRateSnapshot } from "./price-formulas.ts";
-import type { OOSReasonType } from "../schemas/common.ts";
+import {
+  billsOutOfService,
+  type OOSReasonType,
+  type OutOfServiceEntryType,
+  outOfServiceEntries,
+  type OutOfServiceLinkCarrier,
+} from "../schemas/common.ts";
 import { CUSTODY_RULES, OOS_BREAKDOWN_KEYS, oosBucketUnits, OUT_OF_SERVICE_KEYS, type OOSUnitsType, type UnitType } from "../schemas/mod.ts";
 
 /**
@@ -123,7 +137,7 @@ export type ReplacementSourceUnit = Pick<UnitType, "number" | "serial_history">;
 export interface ReplacementBillingInvoice {
   uid: string;
   status: string;
-  items: ReadonlyArray<{ type: string; quantity?: number; uid_out_of_service?: string | null }>;
+  items: ReadonlyArray<{ type: string } & OutOfServiceLinkCarrier>;
 }
 
 /** The fields of an order the seed reads. */
@@ -214,8 +228,9 @@ export function billedOutOfService(
   for (const invoice of invoices) {
     if (invoice.status === "void" || invoice.uid === excludeInvoiceUid) continue;
     for (const item of invoice.items) {
-      if (item.uid_out_of_service == null) continue;
-      billed.set(item.uid_out_of_service, (billed.get(item.uid_out_of_service) ?? 0) + (item.quantity ?? 0));
+      for (const entry of outOfServiceEntries(item)) {
+        billed.set(entry.uid, (billed.get(entry.uid) ?? 0) + entry.quantity);
+      }
     }
   }
   return billed;
@@ -244,7 +259,7 @@ export function isOnRequestBillableOutOfService(
  * @param otherInvoices - Every OTHER invoice naming those records (complete).
  */
 export function overbilledOutOfService(
-  lines: ReadonlyArray<{ quantity?: number; uid_out_of_service?: string | null }>,
+  lines: ReadonlyArray<OutOfServiceLinkCarrier>,
   records: readonly Pick<ReplacementSourceRecord, "uid" | "quantity">[],
   otherInvoices: readonly ReplacementBillingInvoice[],
   invoiceUid?: string,
@@ -252,8 +267,9 @@ export function overbilledOutOfService(
   const billed = billedOutOfService(otherInvoices, invoiceUid);
   const here = new Map<string, number>();
   for (const line of lines) {
-    if (line.uid_out_of_service == null) continue;
-    here.set(line.uid_out_of_service, (here.get(line.uid_out_of_service) ?? 0) + (line.quantity ?? 0));
+    for (const entry of outOfServiceEntries(line)) {
+      here.set(entry.uid, (here.get(entry.uid) ?? 0) + entry.quantity);
+    }
   }
   const byUid = new Map(records.map((r) => [r.uid, r]));
   const out: Array<{ uid_out_of_service: string; quantity: number; billed_elsewhere: number; billing_here: number }> =
@@ -470,4 +486,83 @@ export function seedOnRequestLines(
     });
   }
   return seeds;
+}
+
+export { billsOutOfService, outOfServiceEntries };
+
+/**
+ * Two lines' entries as ONE line's: shares of a record named on both are
+ * summed, records keep the order they first appear in (`a` then `b`). The
+ * merge-on-add of a replacement line onto a line of the same twin under the
+ * same parent (W4R, ruling 16). The result sums to the two lines' quantities.
+ */
+export function mergeOutOfServiceEntries(
+  a: readonly OutOfServiceEntryType[],
+  b: readonly OutOfServiceEntryType[],
+): OutOfServiceEntryType[] {
+  const out: OutOfServiceEntryType[] = [];
+  const at = new Map<string, number>();
+  for (const entry of [...a, ...b]) {
+    const i = at.get(entry.uid);
+    if (i === undefined) {
+      at.set(entry.uid, out.length);
+      out.push({ uid: entry.uid, quantity: entry.quantity });
+    } else out[i] = { uid: entry.uid, quantity: out[i].quantity + entry.quantity };
+  }
+  return out;
+}
+
+/**
+ * The same entries re-shared over a new line `quantity`, so their shares sum
+ * to it: in order, each entry keeps the smaller of its share and what is left;
+ * any excess lands on the LAST entry. No entry is ever dropped — a line a close
+ * cut to 0, or a partial bill's row, keeps naming its records at 0 (an entry's
+ * share may be 0, `OutOfServiceEntry`).
+ *
+ * Deterministic and idempotent: an unchanged quantity returns equal entries.
+ * The caller owns which units a re-share should favour when that matters; this
+ * is the rule a writer applies when nobody chose (a close, a partial bill's
+ * projection, a substitution's offset).
+ *
+ * @throws on an empty list, which no line stores (`OutOfServiceList` is `.min(1)`).
+ */
+export function fitOutOfServiceEntries(
+  entries: readonly OutOfServiceEntryType[],
+  quantity: number,
+): OutOfServiceEntryType[] {
+  if (entries.length === 0) throw new Error("fitOutOfServiceEntries: a line names at least one record");
+  let left = Math.max(0, quantity);
+  const out = entries.map((entry) => {
+    const share = Math.min(entry.quantity, left);
+    left -= share;
+    return { uid: entry.uid, quantity: share };
+  });
+  out[out.length - 1] = { uid: out[out.length - 1].uid, quantity: out[out.length - 1].quantity + left };
+  return out;
+}
+
+/**
+ * A split of a line into the `moved` units that go to a new row and the rest
+ * that stay, with the entries divided to match: the moved side takes entries
+ * FIRST-come, as {@link fitOutOfServiceEntries} does. A record whose share on a
+ * side is 0 is left off that side, unless it is the side's only record (a side
+ * always names one, since `OutOfServiceList` is `.min(1)`).
+ *
+ * @throws when `moved` is not strictly between 0 and the entries' total.
+ */
+export function splitOutOfServiceEntries(
+  entries: readonly OutOfServiceEntryType[],
+  moved: number,
+): { moved: OutOfServiceEntryType[]; kept: OutOfServiceEntryType[] } {
+  const total = entries.reduce((s, e) => s + e.quantity, 0);
+  if (!(moved > 0 && moved < total)) {
+    throw new Error(`splitOutOfServiceEntries: moved ${moved} must be between 0 and ${total}, exclusive`);
+  }
+  const take = fitOutOfServiceEntries(entries, moved);
+  const rest = entries.map((e, i) => ({ uid: e.uid, quantity: e.quantity - take[i].quantity }));
+  const nonZero = (side: OutOfServiceEntryType[]) => {
+    const kept = side.filter((e) => e.quantity > 0);
+    return kept.length > 0 ? kept : [side[0]];
+  };
+  return { moved: nonZero(take), kept: nonZero(rest) };
 }

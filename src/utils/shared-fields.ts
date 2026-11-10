@@ -104,6 +104,11 @@ export interface SharedField {
    * amount_cents}` is the case: its amount is a stated TOTAL with no rate to
    * re-derive from, so a quantity that followed beside an amount that stayed
    * would change the implied unit price silently (one-document-model Phase 3).
+   *
+   * A member may be a whole value (`shared: "value"`), compared as one value:
+   * a payable replacement line's `out_of_service` list sits in `flat_money`
+   * too, because its shares sum to the line's quantity and must move with it
+   * (W4R, 2026-11-10).
    */
   group?: string;
 }
@@ -147,9 +152,9 @@ export const PROPAGATE_META_KEY = "propagate";
  */
 export const SHARED_META_KEY = "shared";
 /**
- * The meta key that puts a shared scalar in a merge GROUP:
- * `.meta({ propagate: true, shared_group: "flat_money" })`. Every member of a
- * group sits in the same row; see {@link SharedField.group}.
+ * The meta key that puts a shared scalar — or a `shared: "value"` field — in a
+ * merge GROUP: `.meta({ propagate: true, shared_group: "flat_money" })`. Every
+ * member of a group sits in the same row; see {@link SharedField.group}.
  */
 export const SHARED_GROUP_META_KEY = "shared_group";
 
@@ -314,7 +319,13 @@ export function classifySharedFields(
       return;
     }
     if (metaOf(both, SHARED_META_KEY) === "value") {
-      fields.push({ path, kind: "propagated", derived_keys: derivedKeysOf(aNodes, bNodes) });
+      const group = metaOf(both, SHARED_GROUP_META_KEY);
+      fields.push({
+        path,
+        kind: "propagated",
+        derived_keys: derivedKeysOf(aNodes, bNodes),
+        ...(typeof group === "string" ? { group } : {}),
+      });
       return;
     }
 

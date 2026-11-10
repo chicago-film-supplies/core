@@ -123,7 +123,7 @@
  * @module
  */
 import type { CreditNoteStatusType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemType, InvoiceStatusType } from "../schemas/mod.ts";
-import { isLineItemType } from "../schemas/mod.ts";
+import { billsOutOfService, isLineItemType } from "../schemas/mod.ts";
 import {
   extensionSectionTargets,
   getOrderScopedItems,
@@ -661,7 +661,7 @@ export function invoiceOnlyLines(
 
     for (const item of scoped) {
       if (!isLineItemType(item.type) || !INVOICE_ONLY_TYPES.has(item.type)) continue;
-      if ((item as { uid_out_of_service?: string | null }).uid_out_of_service != null) continue;
+      if (billsOutOfService(item)) continue;
       const path = item.path ?? [];
       if (path[0] !== orderUid) continue;
       if (isInExtensionSection(path, orderUid, extensionTargets)) continue;

@@ -2,7 +2,7 @@
  * Shared schema fragments used across multiple collections.
  */
 import { z } from "zod";
-import { AnyUid, FirestoreId, ItemUid } from "./_uid.ts";
+import { AnyUid, FirestoreId, ItemUid, OutOfServiceId } from "./_uid.ts";
 import { usState } from "./_usState.ts";
 import { extendChecked } from "./_extend.ts";
 
@@ -172,6 +172,126 @@ function uniqueSubstitutedForPaths(entries: readonly SubstitutedForEntryType[], 
 export const SubstitutedForListInput: z.ZodType<SubstitutedForEntryType[]> = z.array(
   z.object({ path: z.array(ItemUid).min(1), quantity: z.int().positive() }),
 ).superRefine(uniqueSubstitutedForPaths);
+
+/**
+ * One out-of-service record a billing line bills, and how many of the line's
+ * units bill it (one-document-model W4R, owner ruling 16, 2026-11-10).
+ *
+ * ⚠️ **`quantity` may be 0, unlike {@link SubstitutedForEntryType}'s.** An entry
+ * is provenance as well as a billed share: a payable line a close cut to 0
+ * (`purchaseLineCloseOutcome`), or a partial bill's row, still names the
+ * record(s) it was raised for while billing none of them. A reader summing the
+ * shares counts 0 for it, which is the truth.
+ *
+ * An entry may exceed its record's quantity: billing past a record stays an
+ * advisory (`overbilledOutOfService`), never a refusal.
+ */
+export interface OutOfServiceEntryType {
+  /** The `out-of-service` record. A `mark_lost` record's id is a `MovementId`. */
+  uid: string;
+  quantity: number;
+}
+
+/** @see {@link OutOfServiceEntryType} */
+export const OutOfServiceEntry: z.ZodType<OutOfServiceEntryType> = z.strictObject({
+  uid: OutOfServiceId,
+  quantity: z.int().min(0),
+});
+
+function uniqueOutOfServiceUids(entries: readonly OutOfServiceEntryType[], ctx: z.RefinementCtx): void {
+  const seen = new Set<string>();
+  for (const [i, entry] of entries.entries()) {
+    if (seen.has(entry.uid)) {
+      ctx.addIssue({ code: "custom", path: [i, "uid"], message: "out_of_service entries must be unique by uid; add to the existing entry's quantity" });
+    }
+    seen.add(entry.uid);
+  }
+}
+
+/**
+ * `out_of_service` on a billing line (an invoice's `replacement` or `service`
+ * line, every payable `replacement` line): the out-of-service records it bills.
+ * It replaced the single `uid_out_of_service` so that two records of one
+ * replacement twin under one parent MERGE into one line instead of colliding
+ * (ruling 16). The `{ uid, quantity }[]` shape is `substituted_for`'s, keyed by
+ * record instead of by path.
+ *
+ * Entries are unique by `uid` and ACCUMULATE (`mergeOutOfServiceEntries`). Their
+ * shares sum to the line's `quantity` — a LINE rule ({@link outOfServiceLinkIssues}),
+ * since the list cannot see its line.
+ *
+ * `.min(1)`: an absent key is "bills no record", and `[]` would be a second
+ * spelling of it. Declare it with `seed: false`, as `path_order_item` is, since a
+ * form seed of `[]` would fail.
+ */
+export const OutOfServiceList: z.ZodType<OutOfServiceEntryType[]> = z.array(OutOfServiceEntry).min(1)
+  .superRefine(uniqueOutOfServiceUids);
+
+/** {@link OutOfServiceList} as an input takes it: an extra key is stripped, as every input node's is. */
+export const OutOfServiceListInput: z.ZodType<OutOfServiceEntryType[]> = z.array(
+  z.object({ uid: OutOfServiceId, quantity: z.int().min(0) }),
+).min(1).superRefine(uniqueOutOfServiceUids);
+
+/** The two spellings of a line's out-of-service link while W4R migrates (see {@link outOfServiceEntries}). */
+export interface OutOfServiceLinkCarrier {
+  quantity?: number | null;
+  /** The pre-W4R single link. Retired at W4K's contract publish. */
+  uid_out_of_service?: string | null;
+  out_of_service?: readonly OutOfServiceEntryType[];
+}
+
+/**
+ * **The one reader of a line's out-of-service link**, in either spelling: the
+ * list as stated, or a pre-W4R `uid_out_of_service: R` read as
+ * `[{ uid: R, quantity: line.quantity }]`, or `[]` for a line that bills no
+ * record. Every line reader goes through it — the billed sum, the over-bill
+ * advisory, the invoice mirror, the diff, the syncs — so a migrated and an
+ * unmigrated line answer identically.
+ *
+ * Lives in schemas because the invoice mirror's refine reads it (schemas never
+ * import utils); re-exported from `@cfs/core/utils/replacements`.
+ */
+export function outOfServiceEntries(line: OutOfServiceLinkCarrier): OutOfServiceEntryType[] {
+  if (line.out_of_service !== undefined) return line.out_of_service.map((e) => ({ uid: e.uid, quantity: e.quantity }));
+  if (line.uid_out_of_service != null) return [{ uid: line.uid_out_of_service, quantity: line.quantity ?? 0 }];
+  return [];
+}
+
+/** Whether a line bills an out-of-service record at all, in either spelling. */
+export function billsOutOfService(line: OutOfServiceLinkCarrier): boolean {
+  return line.out_of_service !== undefined || line.uid_out_of_service != null;
+}
+
+/**
+ * The LINE rules of an out-of-service link, as `[path, message]` pairs:
+ *
+ * - never both spellings on one line (W4R expand: either is accepted, never both);
+ * - with `required` (the payable `replacement` arm), exactly one of them;
+ * - the list's shares sum to the line's `quantity`. A line with no `quantity`
+ *   key (the bill's charge input, whose writer stamps 1) passes `quantity`.
+ */
+export function outOfServiceLinkIssues(
+  line: OutOfServiceLinkCarrier,
+  opts: { required?: boolean; quantity?: number } = {},
+): Array<[PropertyKey[], string]> {
+  const issues: Array<[PropertyKey[], string]> = [];
+  const hasList = line.out_of_service !== undefined;
+  const hasUid = line.uid_out_of_service != null;
+  if (hasList && hasUid) {
+    issues.push([["uid_out_of_service"], "state out_of_service or uid_out_of_service, never both"]);
+  } else if (opts.required && !hasList && !hasUid) {
+    issues.push([["out_of_service"], "a replacement line names the out-of-service record(s) it bills"]);
+  }
+  const quantity = opts.quantity ?? line.quantity;
+  // An empty list is the list's own `.min(1)` refusal; summing it would name it twice.
+  if (hasList && line.out_of_service!.length > 0 && quantity != null) {
+    const sum = line.out_of_service!.reduce((s, e) => s + e.quantity, 0);
+    if (sum !== quantity) {
+      issues.push([["out_of_service"], `out_of_service shares sum to ${sum}, not the line's quantity ${quantity}`]);
+    }
+  }
+  return issues;
+}
 
 /**
  * One `exchanged_for` entry: a row the exchange takes units back from, how many, and

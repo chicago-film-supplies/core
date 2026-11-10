@@ -785,6 +785,16 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "isBillableOutOfService",
     "overbilledOutOfService",
     "seedReplacementLines",
+    // W4R (one-document-model, ruling 16): merge/fit/split are the WRITE path's
+    // one author of a line's entries (manager merge-on-add and split, the API's
+    // close and projection); a template never edits a line. The two readers
+    // exist for the pre-W4R spelling during the migration; once it has run a
+    // template reads `line.out_of_service` directly, so they are not promoted.
+    "billsOutOfService",
+    "fitOutOfServiceEntries",
+    "mergeOutOfServiceEntries",
+    "outOfServiceEntries",
+    "splitOutOfServiceEntries",
   ],
   // `utils/fulfillment-items.ts` is WRITE-PATH machinery shared by the API and
   // the manager — it rebuilds a fulfillment's items array from a picker

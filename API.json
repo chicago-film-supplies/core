@@ -2667,7 +2667,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocLineItemType",
-          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  xero_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  uid_out_of_service?: string | null;\n  path_order_item?: string[];\n}",
+          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  xero_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  uid_out_of_service?: string | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_order_item?: string[];\n}",
           "doc": "A billable line item on an invoice."
         },
         {
@@ -2739,7 +2739,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  uid_tax_class_override?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  uid_out_of_service?: string | null;\n  path_order_item?: string[];\n}",
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  uid_tax_class_override?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  uid_out_of_service?: string | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_order_item?: string[];\n}",
           "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItem`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
@@ -3920,6 +3920,18 @@
         },
         {
           "kind": "variable",
+          "name": "OutOfServiceEntry",
+          "declaration": "const OutOfServiceEntry: z.ZodType<OutOfServiceEntryType>;",
+          "doc": ""
+        },
+        {
+          "kind": "interface",
+          "name": "OutOfServiceEntryType",
+          "declaration": "interface OutOfServiceEntryType {\n  uid: string;\n  quantity: number;\n}",
+          "doc": "One out-of-service record a billing line bills, and how many of the line's\nunits bill it (one-document-model W4R, owner ruling 16, 2026-11-10).\n\n⚠️ **`quantity` may be 0, unlike {@link SubstitutedForEntryType}'s.** An entry\nis provenance as well as a billed share: a payable line a close cut to 0\n(`purchaseLineCloseOutcome`), or a partial bill's row, still names the\nrecord(s) it was raised for while billing none of them. A reader summing the\nshares counts 0 for it, which is the truth.\n\nAn entry may exceed its record's quantity: billing past a record stays an\nadvisory (`overbilledOutOfService`), never a refusal."
+        },
+        {
+          "kind": "variable",
           "name": "OutOfServiceId",
           "declaration": "const OutOfServiceId: z.ZodType<string>;",
           "doc": "`out-of-service.uid` — **two populations, and the union is the point.**\n\n| population | shape | minted by |\n|---|---|---|\n| a LOSS event | {@link MovementId} | `api-cloudrun/src/services/bookings.ts` — the record IS its `mark_lost` / `mark_damaged` movement, seen from the inventory side, so it takes that movement's id AND its number |\n| anything else | {@link FirestoreId} | `POST /out-of-service` (an operator taking units out of service for cleaning or maintenance — no movement, so nothing to derive from), plus every record written before api-cloudrun#1094 |\n\n⭐ **Why this is a new id ROLE and not a bent derivation.** The module note\nabove says to bend the derivation rather than the schema, and its reasoning is\nthat widening {@link FirestoreId} would weaken a guard covering 41 document\ntypes for the sake of two. Nothing is widened here: `FirestoreId` is\nuntouched, and ONE field gains a second named shape, exactly as `bookings`,\n`quotes` and `transactions` each carry their own. The alternative — 20 hex\nchars of SHA-256 over the movement id, the `templates` family trick — would\nsatisfy the existing validator and make the pairing **unreadable**, which is\nthe property this module already regrets for template families. Owner ruling,\n2026-09-22.\n\n⚠️ **A shared id across two collections is NOT a shared document.** The record\nand the movement are separate documents with separate schemas and separate\nwriters; the id says they describe one event. Do not infer that reading one\ngives you the other, and do not \"resolve\" a record by fetching\n`transactions/{uid}` — the record's own fields are authoritative for the\nrecord.\n\n🔴 **A loss record is therefore addressable by derivation and a manual one is\nnot**, so `out-of-service` has no single \"find the record for X\" rule. Query\n`query_by_sources` for that, exactly as before."
@@ -3929,6 +3941,18 @@
           "name": "OutOfServiceKeyType",
           "declaration": "type OutOfServiceKeyType = indexedAccess;",
           "doc": "One out-of-service key."
+        },
+        {
+          "kind": "interface",
+          "name": "OutOfServiceLinkCarrier",
+          "declaration": "interface OutOfServiceLinkCarrier {\n  quantity?: number | null;\n  uid_out_of_service?: string | null;\n  out_of_service?: readonly OutOfServiceEntryType[];\n}",
+          "doc": "The two spellings of a line's out-of-service link while W4R migrates (see {@link outOfServiceEntries})."
+        },
+        {
+          "kind": "variable",
+          "name": "OutOfServiceList",
+          "declaration": "const OutOfServiceList: z.ZodType<OutOfServiceEntryType[]>;",
+          "doc": "`out_of_service` on a billing line (an invoice's `replacement` or `service`\nline, every payable `replacement` line): the out-of-service records it bills.\nIt replaced the single `uid_out_of_service` so that two records of one\nreplacement twin under one parent MERGE into one line instead of colliding\n(ruling 16). The `{ uid, quantity }[]` shape is `substituted_for`'s, keyed by\nrecord instead of by path.\n\nEntries are unique by `uid` and ACCUMULATE (`mergeOutOfServiceEntries`). Their\nshares sum to the line's `quantity` — a LINE rule ({@link outOfServiceLinkIssues}),\nsince the list cannot see its line.\n\n`.min(1)`: an absent key is \"bills no record\", and `[]` would be a second\nspelling of it. Declare it with `seed: false`, as `path_order_item` is, since a\nform seed of `[]` would fail."
         },
         {
           "kind": "variable",
@@ -4683,7 +4707,7 @@
         {
           "kind": "interface",
           "name": "PurchaseBillLineInputType",
-          "declaration": "interface PurchaseBillLineInputType {\n  type: SharedLineType;\n  uid: string;\n  path: string[];\n  name?: string;\n  description?: string;\n  quantity?: number;\n  amount_cents?: number;\n  ledger_account?: COACodeType | null;\n  uid_product?: string;\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  uid_out_of_service?: string;\n  path_purchase_item?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  uid_tax_class_override?: string | null;\n  uid_tracking_category?: string | null;\n  price?: typeLiteral;\n}",
+          "declaration": "interface PurchaseBillLineInputType {\n  type: SharedLineType;\n  uid: string;\n  path: string[];\n  name?: string;\n  description?: string;\n  quantity?: number;\n  amount_cents?: number;\n  ledger_account?: COACodeType | null;\n  uid_product?: string;\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  uid_out_of_service?: string;\n  out_of_service?: OutOfServiceEntryType[];\n  path_purchase_item?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  uid_tax_class_override?: string | null;\n  uid_tracking_category?: string | null;\n  price?: typeLiteral;\n}",
           "doc": "A line row of a bill's whole-array input.\n\nThe writer pairs each row to a stored one (exact path, then the row's uid and\nancestry), and the paired row is the base for every key this row omits, so a\nrow that moved keeps them. A row no stored row pairs with is, in order: a\nsplit's clone if it states {@link path_purchase_item}; a line of the purchase\nnamed by its path; or a line the bill itself authors, which states its name,\naccount, quantity and money (and `uid_product` on a sale or rental).\n\nOn a TIME line `price.rates` restates each unit rate; a flat line's\n`amount_cents` is stated directly (gross when a discount is set).\n\n`path_purchase_item` absent keeps the stored pointer, and there is no `null`\nform: the writer stamps every moved row's pointer and clears one a move back\nmade pointless, so a stale client's identity-only rows cannot clear one.\nThe writer assigns the tax class and a bill-authored line's flat formula."
         },
         {
@@ -4839,7 +4863,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocumentChargeItemInputType",
-          "declaration": "interface PurchaseDocumentChargeItemInputType {\n  name: string;\n  description?: string;\n  ledger_account: COACodeType;\n  amount_cents: number;\n  uid_product?: string;\n  uid_out_of_service?: string;\n  uid_tracking_category?: string | null;\n}",
+          "declaration": "interface PurchaseDocumentChargeItemInputType {\n  name: string;\n  description?: string;\n  ledger_account: COACodeType;\n  amount_cents: number;\n  uid_product?: string;\n  uid_out_of_service?: string;\n  out_of_service?: OutOfServiceEntryType[];\n  uid_tracking_category?: string | null;\n}",
           "doc": "A document-only charge item as an operator states it on a PUSHED bill or\ncredit (freight nobody expected, a fee). The writer mints its `uid`/`path`,\nstamps a Fixed formula snapshot and `quantity: 1`.\n`uid_tracking_category` follows the order/invoice line rule: absent or `null`\ntakes the attributed product's category (none when it names no product); a\nuid sets it and must name a live category.\n\n⚠️ **The node stays STRICT, though both push inputs embed it.** Stripping\nwould let an api that predates a field silently drop it rather than 400, and\nan attribution would vanish with nothing failing (api-cloudrun#1360)."
         },
         {
@@ -4911,8 +4935,8 @@
         {
           "kind": "interface",
           "name": "PurchaseDocumentReplacementItem",
-          "declaration": "interface PurchaseDocumentReplacementItem {\n  type: \"replacement\";\n  uid_out_of_service: string;\n}",
-          "doc": "A bill or credit REPLACEMENT line — the supplier billing CFS for its unit\nlost or damaged in CFS's hands, naming the out-of-service record (until\n2026-11 a `charge` with `uid_out_of_service`). A `mark_lost` record's id is a\n`MovementId`, hence `OutOfServiceId`."
+          "declaration": "interface PurchaseDocumentReplacementItem {\n  type: \"replacement\";\n  uid_out_of_service?: string;\n  out_of_service?: OutOfServiceEntryType[];\n}",
+          "doc": "A bill or credit REPLACEMENT line — the supplier billing CFS for its unit\nlost or damaged in CFS's hands, naming the out-of-service record(s) (until\n2026-11 a `charge` with `uid_out_of_service`). A `mark_lost` record's id is a\n`MovementId`, hence `OutOfServiceId`.\n\n`uid_product` is the lost rental's money-only twin, never the rental (owner\nruling 15; see `PurchaseReplacementItem`)."
         },
         {
           "kind": "variable",
@@ -5091,14 +5115,14 @@
         {
           "kind": "interface",
           "name": "PurchaseReplacementItem",
-          "declaration": "interface PurchaseReplacementItem {\n  type: \"replacement\";\n  uid_out_of_service: string;\n}",
-          "doc": "A REPLACEMENT item — the supplier billing CFS for one of ITS units lost or\ndamaged in CFS's hands, naming the out-of-service record the loss opened\n(until 2026-11 a `charge` with `uid_out_of_service`). No custody: the\nsettlement movement (`return_to_supplier`) moves the units, not this line.\nOtherwise a {@link PurchaseServiceItem}."
+          "declaration": "interface PurchaseReplacementItem {\n  type: \"replacement\";\n  uid_out_of_service?: string;\n  out_of_service?: OutOfServiceEntryType[];\n}",
+          "doc": "A REPLACEMENT item — the supplier billing CFS for one of ITS units lost or\ndamaged in CFS's hands, naming the out-of-service record(s) the loss opened\n(until 2026-11 a `charge` with `uid_out_of_service`). No custody: the\nsettlement movement (`return_to_supplier`) moves the units, not this line.\nOtherwise a {@link PurchaseServiceItem}.\n\n⚠️ **`uid_product` is the lost rental's money-only TWIN, never the rental**\n(owner ruling 15, 2026-11-10): the rental's `uid_linked_replacement`, a\n`stock_method: \"none\"` product, which the writer derives from the record —\nas an invoice's replacement line names its twin. The line is keyed by it\n({@link payableLineUid}), so naming the rental itself would sit the line at\nthe subrent line's own path. With no twin it names no product and keys\n`custom-`. The lost rental stays reachable through the record's `uid_product`."
         },
         {
           "kind": "interface",
           "name": "PurchaseReplacementItemInputType",
-          "declaration": "interface PurchaseReplacementItemInputType {\n  type: \"replacement\";\n  uid_out_of_service: string;\n}",
-          "doc": "A replacement item as an operator raises it: a {@link PurchaseServiceItemInputType} naming its record."
+          "declaration": "interface PurchaseReplacementItemInputType {\n  type: \"replacement\";\n  uid_out_of_service?: string;\n  out_of_service?: OutOfServiceEntryType[];\n}",
+          "doc": "A replacement item as an operator raises it: a {@link PurchaseServiceItemInputType}\nnaming its record(s) — exactly one of `out_of_service` and the pre-W4R\n`uid_out_of_service`. `uid_product` is the lost rental's twin (ruling 15)."
         },
         {
           "kind": "variable",
@@ -7519,6 +7543,14 @@
         },
         {
           "kind": "function",
+          "name": "billsOutOfService",
+          "signature": "billsOutOfService(line: OutOfServiceLinkCarrier): boolean",
+          "doc": "Whether a line bills an out-of-service record at all, in either spelling.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "canOperatorTransition",
           "signature": "canOperatorTransition(from: string, to: string): boolean",
           "doc": "May an operator move `from` to `to` via `PUT /invoices/{uid}`?\n\nRead this rather than the column, so the manager cannot offer a button the\nserver will 400 — and so a status outside the vocabulary answers `false`\ninstead of throwing on an undefined lookup.",
@@ -8226,6 +8258,22 @@
         },
         {
           "kind": "function",
+          "name": "outOfServiceEntries",
+          "signature": "outOfServiceEntries(line: OutOfServiceLinkCarrier): OutOfServiceEntryType[]",
+          "doc": "**The one reader of a line's out-of-service link**, in either spelling: the\nlist as stated, or a pre-W4R `uid_out_of_service: R` read as\n`[{ uid: R, quantity: line.quantity }]`, or `[]` for a line that bills no\nrecord. Every line reader goes through it — the billed sum, the over-bill\nadvisory, the invoice mirror, the diff, the syncs — so a migrated and an\nunmigrated line answer identically.\n\nLives in schemas because the invoice mirror's refine reads it (schemas never\nimport utils); re-exported from `@cfs/core/utils/replacements`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "outOfServiceLinkIssues",
+          "signature": "outOfServiceLinkIssues(line: OutOfServiceLinkCarrier, _: unknown): Array<[PropertyKey[], string]>",
+          "doc": "The LINE rules of an out-of-service link, as `[path, message]` pairs:\n\n- never both spellings on one line (W4R expand: either is accepted, never both);\n- with `required` (the payable `replacement` arm), exactly one of them;\n- the list's shares sum to the line's `quantity`. A line with no `quantity`\n  key (the bill's charge input, whose writer stamps 1) passes `quantity`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "ownsKey",
           "signature": "ownsKey(bookingType: string, key: BookingBreakdownKeyType): boolean",
           "doc": "Whether CFS still OWNS a booking's units in `key` — **the one author of \"a\nsale's `out` is no longer CFS's\"** (stock campaign, P1).\n\n| booking type | owns |\n|---|---|\n| a line that comes back (`rental`, {@link isCollectionLineType}) | every key |\n| anything else (`sale`, `service`, `surcharge`) | the plan keys, `prepped` and `returned` — never `out` or an out-of-service key |\n\nA sale's units leave CFS ownership at the check-out (the `sale` movement\ndraws cost) and re-enter it only on a `sale_return`, so the units a sale\nholds in `out`, or in `lost`/`damaged` after leaving, are the customer's.\n\nEverything that asks \"is this `out` in flight?\", \"does this booking still\nhold units?\", \"is it closed?\" reads this predicate rather than testing\n`type === \"rental\"` or `type === \"sale\"`: about twenty hand-written copies\nof that test had drifted (core `deriveCustodyStatus` read a fully-out sale\nas `active` while `isBookingClosed` read it closed).\n\n⚠️ **`service` and `surcharge` read like a sale, and that settles a split.**\n`heldByBooking` used to keep their `out` held while `isBookingClosed` and\n`liveCustody` read it terminal. Neither type carries an inventory ledger, so\nno availability answer moves; the rule just stops having two answers.",
@@ -8244,7 +8292,7 @@
           "kind": "function",
           "name": "payableLineUid",
           "signature": "payableLineUid(line: PayableLineUidFields): string",
-          "doc": "The `uid` a payable line takes: its product's, as an order or invoice\ncatalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).\n\n- `sale` / `rental` → `uid_product`.\n- `replacement` → `uid_product` when stated, as an invoice's replacement\n  line takes its replacement product's uid (`utils/replacements.ts`).\n- `service`, and a `replacement` naming no product → a `custom-` uid. A line\n  already carrying one keeps it; any other becomes `custom-` + its old uid,\n  so a re-key is deterministic and repeatable, and a purchase line and the\n  bill line projected from it (which share the old uid) land on one uid.\n\nA product does not repeat within a group on any document: two of one product\nin one section is a split into a sibling group. Dividers keep their uids and\nare not lines, so this is never asked of one.",
+          "doc": "The `uid` a payable line takes: its product's, as an order or invoice\ncatalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).\n\n- `sale` / `rental` → `uid_product`.\n- `replacement` → `uid_product` when stated, as an invoice's replacement\n  line takes its replacement product's uid (`utils/replacements.ts`). That\n  product is the lost rental's money-only TWIN (`uid_linked_replacement`),\n  which the writer derives from the out-of-service record — never the\n  rental itself, whose uid keys the subrent line (owner ruling 15).\n- `service`, and a `replacement` naming no product → a `custom-` uid. A line\n  already carrying one keeps it; any other becomes `custom-` + its old uid,\n  so a re-key is deterministic and repeatable, and a purchase line and the\n  bill line projected from it (which share the old uid) land on one uid.\n\nA product does not repeat within a group on any document: two of one product\nin one section is a split into a sibling group. Dividers keep their uids and\nare not lines, so this is never asked of one.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -9218,9 +9266,39 @@
         },
         {
           "kind": "variable",
+          "name": "OutOfServiceEntry",
+          "declaration": "const OutOfServiceEntry: z.ZodType<OutOfServiceEntryType>;",
+          "doc": ""
+        },
+        {
+          "kind": "interface",
+          "name": "OutOfServiceEntryType",
+          "declaration": "interface OutOfServiceEntryType {\n  uid: string;\n  quantity: number;\n}",
+          "doc": "One out-of-service record a billing line bills, and how many of the line's\nunits bill it (one-document-model W4R, owner ruling 16, 2026-11-10).\n\n⚠️ **`quantity` may be 0, unlike {@link SubstitutedForEntryType}'s.** An entry\nis provenance as well as a billed share: a payable line a close cut to 0\n(`purchaseLineCloseOutcome`), or a partial bill's row, still names the\nrecord(s) it was raised for while billing none of them. A reader summing the\nshares counts 0 for it, which is the truth.\n\nAn entry may exceed its record's quantity: billing past a record stays an\nadvisory (`overbilledOutOfService`), never a refusal."
+        },
+        {
+          "kind": "variable",
           "name": "OutOfServiceId",
           "declaration": "const OutOfServiceId: z.ZodType<string>;",
           "doc": "`out-of-service.uid` — **two populations, and the union is the point.**\n\n| population | shape | minted by |\n|---|---|---|\n| a LOSS event | {@link MovementId} | `api-cloudrun/src/services/bookings.ts` — the record IS its `mark_lost` / `mark_damaged` movement, seen from the inventory side, so it takes that movement's id AND its number |\n| anything else | {@link FirestoreId} | `POST /out-of-service` (an operator taking units out of service for cleaning or maintenance — no movement, so nothing to derive from), plus every record written before api-cloudrun#1094 |\n\n⭐ **Why this is a new id ROLE and not a bent derivation.** The module note\nabove says to bend the derivation rather than the schema, and its reasoning is\nthat widening {@link FirestoreId} would weaken a guard covering 41 document\ntypes for the sake of two. Nothing is widened here: `FirestoreId` is\nuntouched, and ONE field gains a second named shape, exactly as `bookings`,\n`quotes` and `transactions` each carry their own. The alternative — 20 hex\nchars of SHA-256 over the movement id, the `templates` family trick — would\nsatisfy the existing validator and make the pairing **unreadable**, which is\nthe property this module already regrets for template families. Owner ruling,\n2026-09-22.\n\n⚠️ **A shared id across two collections is NOT a shared document.** The record\nand the movement are separate documents with separate schemas and separate\nwriters; the id says they describe one event. Do not infer that reading one\ngives you the other, and do not \"resolve\" a record by fetching\n`transactions/{uid}` — the record's own fields are authoritative for the\nrecord.\n\n🔴 **A loss record is therefore addressable by derivation and a manual one is\nnot**, so `out-of-service` has no single \"find the record for X\" rule. Query\n`query_by_sources` for that, exactly as before."
+        },
+        {
+          "kind": "interface",
+          "name": "OutOfServiceLinkCarrier",
+          "declaration": "interface OutOfServiceLinkCarrier {\n  quantity?: number | null;\n  uid_out_of_service?: string | null;\n  out_of_service?: readonly OutOfServiceEntryType[];\n}",
+          "doc": "The two spellings of a line's out-of-service link while W4R migrates (see {@link outOfServiceEntries})."
+        },
+        {
+          "kind": "variable",
+          "name": "OutOfServiceList",
+          "declaration": "const OutOfServiceList: z.ZodType<OutOfServiceEntryType[]>;",
+          "doc": "`out_of_service` on a billing line (an invoice's `replacement` or `service`\nline, every payable `replacement` line): the out-of-service records it bills.\nIt replaced the single `uid_out_of_service` so that two records of one\nreplacement twin under one parent MERGE into one line instead of colliding\n(ruling 16). The `{ uid, quantity }[]` shape is `substituted_for`'s, keyed by\nrecord instead of by path.\n\nEntries are unique by `uid` and ACCUMULATE (`mergeOutOfServiceEntries`). Their\nshares sum to the line's `quantity` — a LINE rule ({@link outOfServiceLinkIssues}),\nsince the list cannot see its line.\n\n`.min(1)`: an absent key is \"bills no record\", and `[]` would be a second\nspelling of it. Declare it with `seed: false`, as `path_order_item` is, since a\nform seed of `[]` would fail."
+        },
+        {
+          "kind": "variable",
+          "name": "OutOfServiceListInput",
+          "declaration": "const OutOfServiceListInput: z.ZodType<OutOfServiceEntryType[]>;",
+          "doc": "{@link OutOfServiceList} as an input takes it: an extra key is stripped, as every input node's is."
         },
         {
           "kind": "variable",
@@ -9512,6 +9590,14 @@
         },
         {
           "kind": "function",
+          "name": "billsOutOfService",
+          "signature": "billsOutOfService(line: OutOfServiceLinkCarrier): boolean",
+          "doc": "Whether a line bills an out-of-service record at all, in either spelling.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "checkItemContract",
           "signature": "checkItemContract(item: typeLiteral, ctx: z.RefinementCtx): void",
           "doc": "The full per-item contract check — {@link checkItemPriceFormula} plus the\n`replacement` axis. Attached with `.superRefine` to the ORDER line-item arm,\nthe one item shape whose price carries a `replacement` channel. The direct\nanalogue of `checkMovementContract` in `schemas/transaction.ts`.\n\n`required_when_stocked` treats a MISSING `stock_method` as stocked — the\nconservative reading, and the one the hand-written refine this replaced always\nenforced. **Both callers now make the field required** (`OrderDocLineItemInner`\nas of W5, `ComponentObject` from the start), so that branch is unreachable\nthrough either one; it is kept because a refinement is not a parse and this\nfunction takes a structural bound, not a schema.\n\nThe `stock_method` requirement is also why the axis does not run on the\ninvoice arm: an invoice line drops `stock_method` and `price.replacement`\ntogether, so an absent `stock_method` there means \"this shape has no answer\",\nnot \"unknown\" — and running it would reject all 7,076 invoice rentals in prod.\n\n⚠️ **This function takes a STRUCTURAL BOUND, not a schema, so the compiler\ncannot tell you when a field it reads has been renamed away.** During the\ndollars→cents migration `price.replacement` became `price.replacement_cents`\neverywhere; had the bound below not moved with it, `deno check` would have\nstayed green while `item.price?.replacement` read `undefined` forever — the\n`forbidden` arm permanently vacuous (a transaction_fee could carry a\nreplacement price) and the `required_when_stocked` arm firing on every\nstocked rental. Any future rename of a field named here must edit this\nsignature; `tests/common.test.ts` pins both arms against a live shape so a\nvacuous bound fails rather than passes.",
@@ -9659,6 +9745,22 @@
           "name": "locationRole",
           "signature": "locationRole(loc: typeLiteral): LocationRoleType",
           "doc": "A location's role, with an absent `role` read as `storage` — the one place\nthat rule is spelled. Takes the document (where `role` is required since\napi-cloudrun#1302 phase 3) or the ledger's copy (where it may still be absent).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "outOfServiceEntries",
+          "signature": "outOfServiceEntries(line: OutOfServiceLinkCarrier): OutOfServiceEntryType[]",
+          "doc": "**The one reader of a line's out-of-service link**, in either spelling: the\nlist as stated, or a pre-W4R `uid_out_of_service: R` read as\n`[{ uid: R, quantity: line.quantity }]`, or `[]` for a line that bills no\nrecord. Every line reader goes through it — the billed sum, the over-bill\nadvisory, the invoice mirror, the diff, the syncs — so a migrated and an\nunmigrated line answer identically.\n\nLives in schemas because the invoice mirror's refine reads it (schemas never\nimport utils); re-exported from `@cfs/core/utils/replacements`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "outOfServiceLinkIssues",
+          "signature": "outOfServiceLinkIssues(line: OutOfServiceLinkCarrier, _: unknown): Array<[PropertyKey[], string]>",
+          "doc": "The LINE rules of an out-of-service link, as `[path, message]` pairs:\n\n- never both spellings on one line (W4R expand: either is accepted, never both);\n- with `required` (the payable `replacement` arm), exactly one of them;\n- the list's shares sum to the line's `quantity`. A line with no `quantity`\n  key (the bill's charge input, whose writer stamps 1) passes `quantity`.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -10833,7 +10935,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocLineItemType",
-          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  xero_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  uid_out_of_service?: string | null;\n  path_order_item?: string[];\n}",
+          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  xero_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  uid_out_of_service?: string | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_order_item?: string[];\n}",
           "doc": "A billable line item on an invoice."
         },
         {
@@ -10899,7 +11001,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  uid_tax_class_override?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  uid_out_of_service?: string | null;\n  path_order_item?: string[];\n}",
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  uid_tax_class_override?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  uid_out_of_service?: string | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_order_item?: string[];\n}",
           "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItem`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
@@ -13100,14 +13202,14 @@
         {
           "kind": "interface",
           "name": "PurchaseReplacementItem",
-          "declaration": "interface PurchaseReplacementItem {\n  type: \"replacement\";\n  uid_out_of_service: string;\n}",
-          "doc": "A REPLACEMENT item — the supplier billing CFS for one of ITS units lost or\ndamaged in CFS's hands, naming the out-of-service record the loss opened\n(until 2026-11 a `charge` with `uid_out_of_service`). No custody: the\nsettlement movement (`return_to_supplier`) moves the units, not this line.\nOtherwise a {@link PurchaseServiceItem}."
+          "declaration": "interface PurchaseReplacementItem {\n  type: \"replacement\";\n  uid_out_of_service?: string;\n  out_of_service?: OutOfServiceEntryType[];\n}",
+          "doc": "A REPLACEMENT item — the supplier billing CFS for one of ITS units lost or\ndamaged in CFS's hands, naming the out-of-service record(s) the loss opened\n(until 2026-11 a `charge` with `uid_out_of_service`). No custody: the\nsettlement movement (`return_to_supplier`) moves the units, not this line.\nOtherwise a {@link PurchaseServiceItem}.\n\n⚠️ **`uid_product` is the lost rental's money-only TWIN, never the rental**\n(owner ruling 15, 2026-11-10): the rental's `uid_linked_replacement`, a\n`stock_method: \"none\"` product, which the writer derives from the record —\nas an invoice's replacement line names its twin. The line is keyed by it\n({@link payableLineUid}), so naming the rental itself would sit the line at\nthe subrent line's own path. With no twin it names no product and keys\n`custom-`. The lost rental stays reachable through the record's `uid_product`."
         },
         {
           "kind": "interface",
           "name": "PurchaseReplacementItemInputType",
-          "declaration": "interface PurchaseReplacementItemInputType {\n  type: \"replacement\";\n  uid_out_of_service: string;\n}",
-          "doc": "A replacement item as an operator raises it: a {@link PurchaseServiceItemInputType} naming its record."
+          "declaration": "interface PurchaseReplacementItemInputType {\n  type: \"replacement\";\n  uid_out_of_service?: string;\n  out_of_service?: OutOfServiceEntryType[];\n}",
+          "doc": "A replacement item as an operator raises it: a {@link PurchaseServiceItemInputType}\nnaming its record(s) — exactly one of `out_of_service` and the pre-W4R\n`uid_out_of_service`. `uid_product` is the lost rental's twin (ruling 15)."
         },
         {
           "kind": "variable",
@@ -13353,7 +13455,7 @@
           "kind": "function",
           "name": "payableLineUid",
           "signature": "payableLineUid(line: PayableLineUidFields): string",
-          "doc": "The `uid` a payable line takes: its product's, as an order or invoice\ncatalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).\n\n- `sale` / `rental` → `uid_product`.\n- `replacement` → `uid_product` when stated, as an invoice's replacement\n  line takes its replacement product's uid (`utils/replacements.ts`).\n- `service`, and a `replacement` naming no product → a `custom-` uid. A line\n  already carrying one keeps it; any other becomes `custom-` + its old uid,\n  so a re-key is deterministic and repeatable, and a purchase line and the\n  bill line projected from it (which share the old uid) land on one uid.\n\nA product does not repeat within a group on any document: two of one product\nin one section is a split into a sibling group. Dividers keep their uids and\nare not lines, so this is never asked of one.",
+          "doc": "The `uid` a payable line takes: its product's, as an order or invoice\ncatalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).\n\n- `sale` / `rental` → `uid_product`.\n- `replacement` → `uid_product` when stated, as an invoice's replacement\n  line takes its replacement product's uid (`utils/replacements.ts`). That\n  product is the lost rental's money-only TWIN (`uid_linked_replacement`),\n  which the writer derives from the out-of-service record — never the\n  rental itself, whose uid keys the subrent line (owner ruling 15).\n- `service`, and a `replacement` naming no product → a `custom-` uid. A line\n  already carrying one keeps it; any other becomes `custom-` + its old uid,\n  so a re-key is deterministic and repeatable, and a purchase line and the\n  bill line projected from it (which share the old uid) land on one uid.\n\nA product does not repeat within a group on any document: two of one product\nin one section is a split into a sibling group. Dividers keep their uids and\nare not lines, so this is never asked of one.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -13566,7 +13668,7 @@
         {
           "kind": "interface",
           "name": "PurchaseBillLineInputType",
-          "declaration": "interface PurchaseBillLineInputType {\n  type: SharedLineType;\n  uid: string;\n  path: string[];\n  name?: string;\n  description?: string;\n  quantity?: number;\n  amount_cents?: number;\n  ledger_account?: COACodeType | null;\n  uid_product?: string;\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  uid_out_of_service?: string;\n  path_purchase_item?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  uid_tax_class_override?: string | null;\n  uid_tracking_category?: string | null;\n  price?: typeLiteral;\n}",
+          "declaration": "interface PurchaseBillLineInputType {\n  type: SharedLineType;\n  uid: string;\n  path: string[];\n  name?: string;\n  description?: string;\n  quantity?: number;\n  amount_cents?: number;\n  ledger_account?: COACodeType | null;\n  uid_product?: string;\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  uid_out_of_service?: string;\n  out_of_service?: OutOfServiceEntryType[];\n  path_purchase_item?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  uid_tax_class_override?: string | null;\n  uid_tracking_category?: string | null;\n  price?: typeLiteral;\n}",
           "doc": "A line row of a bill's whole-array input.\n\nThe writer pairs each row to a stored one (exact path, then the row's uid and\nancestry), and the paired row is the base for every key this row omits, so a\nrow that moved keeps them. A row no stored row pairs with is, in order: a\nsplit's clone if it states {@link path_purchase_item}; a line of the purchase\nnamed by its path; or a line the bill itself authors, which states its name,\naccount, quantity and money (and `uid_product` on a sale or rental).\n\nOn a TIME line `price.rates` restates each unit rate; a flat line's\n`amount_cents` is stated directly (gross when a discount is set).\n\n`path_purchase_item` absent keeps the stored pointer, and there is no `null`\nform: the writer stamps every moved row's pointer and clears one a move back\nmade pointless, so a stale client's identity-only rows cannot clear one.\nThe writer assigns the tax class and a bill-authored line's flat formula."
         },
         {
@@ -13686,7 +13788,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocumentChargeItemInputType",
-          "declaration": "interface PurchaseDocumentChargeItemInputType {\n  name: string;\n  description?: string;\n  ledger_account: COACodeType;\n  amount_cents: number;\n  uid_product?: string;\n  uid_out_of_service?: string;\n  uid_tracking_category?: string | null;\n}",
+          "declaration": "interface PurchaseDocumentChargeItemInputType {\n  name: string;\n  description?: string;\n  ledger_account: COACodeType;\n  amount_cents: number;\n  uid_product?: string;\n  uid_out_of_service?: string;\n  out_of_service?: OutOfServiceEntryType[];\n  uid_tracking_category?: string | null;\n}",
           "doc": "A document-only charge item as an operator states it on a PUSHED bill or\ncredit (freight nobody expected, a fee). The writer mints its `uid`/`path`,\nstamps a Fixed formula snapshot and `quantity: 1`.\n`uid_tracking_category` follows the order/invoice line rule: absent or `null`\ntakes the attributed product's category (none when it names no product); a\nuid sets it and must name a live category.\n\n⚠️ **The node stays STRICT, though both push inputs embed it.** Stripping\nwould let an api that predates a field silently drop it rather than 400, and\nan attribution would vanish with nothing failing (api-cloudrun#1360)."
         },
         {
@@ -13758,8 +13860,8 @@
         {
           "kind": "interface",
           "name": "PurchaseDocumentReplacementItem",
-          "declaration": "interface PurchaseDocumentReplacementItem {\n  type: \"replacement\";\n  uid_out_of_service: string;\n}",
-          "doc": "A bill or credit REPLACEMENT line — the supplier billing CFS for its unit\nlost or damaged in CFS's hands, naming the out-of-service record (until\n2026-11 a `charge` with `uid_out_of_service`). A `mark_lost` record's id is a\n`MovementId`, hence `OutOfServiceId`."
+          "declaration": "interface PurchaseDocumentReplacementItem {\n  type: \"replacement\";\n  uid_out_of_service?: string;\n  out_of_service?: OutOfServiceEntryType[];\n}",
+          "doc": "A bill or credit REPLACEMENT line — the supplier billing CFS for its unit\nlost or damaged in CFS's hands, naming the out-of-service record(s) (until\n2026-11 a `charge` with `uid_out_of_service`). A `mark_lost` record's id is a\n`MovementId`, hence `OutOfServiceId`.\n\n`uid_product` is the lost rental's money-only twin, never the rental (owner\nruling 15; see `PurchaseReplacementItem`)."
         },
         {
           "kind": "variable",
@@ -18841,7 +18943,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItem",
-          "declaration": "interface InvoiceItem {\n  uid_order?: string | null;\n  description?: string;\n  price?: PriceObject | InvoiceDocItemPriceType;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  xero_id?: string | null;\n  crms_id?: number | string | null;\n  crms_opportunity_id?: number | null;\n  substituted_for?: SubstitutedForEntryType[];\n  uid_out_of_service?: string | null;\n  path_extension_for?: string[];\n  path_order_item?: string[];\n}",
+          "declaration": "interface InvoiceItem {\n  uid_order?: string | null;\n  description?: string;\n  price?: PriceObject | InvoiceDocItemPriceType;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  xero_id?: string | null;\n  crms_id?: number | string | null;\n  crms_opportunity_id?: number | null;\n  substituted_for?: SubstitutedForEntryType[];\n  uid_out_of_service?: string | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_extension_for?: string[];\n  path_order_item?: string[];\n}",
           "doc": "An invoice item with optional order-scoping and invoice-specific fields.\nExtends LineItem with properties that should be carried forward during sync\nand fields needed for Xero mapping.\n\n`price` accepts both the utility's intermediate PriceObject and the full\nInvoiceDocItemPriceType from schemas to avoid type drift."
         },
         {
@@ -24460,7 +24562,7 @@
           "kind": "function",
           "name": "payableLineUid",
           "signature": "payableLineUid(line: PayableLineUidFields): string",
-          "doc": "The `uid` a payable line takes: its product's, as an order or invoice\ncatalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).\n\n- `sale` / `rental` → `uid_product`.\n- `replacement` → `uid_product` when stated, as an invoice's replacement\n  line takes its replacement product's uid (`utils/replacements.ts`).\n- `service`, and a `replacement` naming no product → a `custom-` uid. A line\n  already carrying one keeps it; any other becomes `custom-` + its old uid,\n  so a re-key is deterministic and repeatable, and a purchase line and the\n  bill line projected from it (which share the old uid) land on one uid.\n\nA product does not repeat within a group on any document: two of one product\nin one section is a split into a sibling group. Dividers keep their uids and\nare not lines, so this is never asked of one.",
+          "doc": "The `uid` a payable line takes: its product's, as an order or invoice\ncatalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).\n\n- `sale` / `rental` → `uid_product`.\n- `replacement` → `uid_product` when stated, as an invoice's replacement\n  line takes its replacement product's uid (`utils/replacements.ts`). That\n  product is the lost rental's money-only TWIN (`uid_linked_replacement`),\n  which the writer derives from the out-of-service record — never the\n  rental itself, whose uid keys the subrent line (owner ruling 15).\n- `service`, and a `replacement` naming no product → a `custom-` uid. A line\n  already carrying one keeps it; any other becomes `custom-` + its old uid,\n  so a re-key is deterministic and repeatable, and a purchase line and the\n  bill line projected from it (which share the old uid) land on one uid.\n\nA product does not repeat within a group on any document: two of one product\nin one section is a split into a sibling group. Dividers keep their uids and\nare not lines, so this is never asked of one.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -24947,7 +25049,7 @@
     },
     {
       "entrypoint": "@cfs/core/utils/replacements",
-      "moduleDoc": "Billing out-of-service units — what an `out-of-service` record has been\nbilled, what is left to bill, and the lines a replacement invoice is seeded\nwith. A lost or damaged unit bills as a `replacement` line, offered by\ndefault; a cleaning or maintenance one bills as a `service` line, on request\n({@link OOS_BILLING_POLICY}).\n\n## Billed is DERIVED, never stored on the record\n\nAn invoice line bills a record by carrying its uid\n(`InvoiceDocLineItemType.uid_out_of_service`, valid on `type: \"replacement\"`\nand `type: \"service\"`). What a record has been billed is the sum of those lines' quantities\nacross every invoice that is not `void`:\n\n```\nbilled(record)   = Σ line.quantity  where line.uid_out_of_service === record.uid\n                                    and invoice.status !== \"void\"\nunbilled(record) = record.quantity − billed(record)\n```\n\nSo there is no marker to release when an invoice is voided or a line is\ndeleted — the sum simply stops counting it.\n\n## One module, two askers\n\nThe manager calls {@link seedReplacementLines} to OFFER the lines; the API\ncalls {@link overbilledOutOfService} to WARN of an over-bill — an advisory\n`overbilled_out_of_service` in the response and an `oos_overbilled` log line,\nnever a refusal (api-cloudrun#1147: the invoice is what is billed, and the\noperator may bill past the record). Both read the same sum, so the offer and\nthe warning cannot disagree. `computeDocumentDiffs` reads it too, for a\nrecord's `invoiced` figure.\n\n⚠️ **The sum is only as complete as the invoices passed in.** A caller must\npass EVERY invoice whose `query_by_out_of_service` names the records in\nquestion (one `array-contains-any` query per ≤30 uids). A partial list\nunder-counts: the offer re-offers units already billed, and the warning\nmisses a double bill.",
+      "moduleDoc": "Billing out-of-service units — what an `out-of-service` record has been\nbilled, what is left to bill, and the lines a replacement invoice is seeded\nwith. A lost or damaged unit bills as a `replacement` line, offered by\ndefault; a cleaning or maintenance one bills as a `service` line, on request\n({@link OOS_BILLING_POLICY}).\n\n## Billed is DERIVED, never stored on the record\n\nAn invoice line bills records by naming them with a share each\n(`InvoiceDocLineItemType.out_of_service`, valid on `type: \"replacement\"` and\n`type: \"service\"`; a pre-W4R line's single `uid_out_of_service` reads as one\nentry holding the line's whole quantity — {@link outOfServiceEntries}). What\na record has been billed is the sum of its shares across every invoice that\nis not `void`:\n\n```\nbilled(record)   = Σ entry.quantity  over every line's out_of_service entry naming record.uid,\n                                     on invoices whose status !== \"void\"\nunbilled(record) = record.quantity − billed(record)\n```\n\nA line may bill several records (W4R, owner ruling 16): two records of one\nreplacement twin under one parent merge into one line, and each still bills\nits own share. {@link mergeOutOfServiceEntries}, {@link fitOutOfServiceEntries}\nand {@link splitOutOfServiceEntries} are the one author of a line's entries\nwhen lines merge, change quantity or split.\n\nSo there is no marker to release when an invoice is voided or a line is\ndeleted — the sum simply stops counting it.\n\n## One module, two askers\n\nThe manager calls {@link seedReplacementLines} to OFFER the lines; the API\ncalls {@link overbilledOutOfService} to WARN of an over-bill — an advisory\n`overbilled_out_of_service` in the response and an `oos_overbilled` log line,\nnever a refusal (api-cloudrun#1147: the invoice is what is billed, and the\noperator may bill past the record). Both read the same sum, so the offer and\nthe warning cannot disagree. `computeDocumentDiffs` reads it too, for a\nrecord's `invoiced` figure.\n\n⚠️ **The sum is only as complete as the invoices passed in.** A caller must\npass EVERY invoice whose `query_by_out_of_service` names the records in\nquestion (one `array-contains-any` query per ≤30 uids). A partial list\nunder-counts: the offer re-offers units already billed, and the warning\nmisses a double bill.",
       "symbols": [
         {
           "kind": "variable",
@@ -24982,7 +25084,7 @@
         {
           "kind": "interface",
           "name": "ReplacementBillingInvoice",
-          "declaration": "interface ReplacementBillingInvoice {\n  uid: string;\n  status: string;\n  items: ReadonlyArray<typeLiteral>;\n}",
+          "declaration": "interface ReplacementBillingInvoice {\n  uid: string;\n  status: string;\n  items: ReadonlyArray<typeLiteral & OutOfServiceLinkCarrier>;\n}",
           "doc": "The fields of an invoice the billed sum reads."
         },
         {
@@ -25034,6 +25136,22 @@
         },
         {
           "kind": "function",
+          "name": "billsOutOfService",
+          "signature": "billsOutOfService(line: OutOfServiceLinkCarrier): boolean",
+          "doc": "Whether a line bills an out-of-service record at all, in either spelling.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "fitOutOfServiceEntries",
+          "signature": "fitOutOfServiceEntries(entries: readonly OutOfServiceEntryType[], quantity: number): OutOfServiceEntryType[]",
+          "doc": "The same entries re-shared over a new line `quantity`, so their shares sum\nto it: in order, each entry keeps the smaller of its share and what is left;\nany excess lands on the LAST entry. No entry is ever dropped — a line a close\ncut to 0, or a partial bill's row, keeps naming its records at 0 (an entry's\nshare may be 0, `OutOfServiceEntry`).\n\nDeterministic and idempotent: an unchanged quantity returns equal entries.\nThe caller owns which units a re-share should favour when that matters; this\nis the rule a writer applies when nobody chose (a close, a partial bill's\nprojection, a substitution's offset).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "isBillableOutOfService",
           "signature": "isBillableOutOfService(record: Pick<ReplacementSourceRecord, \"reason\" | \"status\">): boolean",
           "doc": "Is this record a lost/damaged unit a customer can be billed for?",
@@ -25050,6 +25168,14 @@
         },
         {
           "kind": "function",
+          "name": "mergeOutOfServiceEntries",
+          "signature": "mergeOutOfServiceEntries(a: readonly OutOfServiceEntryType[], b: readonly OutOfServiceEntryType[]): OutOfServiceEntryType[]",
+          "doc": "Two lines' entries as ONE line's: shares of a record named on both are\nsummed, records keep the order they first appear in (`a` then `b`). The\nmerge-on-add of a replacement line onto a line of the same twin under the\nsame parent (W4R, ruling 16). The result sums to the two lines' quantities.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "oosLineTypeFor",
           "signature": "oosLineTypeFor(reason: OOSReasonType): \"replacement\" | \"service\"",
           "doc": "The invoice line `type` that bills a record of this reason.",
@@ -25058,8 +25184,16 @@
         },
         {
           "kind": "function",
+          "name": "outOfServiceEntries",
+          "signature": "outOfServiceEntries(line: OutOfServiceLinkCarrier): OutOfServiceEntryType[]",
+          "doc": "**The one reader of a line's out-of-service link**, in either spelling: the\nlist as stated, or a pre-W4R `uid_out_of_service: R` read as\n`[{ uid: R, quantity: line.quantity }]`, or `[]` for a line that bills no\nrecord. Every line reader goes through it — the billed sum, the over-bill\nadvisory, the invoice mirror, the diff, the syncs — so a migrated and an\nunmigrated line answer identically.\n\nLives in schemas because the invoice mirror's refine reads it (schemas never\nimport utils); re-exported from `@cfs/core/utils/replacements`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "overbilledOutOfService",
-          "signature": "overbilledOutOfService(lines: ReadonlyArray<typeLiteral>, records: readonly Pick<ReplacementSourceRecord, \"uid\" | \"quantity\">[], otherInvoices: readonly ReplacementBillingInvoice[], invoiceUid?: string): Array<typeLiteral>",
+          "signature": "overbilledOutOfService(lines: ReadonlyArray<OutOfServiceLinkCarrier>, records: readonly Pick<ReplacementSourceRecord, \"uid\" | \"quantity\">[], otherInvoices: readonly ReplacementBillingInvoice[], invoiceUid?: string): Array<typeLiteral>",
           "doc": "Every record whose lines would bill more than it holds, given the lines an\ninvoice is about to carry. The API's over-bill advisory: an empty result\nmeans nothing to warn about. It never refuses a write (api-cloudrun#1147).",
           "paramTags": [
             {
@@ -25090,6 +25224,14 @@
           "name": "seedReplacementLines",
           "signature": "seedReplacementLines(order: ReplacementSourceOrder, records: readonly ReplacementSourceRecord[], invoices: readonly ReplacementBillingInvoice[], products: ReadonlyMap<string, ReplacementSourceProduct>, units: ReadonlyMap<number, ReplacementSourceUnit>): ReplacementLineSeed[]",
           "doc": "The replacement lines to offer for one order: one per billable record sourced\nfrom it with units left to bill.\n\nPure — the caller supplies the records (`query_by_sources` contains\n`orders:<uid>`), every invoice naming them, and the products (each record's\nrental plus its linked twin). A product missing from `products` is treated\nas having no twin.\n\n`units` is every unit the records name, keyed by number — the serials a\nline's description prints. A number missing from it prints without a serial,\nso a caller that cannot read `units` still gets the numbers.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "splitOutOfServiceEntries",
+          "signature": "splitOutOfServiceEntries(entries: readonly OutOfServiceEntryType[], moved: number): typeLiteral",
+          "doc": "A split of a line into the `moved` units that go to a new row and the rest\nthat stay, with the entries divided to match: the moved side takes entries\nFIRST-come, as {@link fitOutOfServiceEntries} does. A record whose share on a\nside is 0 is left off that side, unless it is the side's only record (a side\nalways names one, since `OutOfServiceList` is `.min(1)`).",
           "paramTags": [],
           "returnsTag": null
         }
@@ -25229,7 +25371,7 @@
           "kind": "variable",
           "name": "SHARED_GROUP_META_KEY",
           "declaration": "const SHARED_GROUP_META_KEY: \"shared_group\";",
-          "doc": "The meta key that puts a shared scalar in a merge GROUP:\n`.meta({ propagate: true, shared_group: \"flat_money\" })`. Every member of a\ngroup sits in the same row; see {@link SharedField.group}."
+          "doc": "The meta key that puts a shared scalar — or a `shared: \"value\"` field — in a\nmerge GROUP: `.meta({ propagate: true, shared_group: \"flat_money\" })`. Every\nmember of a group sits in the same row; see {@link SharedField.group}."
         },
         {
           "kind": "variable",

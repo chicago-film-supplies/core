@@ -49,6 +49,7 @@ import {
   purchaseLineKeyOf,
   purchaseLines,
   PurchaseSaleItemSchema,
+  PurchaseReplacementItemSchema,
   isPurchaseLine,
 } from "../src/schemas/mod.ts";
 import { computeItemPaths } from "../src/utils/orders.ts";
@@ -405,7 +406,7 @@ function purchaseDoc(items: PurchaseItem[]): Purchase {
   };
 }
 
-Deno.test("purchaseBillSharedLineFields: price follows as formula ATOM + rates VALUE + discount terms; quantity and amount as ONE group", () => {
+Deno.test("purchaseBillSharedLineFields: price follows as formula ATOM + rates VALUE + discount terms; quantity, amount and the out-of-service link as ONE group", () => {
   const fields = purchaseBillSharedLineFields();
   const kinds = Object.fromEntries(fields.map((f) => [f.path, f.kind]));
   assertEquals(kinds["price.price_formula"], "atom");
@@ -414,7 +415,10 @@ Deno.test("purchaseBillSharedLineFields: price follows as formula ATOM + rates V
   assertEquals(kinds["price.discount.amount_cents"], "derived");
   assertEquals(kinds["quantity"], "propagated");
   assertEquals(kinds["amount_cents"], "propagated");
-  assertEquals(fields.filter((f) => f.group === "flat_money").map((f) => f.path).sort(), ["amount_cents", "quantity"]);
+  // A replacement line's shares sum to its quantity, so the list moves with it
+  // (W4R): a whole VALUE inside the group, which the classifier now reads.
+  assertEquals(fields.filter((f) => f.group === "flat_money").map((f) => f.path).sort(), ["amount_cents", "out_of_service", "quantity"]);
+  assertEquals(kinds["out_of_service"], "propagated");
   assertEquals(kinds["dates"], undefined);
   assertEquals(kinds["units"], undefined);
 });
@@ -1395,5 +1399,129 @@ Deno.test("syncPurchaseToBills (W4K): one product in two groups — a PO edit re
   const byPath = new Map(linesOf(out.bill).map((l) => [l.path.join("/"), l]));
   assertEquals(byPath.get([PURCHASE, DIV, GROUP, PRODUCT].join("/"))?.quantity, 4, "the group's row follows its line");
   assertEquals(byPath.get([PURCHASE, DIV, PRODUCT].join("/"))?.quantity, 2, "the root row sharing its uid is untouched");
+  parses(out.bill);
+});
+
+// ── W4R: a payable replacement line's out-of-service link is a list (ruling 16) ──
+
+const TWIN = "testtwin100000000000";
+const OOS_A = "testoosA000000000000";
+const OOS_B = "testoosB000000000000";
+/** A flat replacement line for two lost units of one twin, one per record. */
+function lossLine(over: Record<string, unknown> = {}): PurchaseItem {
+  return withPayableMoney({
+    type: "replacement",
+    uid: TWIN,
+    path: [DIV, TWIN],
+    description: "",
+    zero_priced: null,
+    name: "Lost hotspot",
+    uid_product: TWIN,
+    quantity: 4,
+    amount_cents: 40000,
+    price: payablePrice(0, { formula: FIXED_REF }),
+    ledger_account: 5300,
+    uid_tracking_category: null,
+    uid_tax_class: TAX_CLASS,
+    quantity_billed: 0,
+    status: "open",
+    uid_units: [],
+    out_of_service: [{ uid: OOS_A, quantity: 2 }, { uid: OOS_B, quantity: 2 }],
+    ...over,
+  }) as PurchaseItem;
+}
+
+Deno.test("W4R PurchaseReplacementItemSchema: exactly one link spelling; shares sum to quantity; a close to 0 keeps naming its records", () => {
+  const paths = (over: Record<string, unknown>) => {
+    const r = PurchaseReplacementItemSchema.safeParse(lossLine(over));
+    return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
+  };
+  assertEquals(paths({}), []);
+  assertEquals(paths({ out_of_service: undefined, uid_out_of_service: OOS_A }), [], "the pre-W4R spelling (expand)");
+  assertEquals(paths({ out_of_service: undefined }), ["out_of_service"], "a replacement names its record(s)");
+  assertEquals(paths({ uid_out_of_service: OOS_A }), ["uid_out_of_service"], "never both");
+  assertEquals(paths({ out_of_service: [{ uid: OOS_A, quantity: 3 }] }), ["out_of_service"], "3 is not the line's 4");
+  assertEquals(
+    paths({ quantity: 0, amount_cents: 0, status: "canceled", out_of_service: [{ uid: OOS_A, quantity: 0 }, { uid: OOS_B, quantity: 0 }] }),
+    [],
+    "a line closed to 0 still names both records",
+  );
+  const input = (over: Record<string, unknown>) => {
+    const r = PurchaseItemInput.safeParse({
+      type: "replacement", uid: TWIN, path: [DIV, TWIN], uid_product: TWIN, name: "Lost hotspot", ledger_account: 5300, quantity: 4, ...over,
+    });
+    return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
+  };
+  assertEquals(input({ out_of_service: [{ uid: OOS_A, quantity: 2 }, { uid: OOS_B, quantity: 2 }] }), []);
+  assertEquals(input({ uid_out_of_service: OOS_A }), []);
+  assertEquals(input({}), ["out_of_service"]);
+  assertEquals(input({ out_of_service: [{ uid: OOS_A, quantity: 1 }] }), ["out_of_service"]);
+  assertEquals(input({ uid_out_of_service: OOS_A, out_of_service: [{ uid: OOS_A, quantity: 4 }] }), ["uid_out_of_service"]);
+});
+
+Deno.test("W4R: a bill line projected from a replacement line carries its records, re-shared over the bill's quantity", () => {
+  const whole = project(lossLine(), 10, 4) as PurchaseDocumentItem & { out_of_service?: unknown };
+  assertEquals(whole.out_of_service, [{ uid: OOS_A, quantity: 2 }, { uid: OOS_B, quantity: 2 }]);
+  const partial = project(lossLine(), 10, 3) as PurchaseDocumentItem & { out_of_service?: unknown; uid_out_of_service?: unknown };
+  assertEquals(partial.out_of_service, [{ uid: OOS_A, quantity: 2 }, { uid: OOS_B, quantity: 1 }]);
+  assertEquals("uid_out_of_service" in partial, false, "never both spellings on the projection");
+  parses(billDoc(1, [whole]));
+  parses(billDoc(1, [partial]));
+  // The pre-W4R spelling projects as itself.
+  const old = project(lossLine({ out_of_service: undefined, uid_out_of_service: OOS_A }), 10, 3) as unknown as Record<string, unknown>;
+  assertEquals([old.uid_out_of_service, "out_of_service" in old], [OOS_A, false]);
+  // The bill's stored arm: exactly one, summing to its quantity.
+  const r = PurchaseBillSchema.safeParse(billDoc(1, [{ ...partial, out_of_service: [{ uid: OOS_A, quantity: 2 }] } as PurchaseDocumentItem]));
+  assertEquals(r.success ? [] : r.error.issues.map((i) => i.path.join(".")), ["items.2.out_of_service"]);
+});
+
+Deno.test("W4R syncPurchaseToBills: an untouched bill line follows a PO edit's records with its quantity; a partial one keeps its own", () => {
+  const OOS_C = "testoosC000000000000";
+  const prev = lossLine();
+  const next = lossLine({
+    quantity: 5,
+    amount_cents: 50000,
+    out_of_service: [{ uid: OOS_A, quantity: 2 }, { uid: OOS_B, quantity: 2 }, { uid: OOS_C, quantity: 1 }],
+  });
+  // Untouched: quantity, amount and the records follow together.
+  const [out] = sync(prev, next, [billDoc(1, [project(prev, 10, 4)])]);
+  const [followed] = linesOf(out.bill) as (PurchaseDocumentItem & { out_of_service?: unknown })[];
+  assertEquals([followed.quantity, followed.amount_cents], [5, 50000]);
+  assertEquals(followed.out_of_service, next.type === "replacement" ? next.out_of_service : undefined);
+  parses(out.bill);
+  // A partial bill (3 of 4) differs on the group, so it keeps all three of its own.
+  const partial = project(prev, 10, 3);
+  const [kept] = sync(prev, next, [billDoc(1, [partial])]);
+  const [held] = linesOf(kept.bill) as (PurchaseDocumentItem & { out_of_service?: unknown })[];
+  assertEquals([held.quantity, held.out_of_service], [3, [{ uid: OOS_A, quantity: 2 }, { uid: OOS_B, quantity: 1 }]]);
+  parses(kept.bill);
+});
+
+Deno.test("W4R diff: a bill naming different records from its purchase line reports them; a partial bill does not", () => {
+  const item = lossLine({ quantity_billed: 4 });
+  const silent = project(lossLine(), 10, 3);
+  assertEquals(billDiffs("testbill000000000001", { purchase: purchaseDoc([item]), bills: [billDoc(1, [silent])], credits: [] }).lines.get(silent.path.join("/"))
+    ?.filter((e) => e.kind === "differs") ?? [], []);
+  const other = { ...project(lossLine(), 10, 4), out_of_service: [{ uid: OOS_A, quantity: 4 }] } as PurchaseDocumentItem;
+  const onBill = billDiffs("testbill000000000001", { purchase: purchaseDoc([item]), bills: [billDoc(1, [other])], credits: [] })
+    .lines.get(other.path.join("/"));
+  const differs = onBill?.find((e) => e.kind === "differs") as { fields: { field: string }[] } | undefined;
+  assertEquals(differs?.fields.map((f) => f.field), ["out_of_service"]);
+});
+
+Deno.test("W4R syncPurchaseToBills: a bill whose AMOUNT was edited keeps its records too — the group is what keeps the shares on its quantity", () => {
+  const prev = lossLine();
+  const next = lossLine({
+    quantity: 5,
+    amount_cents: 50000,
+    out_of_service: [{ uid: OOS_A, quantity: 2 }, { uid: OOS_B, quantity: 2 }, { uid: "testoosC000000000000", quantity: 1 }],
+  });
+  // Billed in full, then the supplier's amount typed in: the records were never touched.
+  const whole = project(prev, 10, 4);
+  const edited = withPayableMoney({ ...whole, amount_cents: 39000 }) as PurchaseDocumentItem;
+  const [out] = sync(prev, next, [billDoc(1, [edited])]);
+  const [held] = linesOf(out.bill) as (PurchaseDocumentItem & { out_of_service?: unknown })[];
+  // Without the group the records would follow alone: 5 shares on a 4-unit line.
+  assertEquals([held.quantity, held.amount_cents, held.out_of_service], [4, 39000, [{ uid: OOS_A, quantity: 2 }, { uid: OOS_B, quantity: 2 }]]);
   parses(out.bill);
 });
