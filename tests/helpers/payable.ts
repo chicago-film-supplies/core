@@ -10,6 +10,7 @@
  * fixture built here can still catch a regression in the pricer.
  */
 import type { DiscountType, PriceFormulaRef, PriceModifierType } from "../../src/schemas/mod.ts";
+import { canonicalChargeWindows } from "../../src/utils/dates.ts";
 import { tsAt } from "./timestamp.ts";
 
 /** The Fixed formula snapshot every flat payable line carries. */
@@ -81,23 +82,30 @@ export const STORE_ENDPOINT = {
 };
 
 /**
- * A purchase destination pair's `dates`: the hire window on `delivery_start` →
- * `collection_end`, everything else null. The `_fs` mirrors are fixture
- * timestamps from {@link tsAt}, so a schema parse sees a consistent pair.
+ * A purchase destination pair's `dates`, in the ORDER's shape (api-cloudrun#1469):
+ * possession `delivery_start` → `collection_start`, each `*_end` following its
+ * start, one charge window over possession and `days_active` counted (no
+ * holidays) — what the API's `set_possession` + `reset_windows` writes. A `null`
+ * end is a standing hire: no collection bound and no window. The `_fs` mirrors
+ * are fixture timestamps from {@link tsAt}, so a schema parse sees a consistent pair.
  */
 export function hireDates(window: { start: string; end: string | null } | null) {
-  return {
-    delivery_start: window?.start ?? null,
-    delivery_start_fs: window ? tsAt(window.start) : null,
-    delivery_end: null,
-    delivery_end_fs: null,
-    collection_start: null,
-    collection_start_fs: null,
-    collection_end: window?.end ?? null,
-    collection_end_fs: window?.end ? tsAt(window.end) : null,
-    days_active: null,
-    charge_windows: null,
+  const start = window?.start ?? null;
+  const end = window?.end ?? null;
+  const at = (iso: string | null) => (iso === null ? null : tsAt(iso));
+  const dates = {
+    delivery_start: start,
+    delivery_start_fs: at(start),
+    delivery_end: start,
+    delivery_end_fs: at(start),
+    collection_start: end,
+    collection_start_fs: at(end),
+    collection_end: end,
+    collection_end_fs: at(end),
+    days_active: null as number | null,
+    charge_windows: start !== null && end !== null ? [{ start, end }] : null,
   };
+  return canonicalChargeWindows(dates, []);
 }
 
 /**

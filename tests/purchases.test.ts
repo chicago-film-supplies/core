@@ -537,9 +537,11 @@ Deno.test("PurchaseSchema: returned may not exceed received, and a hire may not 
   assertEquals(issuePaths(PurchaseSchema, withItems([hireLine({ quantity_received: 3, quantity_returned: 4 })])), [
     "items.1.quantity_returned",
   ]);
-  // The hire window is the PAIR's (one-document-model Phase 3).
+  // The hire window is the PAIR's (one-document-model Phase 3), and its supply end is `collection_end`.
+  const pair = purchasePair(D, HIRE);
+  const reversed = { ...pair, dates: { ...pair.dates, delivery_start: HIRE.end, collection_end: HIRE.start } };
   assertEquals(
-    issuePaths(PurchaseSchema, withItems([hireLine()], { destinations: [purchasePair(D, { start: HIRE.end, end: HIRE.start })] })),
+    issuePaths(PurchaseSchema, withItems([hireLine()], { destinations: [reversed] })),
     ["destinations.0.dates.collection_end"],
   );
 });
@@ -691,7 +693,17 @@ const destRow = (uid = PAIR_A) => ({ type: "destination", uid, path: [uid] });
 const lineHead = (n: number, pair = PAIR_A) => ({ uid: iuid(n), path: [pair, iuid(n)] });
 const buyInput = { type: "sale", ...lineHead(1), uid_product: PRODUCT, quantity: 1, amount_cents: 100 };
 const nullDates = { delivery_start: null, delivery_end: null, collection_start: null, collection_end: null, charge_windows: null };
-const hireDates = { ...nullDates, delivery_start: HIRE.start, collection_end: HIRE.end };
+/** A hire in the order's shape (api-cloudrun#1469): possession to `collection_start`, `collection_end` following it. */
+const hireDates = {
+  ...nullDates,
+  delivery_start: HIRE.start,
+  delivery_end: HIRE.start,
+  collection_start: HIRE.end,
+  collection_end: HIRE.end,
+  charge_windows: [{ start: HIRE.start, end: HIRE.end }],
+};
+/** The retired hire shape: `delivery_start` → `collection_end`, the rest null. */
+const oldHireDates = { ...nullDates, delivery_start: HIRE.start, collection_end: HIRE.end };
 const endpoint = { uid: null };
 const pairInput = (over: Record<string, unknown> = {}) => ({ uid: PAIR_A, dates: nullDates, delivery: endpoint, collection: null, ...over });
 const createInput = (over: Record<string, unknown> = {}) => ({
@@ -784,16 +796,19 @@ Deno.test("purchase row input: a stale line `dates` strips, so only the rest of 
   assertEquals(issuePaths(UpdatePurchaseInput, { version: 0, items: [oldBody] }).sort(), ["items.0.path", "items.0.uid"]);
 });
 
-Deno.test("PurchaseDestinationInput: a hire states its end, after its start", () => {
+Deno.test("PurchaseDestinationInput: a hire states both collection bounds or neither, its end after its start", () => {
   assertEquals(issuePaths(PurchaseDestinationInput, pairInput({ dates: hireDates })), []);
-  // An open hire states neither a collection start nor an end, and is legal.
-  assertEquals(issuePaths(PurchaseDestinationInput, pairInput({ dates: { ...hireDates, collection_end: null } })), []);
+  // A standing hire states neither a collection start nor an end, and is legal.
+  const standing = { ...hireDates, collection_start: null, collection_end: null, charge_windows: null };
+  assertEquals(issuePaths(PurchaseDestinationInput, pairInput({ dates: standing })), []);
   assertEquals(
-    issuePaths(PurchaseDestinationInput, pairInput({ dates: { ...hireDates, collection_start: HIRE.start, collection_end: null } })),
+    issuePaths(PurchaseDestinationInput, pairInput({ dates: { ...hireDates, collection_end: null } })),
     ["dates.collection_end"],
   );
+  // The retired hire shape is refused, not translated (api-cloudrun#1469).
+  assertEquals(issuePaths(PurchaseDestinationInput, pairInput({ dates: oldHireDates })), ["dates.collection_start"]);
   assertEquals(
-    issuePaths(PurchaseDestinationInput, pairInput({ dates: { ...nullDates, delivery_start: HIRE.end, collection_end: HIRE.start } })),
+    issuePaths(PurchaseDestinationInput, pairInput({ dates: { ...nullDates, delivery_start: HIRE.end, collection_start: HIRE.start, collection_end: HIRE.start } })),
     ["dates.collection_end"],
   );
   assertEquals(

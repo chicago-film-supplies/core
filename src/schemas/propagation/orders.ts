@@ -435,7 +435,7 @@ const createOrderRules: CollectionRule[] = [
         source: ["destinations", "dates"],
         target: ["dates"],
         transform:
-          "buildBookingDates(destination.dates) — per booking's own destination. rental: delivery_start→start, collection_start→end; sale: delivery_start→start, end=null",
+          "buildBookingDates(destination.dates) — per booking's own destination. rental: delivery_start→start, (collection_end ?? collection_start)→end; sale: delivery_start→start, end=null",
       },
       {
         source: ["items", "uid"],

@@ -29,7 +29,7 @@ import {
 import { chargeWindowContext, priceDocument, PriceRefusalError } from "../src/utils/price-document.ts";
 import type { PricingFormulas } from "../src/utils/price-formulas.ts";
 import type { TaxCatalog } from "../src/utils/tax-classes.ts";
-import { payablePrice, purchaseDivider, purchasePair, withPayableMoney } from "./helpers/payable.ts";
+import { hireDates, payablePrice, purchaseDivider, purchasePair, withPayableMoney } from "./helpers/payable.ts";
 import { computeDocumentDiffs, type DocumentDiffContext, type DocumentQuantityEntry } from "../src/utils/documentDiff.ts";
 import { priceFormulaRefOf } from "../src/utils/price-formulas.ts";
 import { cumulativeShareCents } from "../src/utils/purchases.ts";
@@ -52,11 +52,12 @@ import {
   isPurchaseLine,
 } from "../src/schemas/mod.ts";
 import { computeItemPaths } from "../src/utils/orders.ts";
+import { applyDateEdit } from "../src/utils/dates.ts";
 import { orderLineClaimIssues } from "../src/utils/invoices.ts";
 import { purchaseActionsFor } from "../src/utils/purchase-actions.ts";
 import { supplyFromPurchase } from "../src/utils/stock.ts";
 import { FIXED, VISION } from "./helpers/formulas.ts";
-import { mockTimestamp } from "./helpers/timestamp.ts";
+import { mockTimestamp, tsAt } from "./helpers/timestamp.ts";
 
 /** The tax class every payable test line is stamped with: exempt on this side, so it prices nothing. */
 const TAX_CLASS = "TaxClassResale000000";
@@ -1064,6 +1065,11 @@ Deno.test("UpdatePurchaseBillInput: takes the W3 keys and a bill's pair, and ref
   const bad = UpdatePurchaseBillInput.safeParse({ version: 1, destinations: [{ uid_purchase: PURCHASE, uid: DIV, dates, delivery: pair.delivery, collection: pair.collection }] });
   assert(!bad.success);
   assertEquals(bad.error.issues[0].path, ["destinations", 0, "dates", "collection_end"]);
+  // The retired hire shape — an end with no collection start — is refused, not translated (api-cloudrun#1469).
+  const oldShape = { ...pair.dates, delivery_start: jan(1), collection_start: null, collection_end: jan(3) };
+  const old = UpdatePurchaseBillInput.safeParse({ version: 1, destinations: [{ uid_purchase: PURCHASE, uid: DIV, dates: oldShape, delivery: pair.delivery, collection: pair.collection }] });
+  assert(!old.success);
+  assertEquals(old.error.issues.map((i) => i.path), [["destinations", 0, "dates", "collection_start"]]);
 });
 
 Deno.test("stored bill line: substituted_for is on the product arm only", () => {
@@ -1077,18 +1083,76 @@ Deno.test("stored bill line: substituted_for is on the product arm only", () => 
 Deno.test("syncPurchaseToBills: pairs merge PER FIELD, as an invoice's do", () => {
   const item = buyLine();
   const line = project(item, 10, 1);
-  const prev = purchaseDoc([item]);
-  const movedEnd = { ...prev.destinations[0], dates: { ...prev.destinations[0].dates, collection_end: jan(20) } };
+  const hire = { start: jan(1), end: jan(10) };
+  const prev = { ...purchaseDoc([item]), destinations: [purchasePair(DIV, hire)] };
+  const movedEnd = { ...prev.destinations[0], dates: hireDates({ start: jan(1), end: jan(20) }) };
   const next = { ...prev, destinations: [movedEnd] };
-  const overridden = { ...billDoc(1, [line]).destinations[0], delivery: { ...billDoc(1, [line]).destinations[0].delivery, instructions: "Back gate" } };
+  const stored = { uid_purchase: PURCHASE, ...purchasePair(DIV, hire) };
+  const overridden = { ...stored, delivery: { ...stored.delivery, instructions: "Back gate" } };
   const bill = billDoc(1, [line], { destinations: [overridden] });
   const [out] = syncPurchaseToBills({ prev, next, bills: [bill], tax: TAX, time: BILL_SYNC_TIME });
   assert(out.changed);
-  assertEquals(out.bill.destinations[0].dates.collection_end, jan(20), "an untouched leaf follows");
+  assertEquals(out.bill.destinations[0].dates.collection_start, jan(20), "an untouched leaf follows");
+  assertEquals(out.bill.destinations[0].dates.collection_end, jan(20));
   assertEquals(out.bill.destinations[0].delivery.instructions, "Back gate", "the operator's field stays");
   parses(out.bill);
   // Companion: the old whole-pair rule would have kept the end at its stored value.
-  assert(overridden.dates.collection_end !== jan(20));
+  assert(overridden.dates.collection_start !== jan(20));
+});
+
+/**
+ * A purchase hire move, as the API writes it: `applyDateEdit` set_possession
+ * (the end and the window follow), then the `_fs` mirrors from the ISO.
+ */
+function extendHire(pair: ReturnType<typeof purchasePair>, collection: string) {
+  const r = applyDateEdit(pair.dates, { type: "set_possession", collection_start: collection }, { holidays: [] });
+  if ("error" in r) throw new Error(r.error);
+  const d = r.dates;
+  return {
+    ...pair,
+    dates: {
+      ...d,
+      collection_start_fs: d.collection_start ? tsAt(d.collection_start) : null,
+      collection_end_fs: d.collection_end ? tsAt(d.collection_end) : null,
+    },
+  };
+}
+
+Deno.test("syncPurchaseToBills: a bill whose one window equals its hire FOLLOWS a hire move; an edited window stays (api-cloudrun#1469)", () => {
+  const item = buyLine();
+  const line = project(item, 10, 1);
+  const hire = { start: jan(1), end: jan(10) };
+  const prev = { ...purchaseDoc([item]), destinations: [purchasePair(DIV, hire)] };
+  const next = { ...prev, destinations: [extendHire(prev.destinations[0], jan(20))] };
+  assertEquals(next.destinations[0].dates.charge_windows, [{ start: jan(1), end: jan(20) }], "the purchase's own window followed");
+
+  const following = billDoc(1, [line], { destinations: [{ uid_purchase: PURCHASE, ...purchasePair(DIV, hire) }] });
+  const [moved] = syncPurchaseToBills({ prev, next, bills: [following], tax: TAX, time: BILL_SYNC_TIME });
+  assert(moved.changed);
+  const d = moved.bill.destinations[0].dates;
+  assertEquals([d.collection_start, d.collection_end], [jan(20), jan(20)]);
+  assertEquals(d.charge_windows?.map((w) => [w.start, w.end]), [[jan(1), jan(20)]], "the window follows the hire");
+  assertEquals(d.days_active, next.destinations[0].dates.days_active, "and the counts are recomputed");
+  parses(moved.bill);
+
+  const own = purchasePair(DIV, hire);
+  const edited = { uid_purchase: PURCHASE, ...own, dates: { ...own.dates, charge_windows: [{ start: jan(1), end: jan(5) }] } };
+  const kept = billDoc(2, [line], { destinations: [edited] });
+  const [stays] = syncPurchaseToBills({ prev, next, bills: [kept], tax: TAX, time: BILL_SYNC_TIME });
+  const k = stays.bill.destinations[0].dates;
+  assertEquals(k.charge_windows?.map((w) => [w.start, w.end]), [[jan(1), jan(5)]], "what the supplier billed is the bill's");
+  assertEquals(k.collection_start, jan(20), "possession itself still follows: the bill never overrode it");
+
+  // The follow RULE, not the plain merge: the purchase metered its own shorter
+  // window, so the bill's window (its hire) differs from the purchase's previous
+  // one and the three-way rule alone would keep it. `followPossession` moves it.
+  const shortWindow = { ...prev.destinations[0], dates: { ...prev.destinations[0].dates, charge_windows: [{ start: jan(1), end: jan(8) }] } };
+  const prevShort = { ...prev, destinations: [shortWindow] };
+  const nextShort = { ...prev, destinations: [extendHire(shortWindow, jan(20))] };
+  assertEquals(nextShort.destinations[0].dates.charge_windows, [{ start: jan(1), end: jan(8) }], "an edited window does not follow on the purchase");
+  const [ruled] = syncPurchaseToBills({ prev: prevShort, next: nextShort, bills: [following], tax: TAX, time: BILL_SYNC_TIME });
+  assertEquals(ruled.bill.destinations[0].dates.charge_windows?.map((w) => [w.start, w.end]), [[jan(1), jan(20)]]);
+  parses(ruled.bill);
 });
 
 Deno.test("syncPurchaseToBills: a destination the purchase deleted goes with its pair, unless the pair was overridden", () => {

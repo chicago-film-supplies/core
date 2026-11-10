@@ -4780,19 +4780,19 @@
           "kind": "typeAlias",
           "name": "PurchaseDestination",
           "declaration": "type PurchaseDestination = PairCoreType;",
-          "doc": "A purchase's destination pair — the side-neutral {@link PairCoreType}, with\nno customer flags, jurisdiction or exchange leg (one-document-model Phase 3).\n\n- `delivery` — where the goods come INTO CFS's hands: the store by default; a\n  customer's address on a drop ship; the supplier's when CFS collects.\n- `collection` — on a subrent, where they go BACK: the store by default, or\n  the supplier's when CFS returns them there. `null` when nothing goes back.\n- `dates` — a subrent's hire window is `delivery_start` → `collection_end`\n  (`null` end = open-ended, `+∞` in supply); every other date and\n  `charge_windows` are null until a time line meters them."
+          "doc": "A purchase's destination pair — the side-neutral {@link PairCoreType}, with\nno customer flags, jurisdiction or exchange leg (one-document-model Phase 3).\n\n- `delivery` — where the goods come INTO CFS's hands: the store by default; a\n  customer's address on a drop ship; the supplier's when CFS collects.\n- `collection` — on a subrent, where they go BACK: the store by default, or\n  the supplier's when CFS returns them there. `null` when nothing goes back.\n- `dates` — the ORDER's shape (api-cloudrun#1469): possession runs\n  `delivery_start` → `collection_start`, `delivery_end` and `collection_end`\n  follow their starts (a real window later, api-cloudrun#943), `days_active`\n  is counted, and `charge_windows` defaults to one window over possession.\n  Supply reads `delivery_start` → `collection_end`, as a booking's hold does.\n  A standing hire states neither collection bound (`+∞` in supply); a pair\n  with no hire states no dates at all."
         },
         {
           "kind": "variable",
           "name": "PurchaseDestinationInput",
           "declaration": "const PurchaseDestinationInput: z.ZodType<PurchaseDestinationInputType>;",
-          "doc": "Zod schema for {@link PurchaseDestinationInputType}. `OrderDates` checks no\nboundary against another, and a `collection_end` left null reads as `+∞` supply,\nso a stated `collection_start` obliges an end here."
+          "doc": "Zod schema for {@link PurchaseDestinationInputType}. `OrderDates` checks no\nboundary against another, so the collection bounds are both-or-neither here:\na `collection_end` left null reads as `+∞` supply, so a stated\n`collection_start` obliges an end; and a stated `collection_end` obliges a\n`collection_start`.\n\n⚠️ **The second half refuses the retired hire shape** (`delivery_start` →\n`collection_end`, the rest null) rather than translating it — no backwards\ncompatibility (owner, api-cloudrun#1469). Accepted, that body would store a\nhire with no possession end, no charge window and nothing for a time line to\nmeter. The order and invoice inputs carry no such cross-field rule; this one\nexists only so an old client fails loudly."
         },
         {
           "kind": "interface",
           "name": "PurchaseDestinationInputType",
           "declaration": "interface PurchaseDestinationInputType {\n  uid: string;\n  dates: OrderDatesType;\n  delivery: DestinationEndpointType;\n  collection: DestinationEndpointType | null;\n}",
-          "doc": "A destination pair as a client sends it to a purchase: the side-neutral\n{@link PairInputCore} and a required `uid`, its destination divider's.\n\nThe input twin of {@link PurchaseDestination}. `dates.delivery_start` →\n`dates.collection_end` is a subrent's hire window, and `charge_windows` what a\ntime line meters.\n\n`delivery` is required and `collection` required-nullable, as on an order:\n`null` is no return leg, and the store is stated as `uid: null`."
+          "doc": "A destination pair as a client sends it to a purchase: the side-neutral\n{@link PairInputCore} and a required `uid`, its destination divider's.\n\nThe input twin of {@link PurchaseDestination}, in the order's date shape:\n`dates.delivery_start` → `dates.collection_start` is a subrent's hire\n(possession), `collection_end` its supply end, and `charge_windows` what a\ntime line meters.\n\n`delivery` is required and `collection` required-nullable, as on an order:\n`null` is no return leg, and the store is stated as `uid: null`."
         },
         {
           "kind": "interface",
@@ -12891,19 +12891,19 @@
           "kind": "typeAlias",
           "name": "PurchaseDestination",
           "declaration": "type PurchaseDestination = PairCoreType;",
-          "doc": "A purchase's destination pair — the side-neutral {@link PairCoreType}, with\nno customer flags, jurisdiction or exchange leg (one-document-model Phase 3).\n\n- `delivery` — where the goods come INTO CFS's hands: the store by default; a\n  customer's address on a drop ship; the supplier's when CFS collects.\n- `collection` — on a subrent, where they go BACK: the store by default, or\n  the supplier's when CFS returns them there. `null` when nothing goes back.\n- `dates` — a subrent's hire window is `delivery_start` → `collection_end`\n  (`null` end = open-ended, `+∞` in supply); every other date and\n  `charge_windows` are null until a time line meters them."
+          "doc": "A purchase's destination pair — the side-neutral {@link PairCoreType}, with\nno customer flags, jurisdiction or exchange leg (one-document-model Phase 3).\n\n- `delivery` — where the goods come INTO CFS's hands: the store by default; a\n  customer's address on a drop ship; the supplier's when CFS collects.\n- `collection` — on a subrent, where they go BACK: the store by default, or\n  the supplier's when CFS returns them there. `null` when nothing goes back.\n- `dates` — the ORDER's shape (api-cloudrun#1469): possession runs\n  `delivery_start` → `collection_start`, `delivery_end` and `collection_end`\n  follow their starts (a real window later, api-cloudrun#943), `days_active`\n  is counted, and `charge_windows` defaults to one window over possession.\n  Supply reads `delivery_start` → `collection_end`, as a booking's hold does.\n  A standing hire states neither collection bound (`+∞` in supply); a pair\n  with no hire states no dates at all."
         },
         {
           "kind": "variable",
           "name": "PurchaseDestinationInput",
           "declaration": "const PurchaseDestinationInput: z.ZodType<PurchaseDestinationInputType>;",
-          "doc": "Zod schema for {@link PurchaseDestinationInputType}. `OrderDates` checks no\nboundary against another, and a `collection_end` left null reads as `+∞` supply,\nso a stated `collection_start` obliges an end here."
+          "doc": "Zod schema for {@link PurchaseDestinationInputType}. `OrderDates` checks no\nboundary against another, so the collection bounds are both-or-neither here:\na `collection_end` left null reads as `+∞` supply, so a stated\n`collection_start` obliges an end; and a stated `collection_end` obliges a\n`collection_start`.\n\n⚠️ **The second half refuses the retired hire shape** (`delivery_start` →\n`collection_end`, the rest null) rather than translating it — no backwards\ncompatibility (owner, api-cloudrun#1469). Accepted, that body would store a\nhire with no possession end, no charge window and nothing for a time line to\nmeter. The order and invoice inputs carry no such cross-field rule; this one\nexists only so an old client fails loudly."
         },
         {
           "kind": "interface",
           "name": "PurchaseDestinationInputType",
           "declaration": "interface PurchaseDestinationInputType {\n  uid: string;\n  dates: OrderDatesType;\n  delivery: DestinationEndpointType;\n  collection: DestinationEndpointType | null;\n}",
-          "doc": "A destination pair as a client sends it to a purchase: the side-neutral\n{@link PairInputCore} and a required `uid`, its destination divider's.\n\nThe input twin of {@link PurchaseDestination}. `dates.delivery_start` →\n`dates.collection_end` is a subrent's hire window, and `charge_windows` what a\ntime line meters.\n\n`delivery` is required and `collection` required-nullable, as on an order:\n`null` is no return leg, and the store is stated as `uid: null`."
+          "doc": "A destination pair as a client sends it to a purchase: the side-neutral\n{@link PairInputCore} and a required `uid`, its destination divider's.\n\nThe input twin of {@link PurchaseDestination}, in the order's date shape:\n`dates.delivery_start` → `dates.collection_start` is a subrent's hire\n(possession), `collection_end` its supply end, and `charge_windows` what a\ntime line meters.\n\n`delivery` is required and `collection` required-nullable, as on an order:\n`null` is no return leg, and the store is stated as `uid: null`."
         },
         {
           "kind": "interface",

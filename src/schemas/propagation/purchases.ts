@@ -325,12 +325,22 @@ const CARD_BILL_BORN_PAID: EnforcementRef = {
   gates: true,
 };
 
+/** The pair-date follow on a bill — the invoice's rule, in the order's date shape (api-cloudrun#1469). */
+const BILL_PAIR_DATES_FOLLOW: EnforcementRef = {
+  kind: "test",
+  ref:
+    "core/tests/purchase-documents.test.ts::syncPurchaseToBills: a bill whose one window equals its hire FOLLOWS a hire move; an edited window stays (api-cloudrun#1469)",
+  clause:
+    "a purchase hire move reaches a bill pair per field: its possession bounds follow while the bill never overrode them, its single window follows when it equalled the purchase's previous window or the bill's own hire (`followPossession`), an edited window stays, and the day counts are recomputed",
+  gates: true,
+};
+
 /** The purchase → bill merge semantics — pure, in `@cfs/core/utils/purchase-documents`. */
 const PURCHASE_BILL_SYNC_SEMANTICS: EnforcementRef = {
   kind: "test",
   ref: "core/tests/purchase-documents.test.ts::syncPurchaseToBills",
   clause:
-    "the three-way policy per field: a pushed, live, unsettled bill line takes the purchase line's new value of each shared field read off the two schemas (`purchaseBillSharedLineFields`) unless the bill's differs from the PREVIOUS purchase's; quantity, amount_cents and dates are homonyms and the bill's `units` are bill-only, so windows and quantities never move; a followed discount lands as the bill line's share of it, and a changed bill is re-priced whole by `priceDocument`'s stated-total arm; a linked, frozen or voided bill is skipped whole. Does NOT cover the writer's point-get of `query_by_bills` or the post-commit Xero edit push.",
+    "the three-way policy per field: a pushed, live, unsettled bill line takes the purchase line's new value of each shared field read off the two schemas (`purchaseBillSharedLineFields`) unless the bill's differs from the PREVIOUS purchase's; a line's quantity, amount_cents and dates are homonyms and the bill's `units` are bill-only, so line quantities never move; a followed discount lands as the bill line's share of it, and a changed bill is re-priced whole by `priceDocument`'s stated-total arm; a linked, frozen or voided bill is skipped whole. The bill's PAIR dates merge per field as an invoice's do: a bill whose single charge window still equals its hire follows a purchase hire move, and a bill whose window was edited keeps it (api-cloudrun#1469). Does NOT cover the writer's point-get of `query_by_bills` or the post-commit Xero edit push.",
   gates: true,
 };
 
@@ -341,11 +351,11 @@ const updatePurchaseBillRules: CollectionRule[] = [
     target: "purchase-bills",
     mode: "co-write",
     invariant:
-      "A pushed, unsettled bill stays in step with its purchase: each line follows the purchase line it projects on every shared field the bill has not overridden (D5, the order → invoice rule). The bill's windows, units and quantities are what the SUPPLIER billed and never follow — a purchase-side extension must not rewrite them. A linked bill is Xero's and is never written; a settled or voided one is frozen.",
-    enforced_by: [PURCHASE_BILL_SYNC_SEMANTICS],
+      "A pushed, unsettled bill stays in step with its purchase: each line follows the purchase line it projects on every shared field the bill has not overridden (D5, the order → invoice rule). Its pairs follow the same way, AS AN INVOICE'S DO (api-cloudrun#1469, reversing \"never follow\"): a hire move reaches a bill whose dates still equal the purchase's previous ones, and a bill whose single charge window still equals its own hire moves with it; a window the operator edited is what the SUPPLIER billed and stays. The bill's units and line quantities never follow. A linked bill is Xero's and is never written; a settled or voided one is frozen.",
+    enforced_by: [PURCHASE_BILL_SYNC_SEMANTICS, BILL_PAIR_DATES_FOLLOW],
     transaction: "update-purchase",
     trigger:
-      "an item's name, description, type, price (formula, rates, discount), ledger_account, uid_tracking_category, tax class or attribution changes on the purchase — targets every bill in `query_by_bills` that is pushed (or linked and just compared equal with Xero), has no money settlement and is not voided",
+      "an item's name, description, type, price (formula, rates, discount), ledger_account, uid_tracking_category, tax class or attribution changes on the purchase, or a pair's dates do — targets every bill in `query_by_bills` that is pushed (or linked and just compared equal with Xero), has no money settlement and is not voided",
     fields: [
       {
         source: ["items"],
@@ -357,6 +367,12 @@ const updatePurchaseBillRules: CollectionRule[] = [
         source: ["items"],
         target: ["totals"],
         transform: "total_cents = Σ line money (`priceDocument`, payable arm); amount_due_cents moves with it",
+      },
+      {
+        source: ["destinations", "dates"],
+        target: ["destinations", "dates"],
+        transform:
+          "per field within the purchase's scope, matched by pair.uid (`syncScopedDestinations` with `PAYABLE_PAIR_SIDE`, the invoice's `mergePairOn`): mergeSharedFields over the four bounds and `charge_windows`, then `resolveMergedPairDates` — `followPossession` moves a single window that equalled the bill's own possession, and `canonicalChargeWindows` recounts `days_active` and each window's days",
       },
     ],
   },

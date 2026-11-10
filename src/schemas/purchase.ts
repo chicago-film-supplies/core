@@ -1120,9 +1120,13 @@ export const PurchaseLineRefSchema: z.ZodType<PurchaseLineRef> = z.strictObject(
  *   customer's address on a drop ship; the supplier's when CFS collects.
  * - `collection` — on a subrent, where they go BACK: the store by default, or
  *   the supplier's when CFS returns them there. `null` when nothing goes back.
- * - `dates` — a subrent's hire window is `delivery_start` → `collection_end`
- *   (`null` end = open-ended, `+∞` in supply); every other date and
- *   `charge_windows` are null until a time line meters them.
+ * - `dates` — the ORDER's shape (api-cloudrun#1469): possession runs
+ *   `delivery_start` → `collection_start`, `delivery_end` and `collection_end`
+ *   follow their starts (a real window later, api-cloudrun#943), `days_active`
+ *   is counted, and `charge_windows` defaults to one window over possession.
+ *   Supply reads `delivery_start` → `collection_end`, as a booking's hold does.
+ *   A standing hire states neither collection bound (`+∞` in supply); a pair
+ *   with no hire states no dates at all.
  */
 export type PurchaseDestination = PairCoreType;
 
@@ -1131,7 +1135,11 @@ export const PurchaseDestinationSchema: z.ZodType<PurchaseDestination> = z.stric
   (pair, ctx) => hireOrderIssue(pair.dates, ctx),
 );
 
-/** A hire's end is not before its start: the rule the stored and the input pair share. */
+/**
+ * A hire's SUPPLY end (`collection_end`) is not before its start: the rule the
+ * stored and the input pair share. Possession's own order (`collection_start`
+ * after `delivery_start`) is `applyDateEdit`'s, which every writer runs.
+ */
 function hireOrderIssue(
   dates: { delivery_start: string | null; collection_end: string | null },
   ctx: z.RefinementCtx,
@@ -1658,8 +1666,9 @@ export const PurchaseRowInput: z.ZodType<PurchaseRowInputType> = z.discriminated
  * A destination pair as a client sends it to a purchase: the side-neutral
  * {@link PairInputCore} and a required `uid`, its destination divider's.
  *
- * The input twin of {@link PurchaseDestination}. `dates.delivery_start` →
- * `dates.collection_end` is a subrent's hire window, and `charge_windows` what a
+ * The input twin of {@link PurchaseDestination}, in the order's date shape:
+ * `dates.delivery_start` → `dates.collection_start` is a subrent's hire
+ * (possession), `collection_end` its supply end, and `charge_windows` what a
  * time line meters.
  *
  * `delivery` is required and `collection` required-nullable, as on an order:
@@ -1674,8 +1683,17 @@ export interface PurchaseDestinationInputType {
 
 /**
  * Zod schema for {@link PurchaseDestinationInputType}. `OrderDates` checks no
- * boundary against another, and a `collection_end` left null reads as `+∞` supply,
- * so a stated `collection_start` obliges an end here.
+ * boundary against another, so the collection bounds are both-or-neither here:
+ * a `collection_end` left null reads as `+∞` supply, so a stated
+ * `collection_start` obliges an end; and a stated `collection_end` obliges a
+ * `collection_start`.
+ *
+ * ⚠️ **The second half refuses the retired hire shape** (`delivery_start` →
+ * `collection_end`, the rest null) rather than translating it — no backwards
+ * compatibility (owner, api-cloudrun#1469). Accepted, that body would store a
+ * hire with no possession end, no charge window and nothing for a time line to
+ * meter. The order and invoice inputs carry no such cross-field rule; this one
+ * exists only so an old client fails loudly.
  */
 export const PurchaseDestinationInput: z.ZodType<PurchaseDestinationInputType> = z.object({
   uid: z.uuid(),
@@ -1689,7 +1707,12 @@ export function purchaseDestinationInputIssues(
 ): void {
   hireOrderIssue(pair.dates, ctx);
   const { collection_start: start, collection_end: end } = pair.dates;
-  if (start === null) return;
+  if (start === null) {
+    if (end !== null) {
+      ctx.addIssue({ code: "custom", path: ["dates", "collection_start"], message: "a hire with a collection end states its collection start" });
+    }
+    return;
+  }
   if (end === null) {
     ctx.addIssue({ code: "custom", path: ["dates", "collection_end"], message: "a hire with a collection start states its end" });
   } else if (Date.parse(end) < Date.parse(start)) {
