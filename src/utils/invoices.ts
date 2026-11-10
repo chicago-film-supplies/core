@@ -1817,6 +1817,19 @@ export interface ScopedSyncSide<R extends InvoiceItem = InvoiceDocItemType> {
    * is the case: the bill line still bills it.
    */
   stillStored?(path: readonly string[]): boolean;
+  /**
+   * The billing document's own row IS this new initiator line, so the line adopts
+   * it rather than being projected beside it. Asked only of a line no previous
+   * initiator revision held, and only of a stored row under the same parent that
+   * no initiator line ever sat at and that claims none.
+   *
+   * Absent means a path match is the whole answer, which it is on an invoice: a
+   * row's uid is its product there, so an invoice-only line already sits at the
+   * path the order then adds it at. A payable row's uid is its own, so a bill's
+   * own line and the purchase line added after it never share a path, and
+   * without this the bill would hold the product twice (one-document-model W4).
+   */
+  adopts?(item: LineItem, row: R): boolean;
 }
 
 /** The receivable side: order → invoice. */
@@ -2199,6 +2212,20 @@ function syncScopedItems<R extends InvoiceItem>(
   const adoptedAt = new Map<string, string[]>();
   /** New rows that belong under a moved parent, placed once the survivors are back. */
   const adopted: { row: R; under: string[] }[] = [];
+  /** The document's own rows a new initiator line adopted ({@link ScopedSyncSide.adopts}), with that line's path. */
+  const adoptions = new Map<R, string[]>();
+  /** An unclaimed row of the document's own, under `parent`, that IS `item`. */
+  const adopterOf = (item: LineItem, parent: readonly string[]): R | undefined => {
+    if (side.adopts === undefined || !isLineItemType(item.type)) return undefined;
+    const parentKey = itemPathKey(parent);
+    for (const [relKey, row] of invoiceByPath) {
+      if (adoptions.has(row) || !isLineItemType(row.type)) continue;
+      if (prevByPath.has(relKey) || newPathKeys.has(relKey) || claims.has(relKey)) continue;
+      if (itemPathKey(relOf(row).slice(0, -1)) !== parentKey) continue;
+      if (side.adopts(item, row)) return row;
+    }
+    return undefined;
+  };
 
   const result: R[] = [];
   const processedInvoicePaths = new Set<string>();
@@ -2258,6 +2285,15 @@ function syncScopedItems<R extends InvoiceItem>(
       // A new component of a kit the invoice moved goes under the kit where it stands.
       // Projected at its own path it would name a kit the invoice no longer holds there.
       const heldParent = prevItem ? undefined : heldParentOf(newItem.path);
+      // The document's own row for this line, if the side says it has one.
+      const adopter = prevItem || moved.fromPath(newItem.path) !== undefined
+        ? undefined
+        : adopterOf(newItem, heldParent ?? newItem.path.slice(0, -1));
+      if (adopter !== undefined) {
+        adoptions.set(adopter, [...newItem.path]);
+        adoptedAt.set(pathKey, relOf(adopter));
+        continue;
+      }
       if (heldParent !== undefined) {
         const at = [...heldParent, newItem.uid];
         adoptedAt.set(pathKey, at);
@@ -2322,6 +2358,15 @@ function syncScopedItems<R extends InvoiceItem>(
   for (const [pathKey, invoiceItem] of invoiceByPath) {
     if (processedInvoicePaths.has(pathKey) || emittedSubstituted.has(pathKey)) continue;
     if (invoiceItem.type === side.scopeType) continue; // the scope's own divider is the caller's
+
+    // The document's own row a new initiator line adopted: it stays where it
+    // stands and now bills that line, through the move pointer.
+    const adoptedLine = adoptions.get(invoiceItem);
+    if (adoptedLine !== undefined) {
+      survivors.add(invoiceItem);
+      survivorAs.set(invoiceItem, { ...invoiceItem, [side.pointerKey]: adoptedLine } as R);
+      continue;
+    }
 
     // A row billing order line X from elsewhere is decided against X, never by
     // its own path — which no order carries, so the next arm would keep it

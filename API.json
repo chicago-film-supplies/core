@@ -18955,7 +18955,7 @@
         {
           "kind": "interface",
           "name": "ScopedSyncSide",
-          "declaration": "interface ScopedSyncSide {\n  scopeType: \"order\" | \"purchase\";\n  pointerKey: keyof MovePointerCarrier;\n  project(item: LineItem, scopeUid: string): R;\n  lineFields(item: LineItem): readonly SharedField[];\n  isStructural(item: LineItem): boolean;\n  stillStored(path: readonly string[]): boolean;\n}",
+          "declaration": "interface ScopedSyncSide {\n  scopeType: \"order\" | \"purchase\";\n  pointerKey: keyof MovePointerCarrier;\n  project(item: LineItem, scopeUid: string): R;\n  lineFields(item: LineItem): readonly SharedField[];\n  isStructural(item: LineItem): boolean;\n  stillStored(path: readonly string[]): boolean;\n  adopts(item: LineItem, row: R): boolean;\n}",
           "doc": "**What the scoped initiator → billing sync needs to know about a SIDE**\n(one-document-model Phase 3). The order → invoice sync and the purchase →\nbill sync are one engine, {@link syncOrderToInvoiceSelective}'s body; this is\nthe whole of what differs between them, so neither side branches on a\ncollection.\n\nEvery receivable-only arm of the engine — substitutions (`substituted_for`),\ndate-extension sections (`path_extension_for`) — keys on a field no payable\nrow carries, so on a bill it finds nothing and changes nothing. The\nlost/damaged arm (`uid_out_of_service`) applies to both sides as written: a\nline billing a record is the billing document's own row."
         },
         {

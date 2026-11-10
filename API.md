@@ -40521,6 +40521,7 @@ interface ScopedSyncSide {
   lineFields(item: LineItem): readonly SharedField[];
   isStructural(item: LineItem): boolean;
   stillStored(path: readonly string[]): boolean;
+  adopts(item: LineItem, row: R): boolean;
 }
 ```
 

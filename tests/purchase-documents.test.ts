@@ -547,6 +547,34 @@ Deno.test("syncPurchaseToBills: a component added to a kit the bill moved lands 
   parses(out.bill);
 });
 
+Deno.test("syncPurchaseToBills: a purchase line added for a product the bill already authored ADOPTS that row, not a second one (W4)", () => {
+  const OTHER = "testprod200000000000";
+  const a = buyLine();
+  // The bill's own line: its own row uid, no pointer, its own money.
+  const own = { ...project(buyLine({ uid: iuid(30), path: [DIV, iuid(30)], uid_product: OTHER, name: "Antenna" }), 10, 2), amount_cents: 1800 };
+  const bill = billDoc(1, [project(a, 10, 3), own]);
+  const added = buyLine({ uid: iuid(9), path: [DIV, iuid(9)], uid_product: OTHER, name: "Antenna", quantity: 2, amount_cents: 2000 });
+  const [out] = sync([a], [a, added], [bill]);
+  const lines = linesOf(out.bill);
+  assertEquals(lines.map((l) => [l.uid, l.quantity, l.amount_cents]), [[a.uid, 3, 140985], [iuid(30), 2, 1800]]);
+  assertEquals(lines[1].path, [PURCHASE, DIV, iuid(30)]);
+  assertEquals(lines[1].path_purchase_item, [DIV, iuid(9)]);
+  parses(out.bill);
+
+  // The adopted row now bills the purchase line, so a later edit reaches it as a moved row's does.
+  const [next] = sync([a, added], [a, { ...added, name: "Antenna (UHF)" } as PurchaseItem], [out.bill]);
+  const followed = linesOf(next.bill).find((l) => l.uid === iuid(30))!;
+  assertEquals(followed.name, "Antenna (UHF)");
+  assertEquals(followed.amount_cents, 1800);
+  assertEquals(linesOf(next.bill).length, 2);
+
+  // Control: a different product is projected beside it, as before.
+  const third = buyLine({ uid: iuid(9), path: [DIV, iuid(9)], uid_product: "testprod300000000000", name: "Cable", quantity: 2, amount_cents: 2000 });
+  const [beside] = sync([a], [a, third], [bill]);
+  assertEquals(linesOf(beside.bill).map((l) => l.uid), [a.uid, iuid(30), iuid(9)]);
+  assertEquals(linesOf(beside.bill)[1].path_purchase_item, undefined);
+});
+
 Deno.test("syncPurchaseToBills: a line the bill LEFT OUT stays out, and a removed line goes unless overridden", () => {
   const a = buyLine();
   const b = buyLine({ uid: iuid(9), path: [DIV, iuid(9)], name: "Antenna", quantity: 2, amount_cents: 2000 });

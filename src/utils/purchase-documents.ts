@@ -697,6 +697,13 @@ export function payableScopedSync(prev: Purchase, next: Purchase, stored: readon
     pointerKey: "path_purchase_item",
     isStructural: (item) => isKitHeaderLine(item),
     stillStored: (path) => storedPaths.has(path.join("/")),
+    // A bill's own sale or rental line is the purchase line added after it for the
+    // same product. A charge or a replacement line names no product it orders.
+    adopts: (item, row) => {
+      const source = original.get(item);
+      return source !== undefined && (source.type === "sale" || source.type === "rental") &&
+        row.type === source.type && row.uid_product === source.uid_product;
+    },
     project: (item, scopeUid) => {
       const row = original.get(item);
       if (row === undefined) throw new Error(`payableScopedSync: row ${item.uid} is not one of the purchase's`);
