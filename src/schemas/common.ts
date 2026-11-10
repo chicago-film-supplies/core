@@ -211,7 +211,7 @@ function uniqueOutOfServiceUids(entries: readonly OutOfServiceEntryType[], ctx: 
 /**
  * `out_of_service` on a billing line (an invoice's `replacement` or `service`
  * line, every payable `replacement` line): the out-of-service records it bills.
- * It replaced the single `uid_out_of_service` so that two records of one
+ * It replaced the single `uid_out_of_service` (retired 2026-11-10) so that two records of one
  * replacement twin under one parent MERGE into one line instead of colliding
  * (ruling 16). The `{ uid, quantity }[]` shape is `substituted_for`'s, keyed by
  * record instead of by path.
@@ -232,56 +232,45 @@ export const OutOfServiceListInput: z.ZodType<OutOfServiceEntryType[]> = z.array
   z.object({ uid: OutOfServiceId, quantity: z.int().min(0) }),
 ).min(1).superRefine(uniqueOutOfServiceUids);
 
-/** The two spellings of a line's out-of-service link while W4R migrates (see {@link outOfServiceEntries}). */
+/** A line that may carry an out-of-service link (see {@link outOfServiceEntries}). */
 export interface OutOfServiceLinkCarrier {
   quantity?: number | null;
-  /** The pre-W4R single link. Retired at W4K's contract publish. */
-  uid_out_of_service?: string | null;
   out_of_service?: readonly OutOfServiceEntryType[];
 }
 
 /**
- * **The one reader of a line's out-of-service link**, in either spelling: the
- * list as stated, or a pre-W4R `uid_out_of_service: R` read as
- * `[{ uid: R, quantity: line.quantity }]`, or `[]` for a line that bills no
- * record. Every line reader goes through it — the billed sum, the over-bill
- * advisory, the invoice mirror, the diff, the syncs — so a migrated and an
- * unmigrated line answer identically.
+ * **The one reader of a line's out-of-service link**: the list as stated, or
+ * `[]` for a line that bills no record. Every line reader goes through it — the
+ * billed sum, the over-bill advisory, the invoice mirror, the diff, the syncs.
+ *
+ * The pre-W4R single `uid_out_of_service` it also read was retired at W4K's
+ * contract publish (2026-11-10), after every stored line in prod, dev and
+ * `test` was migrated (`api-cloudrun/scripts/migrate-out-of-service-lists.ts`).
  *
  * Lives in schemas because the invoice mirror's refine reads it (schemas never
  * import utils); re-exported from `@cfs/core/utils/replacements`.
  */
 export function outOfServiceEntries(line: OutOfServiceLinkCarrier): OutOfServiceEntryType[] {
-  if (line.out_of_service !== undefined) return line.out_of_service.map((e) => ({ uid: e.uid, quantity: e.quantity }));
-  if (line.uid_out_of_service != null) return [{ uid: line.uid_out_of_service, quantity: line.quantity ?? 0 }];
-  return [];
+  return (line.out_of_service ?? []).map((e) => ({ uid: e.uid, quantity: e.quantity }));
 }
 
-/** Whether a line bills an out-of-service record at all, in either spelling. */
+/** Whether a line bills an out-of-service record at all. */
 export function billsOutOfService(line: OutOfServiceLinkCarrier): boolean {
-  return line.out_of_service !== undefined || line.uid_out_of_service != null;
+  return line.out_of_service !== undefined;
 }
 
 /**
  * The LINE rules of an out-of-service link, as `[path, message]` pairs:
  *
- * - never both spellings on one line (W4R expand: either is accepted, never both);
- * - with `required` (the payable `replacement` arm), exactly one of them;
  * - the list's shares sum to the line's `quantity`. A line with no `quantity`
  *   key (the bill's charge input, whose writer stamps 1) passes `quantity`.
  */
 export function outOfServiceLinkIssues(
   line: OutOfServiceLinkCarrier,
-  opts: { required?: boolean; quantity?: number } = {},
+  opts: { quantity?: number } = {},
 ): Array<[PropertyKey[], string]> {
   const issues: Array<[PropertyKey[], string]> = [];
   const hasList = line.out_of_service !== undefined;
-  const hasUid = line.uid_out_of_service != null;
-  if (hasList && hasUid) {
-    issues.push([["uid_out_of_service"], "state out_of_service or uid_out_of_service, never both"]);
-  } else if (opts.required && !hasList && !hasUid) {
-    issues.push([["out_of_service"], "a replacement line names the out-of-service record(s) it bills"]);
-  }
   const quantity = opts.quantity ?? line.quantity;
   // An empty list is the list's own `.min(1)` refusal; summing it would name it twice.
   if (hasList && line.out_of_service!.length > 0 && quantity != null) {

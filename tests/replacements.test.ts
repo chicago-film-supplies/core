@@ -71,7 +71,7 @@ const vests = record("oosVest", "vest", VEST_LINE, 7);
 const cone = record("oosCone", "cone", CONE_LINE, 1);
 
 function invoice(uid: string, status: string, lines: Array<[string, number]>): ReplacementBillingInvoice {
-  return { uid, status, items: lines.map(([u, q]) => ({ type: "replacement", quantity: q, uid_out_of_service: u })) };
+  return { uid, status, items: lines.map(([u, q]) => ({ type: "replacement", quantity: q, out_of_service: [{ uid: u, quantity: q }] })) };
 }
 
 Deno.test("seed: 7 vests + 1 cone, at the quoted value and else the twin's price", () => {
@@ -177,15 +177,15 @@ Deno.test("billed sum excludes the invoice being rewritten", () => {
 
 Deno.test("overbilled: refuses past the record's quantity, counting other invoices", () => {
   const other = invoice("inv1", "authorised", [["oosVest", 5]]);
-  assertEquals(overbilledOutOfService([{ quantity: 2, uid_out_of_service: "oosVest" }], [vests], [other], "inv2"), []);
+  assertEquals(overbilledOutOfService([{ quantity: 2, out_of_service: [{ uid: "oosVest", quantity: 2 }] }], [vests], [other], "inv2"), []);
   assertEquals(
-    overbilledOutOfService([{ quantity: 3, uid_out_of_service: "oosVest" }], [vests], [other], "inv2"),
+    overbilledOutOfService([{ quantity: 3, out_of_service: [{ uid: "oosVest", quantity: 3 }] }], [vests], [other], "inv2"),
     [{ uid_out_of_service: "oosVest", quantity: 7, billed_elsewhere: 5, billing_here: 3 }],
   );
   // Rewriting inv1 itself: its stored 5 is replaced by the new lines, not added.
-  assertEquals(overbilledOutOfService([{ quantity: 7, uid_out_of_service: "oosVest" }], [vests], [other], "inv1"), []);
+  assertEquals(overbilledOutOfService([{ quantity: 7, out_of_service: [{ uid: "oosVest", quantity: 7 }] }], [vests], [other], "inv1"), []);
   // A record that does not exist holds 0.
-  assertEquals(overbilledOutOfService([{ quantity: 1, uid_out_of_service: "ghost" }], [], [], "x").length, 1);
+  assertEquals(overbilledOutOfService([{ quantity: 1, out_of_service: [{ uid: "ghost", quantity: 1 }] }], [], [], "x").length, 1);
 });
 
 Deno.test("OOS_BILLING_POLICY: lost/damaged bill as replacement by default, cleaning/maintenance as service on request", () => {
@@ -221,8 +221,8 @@ Deno.test("isOnRequestBillableOutOfService: cleaning/maintenance only, never can
 
 Deno.test("a service line billing a cleaning record is counted by billedOutOfService", () => {
   const billed = billedOutOfService([
-    { uid: "inv1", status: "issued", items: [{ type: "service", quantity: 2, uid_out_of_service: "oos-clean" }] },
-    { uid: "inv2", status: "void", items: [{ type: "service", quantity: 5, uid_out_of_service: "oos-clean" }] },
+    { uid: "inv1", status: "issued", items: [{ type: "service", quantity: 2, out_of_service: [{ uid: "oos-clean", quantity: 2 }] }] },
+    { uid: "inv2", status: "void", items: [{ type: "service", quantity: 5, out_of_service: [{ uid: "oos-clean", quantity: 5 }] }] },
   ]);
   assertEquals(billed.get("oos-clean"), 2);
 });
@@ -241,7 +241,7 @@ const cleaned = record("oosClean", "vest", VEST_LINE, 3, { reason: "cleaning" })
 const serviced = record("oosMaint", "cone", CONE_LINE, 1, { reason: "maintenance" });
 
 function serviceInvoice(uid: string, status: string, lines: Array<[string, number]>): ReplacementBillingInvoice {
-  return { uid, status, items: lines.map(([u, q]) => ({ type: "service", quantity: q, uid_out_of_service: u })) };
+  return { uid, status, items: lines.map(([u, q]) => ({ type: "service", quantity: q, out_of_service: [{ uid: u, quantity: q }] })) };
 }
 
 Deno.test("on-request seed: one $0 service line per cleaning/maintenance record, under its leg", () => {
@@ -299,16 +299,17 @@ Deno.test("on-request seed: a record with no booking sits at the order level, an
 
 // ── W4R: a line bills a LIST of records (owner ruling 16, 2026-11-10) ──
 
-Deno.test("W4R outOfServiceEntries: the pre-W4R single link and its migrated list read identically", () => {
-  const before = { quantity: 3, uid_out_of_service: "oosVest" };
-  const after = { quantity: 3, out_of_service: [{ uid: "oosVest", quantity: 3 }] };
-  assertEquals(outOfServiceEntries(before), outOfServiceEntries(after));
+Deno.test("W4R outOfServiceEntries: the list as stated, [] for a line naming no record", () => {
+  const linked = { quantity: 3, out_of_service: [{ uid: "oosVest", quantity: 3 }] };
+  assertEquals(outOfServiceEntries(linked), [{ uid: "oosVest", quantity: 3 }]);
   assertEquals(outOfServiceEntries({ quantity: 3 }), []);
-  assertEquals(outOfServiceEntries({ quantity: 3, uid_out_of_service: null }), []);
-  assertEquals([billsOutOfService(before), billsOutOfService(after), billsOutOfService({ quantity: 1 })], [true, true, false]);
-  // And through the billed sum, which is what the offer and the advisory read.
+  assertEquals([billsOutOfService(linked), billsOutOfService({ quantity: 1 })], [true, false]);
+  // The pre-W4R single link was retired at W4K's contract publish: a line still
+  // carrying it bills no record (no stored line does, in any environment).
+  const retired = { quantity: 3, uid_out_of_service: "oosVest" } as { quantity: number };
+  assertEquals(outOfServiceEntries(retired), []);
   const inv = (items: Record<string, unknown>[]) => [{ uid: "inv1", status: "issued", items: items.map((i) => ({ type: "replacement", ...i })) }];
-  assertEquals(billedOutOfService(inv([before])), billedOutOfService(inv([after])));
+  assertEquals(billedOutOfService(inv([linked])).get("oosVest"), 3);
 });
 
 Deno.test("W4R: a line merging two records bills EACH its own share — no re-offer, no over-bill", () => {

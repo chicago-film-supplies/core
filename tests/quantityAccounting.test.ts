@@ -1040,7 +1040,7 @@ Deno.test("invoiceOnlyLines: replacement, transaction_fee, out-of-service and ex
   ];
   const inv = invoice("a", [...lightOrder(2), ...rows]);
   // `buildOrderScopedItems` normalises the fixture, so the charge's record is stamped after it.
-  const stamped = { ...inv, items: inv.items.map((it) => it.uid === "oos" ? { ...it, uid_out_of_service: "OosRecord000000000000" } : it) };
+  const stamped = { ...inv, items: inv.items.map((it) => it.uid === "oos" ? { ...it, out_of_service: [{ uid: "OosRecord000000000000", quantity: it.quantity ?? 0 }] } : it) };
   assertEquals(invoiceOnlyLines(O, lightOrder(2), [stamped]).lines, []);
   assertEquals(invoiceOnlyLines(O, lightOrder(2, 7), [invoice("a", lightOrder(2, 3)), extensionInvoice("b", 2, 2)]).lines, []);
 });

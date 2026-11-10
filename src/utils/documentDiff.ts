@@ -102,7 +102,7 @@
  * an operator prices it, so it never gets a `quantity` entry.
  *
  * **Lost and damaged records** (the optional `outOfService` source) are not
- * presence rows. An invoice line carrying `uid_out_of_service` is skipped by
+ * presence rows. An invoice line carrying `out_of_service` is skipped by
  * the line comparison, and each record gets its own `quantity` entry at the
  * row that owns its booking: `fulfilled` is its billable units, `invoiced` what
  * its replacement lines bill.

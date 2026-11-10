@@ -190,12 +190,14 @@ Deno.test("cumulativeShareCents: refuses bounds a correct writer never sends", (
 
 /** A deterministic item uid per index — row identity, never a product uid. */
 const iuid = (n: number) => `9a1b2c3d-0000-4000-8000-${String(n).padStart(12, "0")}`;
+/** A deterministic LINE uid per index, product-shaped: a payable catalog line's uid IS its product's (W4K). */
+const lid = (n: number) => `testline${String(n).padStart(12, "0")}`;
 const PRODUCT = "testprod100000000000";
 /** The destination divider (and pair) every fixture line sits under (one-document-model Phase 3). */
 const D = "9a1b2c3d-0000-4000-8000-0000000000d1";
 
 const line = (over: Partial<PurchaseSaleItem> = {}): PurchaseSaleItem => {
-  const uid = over.uid ?? iuid(1);
+  const uid = over.uid ?? lid(1);
   return withPayableMoney({
     type: "sale",
     uid,
@@ -203,7 +205,7 @@ const line = (over: Partial<PurchaseSaleItem> = {}): PurchaseSaleItem => {
     description: "",
     zero_priced: null,
     name: "Walkie Talkie",
-    uid_product: PRODUCT,
+    uid_product: uid,
     quantity: 3,
     amount_cents: 140985,
     price: flatPrice,
@@ -237,7 +239,7 @@ const weeklyPrice = {
 
 /** A FLAT subrent item of 10 steamers, received and returned per `over`. */
 const hireLine = (over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem => {
-  const uid = over.uid ?? iuid(2);
+  const uid = over.uid ?? lid(2);
   return withPayableMoney({
     type: "rental",
     uid,
@@ -245,7 +247,7 @@ const hireLine = (over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem =>
     description: "",
     zero_priced: null,
     name: "Steamer",
-    uid_product: PRODUCT,
+    uid_product: uid,
     quantity: 10,
     amount_cents: 50_000,
     price: flatPrice,
@@ -268,7 +270,7 @@ const timeHire = (over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem =>
 
 /** A TIME charge — a Verizon device line, "monthly unless suspended". */
 const carrierLine = (over: Partial<PurchaseServiceItem> = {}): PurchaseServiceItem => {
-  const uid = over.uid ?? iuid(3);
+  const uid = over.uid ?? `custom-${lid(3)}`;
   return withPayableMoney({
     type: "service",
     uid,
@@ -292,7 +294,7 @@ const carrierLine = (over: Partial<PurchaseServiceItem> = {}): PurchaseServiceIt
 
 /** A FLAT charge — freight. */
 const freight = (over: Partial<PurchaseServiceItem> = {}): PurchaseServiceItem => {
-  const uid = over.uid ?? iuid(4);
+  const uid = over.uid ?? `custom-${lid(4)}`;
   return withPayableMoney({
     type: "service",
     uid,
@@ -450,18 +452,17 @@ Deno.test("PurchaseSchema: OVER-billing is legal — the ceiling refine is gone;
   assertEquals(issuePaths(PurchaseSchema, withItems([freight({ quantity_billed: 2 })])), []);
 });
 
-Deno.test("PurchaseSchema: one product may sit on two items (D2); row identity is the PATH", () => {
-  const two = [line(), line({ uid: iuid(9), quantity: 1, amount_cents: 100 })];
-  assertEquals(issuePaths(PurchaseSchema, withItems(two)), []);
-  assertEquals(deriveQueryByProducts(two), [PRODUCT], "the mirror stays distinct");
+Deno.test("PurchaseSchema: one product may sit on two items (D2), in two groups (W4K); row identity is the PATH", () => {
+  const G = "9a1b2c3d-0000-4000-8000-0000000000a1";
+  const two = [line(), line({ path: [D, G, lid(1)], quantity: 1, amount_cents: 100 })];
+  assertEquals(deriveQueryByProducts(two), [lid(1)], "the mirror stays distinct");
   // A PATH named twice is refused, and so is a path that does not end in its
   // own uid. A uid may repeat under different parents (one-document-model Phase 3).
   assertEquals(issuePaths(PurchaseSchema, withItems([line(), line({ quantity: 1, amount_cents: 100 })])), ["items.2.path"]);
   assertEquals(issuePaths(PurchaseSchema, withItems([line({ path: [D, iuid(8)] })])), ["items.1.path"]);
   assertEquals(issuePaths(PurchaseSchema, withItems([line({ path: [] })])), ["items.1.path"]);
-  const G = "9a1b2c3d-0000-4000-8000-0000000000a1";
   const grouped = purchase({
-    rows: [purchaseDivider(D), { uid: G, type: "group", name: "Spare", path: [D, G], description: "" }, line(), line({ path: [D, G, iuid(1)], quantity: 1, amount_cents: 100 })],
+    rows: [purchaseDivider(D), { uid: G, type: "group", name: "Spare", path: [D, G], description: "" }, ...two],
     total_cents: 141085,
   });
   assertEquals(issuePaths(PurchaseSchema, grouped), [], "one uid under two parents is two rows");
@@ -660,7 +661,7 @@ Deno.test("deriveQueryByProducts leaves a charge's attribution out; deriveQueryB
   assertEquals(deriveQueryByProducts([freight({ uid_product: "testprod900000000000" })]), []);
   assertEquals(deriveQueryByProducts([carrierLine()]), [], "a carrier line attributes, it does not order");
   assertEquals(
-    deriveQueryByOrders([hireLine({ uid_orders: ["a", "b"] }), hireLine({ uid: iuid(7), uid_orders: ["b", "c"] }), line()]),
+    deriveQueryByOrders([hireLine({ uid_orders: ["a", "b"] }), hireLine({ uid: lid(7), uid_orders: ["b", "c"] }), line()]),
     ["a", "b", "c"],
   );
 });
@@ -672,7 +673,7 @@ Deno.test("the item-type switches are exhaustive over PURCHASE_ITEM_TYPES", () =
     sale: line(),
     rental: hireLine(),
     service: freight(),
-    replacement: { ...freight(), type: "replacement", uid_out_of_service: "testoos1000000000000" },
+    replacement: { ...freight(), type: "replacement", out_of_service: [{ uid: "testoos1000000000000", quantity: freight().quantity }] },
   };
   assertEquals(Object.keys(one).sort(), [...PURCHASE_ITEM_TYPES].sort());
   for (const type of PURCHASE_ITEM_TYPES) {
@@ -940,7 +941,7 @@ const docPair = { uid_purchase: P, ...purchasePair(D) };
  * purchase divider, with its uid (one-document-model Phase 3).
  */
 const billItem = (over: Record<string, unknown> = {}) => {
-  const uid = (over.uid as string | undefined) ?? iuid(1);
+  const uid = (over.uid as string | undefined) ?? lid(1);
   return withPayableMoney({
     type: "sale",
     uid,
@@ -948,7 +949,7 @@ const billItem = (over: Record<string, unknown> = {}) => {
     description: "",
     zero_priced: null,
     name: "Walkie Talkie",
-    uid_product: PRODUCT,
+    uid_product: uid,
     quantity: 3,
     amount_cents: 140985,
     price: { ...flatPrice, counts: [] },
@@ -961,7 +962,7 @@ const billItem = (over: Record<string, unknown> = {}) => {
 
 /** A bill charge item — document-only: at a path the purchase does not carry. */
 const billDirect = (over: Record<string, unknown> = {}) => {
-  const uid = (over.uid as string | undefined) ?? iuid(201);
+  const uid = (over.uid as string | undefined) ?? `custom-${lid(201)}`;
   return withPayableMoney({
     type: "service",
     uid,
@@ -1057,23 +1058,24 @@ Deno.test("PurchaseBillSchema: a bill of only document-only charge items parses 
 
 Deno.test("PurchaseBillSchema: a replacement item names its record (a mark_lost MovementId parses); a service item names none", () => {
   const movementId = "0199a1f2-3b4c-7d8e-9f01-234567890abc|mark_lost|testordr100000000000:testitem10000000000x:9c2f4a10-6b3d-4e57-8a91-0d5e7c3b2f48";
+  // Keyed by the lost rental's twin, which it names (W4K, ruling 15).
   const loss = billDirect({
     type: "replacement",
+    uid: PRODUCT,
     name: "Loss charge — steamer",
     uid_product: PRODUCT,
     uid_tracking_category: "testtrack10000000000",
-    uid_out_of_service: movementId,
+    out_of_service: [{ uid: movementId, quantity: 1 }],
   });
   assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [billItem(), loss], totals: T_WITH_FREIGHT })), []);
-  // The record is what makes it a replacement: required there (in either W4R
-  // spelling; the issue names the list, the spelling that survives)…
-  const { uid_out_of_service: _r, ...unnamed } = loss as Record<string, unknown>;
+  // The record is what makes it a replacement: required there…
+  const { out_of_service: _r, ...unnamed } = loss as Record<string, unknown>;
   assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [billItem(), unnamed], totals: T_WITH_FREIGHT })), [
     "items.3.out_of_service",
   ]);
   // …and refused on a service line, which the strict arm does not declare it on.
   assertEquals(
-    issuePaths(PurchaseBillSchema, bill({ items: [billItem(), { ...loss, type: "service" }], totals: T_WITH_FREIGHT })),
+    issuePaths(PurchaseBillSchema, bill({ items: [billItem(), billDirect({ out_of_service: [{ uid: movementId, quantity: 1 }] })], totals: T_WITH_FREIGHT })),
     ["items.3"],
   );
 });
@@ -1095,17 +1097,17 @@ Deno.test("PurchaseBillSchema: several rows may bill one purchase line (a split)
   // Two rows at one path.
   assertEquals(issuePaths(PurchaseBillSchema, bill({ ...linked, items: [billItem(), billItem()] })), ["items.3.path"]);
   // Two rows of ONE product billing two purchase lines is fine (D2).
-  assertEquals(issuePaths(PurchaseBillSchema, bill({ ...linked, items: [billItem(), billItem({ uid: iuid(9) })] })), []);
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ ...linked, items: [billItem(), billItem({ uid: lid(9) })] })), []);
   // A moved row billing the line another row bills at its own path: a split.
   assertEquals(
-    issuePaths(PurchaseBillSchema, bill({ ...linked, items: [billItem(), billItem({ uid: iuid(9), path_purchase_item: [D, iuid(1)] })] })),
+    issuePaths(PurchaseBillSchema, bill({ ...linked, items: [billItem(), billItem({ uid: lid(9), path_purchase_item: [D, iuid(1)] })] })),
     [],
   );
   // Two moved rows billing one line.
   assertEquals(
     issuePaths(
       PurchaseBillSchema,
-      bill({ ...linked, items: [billItem({ uid: iuid(8), path_purchase_item: [D, iuid(7)] }), billItem({ uid: iuid(9), path_purchase_item: [D, iuid(7)] })] }),
+      bill({ ...linked, items: [billItem({ uid: lid(8), path_purchase_item: [D, iuid(7)] }), billItem({ uid: lid(9), path_purchase_item: [D, iuid(7)] })] }),
     ),
     [],
   );
@@ -1125,7 +1127,7 @@ Deno.test("PurchaseBillSchema: a purchase-linked bill leads with its purchase di
   assertEquals(issuePaths(PurchaseBillSchema, bill({ uid_purchase: P })), [""], "the retired key is refused");
   // A charge-only bill with no purchase: no dividers, no mirrors.
   const t = { total_cents: 1500, amount_paid_cents: 0, amount_credited_cents: 0, amount_void_cents: 0, amount_due_cents: 1500 };
-  const loose = billDirect({ path: [iuid(201)] });
+  const loose = billDirect({ path: [`custom-${lid(201)}`] });
   assertEquals(issuePaths(PurchaseBillSchema, bill({ rows: [loose], destinations: [], query_by_purchases: [], number_purchases: [], totals: t })), []);
 });
 
@@ -1214,7 +1216,7 @@ Deno.test("a charge item input stays STRICT inside the push input — an unknown
 const billTimeLine = (over: Record<string, unknown> = {}) =>
   billItem({
     type: "rental",
-    uid: iuid(2),
+    uid: lid(2),
     name: "Hotspot",
     ledger_account: 5100,
     quantity: 2,
@@ -1393,6 +1395,19 @@ Deno.test("PurchaseCreditSchema: sources are derived from the lines; a line name
   assertEquals(issuePaths(PurchaseCreditSchema, credit({ items: [half], ...sources })).some((p) => p.endsWith("path_bill_item")), true);
   assertEquals(issuePaths(PurchaseCreditSchema, credit({ sources: [], query_by_sources: [] })).includes("sources"), true);
   assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [named] })).includes("items"), true, "a bill line credits nothing");
+});
+
+Deno.test("W4K contract: every stored payable line is keyed by its product, or custom- — on a purchase, a bill and a credit", () => {
+  const minted = iuid(77);
+  // A purchase: each arm's refine, at the line's own `uid`.
+  assertEquals(issuePaths(PurchaseSchema, withItems([line()])), [], "control");
+  assertEquals(issuePaths(PurchaseSchema, withItems([line({ uid: minted, path: [D, minted], uid_product: lid(1) })])), ["items.1.uid"]);
+  assertEquals(issuePaths(PurchaseSchema, withItems([hireLine({ uid: lid(1), path: [D, lid(1)], uid_product: lid(2) })])), ["items.1.uid"]);
+  assertEquals(issuePaths(PurchaseSchema, withItems([freight({ uid: minted, path: [D, minted] })])), ["items.1.uid"], "a service is custom-");
+  // A bill and a credit: the document-level line rules, at `items.N.uid`.
+  assertEquals(issuePaths(PurchaseBillSchema, bill()), [], "control");
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [billItem({ uid_product: lid(2) })] })), ["items.2.uid"]);
+  assertEquals(issuePaths(PurchaseCreditSchema, credit({ items: [billItem({ quantity: 1, amount_cents: 46995, uid_product: lid(2) })] })), ["items.2.uid"]);
 });
 
 Deno.test("PurchaseCreditSchema accepts an issued credit and an applied one", () => {

@@ -3856,7 +3856,7 @@ Deno.test("invoiceHasSettlement: absent credited/void keys read as zero, not as 
 // true of ANY row on neither order. Both arms keep; the L&D arm is the one that
 // states why its row is safe.
 
-Deno.test("syncOrderToInvoiceSelective keeps a line carrying uid_out_of_service, and a plain invoice-only line too (core#124)", () => {
+Deno.test("syncOrderToInvoiceSelective keeps a line carrying out_of_service, and a plain invoice-only line too (core#124)", () => {
   const prevItem = orderShapedLine();
   const projected = buildOrderScopedItems([prevItem], ORDER_DIV_1)[0];
   const lostLine = {
@@ -3865,10 +3865,10 @@ Deno.test("syncOrderToInvoiceSelective keeps a line carrying uid_out_of_service,
     type: "replacement",
     name: "Replacement: Light",
     path: [ORDER_DIV_1, DEST_1, ITEM_2],
-    uid_out_of_service: "Oos00000000000000001",
+    out_of_service: [{ uid: "Oos00000000000000001", quantity: (projected as InvoiceItem).quantity }],
   } as InvoiceDocItemType;
   const strayLine = { ...lostLine, uid: ITEM_3, path: [ORDER_DIV_1, DEST_1, ITEM_3] } as InvoiceDocItemType;
-  delete (strayLine as { uid_out_of_service?: string }).uid_out_of_service;
+  delete (strayLine as { out_of_service?: unknown }).out_of_service;
 
   const result = syncOrderToInvoiceSelective(
     [prevItem],
@@ -3881,7 +3881,7 @@ Deno.test("syncOrderToInvoiceSelective keeps a line carrying uid_out_of_service,
   assertEquals(uids.includes(ITEM_3), true, "a plain invoice-only line is the invoice's own, and kept");
   assertEquals(result.map((r) => r.uid), [ITEM_1, ITEM_2, ITEM_3], "each stays where it stood");
   const kept = result.find((r) => r.uid === ITEM_2) as InvoiceItem;
-  assertEquals(kept.uid_out_of_service, "Oos00000000000000001");
+  assertEquals(kept.out_of_service, [{ uid: "Oos00000000000000001", quantity: (projected as InvoiceItem).quantity }]);
 });
 
 Deno.test("syncOrderToInvoiceSelective keeps a SERVICE line billing a cleaning/maintenance record (api-cloudrun#1163)", () => {
@@ -3895,7 +3895,7 @@ Deno.test("syncOrderToInvoiceSelective keeps a SERVICE line billing a cleaning/m
     type: "service",
     name: "Cleaning",
     path: [ORDER_DIV_1, DEST_1, ITEM_2],
-    uid_out_of_service: "Oos00000000000000002",
+    out_of_service: [{ uid: "Oos00000000000000002", quantity: (projected as InvoiceItem).quantity }],
   } as InvoiceDocItemType;
 
   const result = syncOrderToInvoiceSelective(
@@ -3905,18 +3905,23 @@ Deno.test("syncOrderToInvoiceSelective keeps a SERVICE line billing a cleaning/m
     ORDER_DIV_1,
   );
   const kept = result.find((r) => r.uid === ITEM_2) as InvoiceItem | undefined;
-  assertEquals(kept?.uid_out_of_service, "Oos00000000000000002", "the service line is kept");
+  assertEquals(kept?.out_of_service?.[0]?.uid, "Oos00000000000000002", "the service line is kept");
   assertEquals(kept?.type, "service");
 });
 
-Deno.test("InvoiceDocLineItem refuses uid_out_of_service on a non-replacement line", () => {
+Deno.test("InvoiceDocLineItem refuses out_of_service on a non-replacement line, and the retired uid_out_of_service anywhere", () => {
   const projected = buildOrderScopedItems([orderShapedLine()], ORDER_DIV_1)[0];
-  const onRental = InvoiceDocLineItem.safeParse({ ...projected, uid_out_of_service: "Oos00000000000000001" });
+  const link = [{ uid: "Oos00000000000000001", quantity: (projected as InvoiceItem).quantity }];
+  const onRental = InvoiceDocLineItem.safeParse({ ...projected, out_of_service: link });
   assertEquals(onRental.success, false);
+  assertEquals(onRental.success ? [] : onRental.error.issues.map((i) => i.path.join(".")), ["out_of_service"]);
+  // W4K's contract publish removed the single link: a strict stored line refuses it.
+  const retired = InvoiceDocLineItem.safeParse({ ...projected, type: "replacement", uid_out_of_service: "Oos00000000000000001" });
+  assertEquals(retired.success, false);
   const onReplacement = InvoiceDocLineItem.safeParse({
     ...projected,
     type: "replacement",
-    uid_out_of_service: "Oos00000000000000001",
+    out_of_service: link,
   });
   assertEquals(onReplacement.success, true, JSON.stringify(onReplacement.success ? {} : onReplacement.error.issues));
 });
@@ -3932,7 +3937,7 @@ Deno.test("syncOrderItems — the hard snap discards an override but KEEPS a los
       type: "replacement",
       name: "Replacement: Light",
       path: [ORDER_DIV_1, DEST_1, ITEM_2],
-      uid_out_of_service: "Oos00000000000000001",
+      out_of_service: [{ uid: "Oos00000000000000001", quantity: 1 }],
     } as InvoiceDocItemType,
   ];
 
@@ -3941,7 +3946,7 @@ Deno.test("syncOrderItems — the hard snap discards an override but KEEPS a los
   assertEquals(renamed?.name, "Light", "the snap discards the invoice's override — that is its job");
   const lost = result.find((r) => r.uid === ITEM_2) as InvoiceItem | undefined;
   assert(lost, "a line billing a lost/damaged record has no order counterpart, so the rebuild keeps it");
-  assertEquals(lost.uid_out_of_service, "Oos00000000000000001");
+  assertEquals(lost.out_of_service, [{ uid: "Oos00000000000000001", quantity: 1 }]);
 });
 
 // ── D6: the one ACCREC line mapper ───────────────────────────────────

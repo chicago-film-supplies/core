@@ -55,7 +55,7 @@ Deno.test("PurchaseItemInput: a catalog line keyed by another uid is refused at 
   const rental = PurchaseItemInput.safeParse({ ...line, type: "rental", uid: old(1), path: [PAIR_A, old(1)] });
   assertEquals(rental.error?.issues.map((i) => i.path.join(".")), ["uid"]);
   // A replacement is checked only when it names a product.
-  const replacement = { type: "replacement", uid: old(2), path: [PAIR_A, old(2)], name: "Lost unit", ledger_account: 5300, uid_out_of_service: "testoos0000000000001" };
+  const replacement = { type: "replacement", uid: old(2), path: [PAIR_A, old(2)], name: "Lost unit", ledger_account: 5300, out_of_service: [{ uid: "testoos0000000000001", quantity: 1 }] };
   assert(PurchaseItemInput.safeParse(replacement).success, "no product: the writer mints its custom- uid");
   const named = PurchaseItemInput.safeParse({ ...replacement, uid_product: VEST });
   assertEquals(named.error?.issues.map((i) => i.path.join(".")), ["uid"]);

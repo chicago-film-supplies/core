@@ -485,7 +485,7 @@ function projectedLineHead(item: PurchaseItem, uidPurchase: string) {
 function attributionOf(
   item: PurchaseItem,
   quantity: number,
-): { uid_product?: string; uid_out_of_service?: string; out_of_service?: OutOfServiceEntryType[] } {
+): { uid_product?: string; out_of_service?: OutOfServiceEntryType[] } {
   switch (item.type) {
     case "sale":
     case "rental":
@@ -495,11 +495,7 @@ function attributionOf(
     case "replacement":
       return {
         ...(item.uid_product !== undefined ? { uid_product: item.uid_product } : {}),
-        ...(item.out_of_service !== undefined
-          ? { out_of_service: fitOutOfServiceEntries(item.out_of_service, quantity) }
-          : item.uid_out_of_service !== undefined
-          ? { uid_out_of_service: item.uid_out_of_service }
-          : {}),
+        out_of_service: fitOutOfServiceEntries(item.out_of_service, quantity),
       };
     default: {
       const unreachable: never = item;
@@ -601,8 +597,8 @@ function projectTimeLine(item: PurchaseItem, opts: ProjectBillLineOptions): Purc
     case "service":
       return { type: "service", ...head, ledger_account: item.ledger_account };
     case "replacement":
-      // The link is in `head` (`attributionOf`), in whichever spelling the line states.
-      return { type: "replacement", ...head, ledger_account: item.ledger_account };
+      // Restated: `attributionOf`'s return type cannot say the replacement arm always carries the list.
+      return { type: "replacement", ...head, out_of_service: fitOutOfServiceEntries(item.out_of_service, opts.quantity), ledger_account: item.ledger_account };
     default: {
       const unreachable: never = item;
       throw new Error(`projectTimeLine: unknown purchase item ${JSON.stringify(unreachable)}`);

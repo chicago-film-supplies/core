@@ -169,7 +169,6 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["invoices.destinations[].delivery.address.user_coordinates", "array-member-uncensusable"],
   ["invoices.destinations[].jurisdiction", "array-member-uncensusable"],
   ["invoices.items[].quantity_per_parent", "array-member-uncensusable"],
-  ["invoices.items[].uid_out_of_service", "array-member-uncensusable"],
   ["invoices.items[].price.base_percent", "array-member-uncensusable"],
   ["invoices.items[].xero_id", "array-member-uncensusable"],
   ["orders.destinations[].collection.address.address_coordinates", "array-member-uncensusable"],

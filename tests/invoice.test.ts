@@ -1415,7 +1415,7 @@ Deno.test("path: required on every invoice input arm, matching the order grain (
 
 Deno.test("InvoiceSchema requires query_by_out_of_service to be exactly the set its lines carry", () => {
   const line: Record<string, unknown> = validLine;
-  const lost = { ...line, uid: "item2000000000000000", type: "replacement", uid_out_of_service: "Oos00000000000000001" };
+  const lost = { ...line, uid: "item2000000000000000", type: "replacement", out_of_service: [{ uid: "Oos00000000000000001", quantity: line.quantity as number }] };
 
   // Stated on a line, absent from the mirror → refused.
   assertEquals(InvoiceSchema.safeParse({ ...validInvoice, items: [ORDER_DIVIDER, line, lost] }).success, false);
@@ -1444,7 +1444,7 @@ Deno.test("InvoiceSchema accepts a replacement line billing a movement-keyed out
   const recordUid =
     "cb6cedff-1c2d-4e3f-8a9b-0c1d2e3f4a5b|mark_damaged|clcL167FROJu5FITEpIK:J7svp77V0tLx6xBaKRBx:f035e652-4b5d-4e6f-8a9b-0c1d2e3f4a5b";
   const line: Record<string, unknown> = validLine;
-  const lost = { ...line, uid: "item2000000000000000", type: "replacement", uid_out_of_service: recordUid };
+  const lost = { ...line, uid: "item2000000000000000", type: "replacement", out_of_service: [{ uid: recordUid, quantity: line.quantity as number }] };
   const parsed = InvoiceSchema.safeParse({
     ...validInvoice,
     items: [ORDER_DIVIDER, line, lost],
@@ -1457,16 +1457,16 @@ Deno.test("InvoiceSchema accepts a replacement line billing a movement-keyed out
     uid: "item2000000000000000",
     type: "replacement",
     path: ["item2000000000000000"],
-    uid_out_of_service: recordUid,
+    out_of_service: [{ uid: recordUid, quantity: 1 }],
   });
   assertEquals(input.success, true, JSON.stringify(input.success ? {} : input.error.issues));
   assertEquals(
-    InvoiceItemInputLine.safeParse({ uid: "item2000000000000000", type: "replacement", path: ["item2000000000000000"], uid_out_of_service: "not an id" }).success,
+    InvoiceItemInputLine.safeParse({ uid: "item2000000000000000", type: "replacement", path: ["item2000000000000000"], out_of_service: [{ uid: "not an id", quantity: 1 }] }).success,
     false,
   );
 
   // Neither id shape → still refused.
-  const garbage = { ...lost, uid_out_of_service: "not an id" };
+  const garbage = { ...lost, out_of_service: [{ uid: "not an id", quantity: line.quantity as number }] };
   assertEquals(
     InvoiceSchema.safeParse({ ...validInvoice, items: [ORDER_DIVIDER, line, garbage], query_by_out_of_service: ["not an id"] })
       .success,
@@ -1474,14 +1474,14 @@ Deno.test("InvoiceSchema accepts a replacement line billing a movement-keyed out
   );
 });
 
-Deno.test("uid_out_of_service is valid on a replacement or service line and no other type", () => {
+Deno.test("out_of_service is valid on a replacement or service line and no other type", () => {
   const line: Record<string, unknown> = validLine;
   const oos = "Oos00000000000000001";
-  const withType = (type: string) => ({ ...line, uid: "item2000000000000000", type, uid_out_of_service: oos });
+  const withType = (type: string) => ({ ...line, uid: "item2000000000000000", type, out_of_service: [{ uid: oos, quantity: line.quantity as number }] });
   const stored = (type: string) =>
     InvoiceSchema.safeParse({ ...validInvoice, items: [ORDER_DIVIDER, line, withType(type)], query_by_out_of_service: [oos] });
   const input = (type: string) =>
-    InvoiceItemInputLine.safeParse({ uid: "item2000000000000000", type, path: ["item2000000000000000"], uid_out_of_service: oos });
+    InvoiceItemInputLine.safeParse({ uid: "item2000000000000000", type, path: ["item2000000000000000"], out_of_service: [{ uid: oos, quantity: 1 }] });
 
   // A cleaning/maintenance charge is a service line (api-cloudrun#1163).
   const service = stored("service");
@@ -1491,8 +1491,8 @@ Deno.test("uid_out_of_service is valid on a replacement or service line and no o
 
   // Every other type still refuses — the tax resolver keys on TYPE.
   for (const type of ["rental", "sale", "transaction_fee"]) {
-    assertEquals(stored(type).success, false, `${type} must not carry uid_out_of_service`);
-    assertEquals(input(type).success, false, `${type} input must not carry uid_out_of_service`);
+    assertEquals(stored(type).success, false, `${type} must not carry out_of_service`);
+    assertEquals(input(type).success, false, `${type} input must not carry out_of_service`);
   }
 });
 
@@ -1575,7 +1575,7 @@ Deno.test("InvoiceItemInputLine: a stored-form price echo keeps price_formula", 
 
 // ── W4R: the out-of-service link as a list (owner ruling 16, 2026-11-10) ──
 
-Deno.test("W4R: out_of_service shares sum to the line's quantity, are unique by record, and stand beside uid_out_of_service never with it", () => {
+Deno.test("W4R: out_of_service shares sum to the line's quantity, are unique by record, and the retired uid_out_of_service is refused stored, stripped on input", () => {
   const line: Record<string, unknown> = validLine; // quantity 1
   const A = "Oos00000000000000001";
   const B = "Oos00000000000000002";
@@ -1594,10 +1594,10 @@ Deno.test("W4R: out_of_service shares sum to the line's quantity, are unique by 
   assertEquals(paths({ out_of_service: [{ uid: A, quantity: 0 }, { uid: A, quantity: 1 }] }, [A]), ["items.2.out_of_service.1.uid"]);
   // Empty: refused (absent is "bills no record").
   assertEquals(paths({ out_of_service: [] }, []), ["items.2.out_of_service"]);
-  // Both spellings on one line: refused at the old one.
-  assertEquals(paths({ uid_out_of_service: A, out_of_service: [{ uid: A, quantity: 1 }] }, [A]), ["items.2.uid_out_of_service"]);
-  // The pre-W4R spelling alone still parses (expand).
-  assertEquals(paths({ uid_out_of_service: A }, [A]), []);
+  // The pre-W4R single link was retired at W4K's contract publish: a strict
+  // stored line refuses it as an unknown key, alone or beside the list.
+  assertEquals(paths({ uid_out_of_service: A }, []), ["items.2"]);
+  assertEquals(paths({ uid_out_of_service: A, out_of_service: [{ uid: A, quantity: 1 }] }, [A]), ["items.2"]);
   // The list is still a replacement/service line's only.
   const rental = InvoiceSchema.safeParse({
     ...validInvoice,
@@ -1622,7 +1622,10 @@ Deno.test("W4R: out_of_service shares sum to the line's quantity, are unique by 
   assertEquals(inputPaths({ out_of_service: [{ uid: A, quantity: 2 }, { uid: B, quantity: 1 }] }, 3), []);
   assertEquals(inputPaths({ out_of_service: [{ uid: A, quantity: 2 }] }, 3), ["out_of_service"]);
   assertEquals(inputPaths({ out_of_service: [{ uid: A, quantity: 2 }] }), []);
-  assertEquals(inputPaths({ uid_out_of_service: A, out_of_service: [{ uid: A, quantity: 2 }] }, 2), ["uid_out_of_service"]);
+  // An input line is `z.object`: a stale client's retired key is stripped, not refused.
+  const stale = input({ uid_out_of_service: A, out_of_service: [{ uid: A, quantity: 2 }] }, 2);
+  assert(stale.success);
+  assertEquals("uid_out_of_service" in stale.data, false);
   // An input entry strips an unknown key rather than refusing it.
   const stripped = input({ out_of_service: [{ uid: A, quantity: 1, note: "x" }] }, 1);
   assert(stripped.success);

@@ -6008,7 +6008,6 @@ interface InvoiceDocLineItemType {
   crms_opportunity_id?: number | null;
   crms_id?: number | string | null;
   substituted_for?: SubstitutedForEntryType[];
-  uid_out_of_service?: string | null;
   out_of_service?: OutOfServiceEntryType[];
   path_order_item?: string[];
 }
@@ -6174,7 +6173,6 @@ interface InvoiceItemInputLineType {
   substituted_for?: SubstitutedForEntryType[];
   zero_priced?: boolean | null;
   quantity_per_parent?: number | null;
-  uid_out_of_service?: string | null;
   out_of_service?: OutOfServiceEntryType[];
   path_order_item?: string[];
 }
@@ -8971,12 +8969,11 @@ type OutOfServiceKeyType = indexedAccess;
 
 ### `OutOfServiceLinkCarrier`
 
-The two spellings of a line's out-of-service link while W4R migrates (see {@link outOfServiceEntries}).
+A line that may carry an out-of-service link (see {@link outOfServiceEntries}).
 
 ```ts
 interface OutOfServiceLinkCarrier {
   quantity?: number | null;
-  uid_out_of_service?: string | null;
   out_of_service?: readonly OutOfServiceEntryType[];
 }
 ```
@@ -8985,7 +8982,7 @@ interface OutOfServiceLinkCarrier {
 
 `out_of_service` on a billing line (an invoice's `replacement` or `service`
 line, every payable `replacement` line): the out-of-service records it bills.
-It replaced the single `uid_out_of_service` so that two records of one
+It replaced the single `uid_out_of_service` (retired 2026-11-10) so that two records of one
 replacement twin under one parent MERGE into one line instead of colliding
 (ruling 16). The `{ uid, quantity }[]` shape is `substituted_for`'s, keyed by
 record instead of by path.
@@ -10673,7 +10670,6 @@ interface PurchaseBillLineInputType {
   uid_product?: string;
   zero_priced?: boolean | null;
   quantity_per_parent?: number | null;
-  uid_out_of_service?: string;
   out_of_service?: OutOfServiceEntryType[];
   path_purchase_item?: string[];
   substituted_for?: SubstitutedForEntryType[];
@@ -11002,7 +10998,6 @@ interface PurchaseDocumentChargeItemInputType {
   ledger_account: COACodeType;
   amount_cents: number;
   uid_product?: string;
-  uid_out_of_service?: string;
   out_of_service?: OutOfServiceEntryType[];
   uid_tracking_category?: string | null;
 }
@@ -11131,7 +11126,7 @@ const PurchaseDocumentProductItemSchema: z.ZodType<PurchaseDocumentProductItem>;
 
 A bill or credit REPLACEMENT line — the supplier billing CFS for its unit
 lost or damaged in CFS's hands, naming the out-of-service record(s) (until
-2026-11 a `charge` with `uid_out_of_service`). A `mark_lost` record's id is a
+2026-11 a `charge` with a single record id). A `mark_lost` record's id is a
 `MovementId`, hence `OutOfServiceId`.
 
 `uid_product` is the lost rental's money-only twin, never the rental (owner
@@ -11140,8 +11135,7 @@ ruling 15; see `PurchaseReplacementItem`).
 ```ts
 interface PurchaseDocumentReplacementItem {
   type: "replacement";
-  uid_out_of_service?: string;
-  out_of_service?: OutOfServiceEntryType[];
+  out_of_service: OutOfServiceEntryType[];
 }
 ```
 
@@ -11535,7 +11529,7 @@ const PurchaseRentalItemSchema: z.ZodType<PurchaseRentalItem>;
 
 A REPLACEMENT item — the supplier billing CFS for one of ITS units lost or
 damaged in CFS's hands, naming the out-of-service record(s) the loss opened
-(until 2026-11 a `charge` with `uid_out_of_service`). No custody: the
+(until 2026-11 a `charge` with a single record id). No custody: the
 settlement movement (`return_to_supplier`) moves the units, not this line.
 Otherwise a {@link PurchaseServiceItem}.
 
@@ -11550,22 +11544,20 @@ the subrent line's own path. With no twin it names no product and keys
 ```ts
 interface PurchaseReplacementItem {
   type: "replacement";
-  uid_out_of_service?: string;
-  out_of_service?: OutOfServiceEntryType[];
+  out_of_service: OutOfServiceEntryType[];
 }
 ```
 
 ### `PurchaseReplacementItemInputType`
 
 A replacement item as an operator raises it: a {@link PurchaseServiceItemInputType}
-naming its record(s) — exactly one of `out_of_service` and the pre-W4R
-`uid_out_of_service`. `uid_product` is the lost rental's twin (ruling 15).
+naming its record(s) in `out_of_service`. `uid_product` is the lost rental's
+twin (ruling 15).
 
 ```ts
 interface PurchaseReplacementItemInputType {
   type: "replacement";
-  uid_out_of_service?: string;
-  out_of_service?: OutOfServiceEntryType[];
+  out_of_service: OutOfServiceEntryType[];
 }
 ```
 
@@ -16801,7 +16793,7 @@ invoice-shaped data themselves.
 
 ### `billsOutOfService(line: OutOfServiceLinkCarrier): boolean`
 
-Whether a line bills an out-of-service record at all, in either spelling.
+Whether a line bills an out-of-service record at all.
 
 ### `canOperatorTransition(from: string, to: string): boolean`
 
@@ -17896,12 +17888,13 @@ One bucket's unit set, reading an ABSENT set as `[]` — {@link oosBucketQuantit
 
 ### `outOfServiceEntries(line: OutOfServiceLinkCarrier): OutOfServiceEntryType[]`
 
-**The one reader of a line's out-of-service link**, in either spelling: the
-list as stated, or a pre-W4R `uid_out_of_service: R` read as
-`[{ uid: R, quantity: line.quantity }]`, or `[]` for a line that bills no
-record. Every line reader goes through it — the billed sum, the over-bill
-advisory, the invoice mirror, the diff, the syncs — so a migrated and an
-unmigrated line answer identically.
+**The one reader of a line's out-of-service link**: the list as stated, or
+`[]` for a line that bills no record. Every line reader goes through it — the
+billed sum, the over-bill advisory, the invoice mirror, the diff, the syncs.
+
+The pre-W4R single `uid_out_of_service` it also read was retired at W4K's
+contract publish (2026-11-10), after every stored line in prod, dev and
+`test` was migrated (`api-cloudrun/scripts/migrate-out-of-service-lists.ts`).
 
 Lives in schemas because the invoice mirror's refine reads it (schemas never
 import utils); re-exported from `@cfs/core/utils/replacements`.
@@ -17910,8 +17903,6 @@ import utils); re-exported from `@cfs/core/utils/replacements`.
 
 The LINE rules of an out-of-service link, as `[path, message]` pairs:
 
-- never both spellings on one line (W4R expand: either is accepted, never both);
-- with `required` (the payable `replacement` arm), exactly one of them;
 - the list's shares sum to the line's `quantity`. A line with no `quantity`
   key (the bill's charge input, whose writer stamps 1) passes `quantity`.
 
@@ -17971,11 +17962,12 @@ are not lines, so this is never asked of one.
 
 Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`.
 
-⚠️ **Not yet attached to the stored schemas.** It goes on once purchases,
-bills and credits are migrated in every environment and the `test` database
-(one-document-model W4K): a stored tightening ahead of the migration refuses
-every write to an unmigrated document. The input refine
-({@link payableInputUidIssue}) is live.
+Attached to every stored purchase line arm and, through `documentItemsIssues`
+(`schemas/purchase-bill.ts`), to every bill and supplier-credit line — at
+W4K's contract publish (2026-11-10), once purchases, bills and credits were
+migrated in prod, dev and `test`
+(`api-cloudrun/scripts/migrate-payable-line-uids.ts`). The input refine
+({@link payableInputUidIssue}) went live a publish earlier.
 
 ### `payablePostingIssues(type: SharedLineType, account: number | null): typeLiteral[]`
 
@@ -19946,12 +19938,11 @@ const OutOfServiceId: z.ZodType<string>;
 
 ### `OutOfServiceLinkCarrier`
 
-The two spellings of a line's out-of-service link while W4R migrates (see {@link outOfServiceEntries}).
+A line that may carry an out-of-service link (see {@link outOfServiceEntries}).
 
 ```ts
 interface OutOfServiceLinkCarrier {
   quantity?: number | null;
-  uid_out_of_service?: string | null;
   out_of_service?: readonly OutOfServiceEntryType[];
 }
 ```
@@ -19960,7 +19951,7 @@ interface OutOfServiceLinkCarrier {
 
 `out_of_service` on a billing line (an invoice's `replacement` or `service`
 line, every payable `replacement` line): the out-of-service records it bills.
-It replaced the single `uid_out_of_service` so that two records of one
+It replaced the single `uid_out_of_service` (retired 2026-11-10) so that two records of one
 replacement twin under one parent MERGE into one line instead of colliding
 (ruling 16). The `{ uid, quantity }[]` shape is `substituted_for`'s, keyed by
 record instead of by path.
@@ -20629,7 +20620,7 @@ interface ZeroPricedItemLike {
 
 ### `billsOutOfService(line: OutOfServiceLinkCarrier): boolean`
 
-Whether a line bills an out-of-service record at all, in either spelling.
+Whether a line bills an out-of-service record at all.
 
 ### `checkItemContract(item: typeLiteral, ctx: z.RefinementCtx): void`
 
@@ -20871,12 +20862,13 @@ api-cloudrun#1302 phase 3) or the ledger's copy (where it may still be absent).
 
 ### `outOfServiceEntries(line: OutOfServiceLinkCarrier): OutOfServiceEntryType[]`
 
-**The one reader of a line's out-of-service link**, in either spelling: the
-list as stated, or a pre-W4R `uid_out_of_service: R` read as
-`[{ uid: R, quantity: line.quantity }]`, or `[]` for a line that bills no
-record. Every line reader goes through it — the billed sum, the over-bill
-advisory, the invoice mirror, the diff, the syncs — so a migrated and an
-unmigrated line answer identically.
+**The one reader of a line's out-of-service link**: the list as stated, or
+`[]` for a line that bills no record. Every line reader goes through it — the
+billed sum, the over-bill advisory, the invoice mirror, the diff, the syncs.
+
+The pre-W4R single `uid_out_of_service` it also read was retired at W4K's
+contract publish (2026-11-10), after every stored line in prod, dev and
+`test` was migrated (`api-cloudrun/scripts/migrate-out-of-service-lists.ts`).
 
 Lives in schemas because the invoice mirror's refine reads it (schemas never
 import utils); re-exported from `@cfs/core/utils/replacements`.
@@ -20885,8 +20877,6 @@ import utils); re-exported from `@cfs/core/utils/replacements`.
 
 The LINE rules of an out-of-service link, as `[path, message]` pairs:
 
-- never both spellings on one line (W4R expand: either is accepted, never both);
-- with `required` (the payable `replacement` arm), exactly one of them;
 - the list's shares sum to the line's `quantity`. A line with no `quantity`
   key (the bill's charge input, whose writer stamps 1) passes `quantity`.
 
@@ -23409,7 +23399,6 @@ interface InvoiceDocLineItemType {
   crms_opportunity_id?: number | null;
   crms_id?: number | string | null;
   substituted_for?: SubstitutedForEntryType[];
-  uid_out_of_service?: string | null;
   out_of_service?: OutOfServiceEntryType[];
   path_order_item?: string[];
 }
@@ -23569,7 +23558,6 @@ interface InvoiceItemInputLineType {
   substituted_for?: SubstitutedForEntryType[];
   zero_priced?: boolean | null;
   quantity_per_parent?: number | null;
-  uid_out_of_service?: string | null;
   out_of_service?: OutOfServiceEntryType[];
   path_order_item?: string[];
 }
@@ -28338,7 +28326,7 @@ const PurchaseRentalItemSchema: z.ZodType<PurchaseRentalItem>;
 
 A REPLACEMENT item — the supplier billing CFS for one of ITS units lost or
 damaged in CFS's hands, naming the out-of-service record(s) the loss opened
-(until 2026-11 a `charge` with `uid_out_of_service`). No custody: the
+(until 2026-11 a `charge` with a single record id). No custody: the
 settlement movement (`return_to_supplier`) moves the units, not this line.
 Otherwise a {@link PurchaseServiceItem}.
 
@@ -28353,22 +28341,20 @@ the subrent line's own path. With no twin it names no product and keys
 ```ts
 interface PurchaseReplacementItem {
   type: "replacement";
-  uid_out_of_service?: string;
-  out_of_service?: OutOfServiceEntryType[];
+  out_of_service: OutOfServiceEntryType[];
 }
 ```
 
 ### `PurchaseReplacementItemInputType`
 
 A replacement item as an operator raises it: a {@link PurchaseServiceItemInputType}
-naming its record(s) — exactly one of `out_of_service` and the pre-W4R
-`uid_out_of_service`. `uid_product` is the lost rental's twin (ruling 15).
+naming its record(s) in `out_of_service`. `uid_product` is the lost rental's
+twin (ruling 15).
 
 ```ts
 interface PurchaseReplacementItemInputType {
   type: "replacement";
-  uid_out_of_service?: string;
-  out_of_service?: OutOfServiceEntryType[];
+  out_of_service: OutOfServiceEntryType[];
 }
 ```
 
@@ -28789,11 +28775,12 @@ are not lines, so this is never asked of one.
 
 Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`.
 
-⚠️ **Not yet attached to the stored schemas.** It goes on once purchases,
-bills and credits are migrated in every environment and the `test` database
-(one-document-model W4K): a stored tightening ahead of the migration refuses
-every write to an unmigrated document. The input refine
-({@link payableInputUidIssue}) is live.
+Attached to every stored purchase line arm and, through `documentItemsIssues`
+(`schemas/purchase-bill.ts`), to every bill and supplier-credit line — at
+W4K's contract publish (2026-11-10), once purchases, bills and credits were
+migrated in prod, dev and `test`
+(`api-cloudrun/scripts/migrate-payable-line-uids.ts`). The input refine
+({@link payableInputUidIssue}) went live a publish earlier.
 
 ### `payablePostingIssues(type: SharedLineType, account: number | null): typeLiteral[]`
 
@@ -29189,7 +29176,6 @@ interface PurchaseBillLineInputType {
   uid_product?: string;
   zero_priced?: boolean | null;
   quantity_per_parent?: number | null;
-  uid_out_of_service?: string;
   out_of_service?: OutOfServiceEntryType[];
   path_purchase_item?: string[];
   substituted_for?: SubstitutedForEntryType[];
@@ -29430,7 +29416,6 @@ interface PurchaseDocumentChargeItemInputType {
   ledger_account: COACodeType;
   amount_cents: number;
   uid_product?: string;
-  uid_out_of_service?: string;
   out_of_service?: OutOfServiceEntryType[];
   uid_tracking_category?: string | null;
 }
@@ -29559,7 +29544,7 @@ const PurchaseDocumentProductItemSchema: z.ZodType<PurchaseDocumentProductItem>;
 
 A bill or credit REPLACEMENT line — the supplier billing CFS for its unit
 lost or damaged in CFS's hands, naming the out-of-service record(s) (until
-2026-11 a `charge` with `uid_out_of_service`). A `mark_lost` record's id is a
+2026-11 a `charge` with a single record id). A `mark_lost` record's id is a
 `MovementId`, hence `OutOfServiceId`.
 
 `uid_product` is the lost rental's money-only twin, never the rental (owner
@@ -29568,8 +29553,7 @@ ruling 15; see `PurchaseReplacementItem`).
 ```ts
 interface PurchaseDocumentReplacementItem {
   type: "replacement";
-  uid_out_of_service?: string;
-  out_of_service?: OutOfServiceEntryType[];
+  out_of_service: OutOfServiceEntryType[];
 }
 ```
 
@@ -40422,7 +40406,6 @@ interface InvoiceItem {
   crms_id?: number | string | null;
   crms_opportunity_id?: number | null;
   substituted_for?: SubstitutedForEntryType[];
-  uid_out_of_service?: string | null;
   out_of_service?: OutOfServiceEntryType[];
   path_extension_for?: string[];
   path_order_item?: string[];
@@ -40832,7 +40815,7 @@ order line, and {@link ScopedSyncSide.requantify} is how a side whose money
 does not follow quantity keeps a row's money with its units
 (one-document-model W5). The date-extension arm (`path_extension_for`) keys
 on a field no payable row carries, so on a bill it finds nothing. The
-lost/damaged arm (`uid_out_of_service`) applies to both sides as written: a
+lost/damaged arm (`out_of_service`) applies to both sides as written: a
 line billing a record is the billing document's own row.
 
 ```ts
@@ -42341,7 +42324,7 @@ carrying forward invoice-specific overrides on matched uids.
 
 🔴 **A line billing a lost/damaged record is KEPT, and it is the one exception
 to "this path discards overrides".** That rule is about the invoice holding a
-different value for an ORDER's line; a line carrying `uid_out_of_service` has
+different value for an ORDER's line; a line carrying `out_of_service` has
 no order counterpart at all, so a rebuild-from-order has nothing to say about
 it. Dropping it would silently un-bill a unit the customer lost — and it would
 also strand `Invoice.query_by_out_of_service`, whose refine pins the mirror to
@@ -42450,7 +42433,7 @@ removal ⇒ the override test. Its alignment half is
 
 ## A lost/damaged line is the invoice's own row
 
-A line carrying `uid_out_of_service` (`replacement` for a unit the customer
+A line carrying `out_of_service` (`replacement` for a unit the customer
 lost or damaged, `service` for one cleaned or maintained) bills a unit. No order ever had it, so "synced and removed from the order"
 can never be true of it, and the removed-items pass keeps it unconditionally.
 
@@ -51129,11 +51112,12 @@ are not lines, so this is never asked of one.
 
 Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`.
 
-⚠️ **Not yet attached to the stored schemas.** It goes on once purchases,
-bills and credits are migrated in every environment and the `test` database
-(one-document-model W4K): a stored tightening ahead of the migration refuses
-every write to an unmigrated document. The input refine
-({@link payableInputUidIssue}) is live.
+Attached to every stored purchase line arm and, through `documentItemsIssues`
+(`schemas/purchase-bill.ts`), to every bill and supplier-credit line — at
+W4K's contract publish (2026-11-10), once purchases, bills and credits were
+migrated in prod, dev and `test`
+(`api-cloudrun/scripts/migrate-payable-line-uids.ts`). The input refine
+({@link payableInputUidIssue}) went live a publish earlier.
 
 ### `purchaseItemCanceled(item: PurchaseItem): boolean`
 
@@ -51902,8 +51886,7 @@ default; a cleaning or maintenance one bills as a `service` line, on request
 
 An invoice line bills records by naming them with a share each
 (`InvoiceDocLineItemType.out_of_service`, valid on `type: "replacement"` and
-`type: "service"`; a pre-W4R line's single `uid_out_of_service` reads as one
-entry holding the line's whole quantity — {@link outOfServiceEntries}). What
+`type: "service"`; read through {@link outOfServiceEntries}). What
 a record has been billed is the sum of its shares across every invoice that
 is not `void`:
 
@@ -52096,7 +52079,7 @@ rewritten, whose NEW lines the caller adds itself.
 
 ### `billsOutOfService(line: OutOfServiceLinkCarrier): boolean`
 
-Whether a line bills an out-of-service record at all, in either spelling.
+Whether a line bills an out-of-service record at all.
 
 ### `fitOutOfServiceEntries(entries: readonly OutOfServiceEntryType[], quantity: number): OutOfServiceEntryType[]`
 
@@ -52132,12 +52115,13 @@ The invoice line `type` that bills a record of this reason.
 
 ### `outOfServiceEntries(line: OutOfServiceLinkCarrier): OutOfServiceEntryType[]`
 
-**The one reader of a line's out-of-service link**, in either spelling: the
-list as stated, or a pre-W4R `uid_out_of_service: R` read as
-`[{ uid: R, quantity: line.quantity }]`, or `[]` for a line that bills no
-record. Every line reader goes through it — the billed sum, the over-bill
-advisory, the invoice mirror, the diff, the syncs — so a migrated and an
-unmigrated line answer identically.
+**The one reader of a line's out-of-service link**: the list as stated, or
+`[]` for a line that bills no record. Every line reader goes through it — the
+billed sum, the over-bill advisory, the invoice mirror, the diff, the syncs.
+
+The pre-W4R single `uid_out_of_service` it also read was retired at W4K's
+contract publish (2026-11-10), after every stored line in prod, dev and
+`test` was migrated (`api-cloudrun/scripts/migrate-out-of-service-lists.ts`).
 
 Lives in schemas because the invoice mirror's refine reads it (schemas never
 import utils); re-exported from `@cfs/core/utils/replacements`.

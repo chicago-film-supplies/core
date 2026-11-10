@@ -1086,7 +1086,7 @@ function oos(uid: string, quantity: number, extra: Record<string, unknown> = {})
 function invoiceBilling(uidOos: string, quantity: number): Invoice {
   const inv = invoice("inv-1", [{ order: O, items: [...orderItems(), line(`repl-${uidOos}`, [D, `repl-${uidOos}`], quantity, 5000, { type: "replacement" })] }]);
   // Set after the build: the order→invoice projection does not carry an invoice-only field.
-  patchLine(inv.items, `${O}/${D}/repl-${uidOos}`, (it) => { it.uid_out_of_service = uidOos; });
+  patchLine(inv.items, `${O}/${D}/repl-${uidOos}`, (it) => { it.out_of_service = [{ uid: uidOos, quantity }]; });
   return inv;
 }
 

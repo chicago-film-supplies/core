@@ -173,9 +173,7 @@ export interface InvoiceItem extends LineItem {
    * `crms_opportunity_id` line above records the absence of.
    */
   substituted_for?: SubstitutedForEntryType[];
-  /** @see `InvoiceDocLineItemType.uid_out_of_service` — a `replacement` or `service` line's only. */
-  uid_out_of_service?: string | null;
-  /** @see `InvoiceDocLineItemType.out_of_service` — its W4R successor, read through `outOfServiceEntries`. */
+  /** @see `InvoiceDocLineItemType.out_of_service` — a `replacement` or `service` line's only, read through `outOfServiceEntries`. */
   out_of_service?: OutOfServiceEntryType[];
   /** @see `InvoiceDocDestinationItemType.path_extension_for` — a destination divider's only. */
   path_extension_for?: string[];
@@ -778,10 +776,9 @@ const INVOICE_ONLY_ITEM_FIELDS = [
   "crms_id",
   "crms_opportunity_id",
   "substituted_for",
-  // The lost/damaged record a `replacement` line bills. Invoice-authored and
+  // The lost/damaged records a `replacement` line bills. Invoice-authored and
   // never on the order, so it must be carried across a rebuild, and it is not
-  // drift. Both spellings while W4R migrates.
-  "uid_out_of_service",
+  // drift.
   "out_of_service",
   // 🔴 Type-checked against the STORED shape, not derived from it. Derivation is
   // wrong here and the distinction is the whole point: this is an OVERRIDE
@@ -1811,7 +1808,7 @@ function refitOutOfService<R>(row: R): R {
  * does not follow quantity keeps a row's money with its units
  * (one-document-model W5). The date-extension arm (`path_extension_for`) keys
  * on a field no payable row carries, so on a bill it finds nothing. The
- * lost/damaged arm (`uid_out_of_service`) applies to both sides as written: a
+ * lost/damaged arm (`out_of_service`) applies to both sides as written: a
  * line billing a record is the billing document's own row.
  */
 export interface ScopedSyncSide<R extends InvoiceItem = InvoiceDocItemType> {
@@ -2064,7 +2061,7 @@ function mergePair(
  *
  * ## A lost/damaged line is the invoice's own row
  *
- * A line carrying `uid_out_of_service` (`replacement` for a unit the customer
+ * A line carrying `out_of_service` (`replacement` for a unit the customer
  * lost or damaged, `service` for one cleaned or maintained) bills a unit. No order ever had it, so "synced and removed from the order"
  * can never be true of it, and the removed-items pass keeps it unconditionally.
  *
@@ -3234,7 +3231,7 @@ export function carryForwardOverrides(rebuiltItems: InvoiceDocItemType[], existi
  *
  * 🔴 **A line billing a lost/damaged record is KEPT, and it is the one exception
  * to "this path discards overrides".** That rule is about the invoice holding a
- * different value for an ORDER's line; a line carrying `uid_out_of_service` has
+ * different value for an ORDER's line; a line carrying `out_of_service` has
  * no order counterpart at all, so a rebuild-from-order has nothing to say about
  * it. Dropping it would silently un-bill a unit the customer lost — and it would
  * also strand `Invoice.query_by_out_of_service`, whose refine pins the mirror to

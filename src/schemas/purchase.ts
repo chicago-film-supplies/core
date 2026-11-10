@@ -112,7 +112,7 @@
  * @module
  */
 import { z } from "zod";
-import { FirestoreId, ItemUid, OutOfServiceId, ThreadId, UnitId } from "./_uid.ts";
+import { FirestoreId, ItemUid, ThreadId, UnitId } from "./_uid.ts";
 import { chicagoInstant, chicagoStartOfDay } from "./_datetime.ts";
 import { COACode, type COACodeType } from "./chart-of-accounts.ts";
 import {
@@ -648,7 +648,7 @@ export interface PurchaseServiceItem extends PurchaseItemBase {
 /**
  * A REPLACEMENT item — the supplier billing CFS for one of ITS units lost or
  * damaged in CFS's hands, naming the out-of-service record(s) the loss opened
- * (until 2026-11 a `charge` with `uid_out_of_service`). No custody: the
+ * (until 2026-11 a `charge` with a single record id). No custody: the
  * settlement movement (`return_to_supplier`) moves the units, not this line.
  * Otherwise a {@link PurchaseServiceItem}.
  *
@@ -663,21 +663,17 @@ export interface PurchaseServiceItem extends PurchaseItemBase {
 export interface PurchaseReplacementItem extends Omit<PurchaseServiceItem, "type"> {
   type: "replacement";
   /**
-   * The pre-W4R single link — a `mark_lost` record's id is a MovementId, so
-   * `OutOfServiceId`. Exactly one of this and {@link out_of_service} during
-   * the W4R migration; removed (and `out_of_service` required) at W4K's
-   * contract publish.
-   */
-  uid_out_of_service?: string;
-  /**
-   * The records this line bills, each with its share of `quantity` (ruling 16):
+   * The records this line bills (a `mark_lost` record's id is a MovementId, so
+   * `OutOfServiceId`), each with its share of `quantity` (ruling 16):
    * two records of one twin under one parent merge into one line. Follows the
    * purchase onto its bills in the `flat_money` group with `quantity` and
    * `amount_cents`, so a bill line either holds all three as the purchase does
    * or keeps all three of its own, and its shares always sum to its quantity.
    * A close that lowers `quantity` re-shares it (`fitOutOfServiceEntries`).
+   * Required: it replaced the pre-W4R single `uid_out_of_service`, retired at
+   * W4K's contract publish (2026-11-10).
    */
-  out_of_service?: OutOfServiceEntryType[];
+  out_of_service: OutOfServiceEntryType[];
 }
 
 /** Union of every purchase LINE arm, discriminated on `type`. */
@@ -862,6 +858,7 @@ const SaleItemInner = z.strictObject({
   status: lineStatusKey,
   landed_costs: z.array(PurchaseLandedCostSchema).meta({ label: "Landed Cost" }),
 }).superRefine((item, ctx) => {
+  storedUidIssue(item, ctx);
   bucketIssues(item, ctx);
   addIssues(purchaseLineMoneyIssues(item), ctx);
   addIssues(payablePostingIssues(item.type, item.ledger_account), ctx);
@@ -905,6 +902,7 @@ const RentalItemInner = z.strictObject({
   uid_orders: z.array(FirestoreId),
   uid_units: unitsKey,
 }).superRefine((item, ctx) => {
+  storedUidIssue(item, ctx);
   bucketIssues(item, ctx);
   uniqueUnitsIssue(item.uid_units, ctx);
   addIssues(purchaseLineMoneyIssues(item), ctx);
@@ -938,13 +936,14 @@ function noCustodyIssues(
   item: PurchaseServiceItem | PurchaseReplacementItem,
   ctx: z.RefinementCtx,
 ): void {
+  storedUidIssue(item, ctx);
   bucketIssues(item, ctx);
   uniqueUnitsIssue(item.uid_units, ctx);
   addIssues(purchaseLineMoneyIssues(item), ctx);
   addIssues(payablePostingIssues(item.type, item.ledger_account), ctx);
   addIssues(replacementIssues(item), ctx);
   if (item.type === "replacement") {
-    for (const [path, message] of outOfServiceLinkIssues(item, { required: true })) {
+    for (const [path, message] of outOfServiceLinkIssues(item)) {
       ctx.addIssue({ code: "custom", path, message });
     }
   }
@@ -960,12 +959,10 @@ const ReplacementItemInner = z.strictObject({
   type: z.literal("replacement").meta({ column: true, label: "Type", propagate: true }),
   ...itemHead,
   ...noCustodyShape,
-  // A `mark_lost` record's id is a MovementId, so the union, not FirestoreId.
-  // Optional while W4R migrates; `noCustodyIssues` requires exactly one of the two.
-  uid_out_of_service: OutOfServiceId.optional().meta({ propagate: true }),
   // A whole value in the `flat_money` group: it follows with `quantity` and
   // `amount_cents` as one unit, so a bill line's shares stay its quantity's.
-  out_of_service: OutOfServiceList.optional().meta({ seed: false, shared: "value", ...flatMoney }),
+  // Required since W4K's contract publish (it replaced `uid_out_of_service`).
+  out_of_service: OutOfServiceList.meta({ seed: false, shared: "value", ...flatMoney }),
 }).superRefine((item, ctx) => noCustodyIssues(item, ctx));
 
 /** Zod schema for PurchaseSaleItem. */
@@ -1153,11 +1150,12 @@ export function payableLineUid(line: PayableLineUidFields): string {
 /**
  * Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`.
  *
- * ⚠️ **Not yet attached to the stored schemas.** It goes on once purchases,
- * bills and credits are migrated in every environment and the `test` database
- * (one-document-model W4K): a stored tightening ahead of the migration refuses
- * every write to an unmigrated document. The input refine
- * ({@link payableInputUidIssue}) is live.
+ * Attached to every stored purchase line arm and, through `documentItemsIssues`
+ * (`schemas/purchase-bill.ts`), to every bill and supplier-credit line — at
+ * W4K's contract publish (2026-11-10), once purchases, bills and credits were
+ * migrated in prod, dev and `test`
+ * (`api-cloudrun/scripts/migrate-payable-line-uids.ts`). The input refine
+ * ({@link payableInputUidIssue}) went live a publish earlier.
  */
 export function payableLineUidIssue(line: PayableLineUidFields): string | null {
   const keyed = line.type === "service" || (line.type === "replacement" && line.uid_product === undefined)
@@ -1167,6 +1165,12 @@ export function payableLineUidIssue(line: PayableLineUidFields): string | null {
   return line.uid_product !== undefined && line.type !== "service"
     ? `a ${line.type} line's uid is its product's (${line.uid_product}), not ${line.uid}`
     : `a ${line.type} line naming no product carries a custom- uid, not ${line.uid}`;
+}
+
+/** {@link payableLineUidIssue} as a stored line arm's refine, at the line's `uid`. */
+function storedUidIssue(line: PayableLineUidFields, ctx: z.RefinementCtx): void {
+  const message = payableLineUidIssue(line);
+  if (message !== null) ctx.addIssue({ code: "custom", path: ["uid"], message });
 }
 
 /**
@@ -1605,14 +1609,13 @@ export interface PurchaseServiceItemInputType extends PurchaseItemInputBase {
 
 /**
  * A replacement item as an operator raises it: a {@link PurchaseServiceItemInputType}
- * naming its record(s) — exactly one of `out_of_service` and the pre-W4R
- * `uid_out_of_service`. `uid_product` is the lost rental's twin (ruling 15).
+ * naming its record(s) in `out_of_service`. `uid_product` is the lost rental's
+ * twin (ruling 15).
  */
 export interface PurchaseReplacementItemInputType extends Omit<PurchaseServiceItemInputType, "type"> {
   type: "replacement";
-  uid_out_of_service?: string;
   /** Shares sum to `quantity` when it is stated. */
-  out_of_service?: OutOfServiceEntryType[];
+  out_of_service: OutOfServiceEntryType[];
 }
 
 /** Union of every item input arm. */
@@ -1719,11 +1722,10 @@ const serviceItemInputArm = z.object({ type: z.literal("service"), ...noCustodyI
 const replacementItemInputArm = z.object({
   type: z.literal("replacement"),
   ...noCustodyInput,
-  uid_out_of_service: OutOfServiceId.optional(),
-  out_of_service: OutOfServiceListInput.optional().meta({ seed: false }),
+  out_of_service: OutOfServiceListInput.meta({ seed: false }),
 }).superRefine((item, ctx) => {
   noCustodyInputIssues(item, ctx);
-  for (const [path, message] of outOfServiceLinkIssues(item, { required: true })) {
+  for (const [path, message] of outOfServiceLinkIssues(item)) {
     ctx.addIssue({ code: "custom", path, message });
   }
 });

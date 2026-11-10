@@ -9,8 +9,7 @@
  *
  * An invoice line bills records by naming them with a share each
  * (`InvoiceDocLineItemType.out_of_service`, valid on `type: "replacement"` and
- * `type: "service"`; a pre-W4R line's single `uid_out_of_service` reads as one
- * entry holding the line's whole quantity — {@link outOfServiceEntries}). What
+ * `type: "service"`; read through {@link outOfServiceEntries}). What
  * a record has been billed is the sum of its shares across every invoice that
  * is not `void`:
  *
