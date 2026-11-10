@@ -1954,7 +1954,8 @@ function mergePair(
  * - **Moved** (`path_order_item`, core#125): a row billing order line X from
  *   another position is merged against X where it stands, re-pointed when X
  *   moves, and removed with X unless overridden — then kept with its pointer
- *   dropped. Each claiming row is decided on its own ({@link orderLineClaims})
+ *   dropped. Each claiming row is decided on its own ({@link orderLineClaims}).
+ *   A new order row under a moved X lands under X where it stands
  *
  * ## 🔴 Why the substitution arm exists: without it a substitution lasts until
  * the next order save
@@ -2182,6 +2183,23 @@ function syncScopedItems<R extends InvoiceItem>(
     invoiceByPath.set(itemPathKey(relPath), item);
   }
 
+  /** Where the invoice holds each claimed order line: the first row claiming it, in document order. */
+  const claimantOf = new Map<string, string[]>();
+  for (const [relKey, x] of claims) {
+    const key = itemPathKey(x);
+    if (!claimantOf.has(key)) claimantOf.set(key, relOf(invoiceByPath.get(relKey)!));
+  }
+  /** A new order row's parent, where the invoice holds that parent at another position. */
+  const heldParentOf = (path: readonly string[]): string[] | undefined => {
+    if (path.length < 2) return undefined;
+    const key = itemPathKey(path.slice(0, -1));
+    return invoiceByPath.has(key) ? undefined : claimantOf.get(key) ?? adoptedAt.get(key);
+  };
+  /** Order-relative key → where a new row was placed under a moved parent, for its own components. */
+  const adoptedAt = new Map<string, string[]>();
+  /** New rows that belong under a moved parent, placed once the survivors are back. */
+  const adopted: { row: R; under: string[] }[] = [];
+
   const result: R[] = [];
   const processedInvoicePaths = new Set<string>();
   /**
@@ -2235,6 +2253,17 @@ function syncScopedItems<R extends InvoiceItem>(
     processedInvoicePaths.add(pathKey);
 
     if (!invoiceItem) {
+      // The invoice holds this line at another position: it was neither left out nor is it new.
+      if (prevItem && isLineItemType(newItem.type) && claimantOf.has(pathKey)) continue;
+      // A new component of a kit the invoice moved goes under the kit where it stands.
+      // Projected at its own path it would name a kit the invoice no longer holds there.
+      const heldParent = prevItem ? undefined : heldParentOf(newItem.path);
+      if (heldParent !== undefined) {
+        const at = [...heldParent, newItem.uid];
+        adoptedAt.set(pathKey, at);
+        adopted.push({ row: { ...side.project(newItem, orderDividerUid), path: [orderDividerUid, ...at], [side.pointerKey]: [...newItem.path] } as R, under: heldParent });
+        continue;
+      }
       // A LINE the previous order already had that the invoice does not carry
       // was left out on purpose: keep it out. A line that MOVED here counts as
       // left out only if the invoice did not carry it at its old path either —
@@ -2347,6 +2376,19 @@ function syncScopedItems<R extends InvoiceItem>(
   });
   result.length = 0;
   result.push(...placed);
+
+  // After the parent's whole subtree, because `computeInvoiceItemPaths` reads the
+  // divider stack off the array and a row anywhere else would change group.
+  for (const { row, under } of adopted) {
+    const parent = [orderDividerUid, ...under];
+    let at = result.findIndex((r) => r.path.join("/") === parent.join("/"));
+    if (at === -1) {
+      emit(row);
+      continue;
+    }
+    while (at + 1 < result.length && isStrictlyBelow(result[at + 1].path, parent)) at++;
+    result.splice(at + 1, 0, row);
+  }
 
   // 🔴 A declined divider exists while something under it does (core#126): a
   // new order line beneath it re-opens it — every declined ancestor with it —

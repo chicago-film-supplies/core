@@ -42037,7 +42037,8 @@ removed survives exactly while some kept row hangs beneath it.
 - **Moved** (`path_order_item`, core#125): a row billing order line X from
   another position is merged against X where it stands, re-pointed when X
   moves, and removed with X unless overridden — then kept with its pointer
-  dropped. Each claiming row is decided on its own ({@link orderLineClaims})
+  dropped. Each claiming row is decided on its own ({@link orderLineClaims}).
+  A new order row under a moved X lands under X where it stands
 
 ## 🔴 Why the substitution arm exists: without it a substitution lasts until
 the next order save

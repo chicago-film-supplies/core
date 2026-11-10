@@ -107,6 +107,43 @@ Deno.test("claims: a root claims its order line, a component follows by suffix, 
 
 // ── The sync ────────────────────────────────────────────────────────
 
+Deno.test("🔴 sync: a component the order adds to a moved kit lands under the kit where it stands", () => {
+  const K = [D, GRIP, TRIPOD];
+  const COMP = [...K, ARM];
+  const NEW = [...K, CSTAND];
+  const prev = [dest(D), group(GRIP, "Grip"), line(TRIPOD, K), line(ARM, COMP), group(MISC, "Misc")];
+  const next = [...prev.slice(0, 4), line(CSTAND, NEW), prev[4]];
+  const projected = buildOrderScopedItems(prev, O) as InvoiceItem[];
+  const at = (uid: string) => projected.find((r) => r.uid === uid)!;
+  // The operator dragged the kit from Grip into Misc.
+  const invoice = [
+    at(D), at(GRIP), at(MISC),
+    { ...at(TRIPOD), path: [O, D, MISC, TRIPOD], path_order_item: K },
+    { ...at(ARM), path: [O, D, MISC, TRIPOD, ARM] },
+  ] as InvoiceDocItemType[];
+
+  const out = syncOrderToInvoiceSelective(prev, next, invoice, O);
+
+  assertEquals(keys(out).filter((k) => k.endsWith(TRIPOD) || k.endsWith(CSTAND)), [`${O}/${D}/${MISC}/${TRIPOD}`, `${O}/${D}/${MISC}/${TRIPOD}/${CSTAND}`], "one kit, and the new component under it");
+  assertEquals(pointer(byKey(out, [D, MISC, TRIPOD, CSTAND])), NEW, "it still bills its order line");
+  assertEquals(out.at(-1)!.uid, CSTAND, "after the kit's other components, inside Misc");
+});
+
+Deno.test("sync: a new row under a kit still at its own path is not adopted by a split-off claimant", () => {
+  const K = [D, GRIP, TRIPOD];
+  const NEW = [...K, CSTAND];
+  const prev = [dest(D), group(GRIP, "Grip"), line(TRIPOD, K, 2), group(MISC, "Misc")];
+  const next = [...prev.slice(0, 3), line(CSTAND, NEW), prev[3]];
+  const projected = buildOrderScopedItems(prev, O) as InvoiceItem[];
+  const at = (uid: string) => projected.find((r) => r.uid === uid)!;
+  const invoice = [at(D), at(GRIP), { ...at(TRIPOD), quantity: 1 }, at(MISC), { ...at(TRIPOD), quantity: 1, path: [O, D, MISC, TRIPOD], path_order_item: K }] as InvoiceDocItemType[];
+
+  const out = syncOrderToInvoiceSelective(prev, next, invoice, O);
+
+  assertEquals(byKey(out, NEW)?.uid, CSTAND, "under the kit that kept its place");
+  assertEquals(pointer(byKey(out, NEW)), undefined);
+});
+
 Deno.test("🔴 sync: a moved line follows X's quantity and name, stays where the operator put it, keeps its pointer", () => {
   const prev = orderItems();
   const next = orderItems({ quantity: 6, name: "C-stand 40in" });

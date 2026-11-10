@@ -48,6 +48,7 @@ import {
   purchaseLineKeyOf,
   purchaseLines,
   PurchaseSaleItemSchema,
+  isPurchaseLine,
 } from "../src/schemas/mod.ts";
 import { computeItemPaths } from "../src/utils/orders.ts";
 import { orderLineClaimIssues } from "../src/utils/invoices.ts";
@@ -514,6 +515,33 @@ Deno.test("syncPurchaseToBills: a NEW purchase line reaches every unfrozen pushe
   assertEquals(lines.map((l) => [l.uid, l.quantity, l.amount_cents]), [[prevItem.uid, 3, 140985], [iuid(9), 2, 2000]]);
   assertEquals(lines[1].path, [PURCHASE, DIV, iuid(9)]);
   assertEquals(out.bill.totals.total_cents, 140985 + 2000);
+  parses(out.bill);
+});
+
+Deno.test("syncPurchaseToBills: a component added to a kit the bill moved lands under it, and the header does not reopen", () => {
+  const KIT = iuid(20);
+  const GROUP = iuid(21);
+  const header = buyLine({ uid: KIT, path: [DIV, KIT], name: "Kit", quantity: 2, amount_cents: 0, ledger_account: null });
+  const comp = buyLine({ uid: iuid(22), path: [DIV, KIT, iuid(22)], name: "Part", quantity: 2, amount_cents: 400 });
+  const added = buyLine({ uid: iuid(23), path: [DIV, KIT, iuid(23)], name: "Added", quantity: 2, amount_cents: 600 });
+  const doc = billDoc(1, [project(header, 10, 2), project(comp, 11, 2)]);
+  const moved: PurchaseBill = {
+    ...doc,
+    items: [
+      ...doc.items.filter((r) => r.type === "purchase" || r.type === "destination"),
+      { type: "group", uid: GROUP, path: [PURCHASE, DIV, GROUP], name: "Packs", description: "" },
+      ...doc.items.filter(isPurchaseLine).map((l) => ({ ...l, path: [PURCHASE, DIV, GROUP, ...l.path.slice(2)], path_purchase_item: l.path.slice(1) })),
+    ] as PurchaseBill["items"],
+  };
+  const [out] = sync([header, comp], [header, comp, added], [moved]);
+  assertEquals(out.bill.items.filter(isPurchaseLine).map((l) => l.path), [
+    [PURCHASE, DIV, GROUP, KIT],
+    [PURCHASE, DIV, GROUP, KIT, iuid(22)],
+    [PURCHASE, DIV, GROUP, KIT, iuid(23)],
+  ]);
+  const line = linesOf(out.bill).find((l) => l.uid === iuid(23))!;
+  assertEquals(line.path_purchase_item, [DIV, KIT, iuid(23)]);
+  assertEquals(out.bill.totals.total_cents, 400 + 600);
   parses(out.bill);
 });
 
