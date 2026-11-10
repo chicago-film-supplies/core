@@ -87,6 +87,7 @@ import {
   type PurchaseProductItemTypeType,
   type PurchaseDestinationInputType,
   purchaseDestinationInputIssues,
+  payableInputUidIssue,
 } from "./purchase.ts";
 import {
   checkDestinationJoin,
@@ -967,14 +968,17 @@ export const PurchaseCreditSchema: z.ZodType<PurchaseCredit> = z.strictObject({
 
 /** A bill or credit item as an operator matches it to a purchase item. */
 export interface PurchaseDocumentItemInputType {
-  /** The purchase item billed — by row identity, never by product. */
-  uid_item: string;
+  /**
+   * The purchase item billed, by its path on the purchase: the row identity.
+   * Its uid is its product's (W4K), and one product may sit on two items.
+   */
+  path_purchase_item: string[];
   quantity: number;
 }
 
 /** Zod schema for PurchaseDocumentItemInputType. */
 export const PurchaseDocumentItemInput: z.ZodType<PurchaseDocumentItemInputType> = z.object({
-  uid_item: ItemUid,
+  path_purchase_item: z.array(ItemUid).min(1),
   quantity: z.int().min(1),
 });
 
@@ -1004,7 +1008,7 @@ export interface PurchaseCreditItemInputType extends PurchaseDocumentItemInputTy
 
 /** Zod schema for PurchaseCreditItemInputType. */
 export const PurchaseCreditItemInput: z.ZodType<PurchaseCreditItemInputType> = z.object({
-  uid_item: ItemUid,
+  path_purchase_item: z.array(ItemUid).min(1),
   quantity: z.int().min(1),
   counts: z.array(z.object({ rate_key: RateKey, num: z.int().min(0), den: z.int().min(1) })).min(1).optional(),
   uid_purchase_bill: FirestoreId.optional(),
@@ -1046,9 +1050,13 @@ const PurchaseDocumentChargeItemInput: z.ZodType<PurchaseDocumentChargeItemInput
   uid_tracking_category: FirestoreId.nullable().optional(),
 });
 
-/** Each purchase item once per write: it is billed by at most one item of a document. */
+/**
+ * Each purchase item once per write: it is billed by at most one item of a
+ * document. Keyed on the purchase line's path, so a credit still cannot credit
+ * one purchase line against two bill lines in one write (as before W4K).
+ */
 function uniqueItemInputs(
-  items: readonly { uid_item: string; uid_purchase_bill?: string; path_bill_item?: string[] }[],
+  items: readonly { path_purchase_item: readonly string[]; uid_purchase_bill?: string; path_bill_item?: string[] }[],
   ctx: z.RefinementCtx,
 ): void {
   const seen = new Set<string>();
@@ -1056,10 +1064,11 @@ function uniqueItemInputs(
     if ((item.uid_purchase_bill === undefined) !== (item.path_bill_item === undefined)) {
       ctx.addIssue({ code: "custom", path: ["items", i, "path_bill_item"], message: "uid_purchase_bill and path_bill_item are set together" });
     }
-    if (seen.has(item.uid_item)) {
-      ctx.addIssue({ code: "custom", path: ["items", i, "uid_item"], message: "one item per purchase item" });
+    const key = item.path_purchase_item.join("/");
+    if (seen.has(key)) {
+      ctx.addIssue({ code: "custom", path: ["items", i, "path_purchase_item"], message: "one item per purchase item" });
     }
-    seen.add(item.uid_item);
+    seen.add(key);
   });
 }
 
@@ -1314,6 +1323,10 @@ const billLineInput = (type: SharedLineType) =>
       rates: z.array(z.object({ rate_key: RateKey, amount_cents: z.int() })).optional(),
       discount: DiscountInput.nullable().optional(),
     }).optional(),
+  }).superRefine((row, ctx) => {
+    // A row naming its product is keyed by it (W4K), as a purchase line input is.
+    const message = payableInputUidIssue(row);
+    if (message !== null) ctx.addIssue({ code: "custom", path: ["uid"], message });
   });
 
 /** Zod schema for one {@link PurchaseBillRowInputType}. */

@@ -691,7 +691,11 @@ const PAIR_B = iuid(902);
 const GROUP = iuid(903);
 const destRow = (uid = PAIR_A) => ({ type: "destination", uid, path: [uid] });
 const lineHead = (n: number, pair = PAIR_A) => ({ uid: iuid(n), path: [pair, iuid(n)] });
-const buyInput = { type: "sale", ...lineHead(1), uid_product: PRODUCT, quantity: 1, amount_cents: 100 };
+/** The n-th product's uid. */
+const pid = (n: number) => `testprod${String(n).padStart(12, "0")}`;
+/** A catalog line's head, keyed by its product (W4K): uid, path leaf and `uid_product` agree. */
+const keyedHead = (n: number, pair = PAIR_A) => ({ uid: pid(n), path: [pair, pid(n)], uid_product: pid(n) });
+const buyInput = { type: "sale", ...keyedHead(1), quantity: 1, amount_cents: 100 };
 const nullDates = { delivery_start: null, delivery_end: null, collection_start: null, collection_end: null, charge_windows: null };
 /** A hire in the order's shape (api-cloudrun#1469): possession to `collection_start`, `collection_end` following it. */
 const hireDates = {
@@ -716,21 +720,23 @@ const createInput = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-Deno.test("CreatePurchaseInput: rows of every arm, the same product twice, and no kind", () => {
+Deno.test("CreatePurchaseInput: rows of every arm, the same product in two groups, and no kind", () => {
   const items = [
     destRow(),
     buyInput,
-    { ...buyInput, ...lineHead(2), quantity: 2 },
-    { type: "rental", ...lineHead(3), uid_product: PRODUCT, quantity: 10, amount_cents: 50_000 },
+    { ...buyInput, ...keyedHead(3), quantity: 2 },
+    { type: "rental", ...keyedHead(4), quantity: 10, amount_cents: 50_000 },
     {
       type: "rental",
-      ...lineHead(4),
-      uid_product: PRODUCT,
+      ...keyedHead(5),
       quantity: 2,
       price: { uid_price_formula: WEEKLY.uid, rates: weeklyPrice.rates },
     },
     { type: "service", ...lineHead(5), name: "Hotspot line", uid_product: PRODUCT, ledger_account: 5150, price: { uid_price_formula: MONTHLY.uid } },
     { type: "service", ...lineHead(6), name: "Freight", amount_cents: 1_500, ledger_account: 5300, price: { discount: { rate: 10, type: "percent" } } },
+    // The same product again, in its own group: one product per group (W4K).
+    { type: "group", uid: GROUP, path: [PAIR_A, GROUP], name: "Second" },
+    { ...buyInput, path: [PAIR_A, GROUP, pid(1)], quantity: 2 },
   ];
   assertEquals(issuePaths(CreatePurchaseInput, createInput({ items })), []);
 });
@@ -739,9 +745,9 @@ Deno.test("purchase input: two pairs on one window and a group, parsed through t
   const items = [
     destRow(PAIR_A),
     { type: "group", uid: GROUP, path: [PAIR_A, GROUP], name: "Camera" },
-    { ...buyInput, ...lineHead(1), path: [PAIR_A, GROUP, iuid(1)] },
+    { ...buyInput, path: [PAIR_A, GROUP, pid(1)] },
     destRow(PAIR_B),
-    { type: "rental", ...lineHead(2, PAIR_B), uid_product: PRODUCT, quantity: 1, amount_cents: 1 },
+    { type: "rental", ...keyedHead(2, PAIR_B), quantity: 1, amount_cents: 1 },
   ];
   const destinations = [pairInput({ dates: hireDates }), pairInput({ uid: PAIR_B, dates: hireDates, delivery: { uid: "testdest100000000000" } })];
   const parsed = CreatePurchaseInput.safeParse(createInput({ items, destinations }));
@@ -752,11 +758,15 @@ Deno.test("purchase input: two pairs on one window and a group, parsed through t
 });
 
 Deno.test("purchase input: the whole-array rules, one defect at a time", () => {
+  // A row is named by its PATH once per write (W4K: a uid is a product's and repeats across groups).
   const twice = [destRow(), buyInput, buyInput];
-  assertEquals(issuePaths(CreatePurchaseInput, createInput({ items: twice })), ["items.2.uid"]);
-  assertEquals(issuePaths(UpdatePurchaseInput, { version: 0, items: twice }), ["items.2.uid"]);
-  // A divider's uid counts as well as a line's.
-  assertEquals(issuePaths(CreatePurchaseInput, createInput({ items: [destRow(), { ...destRow(), path: [PAIR_B] }, buyInput] })), ["items.1.uid"]);
+  assertEquals(issuePaths(CreatePurchaseInput, createInput({ items: twice })), ["items.2.path"]);
+  assertEquals(issuePaths(UpdatePurchaseInput, { version: 0, items: twice }), ["items.2.path"]);
+  // A divider's path counts as well as a line's.
+  assertEquals(issuePaths(CreatePurchaseInput, createInput({ items: [destRow(), destRow(), buyInput] })), ["items.1.path"]);
+  // One product under two pairs is two rows, not a repeat.
+  const twoPairs = [destRow(), buyInput, destRow(PAIR_B), { ...buyInput, ...keyedHead(1, PAIR_B) }];
+  assertEquals(issuePaths(UpdatePurchaseInput, { version: 0, items: twoPairs }), []);
   // A line ahead of any divider is refused, and that is what refuses an old flat body.
   assertEquals(issuePaths(CreatePurchaseInput, createInput({ items: [buyInput] })), ["items.0.type"]);
   assertEquals(issuePaths(UpdatePurchaseInput, { version: 0, items: [buyInput, destRow()] }), ["items.0.type"]);
@@ -788,7 +798,7 @@ Deno.test("purchase row input: a line and a divider each require their identity"
 });
 
 Deno.test("purchase row input: a stale line `dates` strips, so only the rest of the body refuses an old client", () => {
-  const stale = { type: "rental", ...lineHead(2), uid_product: PRODUCT, quantity: 1, amount_cents: 1, dates: HIRE };
+  const stale = { type: "rental", ...keyedHead(2), quantity: 1, amount_cents: 1, dates: HIRE };
   const parsed = PurchaseRowInput.safeParse(stale);
   assert(parsed.success);
   assertEquals("dates" in parsed.data, false);
@@ -824,7 +834,7 @@ Deno.test("PurchaseDestinationInput: a hire states both collection bounds or nei
 });
 
 Deno.test("PurchaseItemInput: each arm's own requirements, one field at a time", () => {
-  const sub = { type: "rental", ...lineHead(2), uid_product: PRODUCT, quantity: 10, amount_cents: 1 };
+  const sub = { type: "rental", ...keyedHead(2), quantity: 10, amount_cents: 1 };
   const charge = lineHead(3);
   assertEquals(issuePaths(PurchaseItemInput, sub), []);
   assertEquals(issuePaths(PurchaseItemInput, { ...sub, ledger_account: 1999 }), ["ledger_account"]);
@@ -840,18 +850,26 @@ Deno.test("PurchaseItemInput: each arm's own requirements, one field at a time",
 });
 
 Deno.test("ClosePurchaseInput / ReceivePurchaseInput / ReturnPurchaseInput name ITEMS, each once", () => {
-  assertEquals(issuePaths(ClosePurchaseInput, { uid_items: [iuid(1)], uuid_session: SESSION, version: 0 }), []);
-  const r = { uid_item: iuid(1), quantity: 1 };
+  assertEquals(issuePaths(ClosePurchaseInput, { path_purchase_items: [[iuid(1)]], uuid_session: SESSION, version: 0 }), []);
+  const r = { path_purchase_item: [iuid(1)], quantity: 1 };
   const receive = { date: "2026-10-05T10:00:00.000-05:00", lines: [r, r], uuid_session: SESSION, version: 0 };
-  assertEquals(issuePaths(ReceivePurchaseInput, receive), ["lines.1.uid_item"]);
-  assertEquals(issuePaths(ReceivePurchaseInput, { ...receive, lines: [r, { ...r, uid_item: iuid(2) }] }), []);
-  assertEquals(issuePaths(ReturnPurchaseInput, { ...receive, lines: [r, r] }), ["lines.1.uid_item"]);
+  assertEquals(issuePaths(ReceivePurchaseInput, receive), ["lines.1.path_purchase_item"]);
+  assertEquals(issuePaths(ReceivePurchaseInput, { ...receive, lines: [r, { ...r, path_purchase_item: [iuid(2)] }] }), []);
+  assertEquals(issuePaths(ReturnPurchaseInput, { ...receive, lines: [r, r] }), ["lines.1.path_purchase_item"]);
+  // W4K: a line's uid is its product's, so one uid under two pairs is two items, named by path.
+  const twoPairs = [{ path_purchase_item: [iuid(1), PRODUCT_UID_W4K], quantity: 1 }, { path_purchase_item: [iuid(2), PRODUCT_UID_W4K], quantity: 1 }];
+  assertEquals(issuePaths(ReceivePurchaseInput, { ...receive, lines: twoPairs }), []);
+  assertEquals(issuePaths(ClosePurchaseInput, { path_purchase_items: [[]], version: 0 }), ["path_purchase_items.0"]);
+  // A body naming only the retired key is stripped, then refused for the missing path.
+  assertEquals(issuePaths(ReceivePurchaseInput, { ...receive, lines: [{ uid_item: iuid(1), quantity: 1 }] }), ["lines.0.path_purchase_item"]);
 });
+
+const PRODUCT_UID_W4K = "ePJgrlQYm5AEoKUpVcYz";
 
 Deno.test("ReceivePurchaseInput: allocations sum to the quantity, and named units are exactly `quantity`, ascending", () => {
   const receive = (l: Record<string, unknown>) => ({
     date: "2026-10-05T10:00:00.000-05:00",
-    lines: [{ uid_item: iuid(1), quantity: 2, ...l }],
+    lines: [{ path_purchase_item: [iuid(1)], quantity: 2, ...l }],
     uuid_session: SESSION,
     version: 0,
   });
@@ -866,7 +884,7 @@ Deno.test("ReceivePurchaseInput: allocations sum to the quantity, and named unit
 Deno.test("ReturnPurchaseInput: allocations sum to the quantity; units only with the line's own units", () => {
   const ret = (lineOver: Record<string, unknown>) => ({
     date: "2026-10-25T10:00:00.000-05:00",
-    lines: [{ uid_item: iuid(2), quantity: 10, ...lineOver }],
+    lines: [{ path_purchase_item: [iuid(2)], quantity: 10, ...lineOver }],
     uuid_session: SESSION,
     version: 3,
   });
@@ -884,7 +902,7 @@ Deno.test("ReturnPurchaseInput: allocations sum to the quantity; units only with
 Deno.test("ReturnPurchaseInput: a serialized subrent return names its units by number (serialized-subrent § 5)", () => {
   const ret = (lineOver: Record<string, unknown>) => ({
     date: "2026-10-25T10:00:00.000-05:00",
-    lines: [{ uid_item: iuid(2), quantity: 2, ...lineOver }],
+    lines: [{ path_purchase_item: [iuid(2)], quantity: 2, ...lineOver }],
     uuid_session: SESSION,
     version: 3,
   });
@@ -1150,8 +1168,8 @@ Deno.test("PurchaseBillSchema: due_date_fs is a mirror — absent until backfill
   assertEquals(issuePaths(PurchaseBillSchema, bill({ due_date: null, due_date_fs: mockTimestamp })), ["due_date_fs"]);
 });
 
-Deno.test("CreatePurchaseBillInput: items by uid_item, charge items separately; a purchase item once", () => {
-  const items = [{ uid_item: iuid(1), quantity: 3 }];
+Deno.test("CreatePurchaseBillInput: items by path_purchase_item, charge items separately; a purchase item once", () => {
+  const items = [{ path_purchase_item: [iuid(1)], quantity: 3 }];
   const common = { items, uuid_session: SESSION, version: 0 };
   const push = { mode: "push", date: "2026-10-01T00:00:00.000-05:00", due_date: "2026-10-31T00:00:00.000-05:00" };
   assertEquals(issuePaths(CreatePurchaseBillInput, { ...push, ...common }), []);
@@ -1159,7 +1177,7 @@ Deno.test("CreatePurchaseBillInput: items by uid_item, charge items separately; 
   assertEquals(issuePaths(CreatePurchaseBillInput, { mode: "push", date: "2026-10-01T00:00:00.000-05:00", ...common }), ["due_date"]);
   assertEquals(
     issuePaths(CreatePurchaseBillInput, { mode: "link", xero_document: "invoice", xero_id: XERO_ID, ...common, items: [items[0], items[0]] }),
-    ["items.1.uid_item"],
+    ["items.1.path_purchase_item"],
   );
   // A push of charge items alone is a bill; a push of nothing is not.
   const fee = { name: "Freight", ledger_account: 5100, amount_cents: 1500 };
@@ -1175,7 +1193,7 @@ Deno.test("a charge item input stays STRICT inside the push input — an unknown
       mode: "push",
       date: "2026-10-25T00:00:00.000-05:00",
       due_date: "2026-11-24T00:00:00.000-06:00",
-      items: [{ uid_item: iuid(1), quantity: 1 }],
+      items: [{ path_purchase_item: [iuid(1)], quantity: 1 }],
       charge_items: [d],
       uuid_session: SESSION,
       version: 0,
@@ -1409,7 +1427,7 @@ Deno.test("PurchaseCreditSchema: a PUSHED credit's total is its items', at the c
 Deno.test("CreatePurchaseCreditInput: a pushed credit names an item or a direct item", () => {
   const base = { mode: "push", reason: "supplier_adjustment", date: "2026-10-01T00:00:00.000-05:00", uuid_session: SESSION, version: 0 };
   assertEquals(issuePaths(CreatePurchaseCreditInput, { ...base, items: [] }), ["items"]);
-  assertEquals(issuePaths(CreatePurchaseCreditInput, { ...base, items: [{ uid_item: iuid(1), quantity: 1 }] }), []);
+  assertEquals(issuePaths(CreatePurchaseCreditInput, { ...base, items: [{ path_purchase_item: [iuid(1)], quantity: 1 }] }), []);
 });
 
 // ── pack expansion (api-cloudrun#1081) ───────────────────────────────
@@ -1452,19 +1470,21 @@ const CATALOG = new Map<string, PurchaseExpansionProduct>([
 ]);
 
 const D1 = "2026-11-02T00:00:00.000-06:00";
+/** A buy line keyed by its product (W4K), as a client sends it. */
 const buy = (uid_product: string, quantity: number, amount_cents: number, over: Record<string, unknown> = {}) =>
-  ({ type: "sale" as const, uid: iuid(1), path: [PAIR_A, iuid(1)], uid_product, quantity, amount_cents, ...over });
+  ({ type: "sale" as const, uid: uid_product, path: [PAIR_A, uid_product], uid_product, quantity, amount_cents, ...over });
 
 Deno.test("expandPurchaseItems: a stocked product passes through unchanged", () => {
   const items = [buy("410", 7, 700, { expected_date: D1 })];
   assertEquals(expandPurchaseItems(items, CATALOG), { ok: true, items });
 });
 
-Deno.test("expandPurchaseItems: a pack becomes its stocked component at ×N, carrying the pack's amount and uid", () => {
-  assertEquals(expandPurchaseItems([buy("118", 12, 36_000, { uid: iuid(1) })], CATALOG), {
-    ok: true,
-    items: [buy("410", 480, 36_000, { uid: iuid(1) })],
-  });
+Deno.test("expandPurchaseItems: a pack becomes its stocked component at ×N, carrying the pack's amount, keyed by the component (W4K)", () => {
+  const result = expandPurchaseItems([buy("118", 12, 36_000)], CATALOG);
+  assertEquals(result, { ok: true, items: [buy("410", 480, 36_000)] });
+  assert(result.ok);
+  const [row] = result.items as { uid: string; path: string[] }[];
+  assertEquals([row.uid, row.path], ["410", [PAIR_A, "410"]]);
 });
 
 Deno.test("expandPurchaseItems: a nested pack reaches the stocked leaf through the uncounted middle", () => {
@@ -1489,7 +1509,9 @@ Deno.test("expandPurchaseItems: the ratio ceils once in integers — 0.07 × 100
   assertEquals((result.items[0] as { quantity: number }).quantity, 7);
 });
 
-Deno.test("expandPurchaseItems: a pack and its stocked product stay TWO items — no merge since items carry identity (D2)", () => {
+// The expansion does not merge (D2). Keyed by product (W4K), the two rows share a path, which the
+// writer's `itemArrayIssues` uniqueness then refuses, as an order's would.
+Deno.test("expandPurchaseItems: a pack onto a product the group already holds is a second row at one path, never merged here", () => {
   const result = expandPurchaseItems([buy("410", 20, 1_000), buy("118", 2, 6_000)], CATALOG);
   assertEquals(result, { ok: true, items: [buy("410", 20, 1_000), buy("410", 80, 6_000)] });
 });
@@ -1517,8 +1539,8 @@ Deno.test("expandPurchaseItems: a product the caller did not read is the caller'
 Deno.test("expandPurchaseItems: a subrent pack expands carrying its price and orders; a divider and a charge pass through", () => {
   const sub = {
     type: "rental" as const,
-    uid: iuid(2),
-    path: [PAIR_A, iuid(2)],
+    uid: "118",
+    path: [PAIR_A, "118"],
     uid_product: "118",
     quantity: 1,
     amount_cents: 900,
@@ -1531,7 +1553,7 @@ Deno.test("expandPurchaseItems: a subrent pack expands carrying its price and or
   ];
   assertEquals(expandPurchaseItems([sub, ...other], CATALOG), {
     ok: true,
-    items: [{ ...sub, uid_product: "410", quantity: 40 }, ...other],
+    items: [{ ...sub, uid: "410", path: [PAIR_A, "410"], uid_product: "410", quantity: 40 }, ...other],
   });
 });
 
@@ -1778,8 +1800,7 @@ Deno.test("PurchaseSchema: a landed cost's own refines, one field at a time", ()
 Deno.test("landed cost inputs: a subrent item cannot carry them; a buy item input refuses a uid named twice", () => {
   const sub = PurchaseItemInput.safeParse({
     type: "rental",
-    ...lineHead(2),
-    uid_product: PRODUCT,
+    ...keyedHead(2),
     quantity: 1,
     billing: { basis: "fixed", amount_cents: 100 },
     landed_costs: [{ description: "Freight", amount_cents: 1 }],

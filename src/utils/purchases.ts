@@ -19,6 +19,10 @@ import {
   purchaseItemCommittedCents,
   purchaseItemProduct,
   purchaseItemResolved,
+  payableInputUidIssue,
+  payableLineUid,
+  payableLineUidIssue,
+  type PayableLineUidFields,
   type PurchaseRowInputType,
   type PurchaseLandedCost,
   type StockMethodType,
@@ -50,6 +54,8 @@ export {
   purchaseItemProduct,
   purchaseItemResolved,
 };
+// The payable line uid rule (W4K) lives beside the refines that check it.
+export { payableInputUidIssue, payableLineUid, payableLineUidIssue, type PayableLineUidFields };
 
 /** The co-written receipt buckets — a buy or subrent item. */
 type ReceivableItem = Pick<PurchaseSaleItem, "quantity" | "quantity_received">;
@@ -365,11 +371,12 @@ export type PurchaseExpansionResult =
  * refusal (buying it would receive nothing), and several is a refusal too —
  * one amount has no rule for splitting across two products' cost.
  *
- * ⚠️ **Expanded items no longer MERGE** (api-cloudrun#1407 D2). They merged —
- * quantities and amounts summed, one hire window per product — only because a
- * purchase held one line per product. Items carry their own row identity now,
- * so a pack item keeps its `uid` and becomes its own item even when the stocked
- * product already has one; the ledger averages the cost either way.
+ * ⚠️ **Expanded items do not MERGE here** (api-cloudrun#1407 D2). An expanded
+ * item is keyed by the product it now names (W4K, `payableLineUid`): its `uid`
+ * and its path's last segment become the stocked product's. A stocked product
+ * the same group already holds is then a second row at one path, which the
+ * writer's `itemArrayIssues` uniqueness refuses, as an order's would; the
+ * operator merges or splits it into a sibling group.
  * Charge items and dividers pass through untouched, and so does a line that
  * states its kit in the rows: this rewrite serves only a client still sending a
  * bare pack (one-document-model Phase 6a-K), and is deleted once none does.
@@ -432,9 +439,12 @@ function expandOnto(
   uidProduct: string,
   quantity: number,
 ): PurchaseSaleItemInputType | PurchaseRentalItemInputType {
+  // Keyed by the product it now orders (W4K): the uid and the path's last segment.
+  const keyed = { uid: uidProduct, path: [...item.path.slice(0, -1), uidProduct] };
   if (item.type === "sale") {
     return {
       ...item,
+      ...keyed,
       uid_product: uidProduct,
       quantity,
       ...(item.landed_costs !== undefined ? { landed_costs: item.landed_costs.map((e) => ({ ...e })) } : {}),
@@ -442,6 +452,7 @@ function expandOnto(
   }
   return {
     ...item,
+    ...keyed,
     uid_product: uidProduct,
     quantity,
     ...(item.uid_orders !== undefined ? { uid_orders: [...item.uid_orders] } : {}),

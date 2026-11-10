@@ -515,7 +515,12 @@ export const PURCHASE_LINE_STATUSES = ["open", "canceled"] as const;
 export type PurchaseLineStatusType = typeof PURCHASE_LINE_STATUSES[number];
 
 interface PurchaseItemBase {
-  /** Row identity, minted by the writer. Never a product uid: one product may sit on two items. */
+  /**
+   * The line's product's uid, or a `custom-` uid for a line no product keys
+   * ({@link payableLineUid}), as an order or invoice line's (W4K, owner ruling
+   * 12, 2026-11-10). NOT a row identity: one product may sit on two items, under
+   * two pairs or in two groups. `path` is the identity.
+   */
   uid: string;
   name: string;
   description: string;
@@ -1070,6 +1075,73 @@ export function purchaseItemProduct(item: PurchaseItem): string | undefined {
   }
 }
 
+/** The prefix a payable line no product keys carries, as an order or invoice custom line's (`order-lines.ts`). */
+const CUSTOM_LINE_PREFIX = "custom-";
+
+/** The payable line fields {@link payableLineUid} reads. */
+export interface PayableLineUidFields {
+  type: string;
+  uid: string;
+  uid_product?: string;
+}
+
+/**
+ * The `uid` a payable line takes: its product's, as an order or invoice
+ * catalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).
+ *
+ * - `sale` / `rental` → `uid_product`.
+ * - `replacement` → `uid_product` when stated, as an invoice's replacement
+ *   line takes its replacement product's uid (`utils/replacements.ts`).
+ * - `service`, and a `replacement` naming no product → a `custom-` uid. A line
+ *   already carrying one keeps it; any other becomes `custom-` + its old uid,
+ *   so a re-key is deterministic and repeatable, and a purchase line and the
+ *   bill line projected from it (which share the old uid) land on one uid.
+ *
+ * A product does not repeat within a group on any document: two of one product
+ * in one section is a split into a sibling group. Dividers keep their uids and
+ * are not lines, so this is never asked of one.
+ *
+ * @throws when a `sale` or `rental` line names no product, which every schema
+ *   arm for those types refuses.
+ */
+export function payableLineUid(line: PayableLineUidFields): string {
+  if (line.type === "sale" || line.type === "rental" || line.type === "replacement") {
+    if (line.uid_product !== undefined) return line.uid_product;
+    if (line.type !== "replacement") throw new Error(`payableLineUid: a ${line.type} line names no product`);
+  }
+  return line.uid.startsWith(CUSTOM_LINE_PREFIX) ? line.uid : `${CUSTOM_LINE_PREFIX}${line.uid}`;
+}
+
+/**
+ * Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`.
+ *
+ * ⚠️ **Not yet attached to the stored schemas.** It goes on once purchases,
+ * bills and credits are migrated in every environment and the `test` database
+ * (one-document-model W4K): a stored tightening ahead of the migration refuses
+ * every write to an unmigrated document. The input refine
+ * ({@link payableInputUidIssue}) is live.
+ */
+export function payableLineUidIssue(line: PayableLineUidFields): string | null {
+  const keyed = line.type === "service" || (line.type === "replacement" && line.uid_product === undefined)
+    ? line.uid.startsWith(CUSTOM_LINE_PREFIX)
+    : line.uid === line.uid_product;
+  if (keyed) return null;
+  return line.uid_product !== undefined && line.type !== "service"
+    ? `a ${line.type} line's uid is its product's (${line.uid_product}), not ${line.uid}`
+    : `a ${line.type} line naming no product carries a custom- uid, not ${line.uid}`;
+}
+
+/**
+ * Why a line INPUT that names its product carries another uid, or `null`.
+ *
+ * Only the product half of {@link payableLineUidIssue}: a `service` (or
+ * product-less `replacement`) input's `custom-` uid is the writer's to mint.
+ */
+export function payableInputUidIssue(line: { type: string; uid: string; uid_product?: string }): string | null {
+  if (line.type === "service" || line.uid_product === undefined || line.uid === line.uid_product) return null;
+  return `a ${line.type} line's uid is its product's (${line.uid_product}), not ${line.uid}`;
+}
+
 /**
  * Derive `query_by_products` — the distinct products the items ORDER, in first
  * appearance order. Attribution is not an order and is left out. The one author
@@ -1255,8 +1327,8 @@ function sameMembers(mirror: readonly string[], derived: readonly string[]): boo
 
 /**
  * The row-identity invariants an items array owes every reader (cfs-items),
- * asserted directly rather than through a recompute: each `uid` once, and each
- * `path` exactly `[uid]` — non-empty, self-inclusive, flat.
+ * asserted directly rather than through a recompute: each `path` non-empty,
+ * self-inclusive, and once per document. A `uid` may repeat across parents.
  */
 function itemIdentityIssues(items: readonly { uid: string; path: readonly string[] }[], ctx: z.RefinementCtx): void {
   const paths = new Set<string>();
@@ -1409,10 +1481,11 @@ export interface PurchaseLinePriceInputType {
 }
 
 /**
- * The keys every item input carries. `uid` names a stored item to keep; a uid
- * the purchase does not hold is a NEW item, so an update matches rows by identity
- * rather than by product. Both `uid` and `path` are required: the client already
- * holds the uid as the path's last segment.
+ * The keys every item input carries. `uid` is the line's product's uid on a
+ * line naming one (refined on each arm, {@link payableInputUidIssue}), and the
+ * row's identity is its `path`: an update pairs rows with the stored ones by
+ * path, then by uid and ancestry, as an order's does. Both `uid` and `path` are
+ * required: the uid is the path's last segment.
  *
  * `uid_tracking_category` takes the SAME rule as an order or invoice line's
  * (`resolveLinePosting`, `api-cloudrun/src/lib/lineDenorms.ts`): absent KEEPS
@@ -1542,12 +1615,19 @@ const noCustodyInput = {
   uid_product: FirestoreId.optional(),
 };
 
+/** A line input naming its product is keyed by it ({@link payableInputUidIssue}). */
+function inputUidIssue(item: { type: string; uid: string; uid_product?: string }, ctx: z.RefinementCtx): void {
+  const message = payableInputUidIssue(item);
+  if (message !== null) ctx.addIssue({ code: "custom", path: ["uid"], message });
+}
+
 function noCustodyInputIssues(
   item: PurchaseServiceItemInputType | PurchaseReplacementItemInputType,
   ctx: z.RefinementCtx,
 ): void {
   if (item.uid_units) uniqueUnitsIssue(item.uid_units, ctx);
   inputPostingIssue(item, ctx);
+  inputUidIssue(item, ctx);
 }
 
 // Un-annotated so both unions below can list them flat: an annotated union cannot
@@ -1563,6 +1643,7 @@ const saleItemInputArm = z.object({
   landed_costs: z.array(PurchaseLandedCostInput).optional(),
 }).superRefine((item, ctx) => {
   inputPostingIssue(item, ctx);
+  inputUidIssue(item, ctx);
   const named = new Set<string>();
   item.landed_costs?.forEach((entry, k) => {
     if (entry.uid === undefined) return;
@@ -1585,6 +1666,7 @@ const rentalItemInputArm = z.object({
 }).superRefine((item, ctx) => {
   if (item.uid_units) uniqueUnitsIssue(item.uid_units, ctx);
   inputPostingIssue(item, ctx);
+  inputUidIssue(item, ctx);
 });
 
 const serviceItemInputArm = z.object({ type: z.literal("service"), ...noCustodyInput })
@@ -1720,14 +1802,19 @@ export function purchaseDestinationInputIssues(
   }
 }
 
-/** A row named twice in one write is ambiguous: which one is kept? */
-function uniqueRowUids(items: readonly { uid: string }[], ctx: z.RefinementCtx): void {
+/**
+ * A row named twice in one write is ambiguous: which one is kept? Keyed on the
+ * PATH, the row identity: a line's uid is its product's (W4K), and one product
+ * legitimately sits in two groups or under two pairs.
+ */
+function uniqueRowPaths(items: readonly { path: readonly string[] }[], ctx: z.RefinementCtx): void {
   const seen = new Set<string>();
   items.forEach((item, i) => {
-    if (seen.has(item.uid)) {
-      ctx.addIssue({ code: "custom", path: ["items", i, "uid"], message: "a row uid appears once per write" });
+    const key = item.path.join("/");
+    if (seen.has(key)) {
+      ctx.addIssue({ code: "custom", path: ["items", i, "path"], message: "a row path appears once per write" });
     }
-    seen.add(item.uid);
+    seen.add(key);
   });
 }
 
@@ -1741,7 +1828,7 @@ function uniqueRowUids(items: readonly { uid: string }[], ctx: z.RefinementCtx):
  * may be relaxed.
  */
 function purchaseRowsIssues(items: readonly PurchaseRowInputType[], ctx: z.RefinementCtx): void {
-  uniqueRowUids(items, ctx);
+  uniqueRowPaths(items, ctx);
   for (const v of leadingDividerViolations(items, "purchase", false)) {
     ctx.addIssue({
       code: "custom",
@@ -1797,8 +1884,9 @@ export const CreatePurchaseInput: z.ZodType<CreatePurchaseInputType> = z.object(
 /**
  * Input for amending a purchase — a PATCH.
  *
- * `items`, when present, is the complete next array of dividers and lines, matched
- * to the stored rows by `uid`. A stored item absent from it is removed — refused once it has any
+ * `items`, when present, is the complete next array of dividers and lines, paired
+ * with the stored rows by path (then uid and ancestry, `pairItemsAcrossRebuild`),
+ * never by uid alone: a line's uid is its product's. A stored item absent from it is removed — refused once it has any
  * receipt, bill or return. A named item may not change `type`. On a buy the
  * writer refuses to cut `quantity` below what is received or billed, and to
  * change `amount_cents` once it has any receipt or bill: a price that moved
@@ -1841,36 +1929,41 @@ export const UpdatePurchaseInput: z.ZodType<UpdatePurchaseInputType> = z.object(
  * Lowers each named buy or subrent item's `quantity` to what was received and a
  * flat charge's to what was billed, restating its money; a line with nothing
  * left is canceled (`purchaseLineCloseOutcome`). A time charge is canceled and
- * keeps its quantity. `uid_items` absent closes every such item; a cancel is a
+ * keeps its quantity. `path_purchase_items` absent closes every such item; a cancel is a
  * close of a purchase with nothing received. Billed beyond what was received is
  * a diff entry the operator credits by hand; a close raises no credit.
  */
 export interface ClosePurchaseInputType {
-  uid_items?: string[];
+  /** The lines to close, each by its path (row identity; a uid repeats once a line is keyed by its product). */
+  path_purchase_items?: string[][];
   version: number;
 }
 
 /** Zod schema for ClosePurchaseInputType. */
 export const ClosePurchaseInput: z.ZodType<ClosePurchaseInputType> = z.object({
-  uid_items: z.array(ItemUid).min(1).optional(),
+  path_purchase_items: z.array(z.array(ItemUid).min(1)).min(1).optional(),
   version: z.int().min(0),
 });
 
 /** Each named item once per write — a receipt or return of one item is one line. */
-function uniqueItems(lines: readonly { uid_item: string }[], ctx: z.RefinementCtx): void {
+function uniqueItems(lines: readonly { path_purchase_item: readonly string[] }[], ctx: z.RefinementCtx): void {
   const seen = new Set<string>();
   lines.forEach((line, i) => {
-    if (seen.has(line.uid_item)) {
-      ctx.addIssue({ code: "custom", path: ["lines", i, "uid_item"], message: "one line per item" });
+    const key = line.path_purchase_item.join("/");
+    if (seen.has(key)) {
+      ctx.addIssue({ code: "custom", path: ["lines", i, "path_purchase_item"], message: "one line per item" });
     }
-    seen.add(line.uid_item);
+    seen.add(key);
   });
 }
 
 /** One item received in a delivery. */
 export interface ReceivePurchaseLineInputType {
-  /** The buy or subrent item received against — by row identity, since one product may sit on two items. */
-  uid_item: string;
+  /**
+   * The buy or subrent item received against, by its path: the row identity.
+   * Its uid is its product's (W4K), and one product may sit on two items.
+   */
+  path_purchase_item: string[];
   quantity: number;
   /**
    * Which locations the units go to. Absent means they land at the store's
@@ -1889,7 +1982,7 @@ export interface ReceivePurchaseLineInputType {
 
 /** Zod schema for ReceivePurchaseLineInputType. */
 export const ReceivePurchaseLineInput: z.ZodType<ReceivePurchaseLineInputType> = z.object({
-  uid_item: ItemUid,
+  path_purchase_item: z.array(ItemUid).min(1),
   quantity: z.int().min(1),
   allocations: z.array(MovementAllocationInput).min(1).optional(),
   units: z.array(MovementUnitInput).optional(),
@@ -1960,8 +2053,8 @@ export const ReversePurchaseReceiptInput: z.ZodType<ReversePurchaseReceiptInputT
 
 /** One subrent item given back to the supplier. */
 export interface ReturnPurchaseLineInputType {
-  /** The subrent item returned against. */
-  uid_item: string;
+  /** The subrent item returned against, by its path (the row identity). */
+  path_purchase_item: string[];
   quantity: number;
   /**
    * Which locations the units leave FROM. Absent means the writer picks the
@@ -1980,7 +2073,7 @@ export interface ReturnPurchaseLineInputType {
 
 /** Zod schema for ReturnPurchaseLineInputType. */
 export const ReturnPurchaseLineInput: z.ZodType<ReturnPurchaseLineInputType> = z.object({
-  uid_item: ItemUid,
+  path_purchase_item: z.array(ItemUid).min(1),
   quantity: z.int().min(1),
   allocations: z.array(MovementAllocationInput).min(1).optional(),
   units: z.array(MovementUnitInput).optional(),

@@ -64,11 +64,14 @@ export type PurchaseActionItem =
 
 /** One action the UI may offer. `key` is what a menu de-duplicates on. */
 export interface PurchaseActionOffer {
-  /** The action id, or `<action>:<uid_item>` for a per-line action. */
+  /** The action id, or `<action>:<path joined by "/">` for a per-line action. */
   key: string;
   action: PurchaseActionId;
-  /** The per-line actions: the line it acts on. */
-  uid_item?: string;
+  /**
+   * The per-line actions: the line it acts on, by its path (the row identity).
+   * A line's uid is its product's (W4K), so a uid would name every row of it.
+   */
+  path_purchase_item?: string[];
   /** `bill_item`: the most units it may bill. Always > 0. */
   max_quantity?: number;
   /** `allocate_credit`: the most cents it may move. Always > 0. */
@@ -209,7 +212,7 @@ export function purchaseActionsFor(
   const billedPaths = ctx.billed_paths ?? new Set<string>();
   for (const item of items) {
     const line = (action: PurchaseActionId, extra: Partial<PurchaseActionOffer> = {}) =>
-      offers.push({ key: `${action}:${item.uid}`, action, uid_item: item.uid, ...extra });
+      offers.push({ key: lineActionKey(action, item.path), action, path_purchase_item: [...item.path], ...extra });
     if (active && purchaseItemClosable(item)) line("close_item");
     if (status !== "canceled") {
       const max = billableQuantity(item);
@@ -225,7 +228,7 @@ export function purchaseActionsFor(
   for (const header of rows.filter(isKitHeaderLine)) {
     const under = (i: PurchaseActionItem) => i.path.length > header.path.length && header.path.every((seg, k) => i.path[k] === seg);
     if (!items.some((i) => under(i) && purchaseItemTouched(i, billedPaths))) {
-      offers.push({ key: `remove_item:${header.uid}`, action: "remove_item", uid_item: header.uid });
+      offers.push({ key: lineActionKey("remove_item", header.path), action: "remove_item", path_purchase_item: [...header.path] });
     }
   }
   return offers;
@@ -369,7 +372,12 @@ function purchaseCreditVoidRefusal(credit: Pick<PurchaseCredit, "status" | "tota
 /** What an operator route asks to do to a purchase. Over-billing is a difference, never a refusal, so `bill_item` is not capped here. */
 export type PurchaseActionRequest =
   | { action: "close" | "add_bill" | "add_credit" }
-  | { action: "close_item" | "remove_item" | "change_basis"; uid_item: string };
+  | { action: "close_item" | "remove_item" | "change_basis"; path_purchase_item: readonly string[] };
+
+/** A per-line offer's key: the action and the line's path, the row identity. */
+function lineActionKey(action: PurchaseActionId, path: readonly string[]): string {
+  return `${action}:${path.join("/")}`;
+}
 
 /** Refuse a purchase action the ruleset does not offer. Operator routes only. */
 export function assertPurchaseAction(
@@ -377,7 +385,7 @@ export function assertPurchaseAction(
   ctx: PurchaseOfferContext,
   request: PurchaseActionRequest,
 ): void {
-  const k = "uid_item" in request ? `${request.action}:${request.uid_item}` : request.action;
+  const k = "path_purchase_item" in request ? lineActionKey(request.action, request.path_purchase_item) : request.action;
   if (purchaseActionsFor(purchase, ctx).some((o) => o.key === k)) return;
   throw new InvoiceActionRefusal(request.action, `"${request.action}" is not legal on this ${purchase.status} purchase as it stands`);
 }

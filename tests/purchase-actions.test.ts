@@ -348,9 +348,9 @@ Deno.test("assertPurchaseCreditAction and assertPurchaseAction refuse what is no
   assertPurchaseCreditAction(credit, { action: "void_credit" });
   assertThrows(() => assertPurchaseCreditAction({ ...credit, remaining_credit_cents: 4 }, { action: "void_credit" }), InvoiceActionRefusal, "allocated");
   assertThrows(() => assertPurchaseCreditAction({ ...credit, status: "void" }, { action: "void_credit" }), InvoiceActionRefusal, "void");
-  assertPurchaseAction(po([timeCharge()]), {}, { action: "remove_item", uid_item: "c" });
+  assertPurchaseAction(po([timeCharge()]), {}, { action: "remove_item", path_purchase_item: ["c"] });
   assertThrows(
-    () => assertPurchaseAction(po([timeCharge()]), { billed_paths: new Set(["c"]) }, { action: "remove_item", uid_item: "c" }),
+    () => assertPurchaseAction(po([timeCharge()]), { billed_paths: new Set(["c"]) }, { action: "remove_item", path_purchase_item: ["c"] }),
     InvoiceActionRefusal,
     "remove_item",
   );

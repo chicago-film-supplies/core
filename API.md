@@ -2262,13 +2262,13 @@ Input for a short close or a cancel.
 Lowers each named buy or subrent item's `quantity` to what was received and a
 flat charge's to what was billed, restating its money; a line with nothing
 left is canceled (`purchaseLineCloseOutcome`). A time charge is canceled and
-keeps its quantity. `uid_items` absent closes every such item; a cancel is a
+keeps its quantity. `path_purchase_items` absent closes every such item; a cancel is a
 close of a purchase with nothing received. Billed beyond what was received is
 a diff entry the operator credits by hand; a close raises no credit.
 
 ```ts
 interface ClosePurchaseInputType {
-  uid_items?: string[];
+  path_purchase_items?: string[][];
   version: number;
 }
 ```
@@ -9283,6 +9283,18 @@ The divider row types on either payable grain.
 type PayableDividerType = "purchase" | "destination" | "group";
 ```
 
+### `PayableLineUidFields`
+
+The payable line fields {@link payableLineUid} reads.
+
+```ts
+interface PayableLineUidFields {
+  type: string;
+  uid: string;
+  uid_product?: string;
+}
+```
+
 ### `PayableSettlement`
 
 A PAYABLE settlement — one that settles a supplier bill or supplier credit
@@ -10954,7 +10966,7 @@ A bill or credit item as an operator matches it to a purchase item.
 
 ```ts
 interface PurchaseDocumentItemInputType {
-  uid_item: string;
+  path_purchase_item: string[];
   quantity: number;
 }
 ```
@@ -11853,7 +11865,7 @@ One item received in a delivery.
 
 ```ts
 interface ReceivePurchaseLineInputType {
-  uid_item: string;
+  path_purchase_item: string[];
   quantity: number;
   allocations?: MovementAllocationInputType[];
   units?: MovementUnitInputType[];
@@ -12190,7 +12202,7 @@ One subrent item given back to the supplier.
 
 ```ts
 interface ReturnPurchaseLineInputType {
-  uid_item: string;
+  path_purchase_item: string[];
   quantity: number;
   allocations?: MovementAllocationInputType[];
   units?: MovementUnitInputType[];
@@ -15805,8 +15817,9 @@ const UpdatePurchaseInput: z.ZodType<UpdatePurchaseInputType>;
 
 Input for amending a purchase — a PATCH.
 
-`items`, when present, is the complete next array of dividers and lines, matched
-to the stored rows by `uid`. A stored item absent from it is removed — refused once it has any
+`items`, when present, is the complete next array of dividers and lines, paired
+with the stored rows by path (then uid and ancestry, `pairItemsAcrossRebuild`),
+never by uid alone: a line's uid is its product's. A stored item absent from it is removed — refused once it has any
 receipt, bill or return. A named item may not change `type`. On a buy the
 writer refuses to cut `quantity` below what is received or billed, and to
 change `amount_cents` once it has any receipt or bill: a price that moved
@@ -17821,6 +17834,40 @@ as `active` while `isBookingClosed` read it closed).
 `heldByBooking` used to keep their `out` held while `isBookingClosed` and
 `liveCustody` read it terminal. Neither type carries an inventory ledger, so
 no availability answer moves; the rule just stops having two answers.
+
+### `payableInputUidIssue(line: typeLiteral): string | null`
+
+Why a line INPUT that names its product carries another uid, or `null`.
+
+Only the product half of {@link payableLineUidIssue}: a `service` (or
+product-less `replacement`) input's `custom-` uid is the writer's to mint.
+
+### `payableLineUid(line: PayableLineUidFields): string`
+
+The `uid` a payable line takes: its product's, as an order or invoice
+catalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).
+
+- `sale` / `rental` → `uid_product`.
+- `replacement` → `uid_product` when stated, as an invoice's replacement
+  line takes its replacement product's uid (`utils/replacements.ts`).
+- `service`, and a `replacement` naming no product → a `custom-` uid. A line
+  already carrying one keeps it; any other becomes `custom-` + its old uid,
+  so a re-key is deterministic and repeatable, and a purchase line and the
+  bill line projected from it (which share the old uid) land on one uid.
+
+A product does not repeat within a group on any document: two of one product
+in one section is a split into a sibling group. Dividers keep their uids and
+are not lines, so this is never asked of one.
+
+### `payableLineUidIssue(line: PayableLineUidFields): string | null`
+
+Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`.
+
+⚠️ **Not yet attached to the stored schemas.** It goes on once purchases,
+bills and credits are migrated in every environment and the `test` database
+(one-document-model W4K): a stored tightening ahead of the migration refuses
+every write to an unmigrated document. The input refine
+({@link payableInputUidIssue}) is live.
 
 ### `payablePostingIssues(type: SharedLineType, account: number | null): typeLiteral[]`
 
@@ -27511,13 +27558,13 @@ Input for a short close or a cancel.
 Lowers each named buy or subrent item's `quantity` to what was received and a
 flat charge's to what was billed, restating its money; a line with nothing
 left is canceled (`purchaseLineCloseOutcome`). A time charge is canceled and
-keeps its quantity. `uid_items` absent closes every such item; a cancel is a
+keeps its quantity. `path_purchase_items` absent closes every such item; a cancel is a
 close of a purchase with nothing received. Billed beyond what was received is
 a diff entry the operator credits by hand; a close raises no credit.
 
 ```ts
 interface ClosePurchaseInputType {
-  uid_items?: string[];
+  path_purchase_items?: string[][];
   version: number;
 }
 ```
@@ -27613,6 +27660,18 @@ The divider row types on either payable grain.
 
 ```ts
 type PayableDividerType = "purchase" | "destination" | "group";
+```
+
+### `PayableLineUidFields`
+
+The payable line fields {@link payableLineUid} reads.
+
+```ts
+interface PayableLineUidFields {
+  type: string;
+  uid: string;
+  uid_product?: string;
+}
 ```
 
 ### `PayablePriceMoneyCore`
@@ -28293,7 +28352,7 @@ One item received in a delivery.
 
 ```ts
 interface ReceivePurchaseLineInputType {
-  uid_item: string;
+  path_purchase_item: string[];
   quantity: number;
   allocations?: MovementAllocationInputType[];
   units?: MovementUnitInputType[];
@@ -28341,7 +28400,7 @@ One subrent item given back to the supplier.
 
 ```ts
 interface ReturnPurchaseLineInputType {
-  uid_item: string;
+  path_purchase_item: string[];
   quantity: number;
   allocations?: MovementAllocationInputType[];
   units?: MovementUnitInputType[];
@@ -28406,8 +28465,9 @@ const UpdatePurchaseInput: z.ZodType<UpdatePurchaseInputType>;
 
 Input for amending a purchase — a PATCH.
 
-`items`, when present, is the complete next array of dividers and lines, matched
-to the stored rows by `uid`. A stored item absent from it is removed — refused once it has any
+`items`, when present, is the complete next array of dividers and lines, paired
+with the stored rows by path (then uid and ancestry, `pairItemsAcrossRebuild`),
+never by uid alone: a line's uid is its product's. A stored item absent from it is removed — refused once it has any
 receipt, bill or return. A named item may not change `type`. On a buy the
 writer refuses to cut `quantity` below what is received or billed, and to
 change `amount_cents` once it has any receipt or bill: a price that moved
@@ -28482,6 +28542,40 @@ Is this row a line (not a divider)?
 ### `kitHeaderIssues(item: typeLiteral): typeLiteral[]`
 
 A kit header holds no money: a `null` account requires a flat line stating $0.
+
+### `payableInputUidIssue(line: typeLiteral): string | null`
+
+Why a line INPUT that names its product carries another uid, or `null`.
+
+Only the product half of {@link payableLineUidIssue}: a `service` (or
+product-less `replacement`) input's `custom-` uid is the writer's to mint.
+
+### `payableLineUid(line: PayableLineUidFields): string`
+
+The `uid` a payable line takes: its product's, as an order or invoice
+catalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).
+
+- `sale` / `rental` → `uid_product`.
+- `replacement` → `uid_product` when stated, as an invoice's replacement
+  line takes its replacement product's uid (`utils/replacements.ts`).
+- `service`, and a `replacement` naming no product → a `custom-` uid. A line
+  already carrying one keeps it; any other becomes `custom-` + its old uid,
+  so a re-key is deterministic and repeatable, and a purchase line and the
+  bill line projected from it (which share the old uid) land on one uid.
+
+A product does not repeat within a group on any document: two of one product
+in one section is a split into a sibling group. Dividers keep their uids and
+are not lines, so this is never asked of one.
+
+### `payableLineUidIssue(line: PayableLineUidFields): string | null`
+
+Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`.
+
+⚠️ **Not yet attached to the stored schemas.** It goes on once purchases,
+bills and credits are migrated in every environment and the `test` database
+(one-document-model W4K): a stored tightening ahead of the migration refuses
+every write to an unmigrated document. The input refine
+({@link payableInputUidIssue}) is live.
 
 ### `payablePostingIssues(type: SharedLineType, account: number | null): typeLiteral[]`
 
@@ -29144,7 +29238,7 @@ A bill or credit item as an operator matches it to a purchase item.
 
 ```ts
 interface PurchaseDocumentItemInputType {
-  uid_item: string;
+  path_purchase_item: string[];
   quantity: number;
 }
 ```
@@ -49911,7 +50005,7 @@ One action the UI may offer. `key` is what a menu de-duplicates on.
 interface PurchaseActionOffer {
   key: string;
   action: PurchaseActionId;
-  uid_item?: string;
+  path_purchase_item?: string[];
   max_quantity?: number;
   max_cents?: number;
   outcome?: "cancel" | "close";
@@ -50163,6 +50257,30 @@ The payable side of `orderLineClaimIssues`: a bill or credit's
 const PAYABLE_LINE_CLAIMS: LineClaimSide<PurchaseRow>;
 ```
 
+### `PayableLineRekey`
+
+What {@link rekeyPayableLines} returns.
+
+```ts
+interface PayableLineRekey {
+  items: T[];
+  map: PathForwardMap;
+  collisions: PayableRekeyCollision[];
+}
+```
+
+### `PayableRekeyCollision`
+
+Two rows the re-key puts at one path: a product twice under one parent.
+
+```ts
+interface PayableRekeyCollision {
+  index: number;
+  earlier: number;
+  path: string[];
+}
+```
+
 ### `ProjectBillLineOptions`
 
 {@link projectPurchaseLineToBillLine}'s inputs beside the purchase line.
@@ -50225,6 +50343,19 @@ interface PurchaseLineBilling {
   quantity: number;
   amount_cents: number;
   parts: typeLiteral[];
+}
+```
+
+### `RekeyablePayableRow`
+
+A row {@link rekeyPayableLines} re-keys: a payable line or divider, stored or as sent.
+
+```ts
+interface RekeyablePayableRow {
+  type: string;
+  uid: string;
+  path: readonly string[];
+  uid_product?: string;
 }
 ```
 
@@ -50449,6 +50580,41 @@ changes; a bill line's does, so a delta here releases the wrong number on a
 void. Pass EVERY bill and credit of the purchase, including the one the
 caller is writing.
 
+### `rekeyPayableLines(items: readonly T[]): PayableLineRekey<T>`
+
+Re-key a payable document's lines by product (one-document-model W4K, owner
+ruling 12, 2026-11-10): the one author the migration and the API writers
+both call.
+
+Each line takes `payableLineUid`: a `sale` or `rental` (and a `replacement`
+naming a product) its product's uid, anything else a `custom-` uid. Dividers
+keep theirs. Every path is re-derived as `[...its parent's NEW path, its new
+uid]`, where the parent is the row at the ORIGINAL path minus self
+(cfs-items: a uid repeats across parents, so never by uid). So a kit's
+components follow their re-keyed parent, and a bill's lines keep their
+leading `purchase` divider. A row whose parent path names no row keeps that
+prefix verbatim.
+
+Pure, and a fixed point: re-keying keyed rows returns them unchanged, with an
+identity map. Every other key of a row is carried as it is.
+
+### `rekeyPayablePointer(map: PathForwardMap, path: readonly string[]): typeLiteral`
+
+Rewrite a stored pointer (`path_purchase_item`, a `substituted_for` entry's
+`path`, a movement's `path_purchase_item`, a credit's `path_bill_item`)
+through a re-key's `map`.
+
+A pointer at a row the document still holds maps exactly. One that names a
+row it no longer holds is legal stored state (a spent `substituted_for`, a
+move pointer at a removed line), so it is never refused: its longest mapped
+prefix is rewritten and the rest kept verbatim, and `exact: false` reports
+it, as `repointExchangedFor` keeps a dangling `exchanged_for`.
+
+⚠️ Pass the map of the document the pointer's path space belongs to: a bill
+line's `path_purchase_item` and `substituted_for`, and a movement's
+`path_purchase_item`, take the PURCHASE's; a credit's `path_bill_item` takes
+the BILL's.
+
 ### `remainingTimeCounts(args: RemainingTimeCountsArgs): TierCount[] | null`
 
 **What is left to bill of a TIME purchase line, in counts** (0b ruling 3,
@@ -50487,6 +50653,18 @@ Purchase helpers — the cumulative share that prices every receipt and every
 pushed bill line, the per-line headroom, and the status rule.
 
 Design: api-cloudrun#1210.
+
+### `PayableLineUidFields`
+
+The payable line fields {@link payableLineUid} reads.
+
+```ts
+interface PayableLineUidFields {
+  type: string;
+  uid: string;
+  uid_product?: string;
+}
+```
 
 ### `PurchaseExpansionComponent`
 
@@ -50634,11 +50812,12 @@ uncounted bottle under it. Exactly one frontier node expands; none is a
 refusal (buying it would receive nothing), and several is a refusal too —
 one amount has no rule for splitting across two products' cost.
 
-⚠️ **Expanded items no longer MERGE** (api-cloudrun#1407 D2). They merged —
-quantities and amounts summed, one hire window per product — only because a
-purchase held one line per product. Items carry their own row identity now,
-so a pack item keeps its `uid` and becomes its own item even when the stocked
-product already has one; the ledger averages the cost either way.
+⚠️ **Expanded items do not MERGE here** (api-cloudrun#1407 D2). An expanded
+item is keyed by the product it now names (W4K, `payableLineUid`): its `uid`
+and its path's last segment become the stocked product's. A stocked product
+the same group already holds is then a second row at one path, which the
+writer's `itemArrayIssues` uniqueness refuses, as an order's would; the
+operator merges or splits it into a sibling group.
 Charge items and dividers pass through untouched, and so does a line that
 states its kit in the rows: this rewrite serves only a client still sending a
 bare pack (one-document-model Phase 6a-K), and is deleted once none does.
@@ -50693,6 +50872,40 @@ cumulative received count: the units received since the entry was made,
 The clamp at 0 is what makes a REVERSAL that crosses the entry exact: units
 received before the entry never carried it, so taking them back returns none
 of it.
+
+### `payableInputUidIssue(line: typeLiteral): string | null`
+
+Why a line INPUT that names its product carries another uid, or `null`.
+
+Only the product half of {@link payableLineUidIssue}: a `service` (or
+product-less `replacement`) input's `custom-` uid is the writer's to mint.
+
+### `payableLineUid(line: PayableLineUidFields): string`
+
+The `uid` a payable line takes: its product's, as an order or invoice
+catalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).
+
+- `sale` / `rental` → `uid_product`.
+- `replacement` → `uid_product` when stated, as an invoice's replacement
+  line takes its replacement product's uid (`utils/replacements.ts`).
+- `service`, and a `replacement` naming no product → a `custom-` uid. A line
+  already carrying one keeps it; any other becomes `custom-` + its old uid,
+  so a re-key is deterministic and repeatable, and a purchase line and the
+  bill line projected from it (which share the old uid) land on one uid.
+
+A product does not repeat within a group on any document: two of one product
+in one section is a split into a sibling group. Dividers keep their uids and
+are not lines, so this is never asked of one.
+
+### `payableLineUidIssue(line: PayableLineUidFields): string | null`
+
+Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`.
+
+⚠️ **Not yet attached to the stored schemas.** It goes on once purchases,
+bills and credits are migrated in every environment and the `test` database
+(one-document-model W4K): a stored tightening ahead of the migration refuses
+every write to an unmigrated document. The input refine
+({@link payableInputUidIssue}) is live.
 
 ### `purchaseItemCanceled(item: PurchaseItem): boolean`
 

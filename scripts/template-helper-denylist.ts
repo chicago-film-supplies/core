@@ -725,6 +725,10 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "purchaseItemCommittedCents",
     "purchaseItemProduct",
     "purchaseItemResolved",
+    // The payable line uid rule (W4K): what a writer keys a line by, and its refines.
+    "payableInputUidIssue",
+    "payableLineUid",
+    "payableLineUidIssue",
     "remainingToBill",
     "remainingToReceive",
     "remainingToReturn",
@@ -771,6 +775,9 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "purchaseBillSharedPairFields",
     "purchaseScopeDivider",
     "recomputePurchaseQuantityBilled",
+    // The W4K re-key author and its pointer rewrite: a migration's and a writer's.
+    "rekeyPayableLines",
+    "rekeyPayablePointer",
     "syncPurchaseToBills",
   ],
   replacements: [

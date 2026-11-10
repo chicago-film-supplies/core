@@ -1029,8 +1029,8 @@
         {
           "kind": "interface",
           "name": "ClosePurchaseInputType",
-          "declaration": "interface ClosePurchaseInputType {\n  uid_items?: string[];\n  version: number;\n}",
-          "doc": "Input for a short close or a cancel.\n\nLowers each named buy or subrent item's `quantity` to what was received and a\nflat charge's to what was billed, restating its money; a line with nothing\nleft is canceled (`purchaseLineCloseOutcome`). A time charge is canceled and\nkeeps its quantity. `uid_items` absent closes every such item; a cancel is a\nclose of a purchase with nothing received. Billed beyond what was received is\na diff entry the operator credits by hand; a close raises no credit."
+          "declaration": "interface ClosePurchaseInputType {\n  path_purchase_items?: string[][];\n  version: number;\n}",
+          "doc": "Input for a short close or a cancel.\n\nLowers each named buy or subrent item's `quantity` to what was received and a\nflat charge's to what was billed, restating its money; a line with nothing\nleft is canceled (`purchaseLineCloseOutcome`). A time charge is canceled and\nkeeps its quantity. `path_purchase_items` absent closes every such item; a cancel is a\nclose of a purchase with nothing received. Billed beyond what was received is\na diff entry the operator credits by hand; a close raises no credit."
         },
         {
           "kind": "interface",
@@ -4075,6 +4075,12 @@
           "doc": "The divider row types on either payable grain."
         },
         {
+          "kind": "interface",
+          "name": "PayableLineUidFields",
+          "declaration": "interface PayableLineUidFields {\n  type: string;\n  uid: string;\n  uid_product?: string;\n}",
+          "doc": "The payable line fields {@link payableLineUid} reads."
+        },
+        {
           "kind": "typeAlias",
           "name": "PayableSettlement",
           "declaration": "type PayableSettlement = Settlement & typeLiteral;",
@@ -4851,7 +4857,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocumentItemInputType",
-          "declaration": "interface PurchaseDocumentItemInputType {\n  uid_item: string;\n  quantity: number;\n}",
+          "declaration": "interface PurchaseDocumentItemInputType {\n  path_purchase_item: string[];\n  quantity: number;\n}",
           "doc": "A bill or credit item as an operator matches it to a purchase item."
         },
         {
@@ -5307,7 +5313,7 @@
         {
           "kind": "interface",
           "name": "ReceivePurchaseLineInputType",
-          "declaration": "interface ReceivePurchaseLineInputType {\n  uid_item: string;\n  quantity: number;\n  allocations?: MovementAllocationInputType[];\n  units?: MovementUnitInputType[];\n}",
+          "declaration": "interface ReceivePurchaseLineInputType {\n  path_purchase_item: string[];\n  quantity: number;\n  allocations?: MovementAllocationInputType[];\n  units?: MovementUnitInputType[];\n}",
           "doc": "One item received in a delivery."
         },
         {
@@ -5481,7 +5487,7 @@
         {
           "kind": "interface",
           "name": "ReturnPurchaseLineInputType",
-          "declaration": "interface ReturnPurchaseLineInputType {\n  uid_item: string;\n  quantity: number;\n  allocations?: MovementAllocationInputType[];\n  units?: MovementUnitInputType[];\n}",
+          "declaration": "interface ReturnPurchaseLineInputType {\n  path_purchase_item: string[];\n  quantity: number;\n  allocations?: MovementAllocationInputType[];\n  units?: MovementUnitInputType[];\n}",
           "doc": "One subrent item given back to the supplier."
         },
         {
@@ -7084,7 +7090,7 @@
           "kind": "interface",
           "name": "UpdatePurchaseInputType",
           "declaration": "interface UpdatePurchaseInputType {\n  date?: string;\n  reference?: string | null;\n  notes?: string | null;\n  items?: PurchaseRowInputType[];\n  destinations?: PurchaseDestinationInputType[];\n  version: number;\n}",
-          "doc": "Input for amending a purchase — a PATCH.\n\n`items`, when present, is the complete next array of dividers and lines, matched\nto the stored rows by `uid`. A stored item absent from it is removed — refused once it has any\nreceipt, bill or return. A named item may not change `type`. On a buy the\nwriter refuses to cut `quantity` below what is received or billed, and to\nchange `amount_cents` once it has any receipt or bill: a price that moved\nafter goods or a bill exist is a short close plus a new item, because every\nreceipt already carries its share of the old price. Those are cross-document\nfacts the writer holds, so they are not refined here.\n\n⚠️ **A SUBRENT item's price is not frozen by a receipt**, because its receipts\ncarry no cost (`subrent_in` is cost-forbidden). So on a subrent the writer lets\n`amount_cents` and its pair's `dates.collection_end` move after receipt — a\npaid hire extension — with `quantity` still floored at what is received.\n\n`destinations`, when present, states the listed pairs. Absent keeps every\nstored pair as it is."
+          "doc": "Input for amending a purchase — a PATCH.\n\n`items`, when present, is the complete next array of dividers and lines, paired\nwith the stored rows by path (then uid and ancestry, `pairItemsAcrossRebuild`),\nnever by uid alone: a line's uid is its product's. A stored item absent from it is removed — refused once it has any\nreceipt, bill or return. A named item may not change `type`. On a buy the\nwriter refuses to cut `quantity` below what is received or billed, and to\nchange `amount_cents` once it has any receipt or bill: a price that moved\nafter goods or a bill exist is a short close plus a new item, because every\nreceipt already carries its share of the old price. Those are cross-document\nfacts the writer holds, so they are not refined here.\n\n⚠️ **A SUBRENT item's price is not frozen by a receipt**, because its receipts\ncarry no cost (`subrent_in` is cost-forbidden). So on a subrent the writer lets\n`amount_cents` and its pair's `dates.collection_end` move after receipt — a\npaid hire extension — with `quantity` still floored at what is received.\n\n`destinations`, when present, states the listed pairs. Absent keeps every\nstored pair as it is."
         },
         {
           "kind": "variable",
@@ -8223,6 +8229,30 @@
           "name": "ownsKey",
           "signature": "ownsKey(bookingType: string, key: BookingBreakdownKeyType): boolean",
           "doc": "Whether CFS still OWNS a booking's units in `key` — **the one author of \"a\nsale's `out` is no longer CFS's\"** (stock campaign, P1).\n\n| booking type | owns |\n|---|---|\n| a line that comes back (`rental`, {@link isCollectionLineType}) | every key |\n| anything else (`sale`, `service`, `surcharge`) | the plan keys, `prepped` and `returned` — never `out` or an out-of-service key |\n\nA sale's units leave CFS ownership at the check-out (the `sale` movement\ndraws cost) and re-enter it only on a `sale_return`, so the units a sale\nholds in `out`, or in `lost`/`damaged` after leaving, are the customer's.\n\nEverything that asks \"is this `out` in flight?\", \"does this booking still\nhold units?\", \"is it closed?\" reads this predicate rather than testing\n`type === \"rental\"` or `type === \"sale\"`: about twenty hand-written copies\nof that test had drifted (core `deriveCustodyStatus` read a fully-out sale\nas `active` while `isBookingClosed` read it closed).\n\n⚠️ **`service` and `surcharge` read like a sale, and that settles a split.**\n`heldByBooking` used to keep their `out` held while `isBookingClosed` and\n`liveCustody` read it terminal. Neither type carries an inventory ledger, so\nno availability answer moves; the rule just stops having two answers.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "payableInputUidIssue",
+          "signature": "payableInputUidIssue(line: typeLiteral): string | null",
+          "doc": "Why a line INPUT that names its product carries another uid, or `null`.\n\nOnly the product half of {@link payableLineUidIssue}: a `service` (or\nproduct-less `replacement`) input's `custom-` uid is the writer's to mint.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "payableLineUid",
+          "signature": "payableLineUid(line: PayableLineUidFields): string",
+          "doc": "The `uid` a payable line takes: its product's, as an order or invoice\ncatalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).\n\n- `sale` / `rental` → `uid_product`.\n- `replacement` → `uid_product` when stated, as an invoice's replacement\n  line takes its replacement product's uid (`utils/replacements.ts`).\n- `service`, and a `replacement` naming no product → a `custom-` uid. A line\n  already carrying one keeps it; any other becomes `custom-` + its old uid,\n  so a re-key is deterministic and repeatable, and a purchase line and the\n  bill line projected from it (which share the old uid) land on one uid.\n\nA product does not repeat within a group on any document: two of one product\nin one section is a split into a sibling group. Dividers keep their uids and\nare not lines, so this is never asked of one.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "payableLineUidIssue",
+          "signature": "payableLineUidIssue(line: PayableLineUidFields): string | null",
+          "doc": "Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`.\n\n⚠️ **Not yet attached to the stored schemas.** It goes on once purchases,\nbills and credits are migrated in every environment and the `test` database\n(one-document-model W4K): a stored tightening ahead of the migration refuses\nevery write to an unmigrated document. The input refine\n({@link payableInputUidIssue}) is live.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -12830,8 +12860,8 @@
         {
           "kind": "interface",
           "name": "ClosePurchaseInputType",
-          "declaration": "interface ClosePurchaseInputType {\n  uid_items?: string[];\n  version: number;\n}",
-          "doc": "Input for a short close or a cancel.\n\nLowers each named buy or subrent item's `quantity` to what was received and a\nflat charge's to what was billed, restating its money; a line with nothing\nleft is canceled (`purchaseLineCloseOutcome`). A time charge is canceled and\nkeeps its quantity. `uid_items` absent closes every such item; a cancel is a\nclose of a purchase with nothing received. Billed beyond what was received is\na diff entry the operator credits by hand; a close raises no credit."
+          "declaration": "interface ClosePurchaseInputType {\n  path_purchase_items?: string[][];\n  version: number;\n}",
+          "doc": "Input for a short close or a cancel.\n\nLowers each named buy or subrent item's `quantity` to what was received and a\nflat charge's to what was billed, restating its money; a line with nothing\nleft is canceled (`purchaseLineCloseOutcome`). A time charge is canceled and\nkeeps its quantity. `path_purchase_items` absent closes every such item; a cancel is a\nclose of a purchase with nothing received. Billed beyond what was received is\na diff entry the operator credits by hand; a close raises no credit."
         },
         {
           "kind": "variable",
@@ -12874,6 +12904,12 @@
           "name": "PayableDividerType",
           "declaration": "type PayableDividerType = \"purchase\" | \"destination\" | \"group\";",
           "doc": "The divider row types on either payable grain."
+        },
+        {
+          "kind": "interface",
+          "name": "PayableLineUidFields",
+          "declaration": "interface PayableLineUidFields {\n  type: string;\n  uid: string;\n  uid_product?: string;\n}",
+          "doc": "The payable line fields {@link payableLineUid} reads."
         },
         {
           "kind": "variable",
@@ -13178,7 +13214,7 @@
         {
           "kind": "interface",
           "name": "ReceivePurchaseLineInputType",
-          "declaration": "interface ReceivePurchaseLineInputType {\n  uid_item: string;\n  quantity: number;\n  allocations?: MovementAllocationInputType[];\n  units?: MovementUnitInputType[];\n}",
+          "declaration": "interface ReceivePurchaseLineInputType {\n  path_purchase_item: string[];\n  quantity: number;\n  allocations?: MovementAllocationInputType[];\n  units?: MovementUnitInputType[];\n}",
           "doc": "One item received in a delivery."
         },
         {
@@ -13202,7 +13238,7 @@
         {
           "kind": "interface",
           "name": "ReturnPurchaseLineInputType",
-          "declaration": "interface ReturnPurchaseLineInputType {\n  uid_item: string;\n  quantity: number;\n  allocations?: MovementAllocationInputType[];\n  units?: MovementUnitInputType[];\n}",
+          "declaration": "interface ReturnPurchaseLineInputType {\n  path_purchase_item: string[];\n  quantity: number;\n  allocations?: MovementAllocationInputType[];\n  units?: MovementUnitInputType[];\n}",
           "doc": "One subrent item given back to the supplier."
         },
         {
@@ -13239,7 +13275,7 @@
           "kind": "interface",
           "name": "UpdatePurchaseInputType",
           "declaration": "interface UpdatePurchaseInputType {\n  date?: string;\n  reference?: string | null;\n  notes?: string | null;\n  items?: PurchaseRowInputType[];\n  destinations?: PurchaseDestinationInputType[];\n  version: number;\n}",
-          "doc": "Input for amending a purchase — a PATCH.\n\n`items`, when present, is the complete next array of dividers and lines, matched\nto the stored rows by `uid`. A stored item absent from it is removed — refused once it has any\nreceipt, bill or return. A named item may not change `type`. On a buy the\nwriter refuses to cut `quantity` below what is received or billed, and to\nchange `amount_cents` once it has any receipt or bill: a price that moved\nafter goods or a bill exist is a short close plus a new item, because every\nreceipt already carries its share of the old price. Those are cross-document\nfacts the writer holds, so they are not refined here.\n\n⚠️ **A SUBRENT item's price is not frozen by a receipt**, because its receipts\ncarry no cost (`subrent_in` is cost-forbidden). So on a subrent the writer lets\n`amount_cents` and its pair's `dates.collection_end` move after receipt — a\npaid hire extension — with `quantity` still floored at what is received.\n\n`destinations`, when present, states the listed pairs. Absent keeps every\nstored pair as it is."
+          "doc": "Input for amending a purchase — a PATCH.\n\n`items`, when present, is the complete next array of dividers and lines, paired\nwith the stored rows by path (then uid and ancestry, `pairItemsAcrossRebuild`),\nnever by uid alone: a line's uid is its product's. A stored item absent from it is removed — refused once it has any\nreceipt, bill or return. A named item may not change `type`. On a buy the\nwriter refuses to cut `quantity` below what is received or billed, and to\nchange `amount_cents` once it has any receipt or bill: a price that moved\nafter goods or a bill exist is a short close plus a new item, because every\nreceipt already carries its share of the old price. Those are cross-document\nfacts the writer holds, so they are not refined here.\n\n⚠️ **A SUBRENT item's price is not frozen by a receipt**, because its receipts\ncarry no cost (`subrent_in` is cost-forbidden). So on a subrent the writer lets\n`amount_cents` and its pair's `dates.collection_end` move after receipt — a\npaid hire extension — with `quantity` still floored at what is received.\n\n`destinations`, when present, states the listed pairs. Absent keeps every\nstored pair as it is."
         },
         {
           "kind": "function",
@@ -13302,6 +13338,30 @@
           "name": "kitHeaderIssues",
           "signature": "kitHeaderIssues(item: typeLiteral): typeLiteral[]",
           "doc": "A kit header holds no money: a `null` account requires a flat line stating $0.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "payableInputUidIssue",
+          "signature": "payableInputUidIssue(line: typeLiteral): string | null",
+          "doc": "Why a line INPUT that names its product carries another uid, or `null`.\n\nOnly the product half of {@link payableLineUidIssue}: a `service` (or\nproduct-less `replacement`) input's `custom-` uid is the writer's to mint.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "payableLineUid",
+          "signature": "payableLineUid(line: PayableLineUidFields): string",
+          "doc": "The `uid` a payable line takes: its product's, as an order or invoice\ncatalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).\n\n- `sale` / `rental` → `uid_product`.\n- `replacement` → `uid_product` when stated, as an invoice's replacement\n  line takes its replacement product's uid (`utils/replacements.ts`).\n- `service`, and a `replacement` naming no product → a `custom-` uid. A line\n  already carrying one keeps it; any other becomes `custom-` + its old uid,\n  so a re-key is deterministic and repeatable, and a purchase line and the\n  bill line projected from it (which share the old uid) land on one uid.\n\nA product does not repeat within a group on any document: two of one product\nin one section is a split into a sibling group. Dividers keep their uids and\nare not lines, so this is never asked of one.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "payableLineUidIssue",
+          "signature": "payableLineUidIssue(line: PayableLineUidFields): string | null",
+          "doc": "Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`.\n\n⚠️ **Not yet attached to the stored schemas.** It goes on once purchases,\nbills and credits are migrated in every environment and the `test` database\n(one-document-model W4K): a stored tightening ahead of the migration refuses\nevery write to an unmigrated document. The input refine\n({@link payableInputUidIssue}) is live.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -13644,7 +13704,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocumentItemInputType",
-          "declaration": "interface PurchaseDocumentItemInputType {\n  uid_item: string;\n  quantity: number;\n}",
+          "declaration": "interface PurchaseDocumentItemInputType {\n  path_purchase_item: string[];\n  quantity: number;\n}",
           "doc": "A bill or credit item as an operator matches it to a purchase item."
         },
         {
@@ -23796,7 +23856,7 @@
         {
           "kind": "interface",
           "name": "PurchaseActionOffer",
-          "declaration": "interface PurchaseActionOffer {\n  key: string;\n  action: PurchaseActionId;\n  uid_item?: string;\n  max_quantity?: number;\n  max_cents?: number;\n  outcome?: \"cancel\" | \"close\";\n}",
+          "declaration": "interface PurchaseActionOffer {\n  key: string;\n  action: PurchaseActionId;\n  path_purchase_item?: string[];\n  max_quantity?: number;\n  max_cents?: number;\n  outcome?: \"cancel\" | \"close\";\n}",
           "doc": "One action the UI may offer. `key` is what a menu de-duplicates on."
         },
         {
@@ -23981,6 +24041,18 @@
         },
         {
           "kind": "interface",
+          "name": "PayableLineRekey",
+          "declaration": "interface PayableLineRekey {\n  items: T[];\n  map: PathForwardMap;\n  collisions: PayableRekeyCollision[];\n}",
+          "doc": "What {@link rekeyPayableLines} returns."
+        },
+        {
+          "kind": "interface",
+          "name": "PayableRekeyCollision",
+          "declaration": "interface PayableRekeyCollision {\n  index: number;\n  earlier: number;\n  path: string[];\n}",
+          "doc": "Two rows the re-key puts at one path: a product twice under one parent."
+        },
+        {
+          "kind": "interface",
           "name": "ProjectBillLineOptions",
           "declaration": "interface ProjectBillLineOptions {\n  uid_purchase: string;\n  quantity: number;\n  from?: number;\n  counts?: TierCount[];\n}",
           "doc": "{@link projectPurchaseLineToBillLine}'s inputs beside the purchase line."
@@ -24008,6 +24080,12 @@
           "name": "PurchaseLineBilling",
           "declaration": "interface PurchaseLineBilling {\n  quantity: number;\n  amount_cents: number;\n  parts: typeLiteral[];\n}",
           "doc": "What one document bills of one purchase line: {@link purchaseDocumentBilling}'s value."
+        },
+        {
+          "kind": "interface",
+          "name": "RekeyablePayableRow",
+          "declaration": "interface RekeyablePayableRow {\n  type: string;\n  uid: string;\n  path: readonly string[];\n  uid_product?: string;\n}",
+          "doc": "A row {@link rekeyPayableLines} re-keys: a payable line or divider, stored or as sent."
         },
         {
           "kind": "interface",
@@ -24183,6 +24261,22 @@
         },
         {
           "kind": "function",
+          "name": "rekeyPayableLines",
+          "signature": "rekeyPayableLines(items: readonly T[]): PayableLineRekey<T>",
+          "doc": "Re-key a payable document's lines by product (one-document-model W4K, owner\nruling 12, 2026-11-10): the one author the migration and the API writers\nboth call.\n\nEach line takes `payableLineUid`: a `sale` or `rental` (and a `replacement`\nnaming a product) its product's uid, anything else a `custom-` uid. Dividers\nkeep theirs. Every path is re-derived as `[...its parent's NEW path, its new\nuid]`, where the parent is the row at the ORIGINAL path minus self\n(cfs-items: a uid repeats across parents, so never by uid). So a kit's\ncomponents follow their re-keyed parent, and a bill's lines keep their\nleading `purchase` divider. A row whose parent path names no row keeps that\nprefix verbatim.\n\nPure, and a fixed point: re-keying keyed rows returns them unchanged, with an\nidentity map. Every other key of a row is carried as it is.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "rekeyPayablePointer",
+          "signature": "rekeyPayablePointer(map: PathForwardMap, path: readonly string[]): typeLiteral",
+          "doc": "Rewrite a stored pointer (`path_purchase_item`, a `substituted_for` entry's\n`path`, a movement's `path_purchase_item`, a credit's `path_bill_item`)\nthrough a re-key's `map`.\n\nA pointer at a row the document still holds maps exactly. One that names a\nrow it no longer holds is legal stored state (a spent `substituted_for`, a\nmove pointer at a removed line), so it is never refused: its longest mapped\nprefix is rewritten and the rest kept verbatim, and `exact: false` reports\nit, as `repointExchangedFor` keeps a dangling `exchanged_for`.\n\n⚠️ Pass the map of the document the pointer's path space belongs to: a bill\nline's `path_purchase_item` and `substituted_for`, and a movement's\n`path_purchase_item`, take the PURCHASE's; a credit's `path_bill_item` takes\nthe BILL's.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "remainingTimeCounts",
           "signature": "remainingTimeCounts(args: RemainingTimeCountsArgs): TierCount[] | null",
           "doc": "**What is left to bill of a TIME purchase line, in counts** (0b ruling 3,\nthe AR rule `extensionGroups` applies to an order): the line metered over its\nPAIR's `charge_windows` through its formula, less what live bills already\nbill there net of credits ({@link purchaseLineBilledCounts}), each tier\nfloored at 0. Billing in parts therefore never totals more than metering the\nwhole, and an over-billed line seeds nothing (the diff reports it).\n\n`null` when the line's pair states no charge windows — there is no time to\nbill, which the bill writer refuses by name.",
@@ -24203,6 +24297,12 @@
       "entrypoint": "@cfs/core/utils/purchases",
       "moduleDoc": "Purchase helpers — the cumulative share that prices every receipt and every\npushed bill line, the per-line headroom, and the status rule.\n\nDesign: api-cloudrun#1210.",
       "symbols": [
+        {
+          "kind": "interface",
+          "name": "PayableLineUidFields",
+          "declaration": "interface PayableLineUidFields {\n  type: string;\n  uid: string;\n  uid_product?: string;\n}",
+          "doc": "The payable line fields {@link payableLineUid} reads."
+        },
         {
           "kind": "interface",
           "name": "PurchaseExpansionComponent",
@@ -24304,7 +24404,7 @@
           "kind": "function",
           "name": "expandPurchaseItems",
           "signature": "expandPurchaseItems(items: readonly PurchaseRowInputType[], products: ReadonlyMap<string, PurchaseExpansionProduct>): PurchaseExpansionResult",
-          "doc": "Replace every pack on a buy or subrent item with the stocked product it is a\npack of, so a stored purchase only ever names a product that can be RECEIVED.\n\nA pack is a `stock_method: \"none\"` product with `components` — the same\nrelation a sale already draws through (`118 Hot Hands (40 Pairs)` →\n`410 (1 Pair) × 40`). Sales keep the pack as a priced parent over $0\ncomponent lines; a purchase deliberately does NOT (owner, 2026-10-22): the\nitem's money is the stocked product's cost, so it must sit on the item the\nreceipt lands on. `118 × 12 @ $360` becomes `410 × 480 @ $360`, the ratio\napplied once, here, through {@link componentQuantities} — the one quantity\nrule the order expander uses.\n\nThe receivable FRONTIER of a pack is every component that counts stock and\nhas no counted ancestor in the walk: `353 (240 Pairs)` reaches `410` through\nthe uncounted `118`, and a pallet stops at its counted case rather than the\nuncounted bottle under it. Exactly one frontier node expands; none is a\nrefusal (buying it would receive nothing), and several is a refusal too —\none amount has no rule for splitting across two products' cost.\n\n⚠️ **Expanded items no longer MERGE** (api-cloudrun#1407 D2). They merged —\nquantities and amounts summed, one hire window per product — only because a\npurchase held one line per product. Items carry their own row identity now,\nso a pack item keeps its `uid` and becomes its own item even when the stocked\nproduct already has one; the ledger averages the cost either way.\nCharge items and dividers pass through untouched, and so does a line that\nstates its kit in the rows: this rewrite serves only a client still sending a\nbare pack (one-document-model Phase 6a-K), and is deleted once none does.\n\nReturns rather than throws: a refusal is an operator-facing 400, and core\nthrows plain `Error`, which a consumer's middleware reads as a 500.",
+          "doc": "Replace every pack on a buy or subrent item with the stocked product it is a\npack of, so a stored purchase only ever names a product that can be RECEIVED.\n\nA pack is a `stock_method: \"none\"` product with `components` — the same\nrelation a sale already draws through (`118 Hot Hands (40 Pairs)` →\n`410 (1 Pair) × 40`). Sales keep the pack as a priced parent over $0\ncomponent lines; a purchase deliberately does NOT (owner, 2026-10-22): the\nitem's money is the stocked product's cost, so it must sit on the item the\nreceipt lands on. `118 × 12 @ $360` becomes `410 × 480 @ $360`, the ratio\napplied once, here, through {@link componentQuantities} — the one quantity\nrule the order expander uses.\n\nThe receivable FRONTIER of a pack is every component that counts stock and\nhas no counted ancestor in the walk: `353 (240 Pairs)` reaches `410` through\nthe uncounted `118`, and a pallet stops at its counted case rather than the\nuncounted bottle under it. Exactly one frontier node expands; none is a\nrefusal (buying it would receive nothing), and several is a refusal too —\none amount has no rule for splitting across two products' cost.\n\n⚠️ **Expanded items do not MERGE here** (api-cloudrun#1407 D2). An expanded\nitem is keyed by the product it now names (W4K, `payableLineUid`): its `uid`\nand its path's last segment become the stocked product's. A stocked product\nthe same group already holds is then a second row at one path, which the\nwriter's `itemArrayIssues` uniqueness refuses, as an order's would; the\noperator merges or splits it into a sibling group.\nCharge items and dividers pass through untouched, and so does a line that\nstates its kit in the rows: this rewrite serves only a client still sending a\nbare pack (one-document-model Phase 6a-K), and is deleted once none does.\n\nReturns rather than throws: a refusal is an operator-facing 400, and core\nthrows plain `Error`, which a consumer's middleware reads as a 500.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -24345,6 +24445,30 @@
           "name": "landedUnitsPriced",
           "signature": "landedUnitsPriced(entry: Pick<PurchaseLandedCost, \"quantity\" | \"received_at_entry\">, quantityReceived: number): number",
           "doc": "How many of a landed cost's units a line's receipts have priced, at a\ncumulative received count: the units received since the entry was made,\n`clamp(received − received_at_entry, 0, quantity)`.\n\nThe clamp at 0 is what makes a REVERSAL that crosses the entry exact: units\nreceived before the entry never carried it, so taking them back returns none\nof it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "payableInputUidIssue",
+          "signature": "payableInputUidIssue(line: typeLiteral): string | null",
+          "doc": "Why a line INPUT that names its product carries another uid, or `null`.\n\nOnly the product half of {@link payableLineUidIssue}: a `service` (or\nproduct-less `replacement`) input's `custom-` uid is the writer's to mint.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "payableLineUid",
+          "signature": "payableLineUid(line: PayableLineUidFields): string",
+          "doc": "The `uid` a payable line takes: its product's, as an order or invoice\ncatalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).\n\n- `sale` / `rental` → `uid_product`.\n- `replacement` → `uid_product` when stated, as an invoice's replacement\n  line takes its replacement product's uid (`utils/replacements.ts`).\n- `service`, and a `replacement` naming no product → a `custom-` uid. A line\n  already carrying one keeps it; any other becomes `custom-` + its old uid,\n  so a re-key is deterministic and repeatable, and a purchase line and the\n  bill line projected from it (which share the old uid) land on one uid.\n\nA product does not repeat within a group on any document: two of one product\nin one section is a split into a sibling group. Dividers keep their uids and\nare not lines, so this is never asked of one.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "payableLineUidIssue",
+          "signature": "payableLineUidIssue(line: PayableLineUidFields): string | null",
+          "doc": "Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`.\n\n⚠️ **Not yet attached to the stored schemas.** It goes on once purchases,\nbills and credits are migrated in every environment and the `test` database\n(one-document-model W4K): a stored tightening ahead of the migration refuses\nevery write to an unmigrated document. The input refine\n({@link payableInputUidIssue}) is live.",
           "paramTags": [],
           "returnsTag": null
         },

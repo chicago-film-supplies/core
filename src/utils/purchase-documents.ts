@@ -59,6 +59,7 @@ import {
   isPurchaseLine,
   purchaseDocumentLines,
   isKitHeaderLine,
+  payableLineUid,
 } from "../schemas/mod.ts";
 import { cumulativeShareCents } from "./purchases.ts";
 import { roundDivHalfUp } from "./money.ts";
@@ -66,6 +67,7 @@ import {
   collectSubstitutionAnchors,
   type CreditableRow,
   liveSubstitutionAnchors,
+  type PathForwardMap,
   standInUnits,
   substitutionCredit,
 } from "./substitutions.ts";
@@ -1017,4 +1019,110 @@ function withoutCanceledLines(purchase: Purchase): Purchase {
 function withTotal(totals: PurchaseBill["totals"], total: number): PurchaseBill["totals"] {
   const settled = totals.amount_paid_cents + totals.amount_credited_cents + totals.amount_void_cents;
   return { ...totals, total_cents: total, amount_due_cents: total - settled };
+}
+
+// ── Re-keying payable lines by product (W4K) ─────────────────────
+
+/** A row {@link rekeyPayableLines} re-keys: a payable line or divider, stored or as sent. */
+export interface RekeyablePayableRow {
+  type: string;
+  uid: string;
+  path: readonly string[];
+  uid_product?: string;
+}
+
+/** Two rows the re-key puts at one path: a product twice under one parent. */
+export interface PayableRekeyCollision {
+  /** The later row's index. */
+  index: number;
+  /** The earlier row already at {@link path}. */
+  earlier: number;
+  path: string[];
+}
+
+/** What {@link rekeyPayableLines} returns. */
+export interface PayableLineRekey<T> {
+  /** The rows, each line keyed by `payableLineUid` and every path re-derived. */
+  items: T[];
+  /**
+   * The old path → new path correspondence, the shape every pointer rewrite
+   * reads (`PathForwardMap`, `./substitutions.ts`). `undefined` for a path no
+   * row held; see {@link rekeyPayablePointer} for a pointer at such a path.
+   */
+  map: PathForwardMap;
+  /**
+   * Rows whose new path an earlier row already holds. Reported, never merged:
+   * whether two lines of one product may become one is the caller's to decide
+   * (the migration merges a canceled pair, PO-313, and refuses the rest).
+   */
+  collisions: PayableRekeyCollision[];
+}
+
+// Private, as `./item-pairing.ts`'s joiner is: no path leaves this module as a string.
+const rekeyPathKey = (path: readonly string[]): string => path.join("\x1f");
+
+/**
+ * Re-key a payable document's lines by product (one-document-model W4K, owner
+ * ruling 12, 2026-11-10): the one author the migration and the API writers
+ * both call.
+ *
+ * Each line takes `payableLineUid`: a `sale` or `rental` (and a `replacement`
+ * naming a product) its product's uid, anything else a `custom-` uid. Dividers
+ * keep theirs. Every path is re-derived as `[...its parent's NEW path, its new
+ * uid]`, where the parent is the row at the ORIGINAL path minus self
+ * (cfs-items: a uid repeats across parents, so never by uid). So a kit's
+ * components follow their re-keyed parent, and a bill's lines keep their
+ * leading `purchase` divider. A row whose parent path names no row keeps that
+ * prefix verbatim.
+ *
+ * Pure, and a fixed point: re-keying keyed rows returns them unchanged, with an
+ * identity map. Every other key of a row is carried as it is.
+ */
+export function rekeyPayableLines<T extends RekeyablePayableRow>(items: readonly T[]): PayableLineRekey<T> {
+  const forward = new Map<string, string[]>();
+  const holder = new Map<string, number>();
+  const collisions: PayableRekeyCollision[] = [];
+  const rekeyed = items.map((row, index) => {
+    const parent = row.path.slice(0, -1);
+    const newParent = parent.length === 0 ? [] : forward.get(rekeyPathKey(parent)) ?? [...parent];
+    const uid = isPurchaseLine(row) ? payableLineUid(row) : row.uid;
+    const path = [...newParent, uid];
+    forward.set(rekeyPathKey(row.path), path);
+    const at = rekeyPathKey(path);
+    const earlier = holder.get(at);
+    if (earlier !== undefined) collisions.push({ index, earlier, path: [...path] });
+    else holder.set(at, index);
+    return { ...row, uid, path };
+  });
+  return {
+    items: rekeyed,
+    map: { toPath: (from) => (from === undefined ? undefined : forward.get(rekeyPathKey(from))) },
+    collisions,
+  };
+}
+
+/**
+ * Rewrite a stored pointer (`path_purchase_item`, a `substituted_for` entry's
+ * `path`, a movement's `path_purchase_item`, a credit's `path_bill_item`)
+ * through a re-key's `map`.
+ *
+ * A pointer at a row the document still holds maps exactly. One that names a
+ * row it no longer holds is legal stored state (a spent `substituted_for`, a
+ * move pointer at a removed line), so it is never refused: its longest mapped
+ * prefix is rewritten and the rest kept verbatim, and `exact: false` reports
+ * it, as `repointExchangedFor` keeps a dangling `exchanged_for`.
+ *
+ * ⚠️ Pass the map of the document the pointer's path space belongs to: a bill
+ * line's `path_purchase_item` and `substituted_for`, and a movement's
+ * `path_purchase_item`, take the PURCHASE's; a credit's `path_bill_item` takes
+ * the BILL's.
+ */
+export function rekeyPayablePointer(map: PathForwardMap, path: readonly string[]): { path: string[]; exact: boolean } {
+  const exact = map.toPath(path);
+  if (exact !== undefined) return { path: [...exact], exact: true };
+  for (let k = path.length - 1; k > 0; k--) {
+    const prefix = map.toPath(path.slice(0, k));
+    if (prefix !== undefined) return { path: [...prefix, ...path.slice(k)], exact: false };
+  }
+  return { path: [...path], exact: false };
 }
