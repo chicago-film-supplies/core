@@ -1784,9 +1784,12 @@ function movePointerOf(row: MovePointerCarrier, key: keyof MovePointerCarrier): 
  * the whole of what differs between them, so neither side branches on a
  * collection.
  *
- * Every receivable-only arm of the engine — substitutions (`substituted_for`),
- * date-extension sections (`path_extension_for`) — keys on a field no payable
- * row carries, so on a bill it finds nothing and changes nothing. The
+ * The substitution arm (`substituted_for`) runs on both sides: a bill's
+ * substitute stands in for a purchase line exactly as an invoice's does for an
+ * order line, and {@link ScopedSyncSide.requantify} is how a side whose money
+ * does not follow quantity keeps a row's money with its units
+ * (one-document-model W5). The date-extension arm (`path_extension_for`) keys
+ * on a field no payable row carries, so on a bill it finds nothing. The
  * lost/damaged arm (`uid_out_of_service`) applies to both sides as written: a
  * line billing a record is the billing document's own row.
  */
@@ -1830,6 +1833,18 @@ export interface ScopedSyncSide<R extends InvoiceItem = InvoiceDocItemType> {
    * without this the bill would hold the product twice (one-document-model W4).
    */
   adopts?(item: LineItem, row: R): boolean;
+  /**
+   * The row at a new `quantity`, moved by the substitution offset (D2), with its
+   * money to match. Absent means quantity alone, which is right where money is
+   * derived from quantity by the pricer, as on an invoice. A payable flat line
+   * STATES its money, so its side says what the units cost.
+   *
+   * Called twice per substituted row: once to read it at its initiator-equivalent
+   * quantity, with `source` the PREVIOUS initiator line at its path, and once
+   * when it is emitted, with `source` the NEXT one and `scaleFrom` the stored
+   * row's quantity, so units a spent entry took leave with their money.
+   */
+  requantify?(row: R, quantity: number, ctx: { source: LineItem | undefined; scaleFrom?: number }): R;
 }
 
 /** The receivable side: order → invoice. */
@@ -2138,8 +2153,10 @@ function syncScopedItems<R extends InvoiceItem>(
   /** The stored row at its order-equivalent quantity under the previous order. */
   const normalize = (row: R): R => {
     if (!isLineItemType(row.type) || isInExtensionSection(row.path, orderDividerUid, extensionTargets)) return row;
-    const quantity = resync.orderEquivalent(relOf(row), row as InvoiceItem);
+    const rel = relOf(row);
+    const quantity = resync.orderEquivalent(rel, row as InvoiceItem);
     if (quantity === ((row as InvoiceItem).quantity ?? 0)) return row;
+    if (side.requantify) return side.requantify(row, quantity, { source: prevByPath.get(itemPathKey(rel)) });
     return { ...row, quantity } as R;
   };
   const currentInvoiceItems = storedInvoiceItems.map(normalize);
@@ -2450,6 +2467,9 @@ function syncScopedItems<R extends InvoiceItem>(
 
   // Apply the NEW order's D2 offset, re-point live entries and strip spent ones.
   // A substituted row left with no units is dropped, with everything below it.
+  const storedQuantityAt = new Map(
+    storedInvoiceItems.filter((it) => isLineItemType(it.type)).map((it) => [itemPathKey(relOf(it)), (it as InvoiceItem).quantity ?? 0]),
+  );
   const items: R[] = [];
   const droppedPaths: string[][] = [];
   for (const row of result) {
@@ -2472,7 +2492,11 @@ function syncScopedItems<R extends InvoiceItem>(
       droppedPaths.push(rel);
       continue;
     }
-    const out = { ...row, quantity } as R & { substituted_for?: SubstitutedForEntryType[] };
+    const relKey = itemPathKey(rel);
+    const requantified = side.requantify
+      ? side.requantify(row, quantity, { source: newByPath.get(relKey), scaleFrom: storedQuantityAt.get(relKey) })
+      : { ...row, quantity };
+    const out = { ...requantified } as R & { substituted_for?: SubstitutedForEntryType[] };
     if (substituted_for) out.substituted_for = substituted_for as SubstitutedForEntryType[];
     else delete out.substituted_for;
     items.push(out);

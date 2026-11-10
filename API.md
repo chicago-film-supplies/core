@@ -40507,9 +40507,12 @@ bill sync are one engine, {@link syncOrderToInvoiceSelective}'s body; this is
 the whole of what differs between them, so neither side branches on a
 collection.
 
-Every receivable-only arm of the engine — substitutions (`substituted_for`),
-date-extension sections (`path_extension_for`) — keys on a field no payable
-row carries, so on a bill it finds nothing and changes nothing. The
+The substitution arm (`substituted_for`) runs on both sides: a bill's
+substitute stands in for a purchase line exactly as an invoice's does for an
+order line, and {@link ScopedSyncSide.requantify} is how a side whose money
+does not follow quantity keeps a row's money with its units
+(one-document-model W5). The date-extension arm (`path_extension_for`) keys
+on a field no payable row carries, so on a bill it finds nothing. The
 lost/damaged arm (`uid_out_of_service`) applies to both sides as written: a
 line billing a record is the billing document's own row.
 
@@ -40522,6 +40525,7 @@ interface ScopedSyncSide {
   isStructural(item: LineItem): boolean;
   stillStored(path: readonly string[]): boolean;
   adopts(item: LineItem, row: R): boolean;
+  requantify(row: R, quantity: number, ctx: typeLiteral): R;
 }
 ```
 
@@ -50195,6 +50199,7 @@ bill several purchases, so `uid_purchase` says whose lines to read.
 ```ts
 interface PurchaseBilledDocuments {
   uid_purchase: string;
+  purchase_items: readonly CreditableRow[];
   bills: readonly Pick<PurchaseBill, "uid" | "number" | "totals" | "items" | "status">[];
   credits: readonly Pick<PurchaseCredit, "status" | "items">[];
 }
@@ -50208,6 +50213,18 @@ What the live documents bill of one purchase line, net of credits.
 interface PurchaseLineBilledNet {
   quantity: number;
   amount_cents: number;
+}
+```
+
+### `PurchaseLineBilling`
+
+What one document bills of one purchase line: {@link purchaseDocumentBilling}'s value.
+
+```ts
+interface PurchaseLineBilling {
+  quantity: number;
+  amount_cents: number;
+  parts: typeLiteral[];
 }
 ```
 
@@ -50326,6 +50343,25 @@ The pair fields the purchase → bill merge follows, read off the two schemas.
 
 Is this credit live — not voided? Every "already billed" reader asks it.
 
+### `purchaseDocumentBilling(rows: readonly PurchaseDocumentRow[], uidPurchase: string, purchaseItems: readonly CreditableRow[]): Map<string, PurchaseLineBilling>`
+
+**What one document bills of each line of purchase `uidPurchase`**, keyed by
+the line's path relative to the purchase, joined with `/`. Every "already
+billed" reader goes through it.
+
+- A row bills the line its join names (`purchaseLineKeyOf`: its own path, or
+  its move pointer).
+- 🔴 **A substitute Y bills the X it stands in for** (W5, `substituted_for`),
+  as an invoice's does on AR (`invoicedByPath`): each live entry credits X
+  with its units and their share of Y's money and counts, and the rest of Y
+  stays at Y's own join. The stand-in units take Y's FIRST units' share
+  (`cumulativeShareCents`), so the parts sum to exactly Y's amount.
+- An entry is live while the purchase still carries X (`purchase_items`);
+  a spent one bills nothing for X, and its units count at Y's own join.
+- X's kit components are credited through the PURCHASE's own ratio
+  (`substitutionCredit`), in units only: the money a substitute stands in for
+  is X's whole subtree's, and it lands on X.
+
 ### `purchaseDocumentScope(purchase: Pick<Purchase, "uid" | "number" | "items" | "destinations">, lines: readonly PurchaseDocumentItem[]): typeLiteral`
 
 **One purchase's block on a bill or credit**: its `purchase` divider, then
@@ -50341,7 +50377,7 @@ projectPurchaseLineToBillLine}); a line at a path the purchase does not carry
 (a document-only charge, `[purchase uid, uid]`) sits directly under the
 purchase divider, ahead of the first destination, so contiguity holds.
 
-### `purchaseDocumentsBefore(bill: Pick<PurchaseBill, "uid" | "date" | "number">, uidPurchase: string, bills: readonly B[], credits: readonly C[]): typeLiteral`
+### `purchaseDocumentsBefore(bill: Pick<PurchaseBill, "uid" | "date" | "number">, purchase: typeLiteral, bills: readonly B[], credits: readonly C[]): typeLiteral`
 
 **The documents of one purchase dated before `bill`** — by date, then number —
 with `bill` itself left out. A time line re-seeded on `bill` is billed for its

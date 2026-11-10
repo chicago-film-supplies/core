@@ -105,7 +105,11 @@ export function purchaseBilledPaths(
       b.items.flatMap((row) => {
         if (!isPurchaseLine(row) || isKitHeaderLine(row)) return [];
         const key = purchaseLineKeyOf(row as PurchaseDocumentItem);
-        return key !== null && key.startsWith(prefix) ? [key.slice(prefix.length)] : [];
+        if (key === null || !key.startsWith(prefix)) return [];
+        // A substitute (W5) bills the X it stands in for as well. A component of
+        // a substituted kit is billed through its kit, which this names.
+        const stands = "substituted_for" in row ? (row.substituted_for ?? []).map((e) => e.path.join("/")) : [];
+        return [key.slice(prefix.length), ...stands];
       })
     ),
   );
@@ -244,7 +248,7 @@ export type PurchaseBillActionBill =
  */
 export interface PurchaseBillContext {
   /** One entry per purchase the bill names: a bill may bill several. */
-  per_purchase: (PurchaseBilledDocuments & { purchase: Pick<Purchase, "items"> })[];
+  per_purchase: (Omit<PurchaseBilledDocuments, "purchase_items"> & { purchase: Pick<Purchase, "items"> })[];
   /**
    * `purchaseBillXeroSyncStatus(bill, sidecar)`. The one optional key: absent means
    * `push_to_xero` is not offered, so an unknown answer cannot offer it.
@@ -272,7 +276,12 @@ export function purchaseBillVoidRefusal(bill: PurchaseBillActionBill, ctx: Purch
     return `Cannot void bill ${bill.number}: payments or supplier credits are applied to it. Remove them first.`;
   }
   const stranded = ctx.per_purchase.some((p) => {
-    const others = { uid_purchase: p.uid_purchase, bills: p.bills.filter((b) => b.uid !== bill.uid), credits: p.credits };
+    const others = {
+      uid_purchase: p.uid_purchase,
+      purchase_items: p.purchase.items,
+      bills: p.bills.filter((b) => b.uid !== bill.uid),
+      credits: p.credits,
+    };
     const named = purchaseBilledPaths([bill], p.uid_purchase);
     return purchaseLines(p.purchase.items).some((item) =>
       purchaseItemBasis(item) === "flat" && named.has(item.path.join("/")) &&

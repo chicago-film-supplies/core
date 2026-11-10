@@ -18955,8 +18955,8 @@
         {
           "kind": "interface",
           "name": "ScopedSyncSide",
-          "declaration": "interface ScopedSyncSide {\n  scopeType: \"order\" | \"purchase\";\n  pointerKey: keyof MovePointerCarrier;\n  project(item: LineItem, scopeUid: string): R;\n  lineFields(item: LineItem): readonly SharedField[];\n  isStructural(item: LineItem): boolean;\n  stillStored(path: readonly string[]): boolean;\n  adopts(item: LineItem, row: R): boolean;\n}",
-          "doc": "**What the scoped initiator → billing sync needs to know about a SIDE**\n(one-document-model Phase 3). The order → invoice sync and the purchase →\nbill sync are one engine, {@link syncOrderToInvoiceSelective}'s body; this is\nthe whole of what differs between them, so neither side branches on a\ncollection.\n\nEvery receivable-only arm of the engine — substitutions (`substituted_for`),\ndate-extension sections (`path_extension_for`) — keys on a field no payable\nrow carries, so on a bill it finds nothing and changes nothing. The\nlost/damaged arm (`uid_out_of_service`) applies to both sides as written: a\nline billing a record is the billing document's own row."
+          "declaration": "interface ScopedSyncSide {\n  scopeType: \"order\" | \"purchase\";\n  pointerKey: keyof MovePointerCarrier;\n  project(item: LineItem, scopeUid: string): R;\n  lineFields(item: LineItem): readonly SharedField[];\n  isStructural(item: LineItem): boolean;\n  stillStored(path: readonly string[]): boolean;\n  adopts(item: LineItem, row: R): boolean;\n  requantify(row: R, quantity: number, ctx: typeLiteral): R;\n}",
+          "doc": "**What the scoped initiator → billing sync needs to know about a SIDE**\n(one-document-model Phase 3). The order → invoice sync and the purchase →\nbill sync are one engine, {@link syncOrderToInvoiceSelective}'s body; this is\nthe whole of what differs between them, so neither side branches on a\ncollection.\n\nThe substitution arm (`substituted_for`) runs on both sides: a bill's\nsubstitute stands in for a purchase line exactly as an invoice's does for an\norder line, and {@link ScopedSyncSide.requantify} is how a side whose money\ndoes not follow quantity keeps a row's money with its units\n(one-document-model W5). The date-extension arm (`path_extension_for`) keys\non a field no payable row carries, so on a bill it finds nothing. The\nlost/damaged arm (`uid_out_of_service`) applies to both sides as written: a\nline billing a record is the billing document's own row."
         },
         {
           "kind": "interface",
@@ -23994,7 +23994,7 @@
         {
           "kind": "interface",
           "name": "PurchaseBilledDocuments",
-          "declaration": "interface PurchaseBilledDocuments {\n  uid_purchase: string;\n  bills: readonly Pick<PurchaseBill, \"uid\" | \"number\" | \"totals\" | \"items\" | \"status\">[];\n  credits: readonly Pick<PurchaseCredit, \"status\" | \"items\">[];\n}",
+          "declaration": "interface PurchaseBilledDocuments {\n  uid_purchase: string;\n  purchase_items: readonly CreditableRow[];\n  bills: readonly Pick<PurchaseBill, \"uid\" | \"number\" | \"totals\" | \"items\" | \"status\">[];\n  credits: readonly Pick<PurchaseCredit, \"status\" | \"items\">[];\n}",
           "doc": "One purchase's existing bills and credits, as the \"already billed\" readers\nsee them. Pass EVERY bill and credit of the purchase; liveness is decided\nhere ({@link purchaseBillIsLive}, {@link purchaseCreditIsLive}). A bill may\nbill several purchases, so `uid_purchase` says whose lines to read."
         },
         {
@@ -24002,6 +24002,12 @@
           "name": "PurchaseLineBilledNet",
           "declaration": "interface PurchaseLineBilledNet {\n  quantity: number;\n  amount_cents: number;\n}",
           "doc": "What the live documents bill of one purchase line, net of credits."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseLineBilling",
+          "declaration": "interface PurchaseLineBilling {\n  quantity: number;\n  amount_cents: number;\n  parts: typeLiteral[];\n}",
+          "doc": "What one document bills of one purchase line: {@link purchaseDocumentBilling}'s value."
         },
         {
           "kind": "interface",
@@ -24097,6 +24103,14 @@
         },
         {
           "kind": "function",
+          "name": "purchaseDocumentBilling",
+          "signature": "purchaseDocumentBilling(rows: readonly PurchaseDocumentRow[], uidPurchase: string, purchaseItems: readonly CreditableRow[]): Map<string, PurchaseLineBilling>",
+          "doc": "**What one document bills of each line of purchase `uidPurchase`**, keyed by\nthe line's path relative to the purchase, joined with `/`. Every \"already\nbilled\" reader goes through it.\n\n- A row bills the line its join names (`purchaseLineKeyOf`: its own path, or\n  its move pointer).\n- 🔴 **A substitute Y bills the X it stands in for** (W5, `substituted_for`),\n  as an invoice's does on AR (`invoicedByPath`): each live entry credits X\n  with its units and their share of Y's money and counts, and the rest of Y\n  stays at Y's own join. The stand-in units take Y's FIRST units' share\n  (`cumulativeShareCents`), so the parts sum to exactly Y's amount.\n- An entry is live while the purchase still carries X (`purchase_items`);\n  a spent one bills nothing for X, and its units count at Y's own join.\n- X's kit components are credited through the PURCHASE's own ratio\n  (`substitutionCredit`), in units only: the money a substitute stands in for\n  is X's whole subtree's, and it lands on X.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "purchaseDocumentScope",
           "signature": "purchaseDocumentScope(purchase: Pick<Purchase, \"uid\" | \"number\" | \"items\" | \"destinations\">, lines: readonly PurchaseDocumentItem[]): typeLiteral",
           "doc": "**One purchase's block on a bill or credit**: its `purchase` divider, then\nevery purchase divider (destination, group) that is an ancestor of a given\nline, then the lines — in the PURCHASE's row order, re-pathed by\n`computePurchaseDocumentItemPaths` — plus the pairs those destination\ndividers name, scoped by `uid_purchase`. The `adoptOrderDividerStructure`\ntwin: the dividers keep the purchase's uids, so a bill line's path IS\n`[purchase uid, ...its purchase line's path]`.\n\n`lines` are bill or credit lines already at those paths ({@link\nprojectPurchaseLineToBillLine}); a line at a path the purchase does not carry\n(a document-only charge, `[purchase uid, uid]`) sits directly under the\npurchase divider, ahead of the first destination, so contiguity holds.",
@@ -24106,7 +24120,7 @@
         {
           "kind": "function",
           "name": "purchaseDocumentsBefore",
-          "signature": "purchaseDocumentsBefore(bill: Pick<PurchaseBill, \"uid\" | \"date\" | \"number\">, uidPurchase: string, bills: readonly B[], credits: readonly C[]): typeLiteral",
+          "signature": "purchaseDocumentsBefore(bill: Pick<PurchaseBill, \"uid\" | \"date\" | \"number\">, purchase: typeLiteral, bills: readonly B[], credits: readonly C[]): typeLiteral",
           "doc": "**The documents of one purchase dated before `bill`** — by date, then number —\nwith `bill` itself left out. A time line re-seeded on `bill` is billed for its\npair's time less what THESE documents bill (one-document-model item 5): a later\ndocument's billing does not limit what an earlier one may bill. The bill writer\nand the manager's optimistic reprice both read it, so the two cannot disagree.",
           "paramTags": [],
           "returnsTag": null

@@ -197,6 +197,7 @@ import {
   purchaseBillSharedDocFields,
   purchaseBillSharedLineFields,
   purchaseCreditIsLive,
+  purchaseDocumentBilling,
   purchaseLineBilledNet,
   purchaseLineKey,
 } from "./purchase-documents.ts";
@@ -1553,14 +1554,18 @@ function scopePurchase(purchase: Purchase): ScopedLines {
 
 function scopeBill(bill: PurchaseBill, uidPurchase: string): ScopedLines {
   const byKey = new Map<string, LineItem>();
+  const rel: MaybeSubstitution[] = [];
   for (const line of purchaseDocumentLines(bill.items)) {
-    if (line.path[0] === uidPurchase) byKey.set(key(line.path.slice(1)), line as unknown as LineItem);
+    if (line.path[0] !== uidPurchase) continue;
+    byKey.set(key(line.path.slice(1)), line as unknown as LineItem);
+    // A substitute (W5) is anchored in the purchase's path space, as an invoice's is in its order's.
+    if ("substituted_for" in line) rel.push({ path: line.path.slice(1), substituted_for: line.substituted_for });
   }
   const claims = new Map<string, string>();
   for (const [row, x] of orderLineClaims(bill.items as unknown as InvoiceItem[], uidPurchase, "path_purchase_item")) {
     if (byKey.has(row)) claims.set(row, key(x));
   }
-  return { byKey, anchors: [], claims };
+  return { byKey, anchors: collectSubstitutionAnchors(rel), claims };
 }
 
 /**
@@ -1577,17 +1582,23 @@ function scopeBill(bill: PurchaseBill, uidPurchase: string): ScopedLines {
  * `invoiced`, which is how a voided bill's stranded credit reaches the operator.
  */
 function payableQuantityEntry(
-  uidPurchase: string,
+  purchase: Purchase,
   item: PurchaseItem,
   bills: readonly PurchaseBill[],
   credits: readonly PurchaseCredit[],
 ): DocumentQuantityEntry | null {
-  const k = purchaseLineKey(uidPurchase, item.path);
-  const names = (rows: PurchaseBill["items"]) => purchaseDocumentLines(rows).some((l) => purchaseLineKeyOf(l) === k);
+  const k = key(item.path);
+  // A document names the line when it bills any of it, a substitute standing in for it included.
+  const names = (rows: PurchaseBill["items"]) => purchaseDocumentBilling(rows, purchase.uid, purchase.items).has(k);
   const namingBills = bills.filter((b) => names(b.items));
   const namingCredits = credits.filter((c) => names(c.items));
   if (namingBills.length === 0 && namingCredits.length === 0) return null;
-  const net = purchaseLineBilledNet(item.path, { uid_purchase: uidPurchase, bills: namingBills, credits: namingCredits });
+  const net = purchaseLineBilledNet(item.path, {
+    uid_purchase: purchase.uid,
+    purchase_items: purchase.items,
+    bills: namingBills,
+    credits: namingCredits,
+  });
   const ordered = item.quantity;
   // A canceled line holds quantity 0 and states no money, so nothing is expected of its bills.
   const expected_cents = item.quantity === 0
@@ -1656,7 +1667,7 @@ function payableDiffs(
     }
     for (const item of purchaseLines(purchase.items)) {
       if (!isFlat(item)) continue;
-      const entry = payableQuantityEntry(purchase.uid, item, billsOf(purchase.uid), creditsOf(purchase.uid));
+      const entry = payableQuantityEntry(purchase, item, billsOf(purchase.uid), creditsOf(purchase.uid));
       if (entry !== null) push(out.lines, key(item.path), entry);
     }
     return;
@@ -1690,7 +1701,7 @@ function payableDiffs(
       const lineKey = purchaseLineKeyOf(line);
       const item = lineKey === null ? undefined : byKey.get(lineKey);
       if (item === undefined || !isFlat(item)) continue;
-      const entry = payableQuantityEntry(uidPurchase, item, billsOf(uidPurchase), creditsOf(uidPurchase));
+      const entry = payableQuantityEntry(purchase, item, billsOf(uidPurchase), creditsOf(uidPurchase));
       if (entry !== null) push(out.lines, key(line.path), entry);
     }
   }

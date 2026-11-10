@@ -101,6 +101,12 @@ Deno.test("purchaseBilledPaths: a voided bill names nothing; another purchase's 
   assertEquals([...purchaseBilledPaths([{ status: "void", totals: totals(500), items: [line] }], PU)], []);
 });
 
+Deno.test("purchaseBilledPaths: a substitute names the line it stands in for as well as its own (W5)", () => {
+  const substitute = { type: "rental", path: [PU, "y"], substituted_for: [{ path: ["t"], quantity: 2 }] } as PurchaseDocumentItem;
+  const totals = { amount_void_cents: 0 } as PurchaseBill["totals"];
+  assertEquals([...purchaseBilledPaths([{ status: "issued", totals, items: [substitute] }], PU)].sort(), ["t", "y"]);
+});
+
 Deno.test("close: refused whole while a subrent has units out, even with another line open", () => {
   const out = subrent({ quantity: 1, quantity_received: 1 });
   const offers = purchaseActionsFor(po([buy(), out]));
@@ -172,13 +178,13 @@ const voidBill = (
     status: o.voided_at !== undefined || (totals_over?.amount_void_cents ?? 0) !== 0 ? "void" : "issued",
     origin: "pushed",
     xero_document: "invoice",
-    items: lines.map(([path, quantity]) => ({ type: "sale", path: [PU, path], quantity, amount_cents: 100 * quantity })),
+    items: lines.map(([path, quantity]) => ({ type: "sale", path: [PU, path], quantity, amount_cents: 100 * quantity, price: { counts: [] } })),
     totals: { total_cents: 1000, amount_paid_cents: 0, amount_credited_cents: 0, amount_void_cents: 0, amount_due_cents: 1000, ...totals_over },
     ...rest,
   } as PurchaseBill;
 };
 const voidCredit = (lines: [string, number][], status: PurchaseCredit["status"] = "issued") =>
-  ({ status, items: lines.map(([path, quantity]) => ({ type: "sale", path: [PU, path], quantity, amount_cents: 100 * quantity })) }) as PurchaseCredit;
+  ({ status, items: lines.map(([path, quantity]) => ({ type: "sale", path: [PU, path], quantity, amount_cents: 100 * quantity, price: { counts: [] } })) }) as unknown as PurchaseCredit;
 const noDocuments = { per_purchase: [{ uid_purchase: PU, purchase: { items: [] }, bills: [], credits: [] }] };
 const asLines = (...items: PurchaseActionItem[]) => items as PurchaseItem[];
 

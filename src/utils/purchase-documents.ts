@@ -47,6 +47,7 @@ import {
   type PurchaseDocDestination,
   type PurchaseDocumentItem,
   type PurchaseDocumentLinePrice,
+  type PurchaseDocumentProductItem,
   type PurchaseDocumentRow,
   type PurchaseItem,
   purchaseItemBasis,
@@ -61,6 +62,13 @@ import {
 } from "../schemas/mod.ts";
 import { cumulativeShareCents } from "./purchases.ts";
 import { roundDivHalfUp } from "./money.ts";
+import {
+  collectSubstitutionAnchors,
+  type CreditableRow,
+  liveSubstitutionAnchors,
+  standInUnits,
+  substitutionCredit,
+} from "./substitutions.ts";
 import { classifySharedFields, fieldsUnder, sameSharedValue, type SharedField } from "./shared-fields.ts";
 import {
   computePurchaseDocumentItemPaths,
@@ -95,6 +103,13 @@ export { purchaseBillIsLive };
  */
 export interface PurchaseBilledDocuments {
   uid_purchase: string;
+  /**
+   * The purchase's rows, dividers included: which substitutions are LIVE (the
+   * purchase still carries X) and the kit ratio a substitute credits X's
+   * components by ({@link purchaseDocumentBilling}). Required, so a reader
+   * cannot silently stop counting a substitute.
+   */
+  purchase_items: readonly CreditableRow[];
   bills: readonly Pick<PurchaseBill, "uid" | "number" | "totals" | "items" | "status">[];
   credits: readonly Pick<PurchaseCredit, "status" | "items">[];
 }
@@ -111,16 +126,21 @@ export function purchaseDocumentsBefore<
   C extends Pick<PurchaseCredit, "date" | "number">,
 >(
   bill: Pick<PurchaseBill, "uid" | "date" | "number">,
-  uidPurchase: string,
+  purchase: { uid: string; items: readonly CreditableRow[] },
   bills: readonly B[],
   credits: readonly C[],
-): { uid_purchase: string; bills: B[]; credits: C[] } {
+): { uid_purchase: string; purchase_items: readonly CreditableRow[]; bills: B[]; credits: C[] } {
   const at = Date.parse(bill.date);
   const before = (d: { date: string; number: number }): boolean => {
     const t = Date.parse(d.date);
     return t < at || (t === at && d.number < bill.number);
   };
-  return { uid_purchase: uidPurchase, bills: bills.filter((b) => b.uid !== bill.uid && before(b)), credits: credits.filter(before) };
+  return {
+    uid_purchase: purchase.uid,
+    purchase_items: purchase.items,
+    bills: bills.filter((b) => b.uid !== bill.uid && before(b)),
+    credits: credits.filter(before),
+  };
 }
 
 // ── Reading existing coverage ──────────────────────────────────
@@ -135,12 +155,95 @@ export function purchaseLineKey(uidPurchase: string, path: readonly string[]): s
   return [uidPurchase, ...path].join("/");
 }
 
-/** The lines of a document that bill the purchase line at `key` ({@link purchaseLineKey}). */
-function linesFor(rows: readonly PurchaseDocumentRow[], key: string): PurchaseDocumentItem[] {
-  const out: PurchaseDocumentItem[] = [];
+/** A row's `substituted_for`: only the product arm (a sale or rental line) carries one. */
+function substitutedForOf(row: PurchaseDocumentItem): PurchaseDocumentProductItem["substituted_for"] {
+  return "substituted_for" in row ? row.substituted_for : undefined;
+}
+
+/** What one document bills of one purchase line: {@link purchaseDocumentBilling}'s value. */
+export interface PurchaseLineBilling {
+  /** Units billed, a substitute's stand-in units included. */
+  quantity: number;
+  /** The money of those units. */
+  amount_cents: number;
+  /**
+   * The rows' counts, each with the units it bills, for the quantity-weighted
+   * mean ({@link purchaseLineBilledCounts}). A unit credited through a kit's
+   * ratio adds quantity and no part.
+   */
+  parts: { quantity: number; counts: readonly TierCount[] }[];
+}
+
+/**
+ * **What one document bills of each line of purchase `uidPurchase`**, keyed by
+ * the line's path relative to the purchase, joined with `/`. Every "already
+ * billed" reader goes through it.
+ *
+ * - A row bills the line its join names (`purchaseLineKeyOf`: its own path, or
+ *   its move pointer).
+ * - 🔴 **A substitute Y bills the X it stands in for** (W5, `substituted_for`),
+ *   as an invoice's does on AR (`invoicedByPath`): each live entry credits X
+ *   with its units and their share of Y's money and counts, and the rest of Y
+ *   stays at Y's own join. The stand-in units take Y's FIRST units' share
+ *   (`cumulativeShareCents`), so the parts sum to exactly Y's amount.
+ * - An entry is live while the purchase still carries X (`purchase_items`);
+ *   a spent one bills nothing for X, and its units count at Y's own join.
+ * - X's kit components are credited through the PURCHASE's own ratio
+ *   (`substitutionCredit`), in units only: the money a substitute stands in for
+ *   is X's whole subtree's, and it lands on X.
+ */
+export function purchaseDocumentBilling(
+  rows: readonly PurchaseDocumentRow[],
+  uidPurchase: string,
+  purchaseItems: readonly CreditableRow[],
+): Map<string, PurchaseLineBilling> {
+  const out = new Map<string, PurchaseLineBilling>();
+  const at = (k: string): PurchaseLineBilling => {
+    let entry = out.get(k);
+    if (!entry) out.set(k, entry = { quantity: 0, amount_cents: 0, parts: [] });
+    return entry;
+  };
+  const prefix = `${uidPurchase}/`;
+  const lines: PurchaseDocumentItem[] = [];
   for (const row of rows) {
     if (row.type === "purchase" || row.type === "destination" || row.type === "group") continue;
-    if (purchaseLineKeyOf(row) === key) out.push(row);
+    if (row.path[0] === uidPurchase) lines.push(row);
+  }
+  const anchors = liveSubstitutionAnchors(
+    purchaseItems,
+    collectSubstitutionAnchors(lines.map((l) => ({ path: l.path.slice(1), substituted_for: substitutedForOf(l) }))),
+  );
+  const liveX = new Set(anchors.map((a) => a.substitutedFor.join("/")));
+  const direct = new Map<string, number>();
+  for (const line of lines) {
+    const join = purchaseLineKeyOf(line);
+    if (join === null || !join.startsWith(prefix)) continue;
+    const rel = line.path.slice(1).join("/");
+    let units = 0;
+    let cents = 0;
+    for (const a of anchors) {
+      if (a.path.join("/") !== rel || a.quantity <= 0) continue;
+      const share = flatShareCents(line.amount_cents, line.quantity, units, units + a.quantity);
+      const x = a.substitutedFor.join("/");
+      const entry = at(x);
+      entry.quantity += a.quantity;
+      entry.amount_cents += share;
+      entry.parts.push({ quantity: a.quantity, counts: line.price.counts });
+      direct.set(x, (direct.get(x) ?? 0) + a.quantity);
+      units += a.quantity;
+      cents += share;
+    }
+    // A root's live entries are its anchors. A component's stamped entries are its
+    // share of its root's, which the ratio walk below credits to X's components,
+    // so they leave its own join too.
+    const own = line.quantity - standInUnits({ path: line.path, substituted_for: substitutedForOf(line) }, liveX);
+    const entry = at(join.slice(prefix.length));
+    entry.quantity += own;
+    entry.amount_cents += line.amount_cents - cents;
+    if (own > 0) entry.parts.push({ quantity: own, counts: line.price.counts });
+  }
+  for (const [k, units] of substitutionCredit(purchaseItems, direct)) {
+    if (!direct.has(k)) at(k).quantity += units;
   }
   return out;
 }
@@ -171,13 +274,13 @@ export interface PurchaseLineBilledNet {
  * it, which the diff has to be able to show.
  */
 export function purchaseLineBilledNet(path: readonly string[], documents: PurchaseBilledDocuments): PurchaseLineBilledNet {
-  const key = purchaseLineKey(documents.uid_purchase, path);
+  const key = path.join("/");
   const net: PurchaseLineBilledNet = { quantity: 0, amount_cents: 0 };
   const add = (rows: readonly PurchaseDocumentRow[], sign: 1 | -1) => {
-    for (const line of linesFor(rows, key)) {
-      net.quantity += sign * line.quantity;
-      net.amount_cents += sign * line.amount_cents;
-    }
+    const billed = purchaseDocumentBilling(rows, documents.uid_purchase, documents.purchase_items).get(key);
+    if (billed === undefined) return;
+    net.quantity += sign * billed.quantity;
+    net.amount_cents += sign * billed.amount_cents;
   };
   for (const bill of documents.bills) if (purchaseBillIsLive(bill)) add(bill.items, 1);
   for (const credit of documents.credits) if (purchaseCreditIsLive(credit)) add(credit.items, -1);
@@ -196,11 +299,11 @@ export function purchaseLineBilledNet(path: readonly string[], documents: Purcha
  * documents is unchanged (core#149 tracks what that means for a partial bill).
  */
 export function purchaseLineBilledCounts(path: readonly string[], documents: PurchaseBilledDocuments): TierCount[] {
-  const key = purchaseLineKey(documents.uid_purchase, path);
+  const key = path.join("/");
   let net: TierCount[] = [];
   const add = (rows: readonly PurchaseDocumentRow[], sign: 1 | -1) => {
-    const counts = meanTierCounts(linesFor(rows, key).map((line) => ({ quantity: line.quantity, counts: line.price.counts })));
-    net = combineTierCounts(net, counts, sign);
+    const parts = purchaseDocumentBilling(rows, documents.uid_purchase, documents.purchase_items).get(key)?.parts ?? [];
+    net = combineTierCounts(net, meanTierCounts(parts), sign);
   };
   for (const bill of documents.bills) if (purchaseBillIsLive(bill)) add(bill.items, 1);
   for (const credit of documents.credits) if (purchaseCreditIsLive(credit)) add(credit.items, -1);
@@ -703,6 +806,24 @@ export function payableScopedSync(prev: Purchase, next: Purchase, stored: readon
       const source = original.get(item);
       return source !== undefined && (source.type === "sale" || source.type === "rental") &&
         row.type === source.type && row.uid_product === source.uid_product;
+    },
+    // A flat line states its money, so a substitution moving its units moves money
+    // too (W5). A row still at its share of its purchase line follows that line's
+    // share; any other row keeps its amount, unless units left it (a spent entry),
+    // which take their share of it. A time line's money is its counts priced.
+    requantify: (row, quantity, { source, scaleFrom }) => {
+      if (!isPurchaseLine(row) || row.price.price_formula.basis === "time") return { ...row, quantity };
+      const line = source === undefined ? undefined : original.get(source);
+      if (line !== undefined && isPurchaseLine(line) && line.quantity > 0 && purchaseItemBasis(line) === "flat") {
+        const amount = line.amount_cents ?? 0;
+        if (row.amount_cents === flatShareCents(amount, line.quantity, 0, row.quantity)) {
+          return { ...row, quantity, amount_cents: flatShareCents(amount, line.quantity, 0, quantity) };
+        }
+      }
+      if (scaleFrom !== undefined && scaleFrom > 0 && scaleFrom !== quantity) {
+        return { ...row, quantity, amount_cents: flatShareCents(row.amount_cents, scaleFrom, 0, quantity) };
+      }
+      return { ...row, quantity };
     },
     project: (item, scopeUid) => {
       const row = original.get(item);
