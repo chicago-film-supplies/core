@@ -74,6 +74,17 @@ export const DOMAIN_EVENT_MSGS = [
   // `api-cloudrun/src/lib/orderInvoiceMirror.ts`'s two callers in api-cloudrun
   // (`services/orderInvoiceMirror.ts`, `services/invoices.ts`). api#453.
   "order_invoice_mirror_repaired",
+  // A discovery mirror on an initiator (one-document-model ruling 32, 6e-0a)
+  // disagreed with the document that names it and was converged:
+  // `order.credit_notes[]`, `purchase.bills[]` or `purchase.credits[]`, the
+  // twins of `order_invoice_mirror_repaired`. `source:"backstop"` = the eventarc
+  // reconciler repaired one a writer missed or a script wrote raw, which in
+  // steady state IS the bug report; `source:"repair"` = the repair script. A
+  // writer's own post-commit converge is NOT logged here (adding the entry is
+  // its normal path); its propagation record reports it. `{ mirror, uid_initiator, uid_source,
+  // source, status_from, status_to, number_changed, added }`. Emitted from
+  // `api-cloudrun/src/services/docRefMirrors.ts`.
+  "document_ref_mirror_repaired",
   // A denorm cascade resolved its target ids OUTSIDE its transaction (so the
   // collection leaves `contended_ranges` — api-cloudrun#423) and then re-scanned
   // after committing to repair anything that scan could not have seen. Emitted
@@ -377,6 +388,15 @@ export interface DomainEventLogRecord {
   action_subject_uid?: string;
   /** `invoice_action_unoffered` — the refusal message the ruleset would have thrown. */
   refusal?: string;
+  /**
+   * `document_ref_mirror_repaired` — which discovery mirror moved: the
+   * initiator collection and its object-array field.
+   */
+  mirror?: "orders.credit_notes" | "purchases.bills" | "purchases.credits";
+  /** `document_ref_mirror_repaired` — the initiator (order or purchase) whose mirror moved. */
+  uid_initiator?: string;
+  /** `document_ref_mirror_repaired` — the credit note, bill or supplier credit the entry mirrors. */
+  uid_source?: string;
   /** `purchase_landed_cost_stranded` — the purchase whose line was closed. */
   uid_purchase?: string;
   /** `purchase_landed_cost_stranded` — the landed cents no receipt can now price. */
@@ -407,6 +427,9 @@ export const DomainEventLogRecordSchema: z.ZodType<DomainEventLogRecord> = z.obj
   action_subject: z.enum(["invoice", "credit_note", "order"]).optional(),
   action_subject_uid: z.string().optional(),
   refusal: z.string().optional(),
+  mirror: z.enum(["orders.credit_notes", "purchases.bills", "purchases.credits"]).optional(),
+  uid_initiator: z.string().optional(),
+  uid_source: z.string().optional(),
   uid_purchase: z.string().optional(),
   stranded_cents: z.int().optional(),
 }).passthrough().meta({ title: "DomainEventLogRecord" });
