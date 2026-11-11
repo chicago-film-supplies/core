@@ -196,7 +196,7 @@ export const templateSchemaFields: Partial<
     { path: "invoices[].uid", type: "string" },
     { path: "invoices[].number", type: "number" },
     { path: "invoices[].status", type: "draft | issued | part_paid | paid | credited | void" },
-    { path: "credit_notes", type: "object[]?" },
+    { path: "credit_notes", type: "object[]" },
     { path: "credit_notes[].uid", type: "string" },
     { path: "credit_notes[].number", type: "number" },
     { path: "credit_notes[].status", type: "draft | issued | applied | void" },

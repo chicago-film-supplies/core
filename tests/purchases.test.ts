@@ -404,6 +404,9 @@ function purchase(over: Record<string, unknown> = {}) {
     query_by_orders: deriveQueryByOrders(items),
     query_by_item_types: deriveQueryByItemTypes(items),
     query_by_bills: [],
+    bills: [],
+    credits: [],
+    query_by_credits: [],
     version: 0,
     created_by: actor,
     updated_by: actor,
@@ -629,7 +632,8 @@ Deno.test("the price snapshot is reached by the column walker", () => {
 
 Deno.test("PurchaseSchema: all three mirrors and `query_by_bills` are required, and each mirror must be exact", () => {
   assertEquals(issuePaths(PurchaseSchema, purchase()), []);
-  for (const key of ["query_by_products", "query_by_orders", "query_by_item_types", "query_by_bills"]) {
+  // `bills`, `credits` and `query_by_credits` since the 6e-0a backfill (ruling 32).
+  for (const key of ["query_by_products", "query_by_orders", "query_by_item_types", "query_by_bills", "bills", "credits", "query_by_credits"]) {
     const doc = purchase() as Record<string, unknown>;
     delete doc[key];
     assertEquals(issuePaths(PurchaseSchema, doc), [key]);

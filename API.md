@@ -8178,8 +8178,8 @@ interface Order {
   totals: OrderDocTotalsType;
   invoices: Array<typeLiteral>;
   query_by_invoices: string[];
-  credit_notes?: Array<typeLiteral>;
-  query_by_credit_notes?: string[];
+  credit_notes: Array<typeLiteral>;
+  query_by_credit_notes: string[];
   query_by_items: string[];
   query_by_contacts: string[];
   query_by_dates: string[];
@@ -10523,9 +10523,9 @@ interface Purchase {
   query_by_orders: string[];
   query_by_item_types: PurchaseItemTypeType[];
   query_by_bills: string[];
-  bills?: Array<typeLiteral>;
-  credits?: Array<typeLiteral>;
-  query_by_credits?: string[];
+  bills: Array<typeLiteral>;
+  credits: Array<typeLiteral>;
+  query_by_credits: string[];
   query_by_units?: string[];
   uid_thread?: string;
   version: number;
@@ -24816,8 +24816,8 @@ interface Order {
   totals: OrderDocTotalsType;
   invoices: Array<typeLiteral>;
   query_by_invoices: string[];
-  credit_notes?: Array<typeLiteral>;
-  query_by_credit_notes?: string[];
+  credit_notes: Array<typeLiteral>;
+  query_by_credit_notes: string[];
   query_by_items: string[];
   query_by_contacts: string[];
   query_by_dates: string[];
@@ -28017,9 +28017,9 @@ interface Purchase {
   query_by_orders: string[];
   query_by_item_types: PurchaseItemTypeType[];
   query_by_bills: string[];
-  bills?: Array<typeLiteral>;
-  credits?: Array<typeLiteral>;
-  query_by_credits?: string[];
+  bills: Array<typeLiteral>;
+  credits: Array<typeLiteral>;
+  query_by_credits: string[];
   query_by_units?: string[];
   uid_thread?: string;
   version: number;
