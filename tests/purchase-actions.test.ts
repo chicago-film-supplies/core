@@ -22,7 +22,8 @@ import {
   purchaseItemTouched,
 } from "../src/utils/purchase-actions.ts";
 import { deriveInvoiceStatus } from "../src/utils/invoices.ts";
-import { purchaseLineBilledNet } from "../src/utils/purchase-documents.ts";
+import { billLineCreditCents, purchaseLineBilledNet } from "../src/utils/purchase-documents.ts";
+import { sliceSubstitutedFor } from "../src/utils/substitutions.ts";
 import { InvoiceActionRefusal } from "../src/utils/invoice-actions.ts";
 import {
   PURCHASE_ACTION_IDS,
@@ -432,22 +433,86 @@ Deno.test("creditableBillLines: a bill-authored line is creditable, capped by it
   assertEquals(unitsAt(a, ctx6d([a], [credit6d([named("A", ["extra"], 1, { type: "service" })])])), { x: 5, extra: 1 });
 });
 
-Deno.test("creditableBillLines: a substitute Y's stand-in units are capped by X's pool, the rest by Y's own (6d, ruling 23)", () => {
-  // Whole: Y stands in for all 5 of X. X's pool is 5 (Y's stand-ins), Y's own join 0.
+Deno.test("creditableBillLines: one segment per credit — a substitute's stand-ins for each X, then its own units (6d, owner 2026-11-11)", () => {
+  const items = asLines(buy({ uid: "x", path: ["x"], quantity: 5 }));
+  // Whole: Y stands in for all 5 of X — one segment, capped by X's pool (5).
   const whole = bill6d("A", [row(["y"], 5, { substituted_for: [{ path: ["x"], quantity: 5 }] })]);
-  assertEquals(unitsAt(whole, ctx6d([whole])), { y: 5 });
-  // A credit of 2 of Y copies its row and slices the entries: X's pool falls to 3, Y has 3 left.
+  assertEquals(creditableBillLines(whole, ctx6d([whole])), [{ path: [PU, "y"], uid: "y", billed: 5, units: 5, stands_in_for: ["x"] }]);
+  // A credit of 2 copies the row and slices the entries: X's pool falls to 3, and 3 are left.
   const back = credit6d([named("A", ["y"], 2, { substituted_for: [{ path: ["x"], quantity: 2 }] })]);
   assertEquals(unitsAt(whole, ctx6d([whole], [back])), { y: 3 });
   // …and the credit un-bills X itself, by its stand-in units: X's net falls 5 → 3.
-  const docs = (credits: PurchaseCredit[]) => ({ uid_purchase: PU, purchase_items: asLines(buy({ uid: "x", path: ["x"], quantity: 5 })), bills: [whole], credits });
+  const docs = (credits: PurchaseCredit[]) => ({ uid_purchase: PU, purchase_items: items, bills: [whole], credits });
   assertEquals(purchaseLineBilledNet(["x"], docs([])).quantity, 5);
   assertEquals(purchaseLineBilledNet(["x"], docs([back])).quantity, 3);
-  // Partial: Y is 5, of which 2 stand in for X; 3 are Y's own (bill-authored remainder).
+  // Partial: Y is 5, of which 2 stand in for X. The first credit may take only those 2…
   const partial = bill6d("A", [row(["y"], 5, { substituted_for: [{ path: ["x"], quantity: 2 }] })]);
-  assertEquals(unitsAt(partial, ctx6d([partial])), { y: 5 });
-  // A purchase-form credit took 1 of X's pool: the stand-ins are capped at 1, and a credit cannot skip past them.
+  assertEquals(creditableBillLines(partial, ctx6d([partial])), [{ path: [PU, "y"], uid: "y", billed: 5, units: 2, stands_in_for: ["x"] }]);
+  assertEquals(
+    purchaseBillCreditRefusal(partial, ctx6d([partial]), [{ path_bill_item: [PU, "y"], quantity: 3 }])?.includes("stand in for x; credit those first"),
+    true,
+  );
+  // …then, once they are credited, Y's own 3.
+  const stands = credit6d([named("A", ["y"], 2, { substituted_for: [{ path: ["x"], quantity: 2 }] })]);
+  assertEquals(creditableBillLines(partial, ctx6d([partial], [stands])), [{ path: [PU, "y"], uid: "y", billed: 5, units: 3 }]);
+  // A purchase-form credit took 1 of X's pool: the stand-in segment is capped at 1.
   assertEquals(unitsAt(partial, ctx6d([partial], [credit6d([row(["x"], 1)])])), { y: 1 });
   // A spent entry (the purchase no longer carries X) stands in for nothing: the fold counts all 5 at Y's own join.
   assertEquals(unitsAt(partial, ctx6d([partial], [], asLines(buy({ uid: "w", path: ["w"] })))), { y: 5 });
+});
+
+Deno.test("creditableBillLines: crediting a substitute segment by segment nets every line's billed money to exactly 0 (6d)", () => {
+  // Y: 7 units for $1.01, its first 2 standing in for x1, the next 2 for x2, 3 its own.
+  // Odd cents on purpose, so a re-split of a straddling credit would move one.
+  const items = asLines(buy({ uid: "x1", path: ["x1"], quantity: 2 }), buy({ uid: "x2", path: ["x2"], quantity: 2 }));
+  const entries = [{ path: ["x1"], quantity: 2 }, { path: ["x2"], quantity: 2 }];
+  const y = row(["y"], 7, { amount_cents: 101, substituted_for: entries });
+  const bill = bill6d("A", [y]);
+  const credits: PurchaseCredit[] = [];
+  const net = (path: string) => purchaseLineBilledNet([path], { uid_purchase: PU, purchase_items: items, bills: [bill], credits });
+  const billed = { x1: net("x1").amount_cents, x2: net("x2").amount_cents, y: net("y").amount_cents };
+  assertEquals(billed.x1 + billed.x2 + billed.y, 101);
+  // Each credit takes ALL it is offered — the form's default — priced and sliced as the API will.
+  let taken = 0;
+  let taken_cents = 0;
+  const runs: number[] = [];
+  while (taken < 7) {
+    const [line] = creditableBillLines(bill, { per_purchase: [{ uid_purchase: PU, purchase: { items }, bills: [bill], credits }] });
+    assert(line.units >= 1, `units ${taken + 1}.. are offered`);
+    const n = line.units;
+    const cents = billLineCreditCents({ line: { quantity: 7, amount_cents: 101 }, credited: { quantity: taken, amount_cents: taken_cents }, n });
+    const slice = sliceSubstitutedFor(entries, taken, taken + n);
+    credits.push(credit6d([named("A", ["y"], n, { amount_cents: cents, ...(slice.length > 0 ? { substituted_for: slice } : {}) })]));
+    runs.push(n);
+    taken += n;
+    taken_cents += cents;
+  }
+  assertEquals(runs, [2, 2, 3], "one credit per segment");
+  assertEquals(taken_cents, 101);
+  assertEquals([net("x1"), net("x2"), net("y")], [{ quantity: 0, amount_cents: 0 }, { quantity: 0, amount_cents: 0 }, { quantity: 0, amount_cents: 0 }]);
+  assertEquals(creditableBillLines(bill, { per_purchase: [{ uid_purchase: PU, purchase: { items }, bills: [bill], credits }] })[0].units, 0);
+});
+
+Deno.test("creditableBillLines: the straddling credit the rule refuses is the one that moves a cent (6d)", () => {
+  // Y: 3 units for $1.00, its first unit standing in for X. The bill gives X 33¢, Y's own 67¢.
+  const items = asLines(buy({ uid: "x", path: ["x"], quantity: 1 }));
+  const bill = bill6d("A", [row(["y"], 3, { amount_cents: 100, substituted_for: [{ path: ["x"], quantity: 1 }] })]);
+  const net = (credits: PurchaseCredit[], path: string) =>
+    purchaseLineBilledNet([path], { uid_purchase: PU, purchase_items: items, bills: [bill], credits }).amount_cents;
+  assertEquals([net([], "x"), net([], "y")], [33, 67]);
+  // Built by hand, a credit of units 1–2 (67¢, one standing in for X) then unit 3 (33¢)
+  // leaves X at −1¢ and Y at +1¢: its fold gives X half of 67¢, rounded up.
+  const straddle = [
+    credit6d([named("A", ["y"], 2, { amount_cents: 67, substituted_for: [{ path: ["x"], quantity: 1 }] })]),
+    credit6d([named("A", ["y"], 1, { amount_cents: 33 })]),
+  ];
+  assertEquals([net(straddle, "x"), net(straddle, "y")], [-1, 1]);
+  // The rule refuses that first credit, and the segment-by-segment pair nets both to 0.
+  const ctx = { per_purchase: [{ uid_purchase: PU, purchase: { items }, bills: [bill], credits: [] as PurchaseCredit[] }] };
+  assertEquals(purchaseBillCreditRefusal(bill, ctx, [{ path_bill_item: [PU, "y"], quantity: 2 }])?.includes("credit those first"), true);
+  const segmented = [
+    credit6d([named("A", ["y"], 1, { amount_cents: 33, substituted_for: [{ path: ["x"], quantity: 1 }] })]),
+    credit6d([named("A", ["y"], 2, { amount_cents: 67 })]),
+  ];
+  assertEquals([net(segmented, "x"), net(segmented, "y")], [0, 0]);
 });

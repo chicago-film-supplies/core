@@ -380,8 +380,17 @@ export interface CreditableBillLine {
   uid: string;
   /** Units the bill line bills. */
   billed: number;
-  /** Units a credit naming this line may still take. 0 when none. */
+  /**
+   * Units ONE credit naming this line may take now: the rest of its current
+   * segment. 0 when none.
+   */
   units: number;
+  /**
+   * Present when those units stand in for a substitution (W5): the purchase
+   * path of the X they stand in for. The line's other units are offered by a
+   * later credit, once these are credited.
+   */
+  stands_in_for?: string[];
 }
 
 /**
@@ -389,15 +398,19 @@ export interface CreditableBillLine {
  * 6d, owner rulings 21–23). Arm B of the payable credit cap, as an offer, so the
  * manager offers exactly what the server accepts.
  *
- * A line's units left are the least of:
- * - **the line's own**: its quantity less what live credits naming it took
- *   (`billLineCredited`). A credit takes its units FIRST-COME, so it credits
- *   units `(c, c + n]` of the line;
- * - **the pools behind those units** (`purchaseLineBilledNet`). A substitute Y's
- *   first units stand in for its X (W5), so they are capped by X's pool, entry
- *   by entry in stored order; the rest by the pool at Y's own join. A credit
- *   cannot skip past a stand-in it may not take, so a capped stand-in ends the
- *   line's units there.
+ * A credit takes a line's units FIRST-COME, as units `(c, c + n]`, `c` being
+ * what live credits naming it already took (`billLineCredited`), and takes them
+ * from ONE SEGMENT (owner, 2026-11-11). A substitute Y's first units stand in
+ * for its X's (W5), one segment per `substituted_for` entry in stored order;
+ * the rest are the row's own, one more segment. So `units` is the rest of the
+ * current segment, capped by the pool behind it (`purchaseLineBilledNet`): the
+ * entry's X for a stand-in segment, the row's own join for the own one.
+ *
+ * Why one segment: a credit row's fold splits ITS money over its entries
+ * (`purchaseDocumentBilling`), so a credit spanning two segments could
+ * attribute a cent to one line that the bill gave the other. Within one
+ * segment, successive credits sum exactly to the bill's share (the credit is
+ * priced first-come, `billLineCreditCents`, and the shares telescope).
  *
  * Absent rather than offered, failing closed:
  * - a line on a bill not live in Xero, a time line, a kit header, a $0 line;
@@ -434,20 +447,19 @@ export function creditableBillLines(bill: PurchaseBillActionBill, ctx: PurchaseB
     const live = entriesOf(line).filter((e) => onPurchase.has(e.path.join("/")));
     const standIns = live.reduce((n, e) => n + e.quantity, 0);
     const taken = billLineCredited(bill.uid, line.path, p.credits).quantity;
-    let units = 0;
-    let blocked = false;
-    for (const e of sliceSubstitutedFor(live, Math.min(taken, standIns), standIns)) {
-      const allow = Math.min(e.quantity, pool(e.path));
-      units += allow;
-      if (allow < e.quantity) {
-        blocked = true;
-        break;
-      }
+    // ONE SEGMENT per credit: the next entry's stand-in units, or, once every
+    // stand-in is credited, the row's own. Within a segment, successive credits
+    // telescope to exactly what the bill gave that line; across one, the
+    // credit's own fold would re-split its money and could move a cent between
+    // two lines (owner, 2026-11-11).
+    const next = sliceSubstitutedFor(live, Math.min(taken, standIns), standIns)[0];
+    if (next !== undefined) {
+      const units = Math.min(next.quantity, pool(next.path));
+      out.push({ path: [...line.path], uid: line.uid, billed: line.quantity, units, stands_in_for: [...next.path] });
+      continue;
     }
-    if (!blocked) {
-      const own = line.quantity - Math.max(taken, standIns);
-      units += Math.max(0, Math.min(own, pool(join.slice(p.uid_purchase.length + 1).split("/"))));
-    }
+    const own = line.quantity - Math.max(taken, standIns);
+    const units = Math.max(0, Math.min(own, pool(join.slice(p.uid_purchase.length + 1).split("/"))));
     out.push({ path: [...line.path], uid: line.uid, billed: line.quantity, units });
   }
   return out;
@@ -474,7 +486,9 @@ export function purchaseBillCreditRefusal(
     const line = offered.get(k);
     if (line === undefined) return `bill ${bill.number} has no line at ${k} a credit may name`;
     if (quantity > line.units) {
-      return `crediting ${quantity} of the line at ${k} exceeds what bill ${bill.number} has left to credit there (${line.units} of ${line.billed})`;
+      return line.stands_in_for !== undefined
+        ? `crediting ${quantity} of the line at ${k} exceeds the ${line.units} of its units that stand in for ${line.stands_in_for.join("/")}; credit those first, and the rest in another credit`
+        : `crediting ${quantity} of the line at ${k} exceeds what bill ${bill.number} has left to credit there (${line.units} of ${line.billed})`;
     }
   }
   return null;

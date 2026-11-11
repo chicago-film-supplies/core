@@ -50245,6 +50245,7 @@ interface CreditableBillLine {
   uid: string;
   billed: number;
   units: number;
+  stands_in_for?: string[];
 }
 ```
 
@@ -50342,15 +50343,19 @@ Refuse a supplier-credit action the ruleset does not offer. Operator routes only
 6d, owner rulings 21–23). Arm B of the payable credit cap, as an offer, so the
 manager offers exactly what the server accepts.
 
-A line's units left are the least of:
-- **the line's own**: its quantity less what live credits naming it took
-  (`billLineCredited`). A credit takes its units FIRST-COME, so it credits
-  units `(c, c + n]` of the line;
-- **the pools behind those units** (`purchaseLineBilledNet`). A substitute Y's
-  first units stand in for its X (W5), so they are capped by X's pool, entry
-  by entry in stored order; the rest by the pool at Y's own join. A credit
-  cannot skip past a stand-in it may not take, so a capped stand-in ends the
-  line's units there.
+A credit takes a line's units FIRST-COME, as units `(c, c + n]`, `c` being
+what live credits naming it already took (`billLineCredited`), and takes them
+from ONE SEGMENT (owner, 2026-11-11). A substitute Y's first units stand in
+for its X's (W5), one segment per `substituted_for` entry in stored order;
+the rest are the row's own, one more segment. So `units` is the rest of the
+current segment, capped by the pool behind it (`purchaseLineBilledNet`): the
+entry's X for a stand-in segment, the row's own join for the own one.
+
+Why one segment: a credit row's fold splits ITS money over its entries
+(`purchaseDocumentBilling`), so a credit spanning two segments could
+attribute a cent to one line that the bill gave the other. Within one
+segment, successive credits sum exactly to the bill's share (the credit is
+priced first-come, `billLineCreditCents`, and the shares telescope).
 
 Absent rather than offered, failing closed:
 - a line on a bill not live in Xero, a time line, a kit header, a $0 line;
