@@ -250,6 +250,8 @@ export type RuleId =
   | "settle-purchase-bill:settlements-to-credit"
   | "void-purchase-bill-from-xero:settlements-to-credit"
   | "create-purchase-credit:credit-to-purchase"
+  | "update-purchase-bill:status-to-purchases"
+  | "update-purchase-credit:status-to-purchases"
   | "allocate-purchase-credit:credit-to-settlements"
   | "allocate-purchase-credit:settlements-to-bill"
   | "allocate-purchase-credit:settlements-to-credit"
@@ -393,6 +395,7 @@ export type RuleId =
   // credit-notes.ts
   | "create-credit-note:number-from-counter"
   | "create-credit-note:posting-account"
+  | "update-credit-note:note-to-orders"
   | "allocate-credit-note:note-to-settlements"
   | "allocate-credit-note:settlements-to-invoices"
   | "allocate-credit-note:remaining-credit"

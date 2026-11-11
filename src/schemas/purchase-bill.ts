@@ -830,16 +830,10 @@ void _purchaseCreditReasonParity;
 /** Zod schema for PurchaseCreditReasonType. */
 export const PurchaseCreditReasonEnum: z.ZodType<PurchaseCreditReasonType> = z.enum(PURCHASE_CREDIT_REASONS);
 
-/**
- * `issued` while it holds credit, `applied` once it holds none, `void` when
- * annulled — the AR credit note's vocabulary minus `draft` (a supplier credit is
- * raised by a close or recorded from the supplier, never drafted).
- */
-export const PURCHASE_CREDIT_STATUSES = ["issued", "applied", "void"] as const;
-/** One {@link PURCHASE_CREDIT_STATUSES} member. */
-export type PurchaseCreditStatusType = typeof PURCHASE_CREDIT_STATUSES[number];
-/** Zod schema for PurchaseCreditStatusType. */
-export const PurchaseCreditStatusEnum: z.ZodType<PurchaseCreditStatusType> = z.enum(PURCHASE_CREDIT_STATUSES);
+// The status vocabulary lives in `schemas/common.ts` so `purchase.ts` can mirror it
+// (`purchase.credits[]`) without importing this file (6e-0a, api-cloudrun#1455).
+export { PURCHASE_CREDIT_STATUSES, PurchaseCreditStatusEnum, type PurchaseCreditStatusType } from "./common.ts";
+import { PurchaseCreditStatusEnum, type PurchaseCreditStatusType } from "./common.ts";
 
 /** A supplier credit (ACCPAYCREDIT) against one purchase. */
 export interface PurchaseCredit {

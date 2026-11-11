@@ -1953,6 +1953,46 @@ export type InvoiceStatusType = typeof INVOICE_STATUSES[number];
 /** Zod schema for InvoiceStatusType. */
 export const InvoiceStatusEnum: z.ZodType<InvoiceStatusType> = z.enum(INVOICE_STATUSES);
 
+/**
+ * Credit-note lifecycle.
+ *
+ * **Deliberately three live states, with no `part_applied`.** The distinction a
+ * partial member would draw is already carried by `remaining_credit_cents`, more
+ * informatively — and adding it would invert the operator's primary query:
+ * *"does this note still have credit I can allocate?"* is exactly
+ * `status === "issued"` here, but would become `issued OR part_applied`.
+ *
+ * Grounded rather than guessed: across all 12 notes in the live tenant
+ * (2026-08-01) `RemainingCredit` is either `0.00` or the full total — never in
+ * between. Xero has no partial state either; it stays AUTHORISED until the
+ * balance reaches zero. Even CN-1015, split across #1751 and #1767, landed both
+ * allocations at once.
+ *
+ * `applied` means **`remaining_credit_cents === 0`, however it got there** — by
+ * allocation *or* by cash refund. CN-1013 and CN-1016 are PAID in Xero with a
+ * Payment attached and zero allocations, and a cash refund IS a credit note
+ * settled by cash rather than by allocation — recorded, since api-cloudrun#1207,
+ * as a `refund` settlement naming the note.
+ */
+export const CREDIT_NOTE_STATUSES = ["draft", "issued", "applied", "void"] as const;
+/** Allowed credit-note statuses. */
+export type CreditNoteStatusType = typeof CREDIT_NOTE_STATUSES[number];
+/** Zod schema for CreditNoteStatusType. */
+export const CreditNoteStatusEnum: z.ZodType<CreditNoteStatusType> = z.enum(
+  CREDIT_NOTE_STATUSES,
+);
+
+/**
+ * `issued` while it holds credit, `applied` once it holds none, `void` when
+ * annulled — the AR credit note's vocabulary minus `draft` (a supplier credit is
+ * raised by a close or recorded from the supplier, never drafted).
+ */
+export const PURCHASE_CREDIT_STATUSES = ["issued", "applied", "void"] as const;
+/** One {@link PURCHASE_CREDIT_STATUSES} member. */
+export type PurchaseCreditStatusType = typeof PURCHASE_CREDIT_STATUSES[number];
+/** Zod schema for PurchaseCreditStatusType. */
+export const PurchaseCreditStatusEnum: z.ZodType<PurchaseCreditStatusType> = z.enum(PURCHASE_CREDIT_STATUSES);
+
 // ── Settlements ──────────────────────────────────────────────────
 //
 // The vocabulary of the `settlements` journal — the money-side twin of the

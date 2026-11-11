@@ -15,6 +15,7 @@ import {
   COA_BAD_DEBT,
   CREDIT_NOTE_REASONS,
   CreditNoteSchema,
+  deriveCreditNoteSources,
   deriveCreditPostingAccount,
   SETTLEMENT_CONTRACTS,
 } from "../src/schemas/mod.ts";
@@ -255,4 +256,32 @@ Deno.test("CreditNoteSchema: an ISSUED credit note whose line money its rates ×
 Deno.test("CreditNoteSchema: an APPLIED or VOID credit note keeps line money its counts do not reproduce", () => {
   assertEquals(CreditNoteSchema.safeParse(unreproducible("applied", 0)).success, true, "applied");
   assertEquals(CreditNoteSchema.safeParse(unreproducible("void", 0)).success, true, "void");
+});
+
+// ── deriveCreditNoteSources (one-document-model ruling 32, 6e-0a) ─────
+
+Deno.test("deriveCreditNoteSources: orders first, then invoices; a pointed line names only the order its path leads with", () => {
+  const got = deriveCreditNoteSources(
+    [{ uid: "inv1", query_by_orders: ["o1", "o2"] }],
+    [{ path_invoice_item: ["o2", "dest", "x"] }],
+  );
+  assertEquals(got.sources, [{ collection: "orders", uid: "o2" }, { collection: "invoices", uid: "inv1" }]);
+  assertEquals(got.query_by_sources, ["orders:o2", "invoices:inv1"]);
+});
+
+Deno.test("deriveCreditNoteSources: a path that leads with no order the invoice bills names no order (an invoice-authored subtree)", () => {
+  const got = deriveCreditNoteSources([{ uid: "inv1", query_by_orders: ["o1"] }], [{ path_invoice_item: ["authored", "x"] }]);
+  assertEquals(got.query_by_sources, ["invoices:inv1"]);
+});
+
+Deno.test("deriveCreditNoteSources: an unpointed line names every order its invoice bills (ruling 52, the historic notes)", () => {
+  const got = deriveCreditNoteSources(
+    [{ uid: "inv1", query_by_orders: ["o1", "o2"] }, { uid: "inv2", query_by_orders: ["o2", "o3"] }],
+    [{ path_invoice_item: ["o1", "x"] }, {}],
+  );
+  assertEquals(got.query_by_sources, ["orders:o1", "orders:o2", "orders:o3", "invoices:inv1", "invoices:inv2"]);
+});
+
+Deno.test("deriveCreditNoteSources: no billing document names nothing (a historic note with no allocation)", () => {
+  assertEquals(deriveCreditNoteSources([], [{}]), { sources: [], query_by_sources: [] });
 });

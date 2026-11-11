@@ -4,11 +4,11 @@ import { typesenseAddressFields } from "./types.ts";
 /** Typesense collection config for orders. */
 export const orders: TypesenseCollectionConfig = {
   alias: "orders",
-  version: 26,
+  version: 27,
   firestoreCollection: "orders",
-  collectionName: "orders_v26",
+  collectionName: "orders_v27",
   schema: {
-    name: "orders_v26",
+    name: "orders_v27",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -131,6 +131,11 @@ export const orders: TypesenseCollectionConfig = {
       { name: "invoices.uid", type: "string[]", optional: true },
       { name: "invoices.number", type: "int64[]", optional: true },
       { name: "invoices.status", type: "string[]", facet: true, optional: true },
+      // 6e-0a (ruling 32): the credit-note twin of `invoices`, optional through the expand.
+      { name: "credit_notes", type: "object[]", optional: true },
+      { name: "credit_notes.uid", type: "string[]", optional: true },
+      { name: "credit_notes.number", type: "int64[]", optional: true },
+      { name: "credit_notes.status", type: "string[]", facet: true, optional: true },
       { name: "destinations.delivery.uid", type: "string[]", optional: true },
       { name: "destinations.collection.uid", type: "string[]", optional: true },
       { name: "created_at", type: "int64", sort: true, index: true, facet: false, optional: true },

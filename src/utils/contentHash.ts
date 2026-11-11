@@ -112,6 +112,10 @@ export const ORDER_SOURCE_HASH_EXCLUDED_FIELDS: ReadonlySet<string> = new Set([
   "bookings_breakdown",
   "invoices",
   "query_by_invoices",
+  // 6e-0a (ruling 32): a credit note moving its own status must not mark the
+  // order's saved quotes stale, exactly as an invoice's does not.
+  "credit_notes",
+  "query_by_credit_notes",
   "query_by_items",
   "query_by_contacts",
   "query_by_dates",

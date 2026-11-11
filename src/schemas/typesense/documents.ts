@@ -347,6 +347,12 @@ export interface OrderDocument {
     number?: number;
     status?: string;
   }>;
+  /** 6e-0a (ruling 32): the credit-note twin of `invoices`. */
+  credit_notes?: Array<{
+    uid: string;
+    number: number;
+    status: string;
+  }>;
   organization: {
     uid?: string;
     name: string;
@@ -1162,6 +1168,10 @@ export interface PurchaseDocument {
   reference?: string;
   /** Every item arm; `type` is the buy/subrent/usage/direct facet that replaced the document `kind` (api-cloudrun#1407). */
   items?: Array<{ type?: string; uid_product?: string; name?: string; quantity_returned?: number }>;
+  /** 6e-0a (ruling 32): the bill mirror. */
+  bills?: Array<{ uid: string; number: number; status: string }>;
+  /** 6e-0a (ruling 32): the supplier-credit mirror. */
+  credits?: Array<{ uid: string; number: number; status: string }>;
   total_cents?: number;
   total_cents_str?: string;
   created_by?: TypesenseActorRef;

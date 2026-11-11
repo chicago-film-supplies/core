@@ -1320,6 +1320,8 @@ export {
   CREDIT_NOTE_REASONS,
   COA_BAD_DEBT,
   deriveCreditPostingAccount,
+  deriveCreditNoteSources,
+  type CreditNoteBillingSource,
   type CreditNote,
   type CreditNoteDocItemPrice,
   CreditNoteDocLineItem,

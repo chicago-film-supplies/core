@@ -31,15 +31,20 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  * derived Typesense field to declare. Every `items.*` field is `optional: true`
  * because the arms disagree: a direct item names no product, and only a subrent
  * item carries `quantity_returned`.
+ *
+ * v4 (one-document-model 6e-0a, ruling 32): the `bills[]` and `credits[]`
+ * discovery mirrors, `{ uid, number, status }` each, status faceted. Every field
+ * is `optional: true` through the expand, so a purchase stored before the
+ * backfill still indexes.
  */
 export const purchases: TypesenseCollectionConfig = {
   alias: "purchases",
-  version: 3,
+  version: 4,
   firestoreCollection: "purchases",
-  collectionName: "purchases_v3",
+  collectionName: "purchases_v4",
   enabled: true,
   schema: {
-    name: "purchases_v3",
+    name: "purchases_v4",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -58,6 +63,16 @@ export const purchases: TypesenseCollectionConfig = {
       { name: "items.uid_product", type: "string[]", facet: false, optional: true },
       { name: "items.name", type: "string[]", stem: true, optional: true },
       { name: "items.quantity_returned", type: "int32[]", facet: false, optional: true },
+      // 6e-0a (ruling 32): the bill and supplier-credit mirrors, the twins of
+      // `orders.invoices` / `orders.credit_notes`; optional through the expand.
+      { name: "bills", type: "object[]", optional: true },
+      { name: "bills.uid", type: "string[]", optional: true },
+      { name: "bills.number", type: "int64[]", optional: true },
+      { name: "bills.status", type: "string[]", facet: true, optional: true },
+      { name: "credits", type: "object[]", optional: true },
+      { name: "credits.uid", type: "string[]", optional: true },
+      { name: "credits.number", type: "int64[]", optional: true },
+      { name: "credits.status", type: "string[]", facet: true, optional: true },
       { name: "total_cents", type: "int64", sort: true, optional: true, money: true },
       { name: "total_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "created_by", type: "object", optional: true },

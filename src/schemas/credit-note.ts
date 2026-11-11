@@ -117,34 +117,11 @@ export function deriveCreditPostingAccount(
 
 // ── Status ───────────────────────────────────────────────────────
 
-/**
- * Credit-note lifecycle.
- *
- * **Deliberately three live states, with no `part_applied`.** The distinction a
- * partial member would draw is already carried by `remaining_credit_cents`, more
- * informatively — and adding it would invert the operator's primary query:
- * *"does this note still have credit I can allocate?"* is exactly
- * `status === "issued"` here, but would become `issued OR part_applied`.
- *
- * Grounded rather than guessed: across all 12 notes in the live tenant
- * (2026-08-01) `RemainingCredit` is either `0.00` or the full total — never in
- * between. Xero has no partial state either; it stays AUTHORISED until the
- * balance reaches zero. Even CN-1015, split across #1751 and #1767, landed both
- * allocations at once.
- *
- * `applied` means **`remaining_credit_cents === 0`, however it got there** — by
- * allocation *or* by cash refund. CN-1013 and CN-1016 are PAID in Xero with a
- * Payment attached and zero allocations, and a cash refund IS a credit note
- * settled by cash rather than by allocation — recorded, since api-cloudrun#1207,
- * as a `refund` settlement naming the note.
- */
-const CREDIT_NOTE_STATUSES = ["draft", "issued", "applied", "void"] as const;
-/** Allowed credit-note statuses. */
-export type CreditNoteStatusType = typeof CREDIT_NOTE_STATUSES[number];
-/** Zod schema for CreditNoteStatusType. */
-export const CreditNoteStatusEnum: z.ZodType<CreditNoteStatusType> = z.enum(
-  CREDIT_NOTE_STATUSES,
-);
+// The status vocabulary lives in `schemas/common.ts` beside `InvoiceStatusEnum`, so
+// `order.ts` can mirror it (`order.credit_notes[]`) without importing this file,
+// which imports `order.ts` (6e-0a, api-cloudrun#1455).
+export { CreditNoteStatusEnum, type CreditNoteStatusType } from "./common.ts";
+import { CreditNoteStatusEnum, type CreditNoteStatusType } from "./common.ts";
 
 /**
  * What one credit-note status admits (api-cloudrun#1169). Until this table the
@@ -480,6 +457,54 @@ export interface CreditNote {
   updated_by: ActorRefType;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
+}
+
+/** The billing-document facts {@link deriveCreditNoteSources} reads: an invoice and the orders it bills. */
+export interface CreditNoteBillingSource {
+  uid: string;
+  query_by_orders: readonly string[];
+}
+
+/**
+ * **The one author of an AR credit note's `sources`** (one-document-model
+ * ruling 32), the twin of `derivePurchaseCreditSources`: the orders it credits,
+ * then each invoice it credits, in the order given. `query_by_sources` is
+ * `<collection>:<uid>` of each, so `orders:<uid>` is what an order-scoped read
+ * (`order.credit_notes[]`, the over-billing cap) queries on.
+ *
+ * Which orders: for each invoice, the order a pointed line's
+ * `path_invoice_item[0]` names (an order divider's uid IS its order's uid), kept
+ * only when the invoice bills that order — an invoice-authored subtree's first
+ * segment names no order. An invoice that holds a line with NO pointer
+ * contributes every order it bills, because the line cannot say which (ruling
+ * 52: the 13 notes stored before 2026-09-15 point no line, and are backfilled
+ * from the invoices their allocations name). Over-naming is the safe direction:
+ * a missing `orders:` key hides a credit from its order, an extra one only
+ * lists it there.
+ *
+ * ⚠️ Until ruling 34 gives every line `uid_billing`, a line's pointer cannot
+ * say WHICH invoice it is on, so the pointers are matched against every
+ * invoice. Today every note credits at most one, so the two are the same.
+ */
+export function deriveCreditNoteSources(
+  billing: readonly CreditNoteBillingSource[],
+  items: readonly Pick<CreditNoteDocLineItem, "path_invoice_item">[],
+): Pick<CreditNote, "sources" | "query_by_sources"> {
+  const pointed = items.flatMap((i) => i.path_invoice_item?.[0] ?? []);
+  const anyUnpointed = items.some((i) => i.path_invoice_item === undefined);
+  const orders: string[] = [];
+  for (const invoice of billing) {
+    const named = anyUnpointed
+      ? invoice.query_by_orders
+      : invoice.query_by_orders.filter((o) => pointed.includes(o));
+    for (const o of named) if (!orders.includes(o)) orders.push(o);
+  }
+  const invoices = [...new Set(billing.map((b) => b.uid))];
+  const sources: DocSourceType[] = [
+    ...orders.map((uid) => ({ collection: "orders" as const, uid })),
+    ...invoices.map((uid) => ({ collection: "invoices" as const, uid })),
+  ];
+  return { sources, query_by_sources: sources.map((s) => `${s.collection}:${s.uid}`) };
 }
 
 function checkCreditNote(cn: CreditNote, ctx: z.RefinementCtx): void {

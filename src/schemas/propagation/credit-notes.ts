@@ -130,6 +130,31 @@ const CREDIT_NOTE_REMAINING_FOLD: EnforcementRef = {
  * conflating issue with allocation is what makes a partially-applied note
  * unrepresentable.
  */
+
+// ── Discovery mirrors (one-document-model ruling 32, 6e-0a) ─────────
+//
+// Three mirrors share ONE pure merge in api-cloudrun (`upsertDocRef`), so they
+// share their enforcement refs. Each is CONVERGENT, not co-written: the writer
+// that moves a document's status converges its initiator by compare-and-set
+// after its own commit, and an eventarc backstop on the source collection
+// repairs whatever a writer missed or a script wrote raw.
+
+const DOC_REF_MERGE: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/unit/docRefMirror.test.ts::upsertDocRef: returns the INPUT identities when the mirror agrees",
+  clause:
+    "the merge, writer-independently: a missing entry is added to both the object array and the uid list, a disagreeing entry is rewritten, an agreeing mirror comes back by identity (the no-write contract), and nothing is ever removed. Hermetic. Says nothing about whether any given writer calls it.",
+  gates: true,
+};
+
+const DOC_REF_AUDIT: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-document-ref-mirrors.ts",
+  clause:
+    "every initiator's mirror agrees with the documents that name it, in both directions — a named document missing from the mirror, a mirror entry whose number or status disagrees, an object array and uid list that disagree, and an entry naming a document that does not name the initiator. Exits 2 on any.",
+  gates: true,
+};
+
 const createCreditNoteRules: CollectionRule[] = [
   {
     id: "create-credit-note:number-from-counter",
@@ -172,14 +197,45 @@ const createCreditNoteRules: CollectionRule[] = [
 const createCreditNoteTransaction: TransactionDefinition = {
   id: "create-credit-note",
   description:
-    "Mints a credit note from the shared counter, derives each line's posting account, and cowrites its default thread. Allocates nothing — issuing and applying are separate acts.",
+    "Mints a credit note from the shared counter, derives each line's posting account and its `sources` (`deriveCreditNoteSources`: the orders it credits, then its invoice), and cowrites its default thread. After the commit it converges `credit_notes[]` on every order it names. Allocates nothing — issuing and applying are separate acts.",
   steps: [
     "create-credit-note:number-from-counter",
     "create-credit-note:posting-account",
     "cowrite-thread:credit-notes-to-thread",
     "cowrite-thread:thread-to-credit-notes",
+    "update-credit-note:note-to-orders",
   ],
 };
+
+// ── update-credit-note (note → orders, 6e-0a) ───────────────────────
+
+const updateCreditNoteOrderRules: CollectionRule[] = [
+  {
+    id: "update-credit-note:note-to-orders",
+    source: "credit-notes",
+    target: "orders",
+    mode: "co-write",
+    invariant:
+      "Every order a credit note names (`orders:<uid>` in its `query_by_sources`, written by `deriveCreditNoteSources`) carries the note in `credit_notes[]` and `query_by_credit_notes`, and the entry's number and status CONVERGE on the note. CONVERGENT, not co-written: the order write is a compare-and-set AFTER the note's own commit, because two settlements on one order deadlocked inside one transaction (api-cloudrun#1293) and the order is the hot document. Every writer that moves the note's status converges unconditionally (gated on disagreement, never on the status having changed), and the `credit-notes` eventarc backstop repairs a write the writer missed or a script made raw. A void note STAYS in the mirror at `void`, as a void invoice stays in `invoices[]`.",
+    enforced_by: [DOC_REF_MERGE, DOC_REF_AUDIT],
+    trigger:
+      "any credit-note write — targets the orders in its `query_by_sources`. Deliberately not gated on the status having changed (api-cloudrun#453's lesson).",
+    fields: [
+      { source: ["uid"], target: ["query_by_credit_notes"], transform: "added when absent; never removed" },
+      {
+        source: ["status"],
+        target: ["credit_notes", "status"],
+        transform: "upsertDocRef — the entry for this note is added when absent and rewritten when it disagrees; the input identities come back when it agrees, so no order is written",
+      },
+      { source: ["number"], target: ["credit_notes", "number"], transform: "converged by the same merge" },
+      {
+        source: [],
+        target: ["version"],
+        transform: "HELD: there is no operator edit to defend, and `updateOrder` never assigns `credit_notes`, so a stale client cannot revert it",
+      },
+    ],
+  },
+];
 
 // ── allocate-credit-note ────────────────────────────────────────────
 
@@ -281,6 +337,7 @@ const allocateCreditNoteTransaction: TransactionDefinition = {
     "allocate-credit-note:settlements-to-invoices",
     "allocate-credit-note:remaining-credit",
     "update-invoice:status-to-orders",
+    "update-credit-note:note-to-orders",
   ],
 };
 
@@ -338,6 +395,7 @@ const recordCreditNoteRefundTransaction: TransactionDefinition = {
   steps: [
     "record-credit-note-refund:refund-to-settlements",
     "record-credit-note-refund:settlements-to-credit-note",
+    "update-credit-note:note-to-orders",
   ],
 };
 
@@ -380,6 +438,7 @@ const syncXeroCreditNoteRefundsTransaction: TransactionDefinition = {
   steps: [
     "sync-xero-credit-note-refunds:xero-to-settlements",
     "sync-xero-credit-note-refunds:settlements-to-credit-note",
+    "update-credit-note:note-to-orders",
   ],
 };
 
@@ -422,6 +481,7 @@ const reverseCreditNoteRefundTransaction: TransactionDefinition = {
   steps: [
     "reverse-credit-note-refund:reverser-to-settlements",
     "reverse-credit-note-refund:settlements-to-credit-note",
+    "update-credit-note:note-to-orders",
   ],
 };
 
@@ -468,9 +528,10 @@ const voidCreditNoteRules: CollectionRule[] = [
 const voidCreditNoteTransaction: TransactionDefinition = {
   id: "void-credit-note",
   description:
-    "Voids a credit note. Refused when ANY allocation or cash refund is unreversed (a refund is a Xero payment on the note, which Xero also refuses to void past). An allocation is refused with a 409 (`VOID_BLOCKED_BY_ALLOCATION`) — unconditionally, with no flag to override it, because Xero locks both ends of an allocation and CFS must not complete a retraction it cannot mirror. So a void that proceeds touches exactly ONE document: the note's own status. It moves no invoice balance and cascades to no order, because a note with no live allocation has no invoice to affect. Retract allocations first with `POST /settlements/{uid}/reverse`, then void.",
+    "Voids a credit note. Refused when ANY allocation or cash refund is unreversed (a refund is a Xero payment on the note, which Xero also refuses to void past). An allocation is refused with a 409 (`VOID_BLOCKED_BY_ALLOCATION`) — unconditionally, with no flag to override it, because Xero locks both ends of an allocation and CFS must not complete a retraction it cannot mirror. So a void that proceeds touches exactly ONE document in its commit: the note's own status. It moves no invoice balance, because a note with no live allocation has no invoice to affect. After the commit it converges the note's entry in `credit_notes[]` on every order it names, to `void`. Retract allocations first with `POST /settlements/{uid}/reverse`, then void.",
   steps: [
     "void-credit-note:status",
+    "update-credit-note:note-to-orders",
   ],
 };
 
@@ -479,6 +540,7 @@ const voidCreditNoteTransaction: TransactionDefinition = {
 export const creditNotes: PropagationModule = {
   rules: [
     ...createCreditNoteRules,
+    ...updateCreditNoteOrderRules,
     ...allocateCreditNoteRules,
     ...voidCreditNoteRules,
     ...recordCreditNoteRefundRules,

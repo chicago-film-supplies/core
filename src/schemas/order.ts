@@ -48,6 +48,8 @@ import {
   type OOSReasonType,
   type InvoiceStatusType,
   InvoiceStatusEnum,
+  type CreditNoteStatusType,
+  CreditNoteStatusEnum,
   NameField,
   TimestampFields,
   ActorRef,
@@ -2743,6 +2745,21 @@ export interface Order {
   totals: OrderDocTotalsType;
   invoices: Array<{ uid: string; number: number; status: InvoiceStatusType }>;
   query_by_invoices: string[];
+  /**
+   * The AR credit notes that credit this order — `{ uid, number, status }`, the
+   * twin of {@link invoices} (one-document-model ruling 32). One author per
+   * write path (`convergeOrderCreditNoteRefs` in api-cloudrun), converged by
+   * compare-and-set OUTSIDE the credit note's transaction (two writers on one
+   * order deadlocked inside it, api-cloudrun#1293), with an eventarc backstop on
+   * `credit-notes`. A note names this order when its `query_by_sources` carries
+   * `orders:<uid>` (`deriveCreditNoteSources`, `schemas/credit-note.ts`).
+   *
+   * Optional during the 6e-0a expand: the API that writes it deploys before the
+   * backfill, and the field goes required once every stored order states it.
+   */
+  credit_notes?: Array<{ uid: string; number: number; status: CreditNoteStatusType }>;
+  /** Uid list of {@link credit_notes}, for `array-contains` and point-gets. Optional during the 6e-0a expand. */
+  query_by_credit_notes?: string[];
   query_by_items: string[];
   query_by_contacts: string[];
   query_by_dates: string[];
@@ -2953,6 +2970,14 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
     status: InvoiceStatusEnum.meta({ column: true, label: "Status" }),
   })).meta({ label: "Invoice" }),
   query_by_invoices: z.array(z.string()).meta({ derived: true }),
+  // 6e-0a (ruling 32): optional through the expand — the converger deploys,
+  // the backfill states it on every order, then it goes required.
+  credit_notes: z.array(z.strictObject({
+    uid: FirestoreId,
+    number: z.int().meta({ column: true, label: "#" }),
+    status: CreditNoteStatusEnum.meta({ column: true, label: "Status" }),
+  })).optional().meta({ label: "Credit Note" }),
+  query_by_credit_notes: z.array(FirestoreId).optional().meta({ derived: true }),
   query_by_items: z.array(z.string()).meta({ derived: true }),
   query_by_contacts: z.array(z.string()).meta({ derived: true }),
   query_by_dates: z.array(z.string()).meta({ derived: true }),

@@ -124,10 +124,14 @@ import {
   COA_REVENUE_CODES,
   FirestoreTimestamp,
   type FirestoreTimestampType,
+  InvoiceStatusEnum,
+  type InvoiceStatusType,
   OutOfServiceList,
   OutOfServiceListInput,
   type OutOfServiceEntryType,
   outOfServiceLinkIssues,
+  PurchaseCreditStatusEnum,
+  type PurchaseCreditStatusType,
   TimestampFields,
   UidNameRef,
   type UidNameRefType,
@@ -1347,6 +1351,27 @@ export interface Purchase {
    */
   query_by_bills: string[];
   /**
+   * The bills raised against this purchase — `{ uid, number, status }`, the twin
+   * of `order.invoices[]` (one-document-model ruling 32): display, Typesense
+   * search/sort/filter, and a client read without opening each bill. Its uids
+   * are exactly {@link query_by_bills}. Converged wherever a bill's status moves
+   * (create, settle, void, close, reopen, the Xero webhook), with an eventarc
+   * backstop on `purchase-bills`.
+   *
+   * Optional during the 6e-0a expand: the API that writes it deploys before the
+   * backfill, then it goes required.
+   */
+  bills?: Array<{ uid: string; number: number; status: InvoiceStatusType }>;
+  /**
+   * The supplier credits raised against this purchase — the twin of
+   * `order.credit_notes[]`. Its uids are exactly {@link query_by_credits}. A
+   * credit names this purchase as its first `sources` entry
+   * (`derivePurchaseCreditSources`). Optional during the 6e-0a expand.
+   */
+  credits?: Array<{ uid: string; number: number; status: PurchaseCreditStatusType }>;
+  /** Uid list of {@link credits}. Optional during the 6e-0a expand. */
+  query_by_credits?: string[];
+  /**
    * Mirror of the units the lines cover ({@link deriveQueryByUnits}) — "which
    * purchases cover this unit" as one `array-contains`, the read behind every
    * coverage question (`coversForUnit`, the uncovered-window offer).
@@ -1450,7 +1475,19 @@ export const PurchaseSchema: z.ZodType<Purchase> = z.strictObject({
   query_by_products: z.array(FirestoreId).meta({ derived: true }),
   query_by_orders: z.array(FirestoreId).meta({ derived: true }),
   query_by_item_types: z.array(PurchaseItemTypeEnum).meta({ derived: true }),
-  query_by_bills: z.array(FirestoreId),
+  query_by_bills: z.array(FirestoreId).meta({ derived: true }),
+  // 6e-0a (ruling 32): optional through the expand.
+  bills: z.array(z.strictObject({
+    uid: FirestoreId,
+    number: z.int().meta({ column: true, label: "#" }),
+    status: InvoiceStatusEnum.meta({ column: true, label: "Status" }),
+  })).optional().meta({ label: "Bill" }),
+  credits: z.array(z.strictObject({
+    uid: FirestoreId,
+    number: z.int().meta({ column: true, label: "#" }),
+    status: PurchaseCreditStatusEnum.meta({ column: true, label: "Status" }),
+  })).optional().meta({ label: "Supplier Credit" }),
+  query_by_credits: z.array(FirestoreId).optional().meta({ derived: true }),
   query_by_units: z.array(UnitId).optional(),
   uid_thread: ThreadId.optional().meta(homonym),
   version: z.int().min(0).default(0).meta(homonym),

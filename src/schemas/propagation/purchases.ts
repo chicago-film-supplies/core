@@ -87,6 +87,31 @@ const RECEIPT_REVERSAL_LEVER: EnforcementRef = {
   gates: true,
 };
 
+
+// ── Discovery mirrors (one-document-model ruling 32, 6e-0a) ─────────
+//
+// Three mirrors share ONE pure merge in api-cloudrun (`upsertDocRef`), so they
+// share their enforcement refs. Each is CONVERGENT, not co-written: the writer
+// that moves a document's status converges its initiator by compare-and-set
+// after its own commit, and an eventarc backstop on the source collection
+// repairs whatever a writer missed or a script wrote raw.
+
+const DOC_REF_MERGE: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/unit/docRefMirror.test.ts::upsertDocRef: returns the INPUT identities when the mirror agrees",
+  clause:
+    "the merge, writer-independently: a missing entry is added to both the object array and the uid list, a disagreeing entry is rewritten, an agreeing mirror comes back by identity (the no-write contract), and nothing is ever removed. Hermetic. Says nothing about whether any given writer calls it.",
+  gates: true,
+};
+
+const DOC_REF_AUDIT: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-document-ref-mirrors.ts",
+  clause:
+    "every initiator's mirror agrees with the documents that name it, in both directions — a named document missing from the mirror, a mirror entry whose number or status disagrees, an object array and uid list that disagree, and an entry naming a document that does not name the initiator. Exits 2 on any.",
+  gates: true,
+};
+
 const receivePurchaseRules: CollectionRule[] = [
   {
     id: "receive-purchase:receipt-to-purchase",
@@ -1008,6 +1033,42 @@ const BILLED_RECOUNT: EnforcementRef = {
   gates: true,
 };
 
+// ── Discovery mirrors on the purchase (6e-0a) ───────────────────────
+
+const purchaseMirrorRules: CollectionRule[] = [
+  {
+    id: "update-purchase-bill:status-to-purchases",
+    source: "purchase-bills",
+    target: "purchases",
+    mode: "co-write",
+    invariant:
+      "Every purchase a bill bills (`query_by_purchases`) carries it in `bills[]`, whose uids are exactly `query_by_bills`, and the entry's number and status CONVERGE on the bill. CONVERGENT, not co-written: the writer that moves a bill's status (create, settle, void, close, reopen, a credit allocation, the Xero webhook) converges each purchase by compare-and-set after its own commit, unconditionally and gated on disagreement, and the `purchase-bills` eventarc backstop repairs whatever it missed. The twin of `update-invoice:status-to-orders`. A void bill stays listed at `void`.",
+    enforced_by: [DOC_REF_MERGE, DOC_REF_AUDIT],
+    trigger: "any bill write that moves its status — targets the purchases in its `query_by_purchases`",
+    fields: [
+      { source: ["status"], target: ["bills", "status"], transform: "upsertDocRef — added when absent, rewritten when it disagrees, never removed" },
+      { source: ["number"], target: ["bills", "number"], transform: "converged by the same merge" },
+      { source: [], target: ["version"], transform: "HELD, as the invoice mirror holds the order's" },
+    ],
+  },
+  {
+    id: "update-purchase-credit:status-to-purchases",
+    source: "purchase-credits",
+    target: "purchases",
+    mode: "co-write",
+    invariant:
+      "The purchase a supplier credit is raised on (its first `sources` entry) carries it in `credits[]` and `query_by_credits`, and the entry's number and status CONVERGE on the credit — the twin of `update-credit-note:note-to-orders`. CONVERGENT: converged by compare-and-set after the writer's own commit, with the `purchase-credits` eventarc backstop. A void credit stays listed at `void`.",
+    enforced_by: [DOC_REF_MERGE, DOC_REF_AUDIT],
+    trigger: "any supplier-credit write — targets the purchase it was raised on",
+    fields: [
+      { source: ["uid"], target: ["query_by_credits"], transform: "added when absent; never removed" },
+      { source: ["status"], target: ["credits", "status"], transform: "upsertDocRef — added when absent, rewritten when it disagrees" },
+      { source: ["number"], target: ["credits", "number"], transform: "converged by the same merge" },
+      { source: [], target: ["version"], transform: "HELD" },
+    ],
+  },
+];
+
 const purchaseBilledRules: CollectionRule[] = [
   {
     id: "purchase-billed:bills-to-purchase",
@@ -1074,6 +1135,7 @@ const createPurchaseBillTransaction: TransactionDefinition = {
     "cowrite-thread:purchase-bills-to-thread",
     "cowrite-thread:thread-to-purchase-bills",
     ...RECOUNT_STEPS,
+    "update-purchase-bill:status-to-purchases",
   ],
 };
 
@@ -1092,6 +1154,8 @@ const settlePurchaseBillTransaction: TransactionDefinition = {
     "settle-purchase-bill:xero-to-settlements",
     "settle-purchase-bill:settlements-to-bill",
     "settle-purchase-bill:settlements-to-credit",
+    "update-purchase-bill:status-to-purchases",
+    "update-purchase-credit:status-to-purchases",
   ],
 };
 
@@ -1103,19 +1167,20 @@ const voidPurchaseBillTransaction: TransactionDefinition = {
     "void-purchase-bill:void-to-settlements",
     "void-purchase-bill:settlements-to-bill",
     ...RECOUNT_STEPS,
+    "update-purchase-bill:status-to-purchases",
   ],
 };
 
 const closePurchaseBillTransaction: TransactionDefinition = {
   id: "close-purchase-bill",
   description: "Mark Paid on a $0 bill: appends a `bill_closure` row and folds `closure_count` and the status onto the bill.",
-  steps: ["close-purchase-bill:closure-to-bill"],
+  steps: ["close-purchase-bill:closure-to-bill", "update-purchase-bill:status-to-purchases"],
 };
 
 const reopenPurchaseBillTransaction: TransactionDefinition = {
   id: "reopen-purchase-bill",
   description: "Undoes Mark Paid on a $0 bill: appends a `bill_closure_reversal` row and folds `closure_count` and the status onto the bill.",
-  steps: ["reopen-purchase-bill:reversal-to-bill"],
+  steps: ["reopen-purchase-bill:reversal-to-bill", "update-purchase-bill:status-to-purchases"],
 };
 
 const voidPurchaseBillFromXeroTransaction: TransactionDefinition = {
@@ -1127,6 +1192,8 @@ const voidPurchaseBillFromXeroTransaction: TransactionDefinition = {
     "void-purchase-bill-from-xero:settlements-to-bill",
     "void-purchase-bill-from-xero:settlements-to-credit",
     ...RECOUNT_STEPS,
+    "update-purchase-bill:status-to-purchases",
+    "update-purchase-credit:status-to-purchases",
   ],
 };
 
@@ -1139,6 +1206,7 @@ const createPurchaseCreditTransaction: TransactionDefinition = {
     "cowrite-thread:purchase-credits-to-thread",
     "cowrite-thread:thread-to-purchase-credits",
     ...RECOUNT_STEPS,
+    "update-purchase-credit:status-to-purchases",
   ],
 };
 
@@ -1150,6 +1218,8 @@ const allocatePurchaseCreditTransaction: TransactionDefinition = {
     "allocate-purchase-credit:credit-to-settlements",
     "allocate-purchase-credit:settlements-to-bill",
     "allocate-purchase-credit:settlements-to-credit",
+    "update-purchase-bill:status-to-purchases",
+    "update-purchase-credit:status-to-purchases",
   ],
 };
 
@@ -1161,6 +1231,8 @@ const reversePurchaseCreditAllocationTransaction: TransactionDefinition = {
     "reverse-purchase-credit-allocation:reverser-to-settlements",
     "reverse-purchase-credit-allocation:settlements-to-bill",
     "reverse-purchase-credit-allocation:settlements-to-credit",
+    "update-purchase-bill:status-to-purchases",
+    "update-purchase-credit:status-to-purchases",
   ],
 };
 
@@ -1168,14 +1240,14 @@ const settlePurchaseCreditTransaction: TransactionDefinition = {
   id: "settle-purchase-credit",
   description:
     "Reconciles the cash refunds Xero reports on a tracked supplier credit (its `Payments[]`, `APCREDITPAYMENT`) into the credit's journal — appends a `supplier_refund` for each one CFS has not recorded and reaps one Xero no longer lists — and refolds the credit in the same commit. Run by the Xero CREDITNOTE webhook (an ACCPAYCREDIT resolves `purchase-credits` by `xero_id`) and by a link of a credit Xero already shows refunded. One-directional: it never writes to Xero. Fires on: a refund added or removed in Xero.",
-  steps: ["settle-purchase-credit:xero-to-settlements", "settle-purchase-credit:settlements-to-credit"],
+  steps: ["settle-purchase-credit:xero-to-settlements", "settle-purchase-credit:settlements-to-credit", "update-purchase-credit:status-to-purchases"],
 };
 
 const voidPurchaseCreditTransaction: TransactionDefinition = {
   id: "void-purchase-credit",
   description:
     "An operator voids a supplier credit nothing draws on: the posted Xero credit note is voided first (`POST /CreditNotes/{id}` `Status: VOIDED`), then one commit marks the credit void and recounts its purchase lines. A pushed credit not yet posted is voided in CFS alone, and its push then posts nothing. Fires on: every void that is not a replay.",
-  steps: [...RECOUNT_STEPS],
+  steps: [...RECOUNT_STEPS, "update-purchase-credit:status-to-purchases"],
 };
 
 const voidPurchaseCreditFromXeroTransaction: TransactionDefinition = {
@@ -1187,6 +1259,8 @@ const voidPurchaseCreditFromXeroTransaction: TransactionDefinition = {
     "void-purchase-credit-from-xero:settlements-to-bill",
     "void-purchase-credit-from-xero:settlements-to-credit",
     ...RECOUNT_STEPS,
+    "update-purchase-bill:status-to-purchases",
+    "update-purchase-credit:status-to-purchases",
   ],
 };
 
@@ -1291,6 +1365,7 @@ const reversePurchaseReturnTransaction: TransactionDefinition = {
 /** Everything `propagation/purchases.ts` contributes to the catalog. */
 export const purchases: PropagationModule = {
   rules: [
+    ...purchaseMirrorRules,
     ...receivePurchaseRules,
     ...reversePurchaseReceiptRules,
     ...returnPurchaseRules,
