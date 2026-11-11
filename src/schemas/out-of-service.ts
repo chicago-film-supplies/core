@@ -22,8 +22,9 @@
  * `returned_to_supplier` is a RENTED unit that cannot go back — lost at the
  * customer, or damaged — settled to the supplier's account rather than
  * physically returned (api-cloudrun#1360). ⚠️ The record's `supplier` field is
- * the REPAIR vendor, not this; the subrent is named only in the settling
- * movement's `sources[]`.
+ * the REPAIR vendor, not this; the subrent is named by the settling movement's
+ * `sources[]` AND, since one-document-model ruling 54, by the record's own
+ * (below).
  *
  * ⭐ **The booking analogy.** A unit at a customer is `out` and stands AT THE
  * BOOKING, which names its destination; a unit at a vendor is `away` and stands
@@ -49,6 +50,20 @@
  *   - OOS from a booking update → two entries: `bookings:<uid>` + `orders:<uid>`
  *   - OOS manually attached to an order → one entry: `orders:<uid>`
  *   - Fully ad-hoc OOS (shelf maintenance) → empty array
+ *   - A `returned_to_supplier` settle APPENDS `purchases:<uid>`, labelled
+ *     "Returned on PO-n" (one-document-model ruling 54)
+ *
+ * ⚠️ **The keys do not all mean the same thing, so read the collection, not
+ * just the presence.** `bookings:` / `orders:` are written at BIRTH and name
+ * the CAUSE: the order whose customer lost or damaged the unit, the party a
+ * replacement line bills. `purchases:` is written LATER, at the settle, and
+ * names the RESOLUTION: the subrent hire the unit went back on, whose supplier
+ * bills CFS for it. It is never removed (an undone settle keeps it; over-naming
+ * only lists a record, a missing key hides it). A record can carry both: a
+ * customer damages a subrented unit, which then goes back to the supplier, and
+ * it then surfaces on both sides' diffs. It does not bind `dates.start`, which
+ * only a booking dates. The birth-time payable twin of `orders:` is a unit
+ * RECEIVED damaged on an inbound booking (one-document-model Phase 7a).
  * The companion `query_by_sources: string[]` (`["<collection>:<uid>", ...]`)
  * gives Firestore `array-contains` filtering for both order- and
  * booking-detail lookups without sub-object equality issues.
