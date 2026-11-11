@@ -50360,8 +50360,13 @@ priced first-come, `billLineCreditCents`, and the shares telescope).
 Absent rather than offered, failing closed:
 - a line on a bill not live in Xero, a time line, a kit header, a $0 line;
 - a line under no purchase the context carries (a credit names ONE purchase);
-- a kit component of a substituted kit (its entries are a share of its
+- a row below a substitute kit's root (its entries are a share of its
   root's, which a copied row cannot carry alone).
+
+That root is offered for its whole subtree instead (api-cloudrun#1475), a $0
+header included: a credit of it copies every row below it by the bill's own
+ratio (`billLineCreditParts`), so the fold un-bills X and its components
+together. Time and $0 are judged over the subtree.
 
 ### `purchaseActionsFor(purchase: Pick<Purchase, "status" | "query_by_bills"> & typeLiteral, _: unknown): PurchaseActionOffer[]`
 
@@ -50546,6 +50551,20 @@ lived here (`unitWindowsForLine`, `coversForUnit`, `billedUnitCoverage`,
 `seedPurchaseLinesForWindows`) retired in one-document-model Phase 3, unused
 in either environment (Phase 0b census).
 
+### `BillLineCreditPart`
+
+One bill row a supplier credit copies: {@link billLineCreditParts}' element.
+
+```ts
+interface BillLineCreditPart {
+  line: PurchaseDocumentItem;
+  credited: BillLineCredited;
+  n: number;
+  amount_cents: number;
+  substituted_for: SubstitutedForEntryType[];
+}
+```
+
 ### `BillLineCredited`
 
 What live supplier credits have already taken from one bill line.
@@ -50716,6 +50735,28 @@ line's money exactly, and a credit of a bill line is one more of them.
 - The first-come share is capped at what is left of the line's money, so a
   line part-credited at a stated amount cannot be over-credited.
 
+### `billLineCreditParts(args: typeLiteral): BillLineCreditPart[]`
+
+**Every bill row a credit of `n` units of the bill line at `path` copies**,
+each with its units, money and sliced substitution (one-document-model 6d,
+ruling 23). The API's writer stores them and the manager's form previews
+their sum, so the screen shows what is stored.
+
+- An ordinary row is one part: units `(c, c + n]`, `c` what live credits took.
+- A substitute KIT's root ({@link substituteKitSubtree}) brings every row
+  below it, by the BILL's own ratio: a row of `q` units under a root of `Q`
+  takes units `(⌊cQ⌉, ⌊(c + n)Q⌉]` of its own, `⌊kq/Q⌉` rounded half-up, so
+  credits that sum to the root's quantity sum to each row's. A row the ratio
+  gives no unit is left out. Each part is priced on its own, first-come.
+- ⚠️ X's components are un-billed by the fold's ratio walk, which rounds once
+  per DOCUMENT (`substitutionCredit`). A kit's ratio is whole (its
+  `quantity_per_parent`), so the walk is exact; a fractional ratio would leave
+  X's component a unit off after several credits, as several partial bills
+  of one substitute kit already would.
+
+Entries are LIVE while the purchase still carries their X (`purchaseKeys`),
+as the fold reads them; a spent one stands in for nothing and is not copied.
+
 ### `billLineCredited(uidBill: string, path: readonly string[], credits: readonly Pick<PurchaseCredit, "status" | "items">[]): BillLineCredited`
 
 **What live credits have taken from the bill line at `path` on bill
@@ -50830,7 +50871,9 @@ billed" reader goes through it.
   a spent one bills nothing for X, and its units count at Y's own join.
 - X's kit components are credited through the PURCHASE's own ratio
   (`substitutionCredit`), in units only: the money a substitute stands in for
-  is X's whole subtree's, and it lands on X.
+  is X's whole subtree's, and it lands on X. That holds whichever of Y's rows
+  carries it: a component's stamped entries move its stand-in share of its
+  money to X too, units staying with the ratio walk (api-cloudrun#1475).
 
 ### `purchaseDocumentScope(purchase: Pick<Purchase, "uid" | "number" | "items" | "destinations">, lines: readonly PurchaseDocumentItem[], _: unknown): typeLiteral`
 
@@ -50975,6 +51018,23 @@ whole, and an over-billed line seeds nothing (the diff reports it).
 
 `null` when the line's pair states no charge windows — there is no time to
 bill, which the bill writer refuses by name.
+
+### `substituteKitSubtree(rows: readonly PurchaseDocumentRow[], path: readonly string[]): PurchaseDocumentItem[]`
+
+The rows a substitute KIT's root binds on a bill: its line rows strictly below
+it, when it is a substitution's root (W5) and has any. Empty for every other
+row, which a credit copies alone (ruling 23).
+
+A substituted kit's component carries a stamped share of its root's
+`substituted_for`, which a credit row cannot carry without its root above it:
+copied alone, its entries read as anchors and un-bill X itself by the
+component's units. So a credit of such a kit copies the root WITH its subtree
+(api-cloudrun#1475), and the root is offered even when it is a $0 header.
+
+**Parameters**
+
+- `rows` — The bill's rows, dividers included
+- `path` — The candidate root's path on the bill
 
 ### `syncPurchaseToBills(args: SyncPurchaseToBillsArgs): PurchaseBillSync[]`
 

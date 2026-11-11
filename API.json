@@ -24033,7 +24033,7 @@
           "kind": "function",
           "name": "creditableBillLines",
           "signature": "creditableBillLines(bill: PurchaseBillActionBill, ctx: PurchaseBillContext): CreditableBillLine[]",
-          "doc": "**What each flat line of this bill may still be credited** (one-document-model\n6d, owner rulings 21–23). Arm B of the payable credit cap, as an offer, so the\nmanager offers exactly what the server accepts.\n\nA credit takes a line's units FIRST-COME, as units `(c, c + n]`, `c` being\nwhat live credits naming it already took (`billLineCredited`), and takes them\nfrom ONE SEGMENT (owner, 2026-11-11). A substitute Y's first units stand in\nfor its X's (W5), one segment per `substituted_for` entry in stored order;\nthe rest are the row's own, one more segment. So `units` is the rest of the\ncurrent segment, capped by the pool behind it (`purchaseLineBilledNet`): the\nentry's X for a stand-in segment, the row's own join for the own one.\n\nWhy one segment: a credit row's fold splits ITS money over its entries\n(`purchaseDocumentBilling`), so a credit spanning two segments could\nattribute a cent to one line that the bill gave the other. Within one\nsegment, successive credits sum exactly to the bill's share (the credit is\npriced first-come, `billLineCreditCents`, and the shares telescope).\n\nAbsent rather than offered, failing closed:\n- a line on a bill not live in Xero, a time line, a kit header, a $0 line;\n- a line under no purchase the context carries (a credit names ONE purchase);\n- a kit component of a substituted kit (its entries are a share of its\n  root's, which a copied row cannot carry alone).",
+          "doc": "**What each flat line of this bill may still be credited** (one-document-model\n6d, owner rulings 21–23). Arm B of the payable credit cap, as an offer, so the\nmanager offers exactly what the server accepts.\n\nA credit takes a line's units FIRST-COME, as units `(c, c + n]`, `c` being\nwhat live credits naming it already took (`billLineCredited`), and takes them\nfrom ONE SEGMENT (owner, 2026-11-11). A substitute Y's first units stand in\nfor its X's (W5), one segment per `substituted_for` entry in stored order;\nthe rest are the row's own, one more segment. So `units` is the rest of the\ncurrent segment, capped by the pool behind it (`purchaseLineBilledNet`): the\nentry's X for a stand-in segment, the row's own join for the own one.\n\nWhy one segment: a credit row's fold splits ITS money over its entries\n(`purchaseDocumentBilling`), so a credit spanning two segments could\nattribute a cent to one line that the bill gave the other. Within one\nsegment, successive credits sum exactly to the bill's share (the credit is\npriced first-come, `billLineCreditCents`, and the shares telescope).\n\nAbsent rather than offered, failing closed:\n- a line on a bill not live in Xero, a time line, a kit header, a $0 line;\n- a line under no purchase the context carries (a credit names ONE purchase);\n- a row below a substitute kit's root (its entries are a share of its\n  root's, which a copied row cannot carry alone).\n\nThat root is offered for its whole subtree instead (api-cloudrun#1475), a $0\nheader included: a credit of it copies every row below it by the bill's own\nratio (`billLineCreditParts`), so the fold un-bills X and its components\ntogether. Time and $0 are judged over the subtree.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -24167,6 +24167,12 @@
       "symbols": [
         {
           "kind": "interface",
+          "name": "BillLineCreditPart",
+          "declaration": "interface BillLineCreditPart {\n  line: PurchaseDocumentItem;\n  credited: BillLineCredited;\n  n: number;\n  amount_cents: number;\n  substituted_for: SubstitutedForEntryType[];\n}",
+          "doc": "One bill row a supplier credit copies: {@link billLineCreditParts}' element."
+        },
+        {
+          "kind": "interface",
           "name": "BillLineCredited",
           "declaration": "interface BillLineCredited {\n  quantity: number;\n  amount_cents: number;\n}",
           "doc": "What live supplier credits have already taken from one bill line."
@@ -24242,6 +24248,14 @@
           "name": "billLineCreditCents",
           "signature": "billLineCreditCents(args: typeLiteral): number",
           "doc": "**What a supplier credit of `n` units of one bill line is worth**\n(one-document-model 6d, owner 2026-11-11): units `(c, c + n]` of the line,\n`c` the units live credits already took (`billLineCredited`), priced\nFIRST-COME (`flatShareCents`), so crediting a line in parts sums to exactly\nits amount — $100.00 over 3 units credited one at a time is 3333 + 3334 +\n3333, never 9999.\n\n⚠️ **Deliberately unlike AR**, where each credit-note line rounds on its own\n(`priceCreditNote`). This module's rule is that a line's documents sum to the\nline's money exactly, and a credit of a bill line is one more of them.\n\n- `stated_cents`: the supplier's memo governs, refused above what is left of\n  the line's money.\n- The first-come share is capped at what is left of the line's money, so a\n  line part-credited at a stated amount cannot be over-credited.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "billLineCreditParts",
+          "signature": "billLineCreditParts(args: typeLiteral): BillLineCreditPart[]",
+          "doc": "**Every bill row a credit of `n` units of the bill line at `path` copies**,\neach with its units, money and sliced substitution (one-document-model 6d,\nruling 23). The API's writer stores them and the manager's form previews\ntheir sum, so the screen shows what is stored.\n\n- An ordinary row is one part: units `(c, c + n]`, `c` what live credits took.\n- A substitute KIT's root ({@link substituteKitSubtree}) brings every row\n  below it, by the BILL's own ratio: a row of `q` units under a root of `Q`\n  takes units `(⌊cQ⌉, ⌊(c + n)Q⌉]` of its own, `⌊kq/Q⌉` rounded half-up, so\n  credits that sum to the root's quantity sum to each row's. A row the ratio\n  gives no unit is left out. Each part is priced on its own, first-come.\n- ⚠️ X's components are un-billed by the fold's ratio walk, which rounds once\n  per DOCUMENT (`substitutionCredit`). A kit's ratio is whole (its\n  `quantity_per_parent`), so the walk is exact; a fractional ratio would leave\n  X's component a unit off after several credits, as several partial bills\n  of one substitute kit already would.\n\nEntries are LIVE while the purchase still carries their X (`purchaseKeys`),\nas the fold reads them; a spent one stands in for nothing and is not copied.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -24337,7 +24351,7 @@
           "kind": "function",
           "name": "purchaseDocumentBilling",
           "signature": "purchaseDocumentBilling(rows: readonly PurchaseDocumentRow[], uidPurchase: string, purchaseItems: readonly CreditableRow[]): Map<string, PurchaseLineBilling>",
-          "doc": "**What one document bills of each line of purchase `uidPurchase`**, keyed by\nthe line's path relative to the purchase, joined with `/`. Every \"already\nbilled\" reader goes through it.\n\n- A row bills the line its join names (`purchaseLineKeyOf`: its own path, or\n  its move pointer).\n- 🔴 **A substitute Y bills the X it stands in for** (W5, `substituted_for`),\n  as an invoice's does on AR (`invoicedByPath`): each live entry credits X\n  with its units and their share of Y's money and counts, and the rest of Y\n  stays at Y's own join. The stand-in units take Y's FIRST units' share\n  (`cumulativeShareCents`), so the parts sum to exactly Y's amount.\n- An entry is live while the purchase still carries X (`purchase_items`);\n  a spent one bills nothing for X, and its units count at Y's own join.\n- X's kit components are credited through the PURCHASE's own ratio\n  (`substitutionCredit`), in units only: the money a substitute stands in for\n  is X's whole subtree's, and it lands on X.",
+          "doc": "**What one document bills of each line of purchase `uidPurchase`**, keyed by\nthe line's path relative to the purchase, joined with `/`. Every \"already\nbilled\" reader goes through it.\n\n- A row bills the line its join names (`purchaseLineKeyOf`: its own path, or\n  its move pointer).\n- 🔴 **A substitute Y bills the X it stands in for** (W5, `substituted_for`),\n  as an invoice's does on AR (`invoicedByPath`): each live entry credits X\n  with its units and their share of Y's money and counts, and the rest of Y\n  stays at Y's own join. The stand-in units take Y's FIRST units' share\n  (`cumulativeShareCents`), so the parts sum to exactly Y's amount.\n- An entry is live while the purchase still carries X (`purchase_items`);\n  a spent one bills nothing for X, and its units count at Y's own join.\n- X's kit components are credited through the PURCHASE's own ratio\n  (`substitutionCredit`), in units only: the money a substitute stands in for\n  is X's whole subtree's, and it lands on X. That holds whichever of Y's rows\n  carries it: a component's stamped entries move its stand-in share of its\n  money to X too, units staying with the ratio walk (api-cloudrun#1475).",
           "paramTags": [],
           "returnsTag": null
         },
@@ -24435,6 +24449,23 @@
           "signature": "remainingTimeCounts(args: RemainingTimeCountsArgs): TierCount[] | null",
           "doc": "**What is left to bill of a TIME purchase line, in counts** (0b ruling 3,\nthe AR rule `extensionGroups` applies to an order): the line metered over its\nPAIR's `charge_windows` through its formula, less what live bills already\nbill there net of credits ({@link purchaseLineBilledCounts}), each tier\nfloored at 0. Billing in parts therefore never totals more than metering the\nwhole, and an over-billed line seeds nothing (the diff reports it).\n\n`null` when the line's pair states no charge windows — there is no time to\nbill, which the bill writer refuses by name.",
           "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "substituteKitSubtree",
+          "signature": "substituteKitSubtree(rows: readonly PurchaseDocumentRow[], path: readonly string[]): PurchaseDocumentItem[]",
+          "doc": "The rows a substitute KIT's root binds on a bill: its line rows strictly below\nit, when it is a substitution's root (W5) and has any. Empty for every other\nrow, which a credit copies alone (ruling 23).\n\nA substituted kit's component carries a stamped share of its root's\n`substituted_for`, which a credit row cannot carry without its root above it:\ncopied alone, its entries read as anchors and un-bill X itself by the\ncomponent's units. So a credit of such a kit copies the root WITH its subtree\n(api-cloudrun#1475), and the root is offered even when it is a $0 header.",
+          "paramTags": [
+            {
+              "name": "rows",
+              "doc": "The bill's rows, dividers included"
+            },
+            {
+              "name": "path",
+              "doc": "The candidate root's path on the bill"
+            }
+          ],
           "returnsTag": null
         },
         {

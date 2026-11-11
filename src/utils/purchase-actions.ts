@@ -36,7 +36,6 @@ import {
   type PurchaseDocumentItem,
   purchaseItemBasis,
   purchaseLineKeyOf,
-  purchaseDocumentLines,
   purchaseLines,
   type PurchaseRentalItem,
   type PurchaseReplacementItem,
@@ -47,6 +46,7 @@ import {
 } from "../schemas/mod.ts";
 import {
   billLineCredited,
+  substituteKitSubtree,
   type PurchaseBilledDocuments,
   purchaseBillIsLive,
   purchaseLineBilledNet,
@@ -416,8 +416,13 @@ export interface CreditableBillLine {
  * Absent rather than offered, failing closed:
  * - a line on a bill not live in Xero, a time line, a kit header, a $0 line;
  * - a line under no purchase the context carries (a credit names ONE purchase);
- * - a kit component of a substituted kit (its entries are a share of its
+ * - a row below a substitute kit's root (its entries are a share of its
  *   root's, which a copied row cannot carry alone).
+ *
+ * That root is offered for its whole subtree instead (api-cloudrun#1475), a $0
+ * header included: a credit of it copies every row below it by the bill's own
+ * ratio (`billLineCreditParts`), so the fold un-bills X and its components
+ * together. Time and $0 are judged over the subtree.
  */
 export function creditableBillLines(bill: PurchaseBillActionBill, ctx: PurchaseBillContext): CreditableBillLine[] {
   const contract = (INVOICE_STATUS_CONTRACTS as Record<string, { live_in_xero: boolean } | undefined>)[bill.status];
@@ -432,13 +437,26 @@ export function creditableBillLines(bill: PurchaseBillActionBill, ctx: PurchaseB
   const withEntries = bill.items
     .filter((r) => isPurchaseLine(r) && entriesOf(r).length > 0)
     .map((r) => ({ path: r.path, substituted_for: entriesOf(r) }));
-  const lines = purchaseDocumentLines(bill.items);
   const roots = new Set(collectSubstitutionAnchors(withEntries).map((a) => a.path.join("/")));
   const components = new Set(withEntries.map((r) => r.path.join("/")).filter((k) => !roots.has(k)));
+  // A substitute KIT's root is offered with its whole subtree, a $0 header
+  // included, and the rows below it are bound to it (api-cloudrun#1475).
+  const kits = new Map<string, PurchaseDocumentItem[]>();
+  for (const r of withEntries) {
+    const subtree = roots.has(r.path.join("/")) ? substituteKitSubtree(bill.items, r.path) : [];
+    if (subtree.length > 0) kits.set(r.path.join("/"), subtree);
+  }
+  const bound = new Set([...kits.values()].flat().map((r) => r.path.join("/")));
+  const lines = bill.items.filter((r): r is PurchaseDocumentItem =>
+    isPurchaseLine(r) && (!isKitHeaderLine(r) || kits.has(r.path.join("/")))
+  );
   const out: CreditableBillLine[] = [];
   for (const line of lines) {
-    if (line.price.price_formula.basis === "time" || line.amount_cents === 0) continue;
-    if (components.has(line.path.join("/"))) continue;
+    const k = line.path.join("/");
+    if (components.has(k) || bound.has(k)) continue;
+    const copied = [line, ...(kits.get(k) ?? [])];
+    if (copied.some((r) => r.price.price_formula.basis === "time")) continue;
+    if (copied.reduce((sum, r) => sum + r.amount_cents, 0) === 0) continue;
     const p = ctx.per_purchase.find((d) => d.uid_purchase === line.path[0]);
     const join = purchaseLineKeyOf(line);
     if (p === undefined || join === null || !join.startsWith(`${p.uid_purchase}/`)) continue;

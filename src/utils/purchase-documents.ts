@@ -56,6 +56,7 @@ import {
   purchaseLineKeyOf,
   type PurchaseRow,
   PurchaseSchema,
+  type SubstitutedForEntryType,
   isPurchaseLine,
   purchaseDocumentLines,
   isKitHeaderLine,
@@ -70,6 +71,7 @@ import {
   type CreditableRow,
   liveSubstitutionAnchors,
   type PathForwardMap,
+  sliceSubstitutedFor,
   standInUnits,
   substitutionCredit,
 } from "./substitutions.ts";
@@ -194,7 +196,9 @@ export interface PurchaseLineBilling {
  *   a spent one bills nothing for X, and its units count at Y's own join.
  * - X's kit components are credited through the PURCHASE's own ratio
  *   (`substitutionCredit`), in units only: the money a substitute stands in for
- *   is X's whole subtree's, and it lands on X.
+ *   is X's whole subtree's, and it lands on X. That holds whichever of Y's rows
+ *   carries it: a component's stamped entries move its stand-in share of its
+ *   money to X too, units staying with the ratio walk (api-cloudrun#1475).
  */
 export function purchaseDocumentBilling(
   rows: readonly PurchaseDocumentRow[],
@@ -218,6 +222,7 @@ export function purchaseDocumentBilling(
     collectSubstitutionAnchors(lines.map((l) => ({ path: l.path.slice(1), substituted_for: substitutedForOf(l) }))),
   );
   const liveX = new Set(anchors.map((a) => a.substitutedFor.join("/")));
+  const anchorAt = new Set(anchors.map((a) => `${a.path.join("/")}\x1e${a.substitutedFor.join("/")}`));
   const direct = new Map<string, number>();
   for (const line of lines) {
     const join = purchaseLineKeyOf(line);
@@ -225,21 +230,26 @@ export function purchaseDocumentBilling(
     const rel = line.path.slice(1).join("/");
     let units = 0;
     let cents = 0;
-    for (const a of anchors) {
-      if (a.path.join("/") !== rel || a.quantity <= 0) continue;
-      const share = flatShareCents(line.amount_cents, line.quantity, units, units + a.quantity);
-      const x = a.substitutedFor.join("/");
+    // The row's live entries in stored order take its first units, each its share of the money.
+    for (const e of substitutedForOf(line) ?? []) {
+      const x = e.path.join("/");
+      if (e.path.length === 0 || e.quantity <= 0 || !liveX.has(x)) continue;
+      const share = flatShareCents(line.amount_cents, line.quantity, units, units + e.quantity);
       const entry = at(x);
-      entry.quantity += a.quantity;
       entry.amount_cents += share;
-      entry.parts.push({ quantity: a.quantity, counts: line.price.counts });
-      direct.set(x, (direct.get(x) ?? 0) + a.quantity);
-      units += a.quantity;
+      if (anchorAt.has(`${rel}\x1e${x}`)) {
+        // A root: its entry bills X's units, and its counts.
+        entry.quantity += e.quantity;
+        entry.parts.push({ quantity: e.quantity, counts: line.price.counts });
+        direct.set(x, (direct.get(x) ?? 0) + e.quantity);
+      }
+      // A component's stamped entry is its share of its root's. Its UNITS reach X's
+      // components through the ratio walk below. Its MONEY lands on X, as the root's
+      // does: left at the component's own join, it billed a key no purchase line
+      // carries (api-cloudrun#1475, a $0 header Y over priced components).
+      units += e.quantity;
       cents += share;
     }
-    // A root's live entries are its anchors. A component's stamped entries are its
-    // share of its root's, which the ratio walk below credits to X's components,
-    // so they leave its own join too.
     const own = line.quantity - standInUnits({ path: line.path, substituted_for: substitutedForOf(line) }, liveX);
     const entry = at(join.slice(prefix.length));
     entry.quantity += own;
@@ -469,8 +479,10 @@ export function billLineCredited(
   const out: BillLineCredited = { quantity: 0, amount_cents: 0 };
   for (const credit of credits) {
     if (!purchaseCreditIsLive(credit)) continue;
-    for (const line of purchaseDocumentLines(credit.items)) {
-      if (line.uid_purchase_bill !== uidBill || line.path_bill_item?.join("/") !== key) continue;
+    // Every line row, kit headers included: a substitute kit's root is usually a
+    // $0 header, and a credit of it copies it (`billLineCreditParts`).
+    for (const line of credit.items) {
+      if (!isPurchaseLine(line) || line.uid_purchase_bill !== uidBill || line.path_bill_item?.join("/") !== key) continue;
       out.quantity += line.quantity;
       out.amount_cents += line.amount_cents;
     }
@@ -515,6 +527,118 @@ export function billLineCreditCents(args: {
     return stated_cents;
   }
   return Math.min(room, flatShareCents(line.amount_cents, line.quantity, credited.quantity, credited.quantity + n));
+}
+
+/**
+ * The rows a substitute KIT's root binds on a bill: its line rows strictly below
+ * it, when it is a substitution's root (W5) and has any. Empty for every other
+ * row, which a credit copies alone (ruling 23).
+ *
+ * A substituted kit's component carries a stamped share of its root's
+ * `substituted_for`, which a credit row cannot carry without its root above it:
+ * copied alone, its entries read as anchors and un-bill X itself by the
+ * component's units. So a credit of such a kit copies the root WITH its subtree
+ * (api-cloudrun#1475), and the root is offered even when it is a $0 header.
+ *
+ * @param rows - The bill's rows, dividers included
+ * @param path - The candidate root's path on the bill
+ */
+export function substituteKitSubtree(
+  rows: readonly PurchaseDocumentRow[],
+  path: readonly string[],
+): PurchaseDocumentItem[] {
+  const entriesOf = (r: PurchaseDocumentItem) => substitutedForOf(r) ?? [];
+  const lines = rows.filter((r): r is PurchaseDocumentItem => isPurchaseLine(r));
+  const key = path.join("/");
+  const self = lines.find((r) => r.path.join("/") === key);
+  if (self === undefined || entriesOf(self).length === 0) return [];
+  const withEntries = lines.filter((r) => entriesOf(r).length > 0).map((r) => ({ path: r.path, substituted_for: entriesOf(r) }));
+  if (!collectSubstitutionAnchors(withEntries).some((a) => a.path.join("/") === key)) return [];
+  return lines.filter((r) => r.path.length > path.length && path.every((p, i) => r.path[i] === p));
+}
+
+/** One bill row a supplier credit copies: {@link billLineCreditParts}' element. */
+export interface BillLineCreditPart {
+  /** The bill row. */
+  line: PurchaseDocumentItem;
+  /** What live credits naming the row already took ({@link billLineCredited}). */
+  credited: BillLineCredited;
+  /** Units this credit takes of the row: `(credited.quantity, credited.quantity + n]`. */
+  n: number;
+  /** Their money, first-come ({@link billLineCreditCents}). */
+  amount_cents: number;
+  /** The row's LIVE `substituted_for` entries, sliced to those units ({@link sliceSubstitutedFor}). */
+  substituted_for: SubstitutedForEntryType[];
+}
+
+/**
+ * **Every bill row a credit of `n` units of the bill line at `path` copies**,
+ * each with its units, money and sliced substitution (one-document-model 6d,
+ * ruling 23). The API's writer stores them and the manager's form previews
+ * their sum, so the screen shows what is stored.
+ *
+ * - An ordinary row is one part: units `(c, c + n]`, `c` what live credits took.
+ * - A substitute KIT's root ({@link substituteKitSubtree}) brings every row
+ *   below it, by the BILL's own ratio: a row of `q` units under a root of `Q`
+ *   takes units `(⌊cQ⌉, ⌊(c + n)Q⌉]` of its own, `⌊kq/Q⌉` rounded half-up, so
+ *   credits that sum to the root's quantity sum to each row's. A row the ratio
+ *   gives no unit is left out. Each part is priced on its own, first-come.
+ * - ⚠️ X's components are un-billed by the fold's ratio walk, which rounds once
+ *   per DOCUMENT (`substitutionCredit`). A kit's ratio is whole (its
+ *   `quantity_per_parent`), so the walk is exact; a fractional ratio would leave
+ *   X's component a unit off after several credits, as several partial bills
+ *   of one substitute kit already would.
+ *
+ * Entries are LIVE while the purchase still carries their X (`purchaseKeys`),
+ * as the fold reads them; a spent one stands in for nothing and is not copied.
+ *
+ * @throws {RangeError} when no line row sits at `path`, `n` exceeds a row's units
+ *   left, a stated amount exceeds the money left, or a kit's credit states an
+ *   amount (a kit is priced from its rows)
+ */
+export function billLineCreditParts(args: {
+  bill: Pick<PurchaseBill, "uid" | "items">;
+  path: readonly string[];
+  n: number;
+  credits: readonly Pick<PurchaseCredit, "status" | "items">[];
+  /** Keys (`path.join("/")`, purchase-relative) of the purchase's rows. */
+  purchaseKeys: ReadonlySet<string>;
+  stated_cents?: number;
+}): BillLineCreditPart[] {
+  const { bill, path, n, credits, purchaseKeys, stated_cents } = args;
+  const key = path.join("/");
+  const root = bill.items.find((r): r is PurchaseDocumentItem => isPurchaseLine(r) && r.path.join("/") === key);
+  if (root === undefined) throw new RangeError(`bill has no line at ${key}`);
+  const subtree = substituteKitSubtree(bill.items, path);
+  if (subtree.length > 0 && stated_cents !== undefined) {
+    throw new RangeError("a substitute kit's credit is priced from its rows, so it states no amount");
+  }
+  const c = billLineCredited(bill.uid, path, credits).quantity;
+  const part = (line: PurchaseDocumentItem, from: number, to: number): BillLineCreditPart => {
+    const credited = billLineCredited(bill.uid, line.path, credits);
+    const m = to - from;
+    const live = (substitutedForOf(line) ?? []).filter((e) => purchaseKeys.has(e.path.join("/")));
+    return {
+      line,
+      credited,
+      n: m,
+      amount_cents: billLineCreditCents({
+        line,
+        credited,
+        n: m,
+        ...(line === root && stated_cents !== undefined ? { stated_cents } : {}),
+      }),
+      substituted_for: sliceSubstitutedFor(live, from, to),
+    };
+  };
+  const out = [part(root, c, c + n)];
+  const at = (k: number, q: number) => Math.floor((2 * k * q + root.quantity) / (2 * root.quantity));
+  for (const line of subtree) {
+    const from = at(c, line.quantity);
+    const to = at(c + n, line.quantity);
+    if (to > from) out.push(part(line, from, to));
+  }
+  return out;
 }
 
 // ── The projector ───────────────────────────────────────────────

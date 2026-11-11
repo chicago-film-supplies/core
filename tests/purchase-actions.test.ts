@@ -22,7 +22,7 @@ import {
   purchaseItemTouched,
 } from "../src/utils/purchase-actions.ts";
 import { deriveInvoiceStatus } from "../src/utils/invoices.ts";
-import { billLineCreditCents, purchaseLineBilledNet } from "../src/utils/purchase-documents.ts";
+import { billLineCreditCents, billLineCreditParts, purchaseLineBilledNet } from "../src/utils/purchase-documents.ts";
 import { sliceSubstitutedFor } from "../src/utils/substitutions.ts";
 import { InvoiceActionRefusal } from "../src/utils/invoice-actions.ts";
 import {
@@ -433,24 +433,81 @@ Deno.test("creditableBillLines: a bill-authored line is creditable, capped by it
   assertEquals(unitsAt(a, ctx6d([a], [credit6d([named("A", ["extra"], 1, { type: "service" })])])), { x: 5, extra: 1 });
 });
 
-Deno.test("creditableBillLines: a substituted kit's component is absent, whether its root is a no-money header or priced (api-cloudrun#1475)", () => {
+Deno.test("creditableBillLines: a substituted kit's component is never offered alone; its root is, a $0 header included (api-cloudrun#1475)", () => {
   // X is a kit: a header over 2 components a unit. Y, its alternate kit, stands in for all 2;
   // the server stamps Y's component with its share of the root's entry.
   const items = asLines(buy({ uid: "k", path: ["k"], quantity: 2 }), buy({ uid: "c", path: ["k", "c"], quantity: 4 }));
   const component = row(["y", "yc"], 4, { quantity_per_parent: 2, substituted_for: [{ path: ["k"], quantity: 4 }] });
   const headerRoot = row(["y"], 2, { ledger_account: null, amount_cents: 0, substituted_for: [{ path: ["k"], quantity: 2 }] });
   const a = bill6d("A", [headerRoot, component]);
-  // Read with the header filtered out first, the component anchored itself and was offered:
-  // a credit of 1 of its 4 units then un-billed a whole X kit (measured by the 6d API probe).
-  assertEquals(creditableBillLines(a, ctx6d([a], [], items)), []);
+  // The $0 header root is offered for its whole subtree; the component is bound to it.
+  assertEquals(creditableBillLines(a, ctx6d([a], [], items)), [{ path: [PU, "y"], uid: "y", billed: 2, units: 2, stands_in_for: ["k"] }]);
   assertEquals(
     purchaseBillCreditRefusal(a, ctx6d([a], [], items), [{ path_bill_item: [PU, "y", "yc"], quantity: 1 }])?.includes("no line at"),
     true,
+    "a component alone would un-bill X itself by its units",
   );
-  // Companion: a priced root is offered; its component still is not.
+  // A priced root is offered the same way; its component still is not.
   const pricedRoot = row(["y"], 2, { substituted_for: [{ path: ["k"], quantity: 2 }] });
   const b = bill6d("A", [pricedRoot, component]);
   assertEquals(Object.keys(unitsAt(b, ctx6d([b], [], items))), ["y"]);
+  // A substitute kit whose rows carry no money at all is not offered.
+  const free = bill6d("A", [headerRoot, { ...component, amount_cents: 0 } as PurchaseDocumentItem]);
+  assertEquals(creditableBillLines(free, ctx6d([free], [], items)), []);
+});
+
+Deno.test("billLineCreditParts: a substitute kit's root credit copies its subtree by the bill's ratio, and nets X and its components to 0 (api-cloudrun#1475)", () => {
+  // X: a header k (3) over c, 7 a kit (21). Y: a $0 header y (3) over yc, 7 a kit (21), for $1.00,
+  // standing in for all of X. A kit's ratio is its quantity_per_parent, so it is whole.
+  const items = asLines(buy({ uid: "k", path: ["k"], quantity: 3 }), buy({ uid: "c", path: ["k", "c"], quantity: 21 }));
+  const purchaseKeys = new Set(items.map((i) => i.path.join("/")));
+  const y = row(["y"], 3, { ledger_account: null, amount_cents: 0, substituted_for: [{ path: ["k"], quantity: 3 }] });
+  const yc = row(["y", "yc"], 21, { amount_cents: 100, quantity_per_parent: 7, substituted_for: [{ path: ["k"], quantity: 21 }] });
+  const bill = bill6d("A", [y, yc]);
+  const credits: PurchaseCredit[] = [];
+  const net = (path: string[]) => purchaseLineBilledNet(path, { uid_purchase: PU, purchase_items: items, bills: [bill], credits });
+  // The fold: Y's component money lands on X, its units on X's component.
+  assertEquals([net(["k"]), net(["k", "c"]), net(["y", "yc"])], [
+    { quantity: 3, amount_cents: 100 },
+    { quantity: 21, amount_cents: 0 },
+    { quantity: 0, amount_cents: 0 },
+  ]);
+  // Three credits of one root unit each: yc takes 7 units each, priced first-come over
+  // $1.00: 33¢ (7/21 of 100 = 33.33), 34¢ (14/21 → 67, less 33¢), 33¢ (100 − 67).
+  const expected = [[7, 33], [7, 34], [7, 33]];
+  for (const [i, [units, cents]] of expected.entries()) {
+    const parts = billLineCreditParts({ bill, path: [PU, "y"], n: 1, credits, purchaseKeys });
+    assertEquals(
+      parts.map((p) => [p.line.path.slice(1).join("/"), p.n, p.amount_cents, p.substituted_for]),
+      [["y", 1, 0, [{ path: ["k"], quantity: 1 }]], ["y/yc", units, cents, [{ path: ["k"], quantity: units }]]],
+      `credit ${i + 1}`,
+    );
+    credits.push(credit6d(parts.map((p) =>
+      named("A", p.line.path.slice(1), p.n, {
+        ledger_account: p.line.ledger_account,
+        amount_cents: p.amount_cents,
+        substituted_for: p.substituted_for,
+      })
+    )));
+  }
+  assertEquals([net(["k"]), net(["k", "c"]), net(["y", "yc"])], [
+    { quantity: 0, amount_cents: 0 },
+    { quantity: 0, amount_cents: 0 },
+    { quantity: 0, amount_cents: 0 },
+  ]);
+  assertEquals(creditableBillLines(bill, { per_purchase: [{ uid_purchase: PU, purchase: { items }, bills: [bill], credits }] })[0].units, 0);
+  // A kit is priced from its rows: a stated amount is refused.
+  assertThrows(
+    () => billLineCreditParts({ bill, path: [PU, "y"], n: 1, credits: [], purchaseKeys, stated_cents: 10 }),
+    RangeError,
+    "states no amount",
+  );
+  // An ordinary row is one part, as before.
+  const plain = bill6d("B", [row(["x"], 5)]);
+  assertEquals(
+    billLineCreditParts({ bill: plain, path: [PU, "x"], n: 2, credits: [], purchaseKeys }).map((p) => [p.n, p.amount_cents]),
+    [[2, 200]],
+  );
 });
 
 Deno.test("creditableBillLines: one segment per credit — a substitute's stand-ins for each X, then its own units (6d, owner 2026-11-11)", () => {
