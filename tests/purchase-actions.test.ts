@@ -10,7 +10,9 @@ import {
   assertPurchaseAction,
   assertPurchaseBillAction,
   assertPurchaseCreditAction,
+  creditableBillLines,
   purchaseActionsFor,
+  purchaseBillCreditRefusal,
   purchaseBillActionsFor,
   purchaseBillPushRefusal,
   purchaseBillVoidRefusal,
@@ -20,6 +22,7 @@ import {
   purchaseItemTouched,
 } from "../src/utils/purchase-actions.ts";
 import { deriveInvoiceStatus } from "../src/utils/invoices.ts";
+import { purchaseLineBilledNet } from "../src/utils/purchase-documents.ts";
 import { InvoiceActionRefusal } from "../src/utils/invoice-actions.ts";
 import {
   PURCHASE_ACTION_IDS,
@@ -178,13 +181,13 @@ const voidBill = (
     status: o.voided_at !== undefined || (totals_over?.amount_void_cents ?? 0) !== 0 ? "void" : "issued",
     origin: "pushed",
     xero_document: "invoice",
-    items: lines.map(([path, quantity]) => ({ type: "sale", path: [PU, path], quantity, amount_cents: 100 * quantity, price: { counts: [] } })),
+    items: lines.map(([path, quantity]) => ({ type: "sale", path: [PU, path], quantity, amount_cents: 100 * quantity, price: FIXED_PRICE })),
     totals: { total_cents: 1000, amount_paid_cents: 0, amount_credited_cents: 0, amount_void_cents: 0, amount_due_cents: 1000, ...totals_over },
     ...rest,
   } as PurchaseBill;
 };
 const voidCredit = (lines: [string, number][], status: PurchaseCredit["status"] = "issued") =>
-  ({ status, items: lines.map(([path, quantity]) => ({ type: "sale", path: [PU, path], quantity, amount_cents: 100 * quantity, price: { counts: [] } })) }) as unknown as PurchaseCredit;
+  ({ status, items: lines.map(([path, quantity]) => ({ type: "sale", path: [PU, path], quantity, amount_cents: 100 * quantity, price: FIXED_PRICE })) }) as unknown as PurchaseCredit;
 const noDocuments = { per_purchase: [{ uid_purchase: PU, purchase: { items: [] }, bills: [], credits: [] }] };
 const asLines = (...items: PurchaseActionItem[]) => items as PurchaseItem[];
 
@@ -354,4 +357,97 @@ Deno.test("assertPurchaseCreditAction and assertPurchaseAction refuse what is no
     InvoiceActionRefusal,
     "remove_item",
   );
+});
+
+// ── add_credit from a bill's lines (one-document-model 6d, rulings 21–23) ──
+
+/** A bill line or a credit line at `[PU, ...rel]`, $1.00 a unit unless told otherwise. */
+const row = (rel: string[], quantity: number, o: Record<string, unknown> = {}) =>
+  ({ type: "sale", uid: rel.at(-1), path: [PU, ...rel], quantity, amount_cents: 100 * quantity, price: FIXED_PRICE, ledger_account: 1400, ...o }) as unknown as PurchaseDocumentItem;
+const bill6d = (uid: string, items: PurchaseDocumentItem[], o: Partial<PurchaseBill> = {}) =>
+  ({ ...voidBill(uid, []), items, ...o }) as PurchaseBill;
+const credit6d = (items: PurchaseDocumentItem[], status: PurchaseCredit["status"] = "issued") =>
+  ({ status, items }) as unknown as PurchaseCredit;
+/** A credit line naming bill `uidBill`'s line at `[PU, ...rel]`, copying its path. */
+const named = (uidBill: string, rel: string[], quantity: number, o: Record<string, unknown> = {}) =>
+  row(rel, quantity, { uid_purchase_bill: uidBill, path_bill_item: [PU, ...rel], ...o });
+const ctx6d = (bills: PurchaseBill[], credits: PurchaseCredit[] = [], items = asLines(buy({ uid: "x", path: ["x"], quantity: 5 }))) =>
+  ({ per_purchase: [{ uid_purchase: PU, purchase: { items }, bills, credits }] });
+const unitsAt = (b: PurchaseBill, c: ReturnType<typeof ctx6d>) =>
+  Object.fromEntries(creditableBillLines(b, c).map((l) => [l.path.slice(1).join("/"), l.units]));
+
+Deno.test("creditableBillLines: units left per bill line, net of credits naming it (6d)", () => {
+  const a = bill6d("A", [row(["x"], 5)]);
+  assertEquals(creditableBillLines(a, ctx6d([a])), [{ path: [PU, "x"], uid: "x", billed: 5, units: 5 }], "uncredited");
+  assertEquals(unitsAt(a, ctx6d([a], [credit6d([named("A", ["x"], 2)])])), { x: 3 }, "part-credited");
+  assertEquals(unitsAt(a, ctx6d([a], [credit6d([named("A", ["x"], 2)], "void")])), { x: 5 }, "a void credit takes nothing");
+  assertEquals(unitsAt(a, ctx6d([a], [credit6d([named("A", ["x"], 5)])])), { x: 0 }, "fully credited");
+  assertEquals(purchaseBillActionsFor(a, ctx6d([a], [credit6d([named("A", ["x"], 5)])])).some((o) => o.action === "add_credit"), false, "0 left is absent");
+  const offered = purchaseBillActionsFor(a, ctx6d([a])).find((o) => o.action === "add_credit");
+  assertEquals(offered, { key: "add_credit", action: "add_credit", lines: [{ path: [PU, "x"], uid: "x", billed: 5, units: 5 }] });
+});
+
+Deno.test("creditableBillLines: the per-line cap binds while the pool still has room from another bill (6d item 2)", () => {
+  const a = bill6d("A", [row(["x"], 5)]);
+  const b = bill6d("B", [row(["x"], 5)]);
+  const c = ctx6d([a, b], [credit6d([named("A", ["x"], 5)])]);
+  // The pool is 10 − 5 = 5, yet bill A's line has nothing left.
+  assertEquals(unitsAt(a, c), { x: 0 });
+  assertEquals(unitsAt(b, c), { x: 5 });
+  assertEquals(purchaseBillCreditRefusal(a, c, [{ path_bill_item: [PU, "x"], quantity: 1 }])?.includes("(0 of 5)"), true);
+  assertThrows(
+    () => assertPurchaseBillAction(a, { action: "add_credit", context: c, lines: [{ path_bill_item: [PU, "x"], quantity: 1 }] }),
+    InvoiceActionRefusal,
+    "left to credit",
+  );
+  assertPurchaseBillAction(b, { action: "add_credit", context: c, lines: [{ path_bill_item: [PU, "x"], quantity: 5 }] });
+});
+
+Deno.test("creditableBillLines: the pool caps a line too, when a purchase-form credit drew on it (6d)", () => {
+  const a = bill6d("A", [row(["x"], 5)]);
+  const b = bill6d("B", [row(["x"], 5)]);
+  // A credit naming no bill line takes 8 of the pool of 10: 2 left, for either bill.
+  const c = ctx6d([a, b], [credit6d([row(["x"], 8)])]);
+  assertEquals(unitsAt(a, c), { x: 2 });
+  assertEquals(purchaseBillCreditRefusal(a, c, [{ path_bill_item: [PU, "x"], quantity: 2 }]), null);
+  assertEquals(purchaseBillCreditRefusal(a, c, [{ path_bill_item: [PU, "x"], quantity: 3 }])?.includes("(2 of 5)"), true);
+});
+
+Deno.test("creditableBillLines: absent — a time line, a kit header, a $0 line, another purchase's line, a bill not live (6d)", () => {
+  const time = row(["t"], 2, { price: { ...TIME_PRICE, counts: [{ rate_key: "week", num: 1, den: 1 }] } });
+  const header = row(["k"], 1, { ledger_account: null, amount_cents: 0 });
+  const free = row(["z"], 1, { amount_cents: 0 });
+  const elsewhere = { ...row(["x"], 1), path: ["otherpurch0000000000", "x"] } as PurchaseDocumentItem;
+  const a = bill6d("A", [time, header, free, elsewhere, row(["x"], 1)]);
+  assertEquals(Object.keys(unitsAt(a, ctx6d([a]))), ["x"]);
+  const voided = bill6d("A", [row(["x"], 1)], { status: "void" });
+  assertEquals(creditableBillLines(voided, ctx6d([voided])), []);
+  assertEquals(purchaseBillCreditRefusal(a, ctx6d([a]), [{ path_bill_item: [PU, "t"], quantity: 1 }])?.includes("no line at"), true, "a time line is refused by name");
+});
+
+Deno.test("creditableBillLines: a bill-authored line is creditable, capped by its own join (6d, ruling 23)", () => {
+  // `extra` is on no purchase line: its pool is what bills hold at its own path.
+  const a = bill6d("A", [row(["x"], 5), row(["extra"], 2, { type: "service", amount_cents: 300 })]);
+  assertEquals(unitsAt(a, ctx6d([a])), { x: 5, extra: 2 });
+  assertEquals(unitsAt(a, ctx6d([a], [credit6d([named("A", ["extra"], 1, { type: "service" })])])), { x: 5, extra: 1 });
+});
+
+Deno.test("creditableBillLines: a substitute Y's stand-in units are capped by X's pool, the rest by Y's own (6d, ruling 23)", () => {
+  // Whole: Y stands in for all 5 of X. X's pool is 5 (Y's stand-ins), Y's own join 0.
+  const whole = bill6d("A", [row(["y"], 5, { substituted_for: [{ path: ["x"], quantity: 5 }] })]);
+  assertEquals(unitsAt(whole, ctx6d([whole])), { y: 5 });
+  // A credit of 2 of Y copies its row and slices the entries: X's pool falls to 3, Y has 3 left.
+  const back = credit6d([named("A", ["y"], 2, { substituted_for: [{ path: ["x"], quantity: 2 }] })]);
+  assertEquals(unitsAt(whole, ctx6d([whole], [back])), { y: 3 });
+  // …and the credit un-bills X itself, by its stand-in units: X's net falls 5 → 3.
+  const docs = (credits: PurchaseCredit[]) => ({ uid_purchase: PU, purchase_items: asLines(buy({ uid: "x", path: ["x"], quantity: 5 })), bills: [whole], credits });
+  assertEquals(purchaseLineBilledNet(["x"], docs([])).quantity, 5);
+  assertEquals(purchaseLineBilledNet(["x"], docs([back])).quantity, 3);
+  // Partial: Y is 5, of which 2 stand in for X; 3 are Y's own (bill-authored remainder).
+  const partial = bill6d("A", [row(["y"], 5, { substituted_for: [{ path: ["x"], quantity: 2 }] })]);
+  assertEquals(unitsAt(partial, ctx6d([partial])), { y: 5 });
+  // A purchase-form credit took 1 of X's pool: the stand-ins are capped at 1, and a credit cannot skip past them.
+  assertEquals(unitsAt(partial, ctx6d([partial], [credit6d([row(["x"], 1)])])), { y: 1 });
+  // A spent entry (the purchase no longer carries X) stands in for nothing: the fold counts all 5 at Y's own join.
+  assertEquals(unitsAt(partial, ctx6d([partial], [], asLines(buy({ uid: "w", path: ["w"] })))), { y: 5 });
 });

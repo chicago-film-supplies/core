@@ -1446,6 +1446,46 @@ Deno.test("CreatePurchaseCreditInput: a pushed credit names an item or a direct 
   assertEquals(issuePaths(CreatePurchaseCreditInput, { ...base, items: [{ path_purchase_item: [iuid(1)], quantity: 1 }] }), []);
 });
 
+Deno.test("CreatePurchaseCreditInput: a line names a purchase item OR a bill line, and each credited row once (6d, ruling 23)", () => {
+  const base = { mode: "push", reason: "supplier_adjustment", date: "2026-10-01T00:00:00.000-05:00", uuid_session: SESSION, version: 0 };
+  const P = "testpurch10000000000";
+  const billA = "testbillA0000000000a";
+  const billB = "testbillB0000000000b";
+  const issues = (items: unknown[]) => issuePaths(CreatePurchaseCreditInput, { ...base, items });
+  // A bill line alone is enough: the writer derives the purchase line from the row.
+  assertEquals(issues([{ uid_purchase_bill: billA, path_bill_item: [P, iuid(1)], quantity: 1 }]), []);
+  // An older client sending both still parses.
+  assertEquals(issues([{ path_purchase_item: [iuid(1)], uid_purchase_bill: billA, path_bill_item: [P, iuid(1)], quantity: 1 }]), []);
+  // Neither: refused at the purchase item, by name.
+  assertEquals(issues([{ quantity: 1 }]), ["items.0.path_purchase_item"]);
+  // Half a bill line: one issue, the pairing one, not a second "names nothing".
+  assertEquals(issues([{ uid_purchase_bill: billA, quantity: 1 }]), ["items.0.path_bill_item"]);
+  // Two bills' lines at ONE path would store one credit row twice.
+  assertEquals(
+    issues([
+      { uid_purchase_bill: billA, path_bill_item: [P, iuid(1)], quantity: 1 },
+      { uid_purchase_bill: billB, path_bill_item: [P, iuid(1)], quantity: 1 },
+    ]),
+    ["items.1.path_bill_item"],
+  );
+  // A purchase-line item and a bill line resolving to the same row collide too.
+  assertEquals(
+    issues([{ path_purchase_item: [iuid(1)], quantity: 1 }, { uid_purchase_bill: billA, path_bill_item: [P, iuid(1)], quantity: 1 }]),
+    ["items.1.path_bill_item"],
+  );
+  // Two rows of one split purchase line sit at different paths: one write.
+  assertEquals(
+    issues([
+      { uid_purchase_bill: billA, path_bill_item: [P, iuid(1)], quantity: 1 },
+      { uid_purchase_bill: billA, path_bill_item: [P, iuid(7), iuid(1)], quantity: 1 },
+    ]),
+    [],
+  );
+  // A link names no bill line, so it still names its purchase item.
+  const link = { mode: "link", reason: "supplier_adjustment", xero_id: "2c3d4e5f-0000-4000-8000-000000000001", uuid_session: SESSION, version: 0 };
+  assertEquals(issuePaths(CreatePurchaseCreditInput, { ...link, items: [{ quantity: 1 }] }), ["items.0.path_purchase_item"]);
+});
+
 // ── pack expansion (api-cloudrun#1081) ───────────────────────────────
 
 /** A catalog component row, shaped as prod stores them (`path` names the parent chain). */

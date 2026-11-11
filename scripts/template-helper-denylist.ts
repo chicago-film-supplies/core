@@ -738,6 +738,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   "purchase-actions": [
     "purchaseActionsFor",
     "purchaseBillActionsFor",
+    "creditableBillLines",
+    "purchaseBillCreditRefusal",
     "purchaseBillPushRefusal",
     "purchaseBillVoidRefusal",
     "purchaseBilledPaths",
@@ -768,6 +770,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "purchaseLineBilledCounts",
     "purchaseLineBilledNet",
     "purchaseLineCreditCents",
+    "billLineCredited",
+    "billLineCreditCents",
     "purchaseLineCovers",
     "remainingTimeCounts",
     "purchaseLineKey",
@@ -943,6 +947,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // surface, not something a customer document renders.
     "unresolvedExchangedFor",
     "standInUnits",
+    // A credit writer's slice of a bill row's stand-ins (one-document-model 6d).
+    "sliceSubstitutedFor",
     "substitutionCredit",
     "substitutionResync",
   ],

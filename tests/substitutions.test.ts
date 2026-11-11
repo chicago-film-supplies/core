@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertFalse } from "@std/assert";
+import { assert, assertEquals, assertFalse, assertThrows } from "@std/assert";
 
 import {
   collectSubstitutionAnchors,
@@ -11,6 +11,7 @@ import {
   isStrictlyBelow,
   overclaimedExchanges,
   repointExchangedFor,
+  sliceSubstitutedFor,
   standInUnits,
   substitutionResync,
   unresolvedExchangedFor,
@@ -469,4 +470,20 @@ Deno.test("directSubstitutionCredit: anchors sharing one X sum, keyed by X's joi
     { path: ["v"], substitutedFor: ["a"], quantity: 1 },
   ]);
   assertEquals([...direct], [["kit/x", 5], ["a", 1]]);
+});
+
+Deno.test("sliceSubstitutedFor: the entries units (from, to] carry, first units first, zeros dropped (6d)", () => {
+  const entries = [{ path: ["a"], quantity: 2 }, { path: ["b"], quantity: 3 }];
+  assertEquals(sliceSubstitutedFor(entries, 0, 5), entries, "the whole row");
+  assertEquals(sliceSubstitutedFor(entries, 1, 3), [{ path: ["a"], quantity: 1 }, { path: ["b"], quantity: 1 }], "straddles the boundary");
+  assertEquals(sliceSubstitutedFor(entries, 2, 5), [{ path: ["b"], quantity: 3 }], "a is not reached, so it is dropped, never 0");
+  assertEquals(sliceSubstitutedFor(entries, 4, 7), [{ path: ["b"], quantity: 1 }], "past the last entry the units are the row's own");
+  assertEquals(sliceSubstitutedFor(entries, 5, 8), [], "all own units");
+  assertEquals(sliceSubstitutedFor(entries, 3, 3), [], "an empty range");
+  assertThrows(() => sliceSubstitutedFor(entries, 3, 2), RangeError);
+  assertThrows(() => sliceSubstitutedFor(entries, 0.5, 2), RangeError);
+  // Consecutive slices partition the entries: two partial credits of one row sum to its entries.
+  const first = sliceSubstitutedFor(entries, 0, 3);
+  const second = sliceSubstitutedFor(entries, 3, 5);
+  assertEquals([...first, ...second].reduce((n, e) => n + e.quantity, 0), 5);
 });

@@ -618,7 +618,7 @@ const CREDIT_UNBILLS_THE_BUCKET: EnforcementRef = {
   ref:
     "api-cloudrun/tests/integration/purchases/purchaseCredits.test.ts::push — a credit un-bills its items at their cumulative share",
   clause:
-    "each credit recounts its purchase lines' quantity_billed in the same commit; a pushed credit line is priced from the line's billed pool (`purchaseLineCreditCents`: a share of what live bills net of live credits hold, a named bill line's rate, or a stated amount, capped at the pool), so a bill and the credit of all its units sum to zero; un-billing past quantity_billed is refused",
+    "each credit recounts its purchase lines' quantity_billed in the same commit; a pushed credit line naming no bill line is priced from the line's billed pool (`purchaseLineCreditCents`: a share of what live bills net of live credits hold, or a stated amount, capped at the pool), and one naming a bill line first-come from that line's own money (`billLineCreditCents`), so a bill and the credit of all its units sum to zero; un-billing past quantity_billed is refused",
   gates: true,
 };
 

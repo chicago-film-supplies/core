@@ -230,6 +230,45 @@ export function standInUnits(row: MaybeSubstitution, liveX: ReadonlySet<string>)
 }
 
 /**
+ * The `substituted_for` entries that units `(from, to]` of a row carry, when the
+ * row's stand-in units are its FIRST units, entry by entry in stored order — the
+ * order `purchaseDocumentBilling` reads them in (`collectSubstitutionAnchors`).
+ *
+ * A credit that copies a bill row (one-document-model 6d, ruling 23) takes the
+ * slice of the units it credits, so its own fold subtracts from each X exactly
+ * the stand-in units it takes back. An entry the slice does not reach is
+ * dropped, because a stored entry's quantity is positive; past the last entry
+ * the units are the row's own and carry none.
+ *
+ * Pass only the LIVE entries: a spent entry stands in for nothing, so the fold
+ * gives the live ones the first units.
+ *
+ * ⚠️ Not `splitOutOfServiceEntries`' rule. That list must sum to the row's
+ * quantity and keeps a 0 share; this one sums to at most the row's quantity and
+ * never stores a 0.
+ *
+ * @throws {RangeError} when `from` or `to` is not an integer, or `to < from`
+ */
+export function sliceSubstitutedFor<E extends { quantity: number }>(
+  entries: readonly E[],
+  from: number,
+  to: number,
+): E[] {
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from) {
+    throw new RangeError(`sliceSubstitutedFor: (${from}, ${to}] is not a unit range`);
+  }
+  const out: E[] = [];
+  let start = 0;
+  for (const entry of entries) {
+    const end = start + entry.quantity;
+    const quantity = Math.min(end, to) - Math.max(start, from);
+    if (quantity > 0) out.push({ ...entry, quantity });
+    start = end;
+  }
+  return out;
+}
+
+/**
  * Is the ABSENCE of the row at `orderPath` explained by one of these anchors?
  *
  * Answers for X itself (`substitutedFor` equals the path) and for every one of

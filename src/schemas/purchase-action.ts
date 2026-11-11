@@ -61,7 +61,11 @@ export interface PurchaseActionDefinition {
 export const PURCHASE_ACTIONS: Readonly<Record<PurchaseActionId, PurchaseActionDefinition>> = {
   close: { subject: "purchase", description: "Close every open line; refused while sub-rented units are out." },
   add_bill: { subject: "purchase", description: "Bill the purchase, including a charge nobody expected." },
-  add_credit: { subject: "purchase", description: "Record a supplier credit against what was billed." },
+  // Offered on the purchase (by purchase line) AND on a bill (by bill line,
+  // `purchaseBillActionsFor` with `lines`): one write, `createPurchaseCredit`, from
+  // two entries, as AR's `add_credit_note` is one (owner, 2026-11-11). The
+  // subject names the document the credit is raised against.
+  add_credit: { subject: "purchase", description: "Record a supplier credit against what was billed, from the purchase or from a bill's lines." },
   close_item: { subject: "purchase_item", description: "Close one open line." },
   bill_item: { subject: "purchase_item", description: "Bill a line that still has something to bill." },
   remove_item: { subject: "purchase_item", description: "Remove a line with no history." },

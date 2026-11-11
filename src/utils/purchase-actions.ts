@@ -26,6 +26,7 @@
  * @module
  */
 import {
+  INVOICE_STATUS_CONTRACTS,
   isPurchaseLine,
   type PayableDividerType,
   type Purchase,
@@ -35,6 +36,7 @@ import {
   type PurchaseDocumentItem,
   purchaseItemBasis,
   purchaseLineKeyOf,
+  purchaseDocumentLines,
   purchaseLines,
   type PurchaseRentalItem,
   type PurchaseReplacementItem,
@@ -43,10 +45,12 @@ import {
   isKitHeaderLine,
 } from "../schemas/mod.ts";
 import {
+  billLineCredited,
   type PurchaseBilledDocuments,
   purchaseBillIsLive,
   purchaseLineBilledNet,
 } from "./purchase-documents.ts";
+import { collectSubstitutionAnchors, sliceSubstitutedFor } from "./substitutions.ts";
 import { closeRefusal, InvoiceActionRefusal } from "./invoice-actions.ts";
 import { invoiceIsFrozen } from "./invoices.ts";
 import type { PurchaseBillXeroSyncStatus } from "./purchase-bill-xero-sync.ts";
@@ -76,6 +80,12 @@ export interface PurchaseActionOffer {
   max_quantity?: number;
   /** `allocate_credit`: the most cents it may move. Always > 0. */
   max_cents?: number;
+  /**
+   * `add_credit` offered on a BILL ({@link purchaseBillActionsFor}): every bill
+   * line a credit may still name, each with units left. Never empty. The
+   * purchase's own `add_credit` carries none: it credits by purchase line.
+   */
+  lines?: CreditableBillLine[];
   /**
    * `close`: what the close leaves the purchase as. `cancel` when every line
    * ends canceled in full, so the purchase reads canceled; `close` otherwise.
@@ -334,8 +344,9 @@ function billCreditRoom(bill: PurchaseBillActionBill & Pick<PurchaseBill, "xero_
 /**
  * Everything an operator may do to a bill: spend credit on it while it is a live
  * ACCPAY with money due, void it unless {@link purchaseBillVoidRefusal} says
- * otherwise, mark a $0 bill paid and reopen it, and push it while
- * {@link purchaseBillPushRefusal} allows.
+ * otherwise, mark a $0 bill paid and reopen it, push it while
+ * {@link purchaseBillPushRefusal} allows, and raise a supplier credit from its
+ * lines ({@link creditableBillLines}) while any has units left.
  */
 export function purchaseBillActionsFor(
   bill: PurchaseBillActionBill & Pick<PurchaseBill, "xero_document">,
@@ -350,7 +361,123 @@ export function purchaseBillActionsFor(
   if (ctx.xero_sync_status !== undefined && purchaseBillPushRefusal(bill, ctx.xero_sync_status) === null) {
     offers.push({ key: "push_to_xero", action: "push_to_xero" });
   }
+  const creditable = creditableBillLines(bill, ctx).filter((l) => l.units > 0);
+  if (creditable.length > 0) offers.push({ key: "add_credit", action: "add_credit", lines: creditable });
   return offers;
+}
+
+/**
+ * One bill line a supplier credit may name (one-document-model 6d, owner rulings
+ * 21 and 23) — the payable twin of AR's `CreditableLine`, keyed by PATH, the row
+ * identity (a line's uid is its product's, W4K).
+ *
+ * Flat lines only: a time line is credited by counts from the purchase, so it is
+ * never offered here.
+ */
+export interface CreditableBillLine {
+  /** The bill line's `path`: what the credit line names as `path_bill_item`. */
+  path: string[];
+  uid: string;
+  /** Units the bill line bills. */
+  billed: number;
+  /** Units a credit naming this line may still take. 0 when none. */
+  units: number;
+}
+
+/**
+ * **What each flat line of this bill may still be credited** (one-document-model
+ * 6d, owner rulings 21–23). Arm B of the payable credit cap, as an offer, so the
+ * manager offers exactly what the server accepts.
+ *
+ * A line's units left are the least of:
+ * - **the line's own**: its quantity less what live credits naming it took
+ *   (`billLineCredited`). A credit takes its units FIRST-COME, so it credits
+ *   units `(c, c + n]` of the line;
+ * - **the pools behind those units** (`purchaseLineBilledNet`). A substitute Y's
+ *   first units stand in for its X (W5), so they are capped by X's pool, entry
+ *   by entry in stored order; the rest by the pool at Y's own join. A credit
+ *   cannot skip past a stand-in it may not take, so a capped stand-in ends the
+ *   line's units there.
+ *
+ * Absent rather than offered, failing closed:
+ * - a line on a bill not live in Xero, a time line, a kit header, a $0 line;
+ * - a line under no purchase the context carries (a credit names ONE purchase);
+ * - a kit component of a substituted kit (its entries are a share of its
+ *   root's, which a copied row cannot carry alone).
+ */
+export function creditableBillLines(bill: PurchaseBillActionBill, ctx: PurchaseBillContext): CreditableBillLine[] {
+  const contract = (INVOICE_STATUS_CONTRACTS as Record<string, { live_in_xero: boolean } | undefined>)[bill.status];
+  if (!contract?.live_in_xero) return [];
+  const lines = purchaseDocumentLines(bill.items).filter((l) => !isKitHeaderLine(l));
+  const entriesOf = (l: (typeof lines)[number]) => ("substituted_for" in l ? l.substituted_for ?? [] : []);
+  // A row carrying entries that anchors nothing is a component of a substituted kit.
+  const withEntries = lines.filter((l) => entriesOf(l).length > 0).map((l) => ({ path: l.path, substituted_for: entriesOf(l) }));
+  const roots = new Set(collectSubstitutionAnchors(withEntries).map((a) => a.path.join("/")));
+  const components = new Set(withEntries.map((r) => r.path.join("/")).filter((k) => !roots.has(k)));
+  const out: CreditableBillLine[] = [];
+  for (const line of lines) {
+    if (line.price.price_formula.basis === "time" || line.amount_cents === 0) continue;
+    if (components.has(line.path.join("/"))) continue;
+    const p = ctx.per_purchase.find((d) => d.uid_purchase === line.path[0]);
+    const join = purchaseLineKeyOf(line);
+    if (p === undefined || join === null || !join.startsWith(`${p.uid_purchase}/`)) continue;
+    const docs: PurchaseBilledDocuments = {
+      uid_purchase: p.uid_purchase,
+      purchase_items: p.purchase.items,
+      bills: p.bills,
+      credits: p.credits,
+    };
+    const pool = (path: readonly string[]) => Math.max(0, purchaseLineBilledNet(path, docs).quantity);
+    // Live as the fold reads it (`liveSubstitutionAnchors`): any row of the
+    // purchase, so a substituted KIT, whose X is a header, counts.
+    const onPurchase = new Set(p.purchase.items.map((i) => i.path.join("/")));
+    const live = entriesOf(line).filter((e) => onPurchase.has(e.path.join("/")));
+    const standIns = live.reduce((n, e) => n + e.quantity, 0);
+    const taken = billLineCredited(bill.uid, line.path, p.credits).quantity;
+    let units = 0;
+    let blocked = false;
+    for (const e of sliceSubstitutedFor(live, Math.min(taken, standIns), standIns)) {
+      const allow = Math.min(e.quantity, pool(e.path));
+      units += allow;
+      if (allow < e.quantity) {
+        blocked = true;
+        break;
+      }
+    }
+    if (!blocked) {
+      const own = line.quantity - Math.max(taken, standIns);
+      units += Math.max(0, Math.min(own, pool(join.slice(p.uid_purchase.length + 1).split("/"))));
+    }
+    out.push({ path: [...line.path], uid: line.uid, billed: line.quantity, units });
+  }
+  return out;
+}
+
+/**
+ * Why crediting these bill lines would exceed what {@link creditableBillLines}
+ * offers, or `null` when it would not. The server's half of the payable credit
+ * cap: two credits naming one bill line can no longer each take its whole
+ * quantity while the pool still has room from another bill.
+ *
+ * Requests naming one line sum. A line the offer does not list is refused by
+ * name, so a time line or a line under another purchase cannot slip through.
+ */
+export function purchaseBillCreditRefusal(
+  bill: PurchaseBillActionBill,
+  ctx: PurchaseBillContext,
+  lines: readonly { path_bill_item: readonly string[]; quantity: number }[],
+): string | null {
+  const offered = new Map(creditableBillLines(bill, ctx).map((l) => [l.path.join("/"), l]));
+  const asked = new Map<string, number>();
+  for (const l of lines) asked.set(l.path_bill_item.join("/"), (asked.get(l.path_bill_item.join("/")) ?? 0) + l.quantity);
+  for (const [k, quantity] of asked) {
+    const line = offered.get(k);
+    if (line === undefined) return `bill ${bill.number} has no line at ${k} a credit may name`;
+    if (quantity > line.units) {
+      return `crediting ${quantity} of the line at ${k} exceeds what bill ${bill.number} has left to credit there (${line.units} of ${line.billed})`;
+    }
+  }
+  return null;
 }
 
 /** Everything an operator may do to a supplier credit: void it while nothing has drawn on it. */
@@ -399,7 +526,9 @@ export type PurchaseBillActionRequest =
   | { action: "void_bill"; context: PurchaseBillContext }
   | { action: "close_bill" | "reopen_bill" }
   | { action: "push_to_xero"; status: PurchaseBillXeroSyncStatus }
-  | { action: "allocate_credit"; amount_cents: number };
+  | { action: "allocate_credit"; amount_cents: number }
+  /** A credit raised from this bill's lines: the bill line each names, and its units. */
+  | { action: "add_credit"; context: PurchaseBillContext; lines: readonly { path_bill_item: readonly string[]; quantity: number }[] };
 
 /** Refuse a bill action the ruleset does not offer, or one past its limit. Operator routes only. */
 export function assertPurchaseBillAction(
@@ -421,6 +550,8 @@ export function assertPurchaseBillAction(
       return why(purchaseBillReopenRefusal(bill));
     case "push_to_xero":
       return why(purchaseBillPushRefusal(bill, request.status));
+    case "add_credit":
+      return why(purchaseBillCreditRefusal(bill, request.context, request.lines));
     case "allocate_credit": {
       if (request.amount_cents <= 0) refuse("an allocation must be more than $0");
       const room = billCreditRoom(bill);

@@ -23,6 +23,8 @@ import {
   purchaseDocumentScope,
   purchaseLineBilledNet,
   purchaseLineCreditCents,
+  billLineCreditCents,
+  billLineCredited,
   recomputePurchaseQuantityBilled,
   syncPurchaseToBills,
 } from "../src/utils/purchase-documents.ts";
@@ -681,16 +683,71 @@ Deno.test("purchaseLineCreditCents: hand-stated cases, from the pool, never the 
   assertEquals(purchaseLineCreditCents({ pool, n: 14 }), 55958, "CFS-SCR-1's case: nothing strands");
   assertEquals(purchaseLineCreditCents({ pool: { quantity: 3, amount_cents: 1000 }, n: 1 }), 333);
   assertEquals(purchaseLineCreditCents({ pool: { quantity: 2, amount_cents: 1000 }, n: 1 }), 500);
-  // A named bill line prices at ITS rate, not the blend, capped at the pool.
   const blended = { quantity: 2, amount_cents: 300 };
-  assertEquals(purchaseLineCreditCents({ pool: blended, n: 1, bill_line: { quantity: 1, amount_cents: 200 } }), 200);
-  assertEquals(purchaseLineCreditCents({ pool: { quantity: 2, amount_cents: 150 }, n: 2, bill_line: { quantity: 1, amount_cents: 200 } }), 150, "capped");
   // A stated amount governs, up to the pool.
   assertEquals(purchaseLineCreditCents({ pool: blended, n: 1, stated_cents: 7 }), 7);
   assertThrows(() => purchaseLineCreditCents({ pool: blended, n: 1, stated_cents: 301 }), RangeError, "exceeds");
   assertThrows(() => purchaseLineCreditCents({ pool: blended, n: 3 }), RangeError, "exceeds");
   assertThrows(() => purchaseLineCreditCents({ pool: blended, n: 0 }), RangeError, "exceeds");
   assertThrows(() => purchaseLineCreditCents({ pool: { quantity: 2, amount_cents: 0 }, n: 1 }), RangeError, "no money");
+});
+
+Deno.test("billLineCreditCents: a named bill line prices first-come from ITS money, not the pool (6d, owner 2026-11-11)", () => {
+  const line = { quantity: 3, amount_cents: 10000 };
+  const none = { quantity: 0, amount_cents: 0 };
+  // $100.00 over 3 units, one at a time: 3333 + 3334 + 3333 = 10000, never 9999.
+  assertEquals(billLineCreditCents({ line, credited: none, n: 1 }), 3333);
+  assertEquals(billLineCreditCents({ line, credited: { quantity: 1, amount_cents: 3333 }, n: 1 }), 3334);
+  assertEquals(billLineCreditCents({ line, credited: { quantity: 2, amount_cents: 6667 }, n: 1 }), 3333);
+  assertEquals(billLineCreditCents({ line, credited: none, n: 3 }), 10000);
+  // A blended pool never enters: the line's own rate.
+  assertEquals(billLineCreditCents({ line: { quantity: 1, amount_cents: 200 }, credited: none, n: 1 }), 200);
+  // A stated amount governs, up to what is left of the line's money.
+  assertEquals(billLineCreditCents({ line, credited: none, n: 1, stated_cents: 7 }), 7);
+  assertThrows(() => billLineCreditCents({ line, credited: { quantity: 1, amount_cents: 9000 }, n: 1, stated_cents: 1001 }), RangeError, "1000 cents left");
+  // Part-credited at a stated amount: the first-come share is capped at the money left.
+  assertEquals(billLineCreditCents({ line, credited: { quantity: 1, amount_cents: 9000 }, n: 2 }), 1000);
+  // Units: never past what the line has left.
+  assertThrows(() => billLineCreditCents({ line, credited: { quantity: 2, amount_cents: 6667 }, n: 2 }), RangeError, "1 left");
+  assertThrows(() => billLineCreditCents({ line, credited: none, n: 0 }), RangeError, "exceeds");
+});
+
+Deno.test("billLineCreditCents: any run of credits of one bill line sums to exactly its money", () => {
+  // Companion: the independent per-credit rounding this replaced does NOT.
+  let seed = 7;
+  const next = (bound: number) => (seed = (seed * 1103515245 + 12345) % 2147483648) % bound;
+  let independentWrong = 0;
+  for (let round = 0; round < 5_000; round++) {
+    const line = { quantity: 1 + next(40), amount_cents: 1 + next(5_000_000) };
+    const credited = { quantity: 0, amount_cents: 0 };
+    let independent = 0;
+    while (credited.quantity < line.quantity) {
+      const n = 1 + next(line.quantity - credited.quantity);
+      const cents = billLineCreditCents({ line, credited, n });
+      credited.quantity += n;
+      credited.amount_cents += cents;
+      independent += Math.round((line.amount_cents * n) / line.quantity);
+    }
+    assertEquals(credited.amount_cents, line.amount_cents);
+    if (independent !== line.amount_cents) independentWrong++;
+  }
+  assert(independentWrong > 0, "the corpus must discriminate: independent rounding should miss somewhere");
+});
+
+Deno.test("billLineCredited: live credits naming that bill line, by bill AND path", () => {
+  const P = "testpurch10000000000";
+  const named = (uidBill: string, path: string[], quantity: number, amount_cents: number) =>
+    ({ type: "sale", path: [P, "x"], quantity, amount_cents, uid_purchase_bill: uidBill, path_bill_item: path }) as unknown as PurchaseDocumentItem;
+  const credits = [
+    credit([named("A", [P, "x"], 2, 200), named("B", [P, "x"], 5, 500)]),
+    credit([named("A", [P, "x"], 1, 100)]),
+    credit([named("A", [P, "x"], 4, 400)], "void"),
+    credit([named("A", [P, "g", "x"], 3, 300)]),
+  ];
+  assertEquals(billLineCredited("A", [P, "x"], credits), { quantity: 3, amount_cents: 300 });
+  assertEquals(billLineCredited("B", [P, "x"], credits), { quantity: 5, amount_cents: 500 });
+  assertEquals(billLineCredited("A", [P, "g", "x"], credits), { quantity: 3, amount_cents: 300 });
+  assertEquals(billLineCredited("C", [P, "x"], credits), { quantity: 0, amount_cents: 0 });
 });
 
 Deno.test("purchaseLineCreditCents: any split of a pool sums to exactly its money", () => {

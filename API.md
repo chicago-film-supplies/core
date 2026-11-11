@@ -3304,9 +3304,10 @@ const CreatePurchaseCreditInput: z.ZodType<CreatePurchaseCreditInputType>;
 Input for recording a supplier credit against a purchase — push a new
 ACCPAYCREDIT, or link one the supplier's credit was entered as in Xero.
 
-Each `items` entry UN-bills that quantity of its purchase item: it lowers
-`quantity_billed`, and a PUSHED credit prices it from the line's billed pool
-(`purchaseLineCreditCents`), so more than was billed cannot be credited. A price correction with no quantity is a `charge_items` entry
+Each `items` entry UN-bills that quantity of its purchase item, or of the
+bill line it names: it lowers `quantity_billed`, and a PUSHED credit prices it
+from the line's billed pool (`purchaseLineCreditCents`) or from the named bill
+line (`billLineCreditCents`), so more than was billed cannot be credited. A price correction with no quantity is a `charge_items` entry
 (push only). A LINKED credit reads its date, reference and total from Xero,
 as a linked bill does.
 
@@ -10791,12 +10792,17 @@ const PurchaseCreditItemInput: z.ZodType<PurchaseCreditItemInputType>;
 
 ### `PurchaseCreditItemInputType`
 
-One line of a supplier CREDIT as an operator states it: a purchase item and
-what it un-bills.
+One line of a supplier CREDIT as an operator states it: a purchase item, or a
+bill line (one-document-model 6d), and what it un-bills.
 
-- **flat** — `quantity` units, priced from the line's billed pool
-  (`purchaseLineCreditCents`): the pool's share, a named bill line's rate, or a
-  stated `amount_cents`, the pool capping all three.
+- **flat, naming no bill line** — `quantity` units, priced from the line's
+  billed pool (`purchaseLineCreditCents`): the pool's share, or a stated
+  `amount_cents` the pool caps.
+- **flat, naming a bill line** — units `(c, c + quantity]` of that line, `c`
+  what live credits already took from it, priced first-come from the line's
+  own money (`billLineCreditCents`), or a stated `amount_cents` capped at what
+  is left of it. The units are capped per bill line and by the pools behind
+  them (`creditableBillLines`).
 - **time** — credited by COUNTS, as an AR credit note is (0b ruling 3):
   `quantity` units over `counts`, priced `rates × counts` like the bill line
   it reverses. Absent `counts`, the writer credits everything the line is
@@ -10806,6 +10812,7 @@ what it un-bills.
 
 ```ts
 interface PurchaseCreditItemInputType {
+  path_purchase_item?: string[];
   counts?: TierCountType[];
   uid_purchase_bill?: string;
   path_bill_item?: string[];
@@ -29005,9 +29012,10 @@ const CreatePurchaseCreditInput: z.ZodType<CreatePurchaseCreditInputType>;
 Input for recording a supplier credit against a purchase — push a new
 ACCPAYCREDIT, or link one the supplier's credit was entered as in Xero.
 
-Each `items` entry UN-bills that quantity of its purchase item: it lowers
-`quantity_billed`, and a PUSHED credit prices it from the line's billed pool
-(`purchaseLineCreditCents`), so more than was billed cannot be credited. A price correction with no quantity is a `charge_items` entry
+Each `items` entry UN-bills that quantity of its purchase item, or of the
+bill line it names: it lowers `quantity_billed`, and a PUSHED credit prices it
+from the line's billed pool (`purchaseLineCreditCents`) or from the named bill
+line (`billLineCreditCents`), so more than was billed cannot be credited. A price correction with no quantity is a `charge_items` entry
 (push only). A LINKED credit reads its date, reference and total from Xero,
 as a linked bill does.
 
@@ -29289,12 +29297,17 @@ const PurchaseCreditItemInput: z.ZodType<PurchaseCreditItemInputType>;
 
 ### `PurchaseCreditItemInputType`
 
-One line of a supplier CREDIT as an operator states it: a purchase item and
-what it un-bills.
+One line of a supplier CREDIT as an operator states it: a purchase item, or a
+bill line (one-document-model 6d), and what it un-bills.
 
-- **flat** — `quantity` units, priced from the line's billed pool
-  (`purchaseLineCreditCents`): the pool's share, a named bill line's rate, or a
-  stated `amount_cents`, the pool capping all three.
+- **flat, naming no bill line** — `quantity` units, priced from the line's
+  billed pool (`purchaseLineCreditCents`): the pool's share, or a stated
+  `amount_cents` the pool caps.
+- **flat, naming a bill line** — units `(c, c + quantity]` of that line, `c`
+  what live credits already took from it, priced first-come from the line's
+  own money (`billLineCreditCents`), or a stated `amount_cents` capped at what
+  is left of it. The units are capped per bill line and by the pools behind
+  them (`creditableBillLines`).
 - **time** — credited by COUNTS, as an AR credit note is (0b ruling 3):
   `quantity` units over `counts`, priced `rates × counts` like the bill line
   it reverses. Absent `counts`, the writer credits everything the line is
@@ -29304,6 +29317,7 @@ what it un-bills.
 
 ```ts
 interface PurchaseCreditItemInputType {
+  path_purchase_item?: string[];
   counts?: TierCountType[];
   uid_purchase_bill?: string;
   path_bill_item?: string[];
@@ -45930,6 +45944,25 @@ reason is carried verbatim: it is why the units come back, not where.
 
 **Returns** — The entries, re-pointed where a map carries them onto a row
 
+### `sliceSubstitutedFor(entries: readonly E[], from: number, to: number): E[]`
+
+The `substituted_for` entries that units `(from, to]` of a row carry, when the
+row's stand-in units are its FIRST units, entry by entry in stored order — the
+order `purchaseDocumentBilling` reads them in (`collectSubstitutionAnchors`).
+
+A credit that copies a bill row (one-document-model 6d, ruling 23) takes the
+slice of the units it credits, so its own fold subtracts from each X exactly
+the stand-in units it takes back. An entry the slice does not reach is
+dropped, because a stored entry's quantity is positive; past the last entry
+the units are the row's own and carry none.
+
+Pass only the LIVE entries: a spent entry stands in for nothing, so the fold
+gives the live ones the first units.
+
+⚠️ Not `splitOutOfServiceEntries`' rule. That list must sum to the row's
+quantity and keeps a 0 share; this one sums to at most the row's quantity and
+never stores a 0.
+
 ### `standInUnits(row: MaybeSubstitution, liveX: ReadonlySet<string>): number`
 
 How many of a row's own units stand in for a substitution rather than for
@@ -50197,6 +50230,24 @@ an operator's policy is not the ledger's legality.
    line that cannot be probed is not offered.
 2. An offer is a snapshot of the documents it was handed; the server re-checks.
 
+### `CreditableBillLine`
+
+One bill line a supplier credit may name (one-document-model 6d, owner rulings
+21 and 23) — the payable twin of AR's `CreditableLine`, keyed by PATH, the row
+identity (a line's uid is its product's, W4K).
+
+Flat lines only: a time line is credited by counts from the purchase, so it is
+never offered here.
+
+```ts
+interface CreditableBillLine {
+  path: string[];
+  uid: string;
+  billed: number;
+  units: number;
+}
+```
+
 ### `PurchaseActionItem`
 
 A purchase line as the ruleset reads it.
@@ -50216,6 +50267,7 @@ interface PurchaseActionOffer {
   path_purchase_item?: string[];
   max_quantity?: number;
   max_cents?: number;
+  lines?: CreditableBillLine[];
   outcome?: "cancel" | "close";
 }
 ```
@@ -50244,7 +50296,7 @@ purchase's other documents, so only a void carries them: a caller allocating
 credit or pushing a bill does not read a whole purchase to ask.
 
 ```ts
-type PurchaseBillActionRequest = typeLiteral | typeLiteral | typeLiteral | typeLiteral;
+type PurchaseBillActionRequest = typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral;
 ```
 
 ### `PurchaseBillContext`
@@ -50284,6 +50336,28 @@ Refuse a bill action the ruleset does not offer, or one past its limit. Operator
 
 Refuse a supplier-credit action the ruleset does not offer. Operator routes only.
 
+### `creditableBillLines(bill: PurchaseBillActionBill, ctx: PurchaseBillContext): CreditableBillLine[]`
+
+**What each flat line of this bill may still be credited** (one-document-model
+6d, owner rulings 21–23). Arm B of the payable credit cap, as an offer, so the
+manager offers exactly what the server accepts.
+
+A line's units left are the least of:
+- **the line's own**: its quantity less what live credits naming it took
+  (`billLineCredited`). A credit takes its units FIRST-COME, so it credits
+  units `(c, c + n]` of the line;
+- **the pools behind those units** (`purchaseLineBilledNet`). A substitute Y's
+  first units stand in for its X (W5), so they are capped by X's pool, entry
+  by entry in stored order; the rest by the pool at Y's own join. A credit
+  cannot skip past a stand-in it may not take, so a capped stand-in ends the
+  line's units there.
+
+Absent rather than offered, failing closed:
+- a line on a bill not live in Xero, a time line, a kit header, a $0 line;
+- a line under no purchase the context carries (a credit names ONE purchase);
+- a kit component of a substituted kit (its entries are a share of its
+  root's, which a copied row cannot carry alone).
+
 ### `purchaseActionsFor(purchase: Pick<Purchase, "status" | "query_by_bills"> & typeLiteral, _: unknown): PurchaseActionOffer[]`
 
 **Everything an operator may do to a purchase and its lines.** Per-line offers
@@ -50297,8 +50371,19 @@ close.
 
 Everything an operator may do to a bill: spend credit on it while it is a live
 ACCPAY with money due, void it unless {@link purchaseBillVoidRefusal} says
-otherwise, mark a $0 bill paid and reopen it, and push it while
-{@link purchaseBillPushRefusal} allows.
+otherwise, mark a $0 bill paid and reopen it, push it while
+{@link purchaseBillPushRefusal} allows, and raise a supplier credit from its
+lines ({@link creditableBillLines}) while any has units left.
+
+### `purchaseBillCreditRefusal(bill: PurchaseBillActionBill, ctx: PurchaseBillContext, lines: readonly typeLiteral[]): string | null`
+
+Why crediting these bill lines would exceed what {@link creditableBillLines}
+offers, or `null` when it would not. The server's half of the payable credit
+cap: two credits naming one bill line can no longer each take its whole
+quantity while the pool still has room from another bill.
+
+Requests naming one line sum. A line the offer does not list is refused by
+name, so a time line or a line under another purchase cannot slip through.
 
 ### `purchaseBillPushRefusal(bill: PurchaseBillActionBill, status: PurchaseBillXeroSyncStatus): string | null`
 
@@ -50456,6 +50541,17 @@ lived here (`unitWindowsForLine`, `coversForUnit`, `billedUnitCoverage`,
 `seedPurchaseLinesForWindows`) retired in one-document-model Phase 3, unused
 in either environment (Phase 0b census).
 
+### `BillLineCredited`
+
+What live supplier credits have already taken from one bill line.
+
+```ts
+interface BillLineCredited {
+  quantity: number;
+  amount_cents: number;
+}
+```
+
 ### `PAYABLE_LINE_CLAIMS`
 
 The payable side of `orderLineClaimIssues`: a bill or credit's
@@ -50596,6 +50692,36 @@ interface SyncPurchaseToBillsArgs {
   linked_cleared?: ReadonlySet<string>;
 }
 ```
+
+### `billLineCreditCents(args: typeLiteral): number`
+
+**What a supplier credit of `n` units of one bill line is worth**
+(one-document-model 6d, owner 2026-11-11): units `(c, c + n]` of the line,
+`c` the units live credits already took (`billLineCredited`), priced
+FIRST-COME (`flatShareCents`), so crediting a line in parts sums to exactly
+its amount — $100.00 over 3 units credited one at a time is 3333 + 3334 +
+3333, never 9999.
+
+⚠️ **Deliberately unlike AR**, where each credit-note line rounds on its own
+(`priceCreditNote`). This module's rule is that a line's documents sum to the
+line's money exactly, and a credit of a bill line is one more of them.
+
+- `stated_cents`: the supplier's memo governs, refused above what is left of
+  the line's money.
+- The first-come share is capped at what is left of the line's money, so a
+  line part-credited at a stated amount cannot be over-credited.
+
+### `billLineCredited(uidBill: string, path: readonly string[], credits: readonly Pick<PurchaseCredit, "status" | "items">[]): BillLineCredited`
+
+**What live credits have taken from the bill line at `path` on bill
+`uidBill`** — every live credit line naming that `(uid_purchase_bill,
+path_bill_item)`. The per-line half of the credit cap (one-document-model 6d),
+the twin of AR's `creditableLines` prior-note sum.
+
+⚠️ Keyed on the pointer as written, which goes stale when the bill row moves
+(owner ruling 22, as `path_invoice_item` does on AR): a credit raised before a
+move then no longer counts against the row. The pool cap
+(`purchaseLineBilledNet`) still sees it.
 
 ### `flatShareCents(amountCents: number, quantity: number, before: number, after: number): number`
 
@@ -50753,18 +50879,18 @@ completed line still covered what it covered.
 
 ### `purchaseLineCreditCents(args: typeLiteral): number`
 
-**What a supplier credit of `n` flat units is worth** (api-cloudrun#1439) — a
-share of the line's billed POOL (`purchaseLineBilledNet`: live bills less live
-credits), never of the PO line, so an edited bill strands nothing.
+**What a supplier credit of `n` flat units is worth, when it names no bill
+line** (api-cloudrun#1439) — a share of the line's billed POOL
+(`purchaseLineBilledNet`: live bills less live credits), never of the PO line,
+so an edited bill strands nothing.
 
-- No bill line named: the pool's share of its last `n` units. Crediting the
-  whole pool returns exactly its money, and successive credits sum to it.
-- A bill line named: that line's rate for `n` units, so a credit raised from a
-  bill is not blended across bills at different prices.
-- `stated_cents`: the supplier's memo governs.
+- The pool's share of its last `n` units. Crediting the whole pool returns
+  exactly its money, and successive credits sum to it.
+- `stated_cents`: the supplier's memo governs, refused above the pool, because
+  an operator typed it.
 
-**The pool caps all three.** A named rate above the pool is capped, a stated
-amount above it refused, because an operator typed that one.
+A credit that names a bill line is priced by {@link billLineCreditCents}
+instead (one-document-model 6d): from that line, not the pool.
 
 ### `purchaseLineKey(uidPurchase: string, path: readonly string[]): string`
 

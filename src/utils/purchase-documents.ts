@@ -406,18 +406,18 @@ export function flatShareCents(amountCents: number, quantity: number, before: nu
 }
 
 /**
- * **What a supplier credit of `n` flat units is worth** (api-cloudrun#1439) — a
- * share of the line's billed POOL (`purchaseLineBilledNet`: live bills less live
- * credits), never of the PO line, so an edited bill strands nothing.
+ * **What a supplier credit of `n` flat units is worth, when it names no bill
+ * line** (api-cloudrun#1439) — a share of the line's billed POOL
+ * (`purchaseLineBilledNet`: live bills less live credits), never of the PO line,
+ * so an edited bill strands nothing.
  *
- * - No bill line named: the pool's share of its last `n` units. Crediting the
- *   whole pool returns exactly its money, and successive credits sum to it.
- * - A bill line named: that line's rate for `n` units, so a credit raised from a
- *   bill is not blended across bills at different prices.
- * - `stated_cents`: the supplier's memo governs.
+ * - The pool's share of its last `n` units. Crediting the whole pool returns
+ *   exactly its money, and successive credits sum to it.
+ * - `stated_cents`: the supplier's memo governs, refused above the pool, because
+ *   an operator typed it.
  *
- * **The pool caps all three.** A named rate above the pool is capped, a stated
- * amount above it refused, because an operator typed that one.
+ * A credit that names a bill line is priced by {@link billLineCreditCents}
+ * instead (one-document-model 6d): from that line, not the pool.
  *
  * @throws {RangeError} when `n` is outside `1..pool quantity`, the pool holds no
  *   money, or a stated amount exceeds the pool
@@ -425,10 +425,9 @@ export function flatShareCents(amountCents: number, quantity: number, before: nu
 export function purchaseLineCreditCents(args: {
   pool: PurchaseLineBilledNet;
   n: number;
-  bill_line?: { quantity: number; amount_cents: number };
   stated_cents?: number;
 }): number {
-  const { pool, n, bill_line, stated_cents } = args;
+  const { pool, n, stated_cents } = args;
   if (!Number.isInteger(n) || n < 1 || n > pool.quantity) {
     throw new RangeError(`crediting ${n} exceeds the ${pool.quantity} billed`);
   }
@@ -439,11 +438,83 @@ export function purchaseLineCreditCents(args: {
     }
     return stated_cents;
   }
-  if (bill_line !== undefined) {
-    const named = Number(roundDivHalfUp(BigInt(bill_line.amount_cents) * BigInt(n), BigInt(bill_line.quantity)));
-    return Math.min(named, pool.amount_cents);
-  }
   return flatShareCents(pool.amount_cents, pool.quantity, pool.quantity - n, pool.quantity);
+}
+
+/** What live supplier credits have already taken from one bill line. */
+export interface BillLineCredited {
+  /** Σ quantity of live credit lines naming the bill line. */
+  quantity: number;
+  /** Σ their `amount_cents`. */
+  amount_cents: number;
+}
+
+/**
+ * **What live credits have taken from the bill line at `path` on bill
+ * `uidBill`** — every live credit line naming that `(uid_purchase_bill,
+ * path_bill_item)`. The per-line half of the credit cap (one-document-model 6d),
+ * the twin of AR's `creditableLines` prior-note sum.
+ *
+ * ⚠️ Keyed on the pointer as written, which goes stale when the bill row moves
+ * (owner ruling 22, as `path_invoice_item` does on AR): a credit raised before a
+ * move then no longer counts against the row. The pool cap
+ * (`purchaseLineBilledNet`) still sees it.
+ */
+export function billLineCredited(
+  uidBill: string,
+  path: readonly string[],
+  credits: readonly Pick<PurchaseCredit, "status" | "items">[],
+): BillLineCredited {
+  const key = path.join("/");
+  const out: BillLineCredited = { quantity: 0, amount_cents: 0 };
+  for (const credit of credits) {
+    if (!purchaseCreditIsLive(credit)) continue;
+    for (const line of purchaseDocumentLines(credit.items)) {
+      if (line.uid_purchase_bill !== uidBill || line.path_bill_item?.join("/") !== key) continue;
+      out.quantity += line.quantity;
+      out.amount_cents += line.amount_cents;
+    }
+  }
+  return out;
+}
+
+/**
+ * **What a supplier credit of `n` units of one bill line is worth**
+ * (one-document-model 6d, owner 2026-11-11): units `(c, c + n]` of the line,
+ * `c` the units live credits already took (`billLineCredited`), priced
+ * FIRST-COME (`flatShareCents`), so crediting a line in parts sums to exactly
+ * its amount — $100.00 over 3 units credited one at a time is 3333 + 3334 +
+ * 3333, never 9999.
+ *
+ * ⚠️ **Deliberately unlike AR**, where each credit-note line rounds on its own
+ * (`priceCreditNote`). This module's rule is that a line's documents sum to the
+ * line's money exactly, and a credit of a bill line is one more of them.
+ *
+ * - `stated_cents`: the supplier's memo governs, refused above what is left of
+ *   the line's money.
+ * - The first-come share is capped at what is left of the line's money, so a
+ *   line part-credited at a stated amount cannot be over-credited.
+ *
+ * @throws {RangeError} when `n` is outside `1..units left`, or a stated amount
+ *   exceeds the money left
+ */
+export function billLineCreditCents(args: {
+  line: { quantity: number; amount_cents: number };
+  credited: BillLineCredited;
+  n: number;
+  stated_cents?: number;
+}): number {
+  const { line, credited, n, stated_cents } = args;
+  const left = line.quantity - credited.quantity;
+  if (!Number.isInteger(n) || n < 1 || n > left) {
+    throw new RangeError(`crediting ${n} exceeds the ${Math.max(0, left)} left on the bill line`);
+  }
+  const room = Math.max(0, line.amount_cents - credited.amount_cents);
+  if (stated_cents !== undefined) {
+    if (stated_cents > room) throw new RangeError(`a credit of ${stated_cents} cents exceeds the ${room} cents left on the bill line`);
+    return stated_cents;
+  }
+  return Math.min(room, flatShareCents(line.amount_cents, line.quantity, credited.quantity, credited.quantity + n));
 }
 
 // ── The projector ───────────────────────────────────────────────

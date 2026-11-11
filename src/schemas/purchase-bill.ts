@@ -1004,12 +1004,17 @@ export const PurchaseDocumentItemInput: z.ZodType<PurchaseDocumentItemInputType>
 });
 
 /**
- * One line of a supplier CREDIT as an operator states it: a purchase item and
- * what it un-bills.
+ * One line of a supplier CREDIT as an operator states it: a purchase item, or a
+ * bill line (one-document-model 6d), and what it un-bills.
  *
- * - **flat** — `quantity` units, priced from the line's billed pool
- *   (`purchaseLineCreditCents`): the pool's share, a named bill line's rate, or a
- *   stated `amount_cents`, the pool capping all three.
+ * - **flat, naming no bill line** — `quantity` units, priced from the line's
+ *   billed pool (`purchaseLineCreditCents`): the pool's share, or a stated
+ *   `amount_cents` the pool caps.
+ * - **flat, naming a bill line** — units `(c, c + quantity]` of that line, `c`
+ *   what live credits already took from it, priced first-come from the line's
+ *   own money (`billLineCreditCents`), or a stated `amount_cents` capped at what
+ *   is left of it. The units are capped per bill line and by the pools behind
+ *   them (`creditableBillLines`).
  * - **time** — credited by COUNTS, as an AR credit note is (0b ruling 3):
  *   `quantity` units over `counts`, priced `rates × counts` like the bill line
  *   it reverses. Absent `counts`, the writer credits everything the line is
@@ -1017,10 +1022,23 @@ export const PurchaseDocumentItemInput: z.ZodType<PurchaseDocumentItemInputType>
  *   input used to take retired with the unit charge windows
  *   (one-document-model Phase 3).
  */
-export interface PurchaseCreditItemInputType extends PurchaseDocumentItemInputType {
+export interface PurchaseCreditItemInputType extends Omit<PurchaseDocumentItemInputType, "path_purchase_item"> {
+  /**
+   * The purchase item credited, by its path on the purchase. Required unless the
+   * line names a bill line ({@link uid_purchase_bill} + {@link path_bill_item}):
+   * a credit raised from a bill is keyed on the BILL LINE, and the writer derives
+   * the purchase line from the row (one-document-model 6d, owner ruling 23), so a
+   * substitute or a bill-authored line, which projects no purchase line of its
+   * own, can be credited. A client may still send both.
+   */
+  path_purchase_item?: string[];
   /** A time line's counts to credit; refused on a flat line by the writer. */
   counts?: TierCountType[];
-  /** The bill line credited (api-cloudrun#1439). Both or neither with {@link path_bill_item}; refused on a link. */
+  /**
+   * The bill line credited (api-cloudrun#1439). Both or neither with
+   * {@link path_bill_item}; refused on a link. Its units are capped per bill line
+   * (`creditableBillLines`) and priced first-come from it (`billLineCreditCents`).
+   */
   uid_purchase_bill?: string;
   path_bill_item?: string[];
   /** A pushed flat line's stated credit, capped at the line's billed pool; a supplier's memo governs. */
@@ -1029,7 +1047,8 @@ export interface PurchaseCreditItemInputType extends PurchaseDocumentItemInputTy
 
 /** Zod schema for PurchaseCreditItemInputType. */
 export const PurchaseCreditItemInput: z.ZodType<PurchaseCreditItemInputType> = z.object({
-  path_purchase_item: z.array(ItemUid).min(1),
+  // Optional only beside a named bill line; `uniqueItemInputs` requires one or the other.
+  path_purchase_item: z.array(ItemUid).min(1).optional(),
   quantity: z.int().min(1),
   counts: z.array(z.object({ rate_key: RateKey, num: z.int().min(0), den: z.int().min(1) })).min(1).optional(),
   uid_purchase_bill: FirestoreId.optional(),
@@ -1085,22 +1104,43 @@ const PurchaseDocumentChargeItemInput: z.ZodType<PurchaseDocumentChargeItemInput
 });
 
 /**
- * Each purchase item once per write: it is billed by at most one item of a
- * document. Keyed on the purchase line's path, so a credit still cannot credit
- * one purchase line against two bill lines in one write (as before W4K).
+ * Each credited ROW once per write, and every line names what it bills or
+ * credits.
+ *
+ * - A line names a purchase item (`path_purchase_item`) or, on a credit, a bill
+ *   line (`uid_purchase_bill` + `path_bill_item`, both or neither).
+ * - Keyed on the row the write produces under the purchase divider: a bill line's
+ *   own path below that divider when one is named, else the purchase line's
+ *   path. A credit row copies the bill row it credits (owner ruling 23), so two
+ *   items resolving to one row would store one path twice. Two bills' lines at
+ *   one path are therefore credited in two writes; two rows of one split
+ *   purchase line, at different paths, in one.
  */
 function uniqueItemInputs(
-  items: readonly { path_purchase_item: readonly string[]; uid_purchase_bill?: string; path_bill_item?: string[] }[],
+  items: readonly { path_purchase_item?: readonly string[]; uid_purchase_bill?: string; path_bill_item?: readonly string[] }[],
   ctx: z.RefinementCtx,
 ): void {
   const seen = new Set<string>();
   items.forEach((item, i) => {
-    if ((item.uid_purchase_bill === undefined) !== (item.path_bill_item === undefined)) {
+    const halves = (item.uid_purchase_bill === undefined) !== (item.path_bill_item === undefined);
+    if (halves) {
       ctx.addIssue({ code: "custom", path: ["items", i, "path_bill_item"], message: "uid_purchase_bill and path_bill_item are set together" });
     }
-    const key = item.path_purchase_item.join("/");
+    const named = item.path_bill_item !== undefined && item.uid_purchase_bill !== undefined;
+    const row = named ? item.path_bill_item!.slice(1) : item.path_purchase_item;
+    if (row === undefined) {
+      if (!halves) {
+        ctx.addIssue({ code: "custom", path: ["items", i, "path_purchase_item"], message: "a line names its purchase item, or a bill line it credits" });
+      }
+      return;
+    }
+    const key = row.join("/");
     if (seen.has(key)) {
-      ctx.addIssue({ code: "custom", path: ["items", i, "path_purchase_item"], message: "one item per purchase item" });
+      ctx.addIssue({
+        code: "custom",
+        path: ["items", i, named ? "path_bill_item" : "path_purchase_item"],
+        message: "one item per credited row; credit another bill's line at the same path in a second credit",
+      });
     }
     seen.add(key);
   });
@@ -1176,9 +1216,10 @@ export const CreatePurchaseBillInput: z.ZodType<CreatePurchaseBillInputType> = z
  * Input for recording a supplier credit against a purchase — push a new
  * ACCPAYCREDIT, or link one the supplier's credit was entered as in Xero.
  *
- * Each `items` entry UN-bills that quantity of its purchase item: it lowers
- * `quantity_billed`, and a PUSHED credit prices it from the line's billed pool
- * (`purchaseLineCreditCents`), so more than was billed cannot be credited. A price correction with no quantity is a `charge_items` entry
+ * Each `items` entry UN-bills that quantity of its purchase item, or of the
+ * bill line it names: it lowers `quantity_billed`, and a PUSHED credit prices it
+ * from the line's billed pool (`purchaseLineCreditCents`) or from the named bill
+ * line (`billLineCreditCents`), so more than was billed cannot be credited. A price correction with no quantity is a `charge_items` entry
  * (push only). A LINKED credit reads its date, reference and total from Xero,
  * as a linked bill does.
  */
