@@ -664,6 +664,53 @@ Deno.test("purchaseDocumentScope: the purchase divider, the dividers above each 
   assertThrows(() => purchaseDocumentScope(purchase, [{ ...project(a, 0, 1), path: ["elsewhere", a.uid] }]), Error, "not under purchase");
 });
 
+Deno.test("purchaseDocumentScope: a credit line copied from a bill row keeps the bill's path, its dividers from the purchase or the bill", () => {
+  const a = buyLine();
+  const g = "9a1b2c3d-0000-4000-8000-0000000000a1";
+  const h = "9a1b2c3d-0000-4000-8000-0000000000a2";
+  const e = "9a1b2c3d-0000-4000-8000-0000000000e1";
+  const b = buyLine({ uid: lid(9), path: [DIV, g, lid(9)], quantity: 1, amount_cents: 100 });
+  const purchase = { ...purchaseDoc([a]), items: [purchaseDivider(DIV), a, { uid: g, type: "group" as const, name: "Spare", path: [DIV, g], description: "" }, b] };
+  // On the bill: a substitute Y beside a, a group h and a destination e the BILL authored, each holding a charge.
+  const at = (uid: string, path: string[]) => ({ ...project(a, 0, 1), uid, path });
+  const y = at(lid(7), [PURCHASE, DIV, lid(7)]);
+  const c = at(lid(8), [PURCHASE, DIV, h, lid(8)]);
+  const d = at(lid(6), [PURCHASE, e, lid(6)]);
+  const bill = billDoc(5, [], {
+    items: [
+      ...SCOPE,
+      project(a, 0, 1),
+      y,
+      { uid: g, type: "group", name: "Spare", path: [PURCHASE, DIV, g], description: "" },
+      { uid: h, type: "group", name: "Extras", path: [PURCHASE, DIV, h], description: "" },
+      c,
+      { ...purchaseDivider(e), path: [PURCHASE, e] },
+      d,
+    ],
+    destinations: [{ uid_purchase: PURCHASE, ...purchasePair(DIV) }, { uid_purchase: PURCHASE, ...purchasePair(e) }],
+  });
+  const credited = (row: PurchaseDocumentItem) => ({ ...row, uid_purchase_bill: bill.uid, path_bill_item: [...row.path] });
+  const scope = purchaseDocumentScope(purchase, [credited(c), project(b, 0, 1), credited(d), credited(y)], { bills: [bill] });
+  assertEquals(scope.items.map((r) => [r.type, r.path.join("/")]), [
+    ["purchase", PURCHASE],
+    ["destination", `${PURCHASE}/${DIV}`],
+    // A line directly under a destination goes ahead of its first group, or it would read as the group's.
+    ["sale", `${PURCHASE}/${DIV}/${lid(7)}`],
+    ["group", `${PURCHASE}/${DIV}/${g}`],
+    ["sale", `${PURCHASE}/${DIV}/${g}/${lid(9)}`],
+    ["group", `${PURCHASE}/${DIV}/${h}`],
+    ["sale", `${PURCHASE}/${DIV}/${h}/${lid(8)}`],
+    ["destination", `${PURCHASE}/${e}`],
+    ["sale", `${PURCHASE}/${e}/${lid(6)}`],
+  ]);
+  assertEquals(scope.destinations.map((p) => [p.uid_purchase, p.uid]), [[PURCHASE, DIV], [PURCHASE, e]], "the bill's own pair comes with its destination");
+  assertEquals(scope.items.find((r) => r.uid === g)!.name, "Spare", "a divider the purchase holds is the purchase's");
+
+  // Companion: with no bill to read, a bill-row line cannot be placed and says so, rather than flattening.
+  assertThrows(() => purchaseDocumentScope(purchase, [credited(y)]), Error, "was not passed");
+  assertThrows(() => purchaseDocumentScope(purchase, [{ ...credited(y), path: [PURCHASE, DIV, lid(5)] }], { bills: [bill] }), Error, "holds no row");
+});
+
 Deno.test("flatShareCents: past `quantity` it keeps the per-unit rate, and agrees with cumulativeShareCents inside it", () => {
   // $14.09 over 3 units: 470, 939, 1409 cumulative, then 1879 and 2348 past the order.
   assertEquals(flatShareCents(1409, 3, 3, 4), 470);

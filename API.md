@@ -50832,7 +50832,7 @@ billed" reader goes through it.
   (`substitutionCredit`), in units only: the money a substitute stands in for
   is X's whole subtree's, and it lands on X.
 
-### `purchaseDocumentScope(purchase: Pick<Purchase, "uid" | "number" | "items" | "destinations">, lines: readonly PurchaseDocumentItem[]): typeLiteral`
+### `purchaseDocumentScope(purchase: Pick<Purchase, "uid" | "number" | "items" | "destinations">, lines: readonly PurchaseDocumentItem[], _: unknown): typeLiteral`
 
 **One purchase's block on a bill or credit**: its `purchase` divider, then
 every purchase divider (destination, group) that is an ancestor of a given
@@ -50846,6 +50846,16 @@ twin: the dividers keep the purchase's uids, so a bill line's path IS
 projectPurchaseLineToBillLine}); a line at a path the purchase does not carry
 (a document-only charge, `[purchase uid, uid]`) sits directly under the
 purchase divider, ahead of the first destination, so contiguity holds.
+
+**A credit line copied from a BILL ROW keeps that row's path**
+(one-document-model 6d, ruling 23; owner 2026-11-11), even where the purchase
+has no row there: a W5 substitute, a bill-authored charge, a row the bill
+moved. Its dividers come from the bill named by `uid_purchase_bill`, which
+`opts.bills` must carry: one the purchase holds is taken as above, and one the
+BILL authored (a group, or a destination with its pair) is copied from the
+bill. The line goes at the end of its parent's direct lines (ahead of a
+destination's first group, as a divider closes every level below it), so the
+credit shows the bill's tree.
 
 ### `purchaseDocumentsBefore(bill: Pick<PurchaseBill, "uid" | "date" | "number">, purchase: typeLiteral, bills: readonly B[], credits: readonly C[]): typeLiteral`
 

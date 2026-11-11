@@ -695,13 +695,28 @@ export function purchaseScopeDivider(purchase: Pick<Purchase, "uid" | "number">)
  * projectPurchaseLineToBillLine}); a line at a path the purchase does not carry
  * (a document-only charge, `[purchase uid, uid]`) sits directly under the
  * purchase divider, ahead of the first destination, so contiguity holds.
+ *
+ * **A credit line copied from a BILL ROW keeps that row's path**
+ * (one-document-model 6d, ruling 23; owner 2026-11-11), even where the purchase
+ * has no row there: a W5 substitute, a bill-authored charge, a row the bill
+ * moved. Its dividers come from the bill named by `uid_purchase_bill`, which
+ * `opts.bills` must carry: one the purchase holds is taken as above, and one the
+ * BILL authored (a group, or a destination with its pair) is copied from the
+ * bill. The line goes at the end of its parent's direct lines (ahead of a
+ * destination's first group, as a divider closes every level below it), so the
+ * credit shows the bill's tree.
+ *
+ * @throws when a line names a bill `opts.bills` does not carry, or a row that
+ *   bill does not hold
  */
 export function purchaseDocumentScope(
   purchase: Pick<Purchase, "uid" | "number" | "items" | "destinations">,
   lines: readonly PurchaseDocumentItem[],
+  opts: { bills?: readonly Pick<PurchaseBill, "uid" | "items" | "destinations">[] } = {},
 ): { items: PurchaseDocumentRow[]; destinations: PurchaseDocDestination[] } {
   const byLocal = new Map<string, PurchaseDocumentItem>();
   const own: PurchaseDocumentItem[] = [];
+  const fromBill: PurchaseDocumentItem[] = [];
   for (const line of lines) {
     if (line.path[0] !== purchase.uid) {
       throw new Error(`purchaseDocumentScope: line ${line.uid} is not under purchase ${purchase.uid}`);
@@ -709,15 +724,49 @@ export function purchaseDocumentScope(
     const local = line.path.slice(1).join("/");
     const onPurchase = purchase.items.some((r) => r.path.join("/") === local);
     if (onPurchase) byLocal.set(local, line);
+    else if (line.uid_purchase_bill !== undefined) fromBill.push(line);
     else own.push(line);
   }
   // Every ancestor path of a billed line, so the dividers above it come along.
   const wanted = new Set<string>();
-  for (const local of byLocal.keys()) {
+  // `local` and every ancestor of it (`inclusive`), or its ancestors alone.
+  const want = (local: string, inclusive: boolean) => {
     const parts = local.split("/");
-    for (let k = 1; k < parts.length; k++) wanted.add(parts.slice(0, k).join("/"));
-  }
+    for (let k = 1; k < parts.length + (inclusive ? 1 : 0); k++) wanted.add(parts.slice(0, k).join("/"));
+  };
+  for (const local of byLocal.keys()) want(local, false);
   const held = new Map(purchase.items.map((r) => [r.path.join("/"), r]));
+  // A bill-row line's ancestors: those the purchase holds come along as above;
+  // a divider only the bill holds is copied from the bill (in path order).
+  const authored = new Map<string, PurchaseDocumentRow>();
+  const authoredPairs: PurchaseDocDestination[] = [];
+  for (const line of fromBill) {
+    const bill = opts.bills?.find((b) => b.uid === line.uid_purchase_bill);
+    if (bill === undefined) {
+      throw new Error(`purchaseDocumentScope: line ${line.uid} names bill ${line.uid_purchase_bill}, which was not passed`);
+    }
+    const billRows = new Map(bill.items.map((r) => [r.path.join("/"), r]));
+    if (!billRows.has(line.path.join("/"))) {
+      throw new Error(`purchaseDocumentScope: bill ${bill.uid} holds no row at ${line.path.join("/")}`);
+    }
+    for (let k = 2; k < line.path.length; k++) {
+      const full = line.path.slice(0, k).join("/");
+      const local = line.path.slice(1, k).join("/");
+      if (held.has(local)) {
+        want(local, true);
+        continue;
+      }
+      const row = billRows.get(full);
+      if (row === undefined || (row.type !== "destination" && row.type !== "group")) continue;
+      if (!authored.has(full)) {
+        authored.set(full, row);
+        if (row.type === "destination") {
+          const pair = bill.destinations.find((d) => d.uid === row.uid);
+          if (pair !== undefined) authoredPairs.push(pair);
+        }
+      }
+    }
+  }
   const rows: PurchaseDocumentRow[] = [purchaseScopeDivider(purchase), ...own];
   for (const row of purchase.items) {
     const local = row.path.join("/");
@@ -739,10 +788,39 @@ export function purchaseDocumentScope(
       rows.push(projectPurchaseLineToBillLine(row, { uid_purchase: purchase.uid, quantity: row.quantity, from: 0 }));
     }
   }
+  // Insert each bill-row line, and each divider only the bill holds, under its
+  // parent: after the parent's direct lines (a divider row ends them), or for a
+  // divider, after the parent's whole subtree.
+  const startsWith = (path: readonly string[], prefix: readonly string[]) => prefix.every((p, i) => path[i] === p);
+  const isDivider = (r: PurchaseDocumentRow) => r.type === "purchase" || r.type === "destination" || r.type === "group";
+  const place = (row: PurchaseDocumentRow) => {
+    // The nearest ancestor this block holds; the purchase divider always is one.
+    let parentPath = row.path.slice(0, -1);
+    let at = -1;
+    for (; parentPath.length > 0; parentPath = parentPath.slice(0, -1)) {
+      at = rows.findIndex((r) => r.path.join("/") === parentPath.join("/"));
+      if (at !== -1) break;
+    }
+    at += 1;
+    const divider = isDivider(row);
+    while (at < rows.length && startsWith(rows[at].path, parentPath) && (divider || !isDivider(rows[at]))) at += 1;
+    rows.splice(at, 0, row);
+  };
+  for (const line of fromBill) {
+    for (let k = 2; k < line.path.length; k++) {
+      const full = line.path.slice(0, k).join("/");
+      const divider = authored.get(full);
+      if (divider !== undefined && !rows.some((r) => r.path.join("/") === full)) place(divider);
+    }
+    place(line);
+  }
   const dividers = new Set(rows.filter((r) => r.type === "destination").map((r) => r.uid));
   return {
     items: computePurchaseDocumentItemPaths(rows),
-    destinations: purchase.destinations.filter((d) => dividers.has(d.uid)).map((d) => ({ uid_purchase: purchase.uid, ...d })),
+    destinations: [
+      ...purchase.destinations.filter((d) => dividers.has(d.uid)).map((d) => ({ uid_purchase: purchase.uid, ...d })),
+      ...authoredPairs.filter((d) => dividers.has(d.uid)),
+    ],
   };
 }
 
