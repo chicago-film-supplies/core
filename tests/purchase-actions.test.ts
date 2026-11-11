@@ -433,6 +433,26 @@ Deno.test("creditableBillLines: a bill-authored line is creditable, capped by it
   assertEquals(unitsAt(a, ctx6d([a], [credit6d([named("A", ["extra"], 1, { type: "service" })])])), { x: 5, extra: 1 });
 });
 
+Deno.test("creditableBillLines: a substituted kit's component is absent, whether its root is a no-money header or priced (api-cloudrun#1475)", () => {
+  // X is a kit: a header over 2 components a unit. Y, its alternate kit, stands in for all 2;
+  // the server stamps Y's component with its share of the root's entry.
+  const items = asLines(buy({ uid: "k", path: ["k"], quantity: 2 }), buy({ uid: "c", path: ["k", "c"], quantity: 4 }));
+  const component = row(["y", "yc"], 4, { quantity_per_parent: 2, substituted_for: [{ path: ["k"], quantity: 4 }] });
+  const headerRoot = row(["y"], 2, { ledger_account: null, amount_cents: 0, substituted_for: [{ path: ["k"], quantity: 2 }] });
+  const a = bill6d("A", [headerRoot, component]);
+  // Read with the header filtered out first, the component anchored itself and was offered:
+  // a credit of 1 of its 4 units then un-billed a whole X kit (measured by the 6d API probe).
+  assertEquals(creditableBillLines(a, ctx6d([a], [], items)), []);
+  assertEquals(
+    purchaseBillCreditRefusal(a, ctx6d([a], [], items), [{ path_bill_item: [PU, "y", "yc"], quantity: 1 }])?.includes("no line at"),
+    true,
+  );
+  // Companion: a priced root is offered; its component still is not.
+  const pricedRoot = row(["y"], 2, { substituted_for: [{ path: ["k"], quantity: 2 }] });
+  const b = bill6d("A", [pricedRoot, component]);
+  assertEquals(Object.keys(unitsAt(b, ctx6d([b], [], items))), ["y"]);
+});
+
 Deno.test("creditableBillLines: one segment per credit — a substitute's stand-ins for each X, then its own units (6d, owner 2026-11-11)", () => {
   const items = asLines(buy({ uid: "x", path: ["x"], quantity: 5 }));
   // Whole: Y stands in for all 5 of X — one segment, capped by X's pool (5).

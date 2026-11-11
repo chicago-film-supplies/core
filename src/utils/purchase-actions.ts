@@ -42,6 +42,7 @@ import {
   type PurchaseReplacementItem,
   type PurchaseSaleItem,
   type PurchaseServiceItem,
+  type SubstitutedForEntryType,
   isKitHeaderLine,
 } from "../schemas/mod.ts";
 import {
@@ -421,10 +422,17 @@ export interface CreditableBillLine {
 export function creditableBillLines(bill: PurchaseBillActionBill, ctx: PurchaseBillContext): CreditableBillLine[] {
   const contract = (INVOICE_STATUS_CONTRACTS as Record<string, { live_in_xero: boolean } | undefined>)[bill.status];
   if (!contract?.live_in_xero) return [];
-  const lines = purchaseDocumentLines(bill.items).filter((l) => !isKitHeaderLine(l));
-  const entriesOf = (l: (typeof lines)[number]) => ("substituted_for" in l ? l.substituted_for ?? [] : []);
+  const entriesOf = (l: object): SubstitutedForEntryType[] =>
+    "substituted_for" in l && Array.isArray(l.substituted_for) ? l.substituted_for as SubstitutedForEntryType[] : [];
   // A row carrying entries that anchors nothing is a component of a substituted kit.
-  const withEntries = lines.filter((l) => entriesOf(l).length > 0).map((l) => ({ path: l.path, substituted_for: entriesOf(l) }));
+  // 🔴 Read over every line ROW, kit headers included (`purchaseDocumentLines`
+  // drops them): a substitute kit's root is usually a no-money header, and
+  // without it each stamped component reads as a root, so a credit of one
+  // component un-billed a whole X kit (api-cloudrun#1475, found by the 6d API probe).
+  const withEntries = bill.items
+    .filter((r) => isPurchaseLine(r) && entriesOf(r).length > 0)
+    .map((r) => ({ path: r.path, substituted_for: entriesOf(r) }));
+  const lines = purchaseDocumentLines(bill.items);
   const roots = new Set(collectSubstitutionAnchors(withEntries).map((a) => a.path.join("/")));
   const components = new Set(withEntries.map((r) => r.path.join("/")).filter((k) => !roots.has(k)));
   const out: CreditableBillLine[] = [];
