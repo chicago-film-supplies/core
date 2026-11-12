@@ -53,11 +53,13 @@
  */
 import { z } from "zod";
 import { FirestoreId } from "./_uid.ts";
+import { chicagoInstant } from "./_datetime.ts";
 import {
   ActorRef,
   type ActorRefType,
   checkZeroPricedAmount,
   checkZeroPricedComponents,
+  FirestoreTimestamp,
   type FirestoreTimestampType,
   TimestampFields,
   UidNameRef,
@@ -183,6 +185,24 @@ export interface PurchaseReceipt {
   subject: string;
   /** The purchase's reference. */
   reference: string | null;
+  /**
+   * When this receipt is next due — the earliest of its open legs: a unit still
+   * to ARRIVE is due at its pair's `delivery_start`, a subrent unit held for
+   * SEND-BACK at its pair's `collection_start` (the hire end; `collection_end`
+   * is supply's). `null` once the purchase is complete or canceled, or when no
+   * pair states the date. The fulfillment's `due_at`, on the payable side, so
+   * one custody page sorts both (ruling 29). Derived by `deriveReceiptDueAt`
+   * (`utils/purchase-receipts.ts`) from the purchase and its inbound bookings.
+   */
+  due_at: string | null;
+  /** The `Timestamp` mirror of {@link due_at}, from the same pair. */
+  due_at_fs: FirestoreTimestampType | null;
+  /**
+   * The stores this receipt's units come to or sit in: the purchase's store,
+   * then every store its inbound bookings name (`receiptQueryByUidStore`). For
+   * a store-scoped "what's arriving here" list (owner, 2026-11-11).
+   */
+  query_by_uid_store: string[];
   /** The products this receipt carries (its line rows' uids), for reverse lookup. */
   query_by_items: string[];
   /** Every contact a pair's endpoint names (`buildQueryByContacts`, `utils/orders.ts`). */
@@ -208,6 +228,13 @@ export const PurchaseReceiptSchema: z.ZodType<PurchaseReceipt> = z.strictObject(
   items: z.array(PurchaseReceiptItem).min(1).meta({ label: "Item" }).superRefine(checkZeroPricedComponents),
   subject: z.string().meta({ pii: "mask", column: true, label: "Subject", linkTo: "purchaseDetail" }),
   reference: z.string().max(200).nullable().meta({ column: true, label: "Reference" }),
+  // Bare `.nullable()`: a new collection has no corpus to forgive, so a writer
+  // that omits the key fails rather than storing an absence (unlike the
+  // fulfillment's catalogued `.default(null)`).
+  due_at: chicagoInstant().meta({ column: true, label: "Due", serverSortVia: "due_at_fs" }).nullable(),
+  // Never a column — an `_fs` mirror is `due_at` under the Timestamp encoding.
+  due_at_fs: FirestoreTimestamp.nullable(),
+  query_by_uid_store: z.array(FirestoreId),
   query_by_items: z.array(z.string()),
   query_by_contacts: z.array(z.string()),
   query_by_dates: z.array(z.string()),
@@ -221,7 +248,7 @@ export const PurchaseReceiptSchema: z.ZodType<PurchaseReceipt> = z.strictObject(
   title: "Purchase Receipt",
   collection: "purchase-receipts",
   displayDefaults: {
-    columns: ["number", "supplier.name", "subject", "status"],
+    columns: ["number", "supplier.name", "subject", "status", "due_at"],
     filters: { status: [] },
     sort: { column: "number", direction: "desc" },
   },

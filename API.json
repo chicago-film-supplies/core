@@ -4875,7 +4875,7 @@
         {
           "kind": "interface",
           "name": "Purchase",
-          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  uid_store: string;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseRow[];\n  destinations: PurchaseDestination[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  bills: Array<typeLiteral>;\n  credits: Array<typeLiteral>;\n  query_by_credits: string[];\n  query_by_units?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  uid_store: string;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseRow[];\n  destinations: PurchaseDestination[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  bills: Array<typeLiteral>;\n  credits: Array<typeLiteral>;\n  query_by_credits: string[];\n  bookings_breakdown: InboundBreakdown;\n  query_by_units?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A purchase order placed with a supplier."
         },
         {
@@ -5325,7 +5325,7 @@
         {
           "kind": "interface",
           "name": "PurchaseReceipt",
-          "declaration": "interface PurchaseReceipt {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  destinations: PurchaseDestination[];\n  items: PurchaseReceiptItemType[];\n  subject: string;\n  reference: string | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_by: ActorRefType | null;\n  updated_by: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface PurchaseReceipt {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  destinations: PurchaseDestination[];\n  items: PurchaseReceiptItemType[];\n  subject: string;\n  reference: string | null;\n  due_at: string | null;\n  due_at_fs: FirestoreTimestampType | null;\n  query_by_uid_store: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_by: ActorRefType | null;\n  updated_by: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A purchase receipt: the custody projection of one purchase, keyed by its uid."
         },
         {
@@ -13688,7 +13688,7 @@
         {
           "kind": "interface",
           "name": "Purchase",
-          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  uid_store: string;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseRow[];\n  destinations: PurchaseDestination[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  bills: Array<typeLiteral>;\n  credits: Array<typeLiteral>;\n  query_by_credits: string[];\n  query_by_units?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  uid_store: string;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseRow[];\n  destinations: PurchaseDestination[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  bills: Array<typeLiteral>;\n  credits: Array<typeLiteral>;\n  query_by_credits: string[];\n  bookings_breakdown: InboundBreakdown;\n  query_by_units?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A purchase order placed with a supplier."
         },
         {
@@ -14632,7 +14632,7 @@
         {
           "kind": "interface",
           "name": "PurchaseReceipt",
-          "declaration": "interface PurchaseReceipt {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  destinations: PurchaseDestination[];\n  items: PurchaseReceiptItemType[];\n  subject: string;\n  reference: string | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_by: ActorRefType | null;\n  updated_by: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface PurchaseReceipt {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  destinations: PurchaseDestination[];\n  items: PurchaseReceiptItemType[];\n  subject: string;\n  reference: string | null;\n  due_at: string | null;\n  due_at_fs: FirestoreTimestampType | null;\n  query_by_uid_store: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_by: ActorRefType | null;\n  updated_by: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A purchase receipt: the custody projection of one purchase, keyed by its uid."
         },
         {
@@ -25469,6 +25469,18 @@
       "moduleDoc": "Purchase receipt rows — why a stored receipt row exists.\n\nThe receipt (`schemas/purchase-receipt.ts`) is the payable side's custody\ndocument, the twin of the fulfillment. This module holds the receipt's twin\nof `fulfillmentRowSources` (`utils/fulfillment-items.ts`): ONE classifier for\n\"why does this row exist\", which every reader of a receipt row asks through\n(the receiver's save, the purchase → receipt sync, the drift audit), so a new\nkind of receipt-only row is a new member of the union rather than a branch\ntaught to some readers and not others (core#129's lesson on the fulfillment).",
       "symbols": [
         {
+          "kind": "interface",
+          "name": "ReceiptBookingSource",
+          "declaration": "interface ReceiptBookingSource {\n  readonly uid: string;\n  readonly type: \"sale\" | \"rental\";\n  readonly breakdown: Readonly<Record<\"ordered\" | \"transit_inbound\" | \"received\" | \"stocked\" | \"transit_outbound\", number>>;\n  readonly query_by_uid_store: readonly string[];\n}",
+          "doc": "The inbound booking fields the receipt derivations read."
+        },
+        {
+          "kind": "interface",
+          "name": "ReceiptPairSource",
+          "declaration": "interface ReceiptPairSource {\n  readonly uid: string;\n  readonly dates: Pick<OrderDocDatesType, \"delivery_start\" | \"delivery_start_fs\" | \"collection_start\" | \"collection_start_fs\" | \"collection_end\" | \"collection_end_fs\">;\n}",
+          "doc": "The purchase pair fields {@link deriveReceiptDueAt} reads."
+        },
+        {
           "kind": "typeAlias",
           "name": "ReceiptRowSource",
           "declaration": "type ReceiptRowSource = \"purchase\" | \"kept\" | \"receipt_extra\" | \"unexplained\";",
@@ -25485,6 +25497,22 @@
           "name": "ReceiptRowSourceReceipt",
           "declaration": "interface ReceiptRowSourceReceipt {\n  items: ReadonlyArray<PurchaseReceiptItemType | T>;\n}",
           "doc": "The receipt fields {@link receiptRowSources} reads."
+        },
+        {
+          "kind": "function",
+          "name": "deriveReceiptDueAt",
+          "signature": "deriveReceiptDueAt(purchase: typeLiteral, bookings: readonly ReceiptBookingSource[]): typeLiteral",
+          "doc": "When a receipt is next due: the earliest open leg across its inbound\nbookings, read off each booking's own pair (the booking id's leg segment).\n\n| the booking holds | it is due | at |\n|---|---|---|\n| units `ordered` or `transit_inbound` | to ARRIVE | `delivery_start` |\n| a SUBRENT's units `received`, `stocked` or `transit_outbound` | to go BACK | `collection_start`, else `collection_end` |\n\nThe receipt's twin of `deriveNextEventDate` (`utils/orders.ts`), with one\ndeliberate difference: the leg is decided PER BOOKING, not from a summed\nbreakdown, because the inbound ladder reads one key two ways by type — a\nBuy's `stocked` is terminal, a Subrent's is held for return — so a purchase\nrollup cannot tell a send-back from a finished buy. `collection_start` is the\nhire end; `collection_end` is where supply ends, the later bound.\n\n`{ iso: null, fs: null }` on a complete or canceled purchase, and when no\nopen leg's pair states its date. The `_fs` is the winning pair's own, since\nthis module cannot mint a `Timestamp`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "receiptQueryByUidStore",
+          "signature": "receiptQueryByUidStore(purchase: typeLiteral, bookings: readonly Pick<ReceiptBookingSource, \"query_by_uid_store\">[]): string[]",
+          "doc": "A receipt's `query_by_uid_store`: the purchase's store (where the goods come\nto), then every store an inbound booking names, each once, in that order.\nThe purchase's store stays even after the units land elsewhere, so a store\nthat expected a delivery still finds the receipt that answers it.",
+          "paramTags": [],
+          "returnsTag": null
         },
         {
           "kind": "function",

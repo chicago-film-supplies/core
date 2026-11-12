@@ -163,6 +163,7 @@ import {
 } from "./order.ts";
 import { LedgerPostingCore, LineItemCore, LineTaxCore, PayableKitLedgerAccount } from "./_items.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
+import { type InboundBreakdown, InboundBreakdownSchema } from "./_inbound-breakdown.ts";
 import { SIDE_CONTRACTS, type SharedLineType } from "./side.ts";
 import {
   type PriceFormulaBasis,
@@ -1281,6 +1282,15 @@ export interface Purchase {
   /** Uid list of {@link credits}. */
   query_by_credits: string[];
   /**
+   * The purchase's inbound bookings' `breakdown`s summed — the order's
+   * `bookings_breakdown`, on the supplier ladder (7a, owner 2026-11-11). Written
+   * by the purchase finalize from committed bookings. A SUMMARY only: it adds
+   * Buys and Subrents, whose `stocked` means different things (terminal for a
+   * Buy, held for return on a Subrent), so no leg rule reads it; the receipt's
+   * `due_at` reads the bookings themselves.
+   */
+  bookings_breakdown: InboundBreakdown;
+  /**
    * Mirror of the units the lines cover ({@link deriveQueryByUnits}) — "which
    * purchases cover this unit" as one `array-contains`, the read behind every
    * coverage question (`coversForUnit`, the uncovered-window offer).
@@ -1390,6 +1400,10 @@ export const PurchaseSchema: z.ZodType<Purchase> = z.strictObject({
     status: PurchaseCreditStatusEnum.meta({ column: true, label: "Status" }),
   })).meta({ label: "Supplier Credit" }),
   query_by_credits: z.array(FirestoreId).meta({ derived: true }),
+  // The inbound bookings' breakdowns summed, the order's `bookings_breakdown`
+  // twin (7a, owner 2026-11-11). Written by `finalize-purchase`; a summary for
+  // display, never a leg rule (it sums Buys and Subrents, whose keys differ).
+  bookings_breakdown: InboundBreakdownSchema.meta({ derived: true }),
   query_by_units: z.array(UnitId).optional(),
   uid_thread: ThreadId.optional().meta(homonym),
   version: z.int().min(0).default(0).meta(homonym),

@@ -834,6 +834,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // receiver's save and the drift audit. It needs the purchase AND the stored
   // receipt at once; a template renders one document.
   "purchase-receipts": [
+    "deriveReceiptDueAt",
+    "receiptQueryByUidStore",
     "receiptRowSources",
   ],
   // `utils/fulfillment-items.ts` is WRITE-PATH machinery shared by the API and

@@ -10987,6 +10987,7 @@ interface Purchase {
   bills: Array<typeLiteral>;
   credits: Array<typeLiteral>;
   query_by_credits: string[];
+  bookings_breakdown: InboundBreakdown;
   query_by_units?: string[];
   uid_thread?: string;
   version: number;
@@ -11973,6 +11974,9 @@ interface PurchaseReceipt {
   items: PurchaseReceiptItemType[];
   subject: string;
   reference: string | null;
+  due_at: string | null;
+  due_at_fs: FirestoreTimestampType | null;
+  query_by_uid_store: string[];
   query_by_items: string[];
   query_by_contacts: string[];
   query_by_dates: string[];
@@ -29149,6 +29153,7 @@ interface Purchase {
   bills: Array<typeLiteral>;
   credits: Array<typeLiteral>;
   query_by_credits: string[];
+  bookings_breakdown: InboundBreakdown;
   query_by_units?: string[];
   uid_thread?: string;
   version: number;
@@ -31021,6 +31026,9 @@ interface PurchaseReceipt {
   items: PurchaseReceiptItemType[];
   subject: string;
   reference: string | null;
+  due_at: string | null;
+  due_at_fs: FirestoreTimestampType | null;
+  query_by_uid_store: string[];
   query_by_items: string[];
   query_by_contacts: string[];
   query_by_dates: string[];
@@ -52925,6 +52933,30 @@ of `fulfillmentRowSources` (`utils/fulfillment-items.ts`): ONE classifier for
 kind of receipt-only row is a new member of the union rather than a branch
 taught to some readers and not others (core#129's lesson on the fulfillment).
 
+### `ReceiptBookingSource`
+
+The inbound booking fields the receipt derivations read.
+
+```ts
+interface ReceiptBookingSource {
+  readonly uid: string;
+  readonly type: "sale" | "rental";
+  readonly breakdown: Readonly<Record<"ordered" | "transit_inbound" | "received" | "stocked" | "transit_outbound", number>>;
+  readonly query_by_uid_store: readonly string[];
+}
+```
+
+### `ReceiptPairSource`
+
+The purchase pair fields {@link deriveReceiptDueAt} reads.
+
+```ts
+interface ReceiptPairSource {
+  readonly uid: string;
+  readonly dates: Pick<OrderDocDatesType, "delivery_start" | "delivery_start_fs" | "collection_start" | "collection_start_fs" | "collection_end" | "collection_end_fs">;
+}
+```
+
 ### `ReceiptRowSource`
 
 Why a stored receipt LINE row exists — {@link receiptRowSources}.
@@ -52964,6 +52996,34 @@ interface ReceiptRowSourceReceipt {
   items: ReadonlyArray<PurchaseReceiptItemType | T>;
 }
 ```
+
+### `deriveReceiptDueAt(purchase: typeLiteral, bookings: readonly ReceiptBookingSource[]): typeLiteral`
+
+When a receipt is next due: the earliest open leg across its inbound
+bookings, read off each booking's own pair (the booking id's leg segment).
+
+| the booking holds | it is due | at |
+|---|---|---|
+| units `ordered` or `transit_inbound` | to ARRIVE | `delivery_start` |
+| a SUBRENT's units `received`, `stocked` or `transit_outbound` | to go BACK | `collection_start`, else `collection_end` |
+
+The receipt's twin of `deriveNextEventDate` (`utils/orders.ts`), with one
+deliberate difference: the leg is decided PER BOOKING, not from a summed
+breakdown, because the inbound ladder reads one key two ways by type — a
+Buy's `stocked` is terminal, a Subrent's is held for return — so a purchase
+rollup cannot tell a send-back from a finished buy. `collection_start` is the
+hire end; `collection_end` is where supply ends, the later bound.
+
+`{ iso: null, fs: null }` on a complete or canceled purchase, and when no
+open leg's pair states its date. The `_fs` is the winning pair's own, since
+this module cannot mint a `Timestamp`.
+
+### `receiptQueryByUidStore(purchase: typeLiteral, bookings: readonly Pick<ReceiptBookingSource, "query_by_uid_store">[]): string[]`
+
+A receipt's `query_by_uid_store`: the purchase's store (where the goods come
+to), then every store an inbound booking names, each once, in that order.
+The purchase's store stays even after the units land elsewhere, so a store
+that expected a delivery still finds the receipt that answers it.
 
 ### `receiptRowSources(receipt: ReceiptRowSourceReceipt<T>, purchase: ReceiptRowSourcePurchase): Map<T, ReceiptRowSource>`
 

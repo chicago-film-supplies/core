@@ -15,7 +15,12 @@ import {
   schemas,
 } from "../src/schemas/mod.ts";
 import { getTestDoc, type TestDocOptionsWithNow } from "../src/schemas/testing.ts";
-import { type ReceiptRowSource, receiptRowSources } from "../src/utils/purchase-receipts.ts";
+import {
+  deriveReceiptDueAt,
+  receiptQueryByUidStore,
+  type ReceiptRowSource,
+  receiptRowSources,
+} from "../src/utils/purchase-receipts.ts";
 import { mergeSharedFields, purchaseReceiptSharedFields } from "../src/utils/shared-fields.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
@@ -161,4 +166,75 @@ Deno.test("purchaseReceiptSharedFields: an untouched row follows the purchase; a
   // label correction still reaches the row.
   const short = mergeSharedFields(fields, prev, next, line({ quantity: 3, name: "Chair" }));
   assertEquals([short.merged.quantity, short.merged.name], [3, "Folding chair"]);
+});
+
+// ── due_at and query_by_uid_store (owner, 2026-11-11) ──────────────────
+
+const LEG_B = "22222222-2222-4222-8222-222222222222";
+const PURCHASE_UID = "PPPPPPPPPPPPPPPPPPPP";
+const iso = (d: number) => `2026-12-${String(d).padStart(2, "0")}T09:00:00.000-06:00`;
+const fsOf = (d: number) => ({ ...mockTimestamp, seconds: d });
+const pair = (uid: string, deliver: number | null, back: number | null, end: number | null = null) => ({
+  uid,
+  dates: {
+    delivery_start: deliver === null ? null : iso(deliver),
+    delivery_start_fs: deliver === null ? null : fsOf(deliver),
+    collection_start: back === null ? null : iso(back),
+    collection_start_fs: back === null ? null : fsOf(back),
+    collection_end: end === null ? null : iso(end),
+    collection_end_fs: end === null ? null : fsOf(end),
+  },
+});
+const zero = { ordered: 0, transit_inbound: 0, received: 0, stocked: 0, transit_outbound: 0 };
+const booking = (type: "sale" | "rental", leg: string, held: Partial<typeof zero>, stores: string[] = []) => ({
+  uid: `${PURCHASE_UID}:${PRODUCT}:${leg}`,
+  type,
+  breakdown: { ...zero, ...held },
+  query_by_uid_store: stores,
+});
+const active = (destinations: ReturnType<typeof pair>[]) => ({ status: "active" as const, destinations });
+
+Deno.test("deriveReceiptDueAt: a unit still to arrive is due at its pair's delivery_start", () => {
+  const got = deriveReceiptDueAt(active([pair(LEG, 5, 9)]), [booking("sale", LEG, { ordered: 2 })]);
+  assertEquals(got, { iso: iso(5), fs: fsOf(5) });
+});
+
+Deno.test("deriveReceiptDueAt: a held SUBRENT is due back at collection_start; a stocked BUY is due nowhere", () => {
+  const dests = [pair(LEG, 5, 9, 12)];
+  assertEquals(deriveReceiptDueAt(active(dests), [booking("rental", LEG, { stocked: 2 })]).iso, iso(9));
+  // The same key, a Buy: terminal, so nothing is due — what a summed rollup cannot tell apart.
+  assertEquals(deriveReceiptDueAt(active(dests), [booking("sale", LEG, { stocked: 2 })]), { iso: null, fs: null });
+  // No hire end stated: the supply end stands in.
+  assertEquals(deriveReceiptDueAt(active([pair(LEG, 5, null, 12)]), [booking("rental", LEG, { received: 1 })]).iso, iso(12));
+});
+
+Deno.test("deriveReceiptDueAt: the earliest open leg across pairs wins, its _fs from the same pair", () => {
+  const dests = [pair(LEG, 20, 25), pair(LEG_B, 8, 14)];
+  const got = deriveReceiptDueAt(active(dests), [booking("sale", LEG, { ordered: 1 }), booking("rental", LEG_B, { stocked: 1 })]);
+  assertEquals(got, { iso: iso(14), fs: fsOf(14) });
+});
+
+Deno.test("deriveReceiptDueAt: null when the purchase is closed, nothing is open, or the pair states no date", () => {
+  const dests = [pair(LEG, 5, 9)];
+  const open = [booking("sale", LEG, { ordered: 2 })];
+  assertEquals(deriveReceiptDueAt({ status: "complete", destinations: dests }, open), { iso: null, fs: null });
+  assertEquals(deriveReceiptDueAt({ status: "canceled", destinations: dests }, open), { iso: null, fs: null });
+  assertEquals(deriveReceiptDueAt(active(dests), [booking("rental", LEG, {})]), { iso: null, fs: null });
+  assertEquals(deriveReceiptDueAt(active([pair(LEG, null, null)]), open), { iso: null, fs: null });
+});
+
+Deno.test("receiptQueryByUidStore: the purchase's store first, then each booking store once", () => {
+  assertEquals(receiptQueryByUidStore({ uid_store: "S1" }, []), ["S1"]);
+  assertEquals(
+    receiptQueryByUidStore({ uid_store: "S1" }, [{ query_by_uid_store: ["S2", "S1"] }, { query_by_uid_store: ["S2", "S3"] }]),
+    ["S1", "S2", "S3"],
+  );
+});
+
+Deno.test("PurchaseReceiptSchema: due_at and query_by_uid_store are REQUIRED keys (nullable due)", () => {
+  const { due_at: _d, ...noDue } = receipt();
+  assert(issues(noDue).length > 0, "an absent due_at is refused, not defaulted");
+  const { query_by_uid_store: _q, ...noStores } = receipt();
+  assert(issues(noStores).length > 0);
+  assertEquals(issues({ ...receipt(), due_at: null, due_at_fs: null }), []);
 });

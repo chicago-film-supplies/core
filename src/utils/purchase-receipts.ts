@@ -13,7 +13,10 @@
  */
 import { isPurchaseReceiptLineItem } from "../schemas/purchase-receipt.ts";
 import type { PurchaseReceiptItemType, PurchaseReceiptLineItemType } from "../schemas/purchase-receipt.ts";
-import { PURCHASE_PRODUCT_ITEM_TYPES } from "../schemas/purchase.ts";
+import { PURCHASE_PRODUCT_ITEM_TYPES, type PurchaseStatusType } from "../schemas/purchase.ts";
+import type { OrderDocDatesType } from "../schemas/order.ts";
+import type { FirestoreTimestampType } from "../schemas/common.ts";
+import { parseBookingId } from "./booking-id.ts";
 
 /**
  * Why a stored receipt LINE row exists — {@link receiptRowSources}.
@@ -91,4 +94,84 @@ export function receiptRowSources<T extends PurchaseReceiptLineItemType>(
     out.set(line, source);
   }
   return out;
+}
+
+// ── The receipt's derived fields (7a, owner 2026-11-11) ──────────────
+
+/** The inbound booking fields the receipt derivations read. */
+export interface ReceiptBookingSource {
+  readonly uid: string;
+  readonly type: "sale" | "rental";
+  readonly breakdown: Readonly<Record<"ordered" | "transit_inbound" | "received" | "stocked" | "transit_outbound", number>>;
+  readonly query_by_uid_store: readonly string[];
+}
+
+/** The purchase pair fields {@link deriveReceiptDueAt} reads. */
+export interface ReceiptPairSource {
+  readonly uid: string;
+  readonly dates: Pick<
+    OrderDocDatesType,
+    "delivery_start" | "delivery_start_fs" | "collection_start" | "collection_start_fs" | "collection_end" | "collection_end_fs"
+  >;
+}
+
+/**
+ * When a receipt is next due: the earliest open leg across its inbound
+ * bookings, read off each booking's own pair (the booking id's leg segment).
+ *
+ * | the booking holds | it is due | at |
+ * |---|---|---|
+ * | units `ordered` or `transit_inbound` | to ARRIVE | `delivery_start` |
+ * | a SUBRENT's units `received`, `stocked` or `transit_outbound` | to go BACK | `collection_start`, else `collection_end` |
+ *
+ * The receipt's twin of `deriveNextEventDate` (`utils/orders.ts`), with one
+ * deliberate difference: the leg is decided PER BOOKING, not from a summed
+ * breakdown, because the inbound ladder reads one key two ways by type — a
+ * Buy's `stocked` is terminal, a Subrent's is held for return — so a purchase
+ * rollup cannot tell a send-back from a finished buy. `collection_start` is the
+ * hire end; `collection_end` is where supply ends, the later bound.
+ *
+ * `{ iso: null, fs: null }` on a complete or canceled purchase, and when no
+ * open leg's pair states its date. The `_fs` is the winning pair's own, since
+ * this module cannot mint a `Timestamp`.
+ */
+export function deriveReceiptDueAt(
+  purchase: { readonly status: PurchaseStatusType; readonly destinations: readonly ReceiptPairSource[] },
+  bookings: readonly ReceiptBookingSource[],
+): { iso: string | null; fs: FirestoreTimestampType | null } {
+  if (purchase.status !== "active") return { iso: null, fs: null };
+  const pairs = new Map(purchase.destinations.map((d) => [d.uid, d]));
+  let best: { t: number; iso: string; fs: FirestoreTimestampType | null } | null = null;
+  const consider = (iso: string | null | undefined, fs: FirestoreTimestampType | null | undefined) => {
+    if (!iso) return;
+    const t = Date.parse(iso);
+    if (Number.isNaN(t)) return;
+    if (best === null || t < best.t) best = { t, iso, fs: fs ?? null };
+  };
+  for (const b of bookings) {
+    const leg = parseBookingId(b.uid)?.destUid;
+    const pair = leg === undefined ? undefined : pairs.get(leg);
+    if (!pair) continue;
+    const d = pair.dates;
+    if (b.breakdown.ordered + b.breakdown.transit_inbound > 0) consider(d.delivery_start, d.delivery_start_fs);
+    if (b.type === "rental" && b.breakdown.received + b.breakdown.stocked + b.breakdown.transit_outbound > 0) {
+      if (d.collection_start) consider(d.collection_start, d.collection_start_fs);
+      else consider(d.collection_end, d.collection_end_fs);
+    }
+  }
+  const won = best as { iso: string; fs: FirestoreTimestampType | null } | null;
+  return won === null ? { iso: null, fs: null } : { iso: won.iso, fs: won.fs };
+}
+
+/**
+ * A receipt's `query_by_uid_store`: the purchase's store (where the goods come
+ * to), then every store an inbound booking names, each once, in that order.
+ * The purchase's store stays even after the units land elsewhere, so a store
+ * that expected a delivery still finds the receipt that answers it.
+ */
+export function receiptQueryByUidStore(
+  purchase: { readonly uid_store: string },
+  bookings: readonly Pick<ReceiptBookingSource, "query_by_uid_store">[],
+): string[] {
+  return [...new Set([purchase.uid_store, ...bookings.flatMap((b) => b.query_by_uid_store)])];
 }

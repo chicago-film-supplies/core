@@ -10,6 +10,7 @@
  */
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
+  emptyInboundBreakdown,
   type PurchaseSaleItem,
   ClosePurchaseInput,
   COA_ASSET_CODES,
@@ -334,6 +335,7 @@ function purchase(over: Record<string, unknown> = {}) {
     bills: [],
     credits: [],
     query_by_credits: [],
+    bookings_breakdown: emptyInboundBreakdown(),
     version: 0,
     created_by: actor,
     updated_by: actor,

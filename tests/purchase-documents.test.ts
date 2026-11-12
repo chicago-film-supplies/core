@@ -37,6 +37,7 @@ import { computeDocumentDiffs, type DocumentDiffContext, type DocumentQuantityEn
 import { priceFormulaRefOf } from "../src/utils/price-formulas.ts";
 import { cumulativeShareCents } from "../src/utils/purchases.ts";
 import {
+  emptyInboundBreakdown,
   type Purchase,
   type PurchaseBill,
   PurchaseBillSchema,
@@ -389,6 +390,7 @@ function purchaseDoc(items: PurchaseItem[]): Purchase {
     bills: [],
     credits: [],
     query_by_credits: [],
+    bookings_breakdown: emptyInboundBreakdown(),
     version: 0,
     created_by: actor,
     updated_by: actor,
