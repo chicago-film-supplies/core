@@ -41,6 +41,7 @@ import {
   type Purchase,
   type PurchaseBill,
   PurchaseBillSchema,
+  PurchaseSchema,
   UpdatePurchaseBillInput,
   type PurchaseCredit,
   type PurchaseDocumentItem,
@@ -520,8 +521,8 @@ Deno.test("syncPurchaseToBills: a component added to a kit the bill moved lands 
   const KIT = lid(20);
   const GROUP = iuid(21);
   const header = buyLine({ uid: KIT, path: [DIV, KIT], name: "Kit", quantity: 2, amount_cents: 0, ledger_account: null });
-  const comp = buyLine({ uid: lid(22), path: [DIV, KIT, lid(22)], name: "Part", quantity: 2, amount_cents: 400 });
-  const added = buyLine({ uid: lid(23), path: [DIV, KIT, lid(23)], name: "Added", quantity: 2, amount_cents: 600 });
+  const comp = buyLine({ uid: lid(22), path: [DIV, KIT, lid(22)], name: "Part", quantity: 2, amount_cents: 400, zero_priced: false });
+  const added = buyLine({ uid: lid(23), path: [DIV, KIT, lid(23)], name: "Added", quantity: 2, amount_cents: 600, zero_priced: false });
   const doc = billDoc(1, [project(header, 10, 2), project(comp, 11, 2)]);
   const moved: PurchaseBill = {
     ...doc,
@@ -541,6 +542,28 @@ Deno.test("syncPurchaseToBills: a component added to a kit the bill moved lands 
   assertEquals(line.path_purchase_item, [DIV, KIT, lid(23)]);
   assertEquals(out.bill.totals.total_cents, 400 + 600);
   parses(out.bill);
+});
+
+Deno.test("C15: a payable component states zero_priced and only a component may be flagged, on the purchase and the bill", () => {
+  // Only the zero_priced findings: the fixture's other mirrors are not under test here.
+  const flags = (issues: readonly { path: PropertyKey[] }[] | undefined) =>
+    (issues ?? []).filter((i) => i.path.at(-1) === "zero_priced").map((i) => i.path.join("."));
+  const onPurchase = (items: PurchaseItem[]) => flags(PurchaseSchema.safeParse(purchaseDoc(items)).error?.issues);
+  const onBill = (items: PurchaseItem[]) => flags(PurchaseBillSchema.safeParse(billDoc(1, items.map((i) => project(i)))).error?.issues);
+
+  const HIRE = lid(30);
+  const product = buyLine({ uid: HIRE, path: [DIV, HIRE], name: "Hotspot" });
+  // Freight placed under the product row it costs (ruling 70): a COMPONENT of that row.
+  const placed = (zero_priced: boolean | null) =>
+    payableLine("service", { uid: `custom-${lid(31)}`, path: [DIV, HIRE, `custom-${lid(31)}`], name: "Freight", zero_priced }, DIV) as PurchaseItem;
+  const topLevel = (zero_priced: boolean | null) =>
+    payableLine("service", { uid: `custom-${lid(32)}`, path: [DIV, `custom-${lid(32)}`], name: "Carrier", zero_priced }, DIV) as PurchaseItem;
+
+  for (const [name, check] of [["purchase", onPurchase], ["bill", onBill]] as const) {
+    assertEquals(check([product, placed(false), topLevel(null)]), [], `${name}: control — a stated component, an unflagged top-level line`);
+    assertEquals(check([product, placed(null)]).length, 1, `${name}: a placed charge that states nothing is refused`);
+    assertEquals(check([product, topLevel(true)]).length, 1, `${name}: a top-level line may not be flagged`);
+  }
 });
 
 Deno.test("syncPurchaseToBills: a purchase line added for a product the bill already authored ADOPTS that row, not a second one (W4)", () => {

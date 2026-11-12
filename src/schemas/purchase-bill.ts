@@ -112,6 +112,7 @@ import {
   type OutOfServiceLinkCarrier,
   ActorRef,
   type ActorRefType,
+  checkZeroPricedComponents,
   DocSource,
   type DocSourceType,
   FirestoreTimestamp,
@@ -803,7 +804,10 @@ export const PurchaseBillSchema: z.ZodType<PurchaseBill> = z.strictObject({
   // `.min(1)`: a bill bills at least one item. With charge items in the same
   // array that holds without a special case — a historic Vision bill is one
   // document-only or standing-line charge item (D5).
-  items: z.array(PurchaseDocumentRowSchema).min(1).meta({ label: "Item" }),
+  // A component states `zero_priced`, and only a component may be flagged (C15
+  // item 1), as on the purchase. The supplier credit does not take it, as the
+  // AR credit note does not.
+  items: z.array(PurchaseDocumentRowSchema).min(1).meta({ label: "Item" }).superRefine(checkZeroPricedComponents),
   destinations: z.array(PurchaseDocDestinationSchema).meta({ label: "Destination" }),
   totals: PurchaseBillTotalsSchema,
   voided_at: FirestoreTimestamp.optional(),

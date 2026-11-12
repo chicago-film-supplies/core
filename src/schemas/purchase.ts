@@ -123,6 +123,7 @@ import { COACode, type COACodeType } from "./chart-of-accounts.ts";
 import {
   ActorRef,
   type ActorRefType,
+  checkZeroPricedComponents,
   COA_ASSET_CODES,
   COA_COST_CODES,
   COA_EXPENSED_ASSET_CODES,
@@ -1387,7 +1388,11 @@ export const PurchaseSchema: z.ZodType<Purchase> = z.strictObject({
   subject: z.string().meta({ pii: "mask", column: true, label: "Subject", linkTo: "purchaseDetail", propagate: true }),
   reference: z.string().max(200).nullable().meta({ column: true, label: "Reference", ...homonym }),
   notes: z.string().meta({ pii: "mask", column: true, label: "Notes" }).nullable(),
-  items: z.array(PurchaseRowSchema).min(1).meta({ label: "Item" }),
+  // A component (a charge placed under the product it costs, a kit's part)
+  // states `zero_priced`, and only a component may be flagged — as on the order,
+  // invoice, fulfillment and receipt (C15 item 1). The writer refused both
+  // before; this is what lets a corpus re-parse see a stored violation.
+  items: z.array(PurchaseRowSchema).min(1).meta({ label: "Item" }).superRefine(checkZeroPricedComponents),
   destinations: z.array(PurchaseDestinationSchema).min(1).meta({ label: "Destination" }),
   total_cents: z.int().min(0).meta({ column: true, label: "Total", ...homonym }),
   query_by_products: z.array(FirestoreId).meta({ derived: true }),
