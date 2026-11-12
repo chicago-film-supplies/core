@@ -13,6 +13,7 @@ import {
   COA_EXPENSED_ASSET_CODES,
   FULFILLMENT_LINE_ITEM_TYPES,
   ITEM_CONTRACTS,
+  MOVEMENT_CONTRACTS,
   PRE_TAX_ITEM_TYPES,
   payablePostingIssues,
   PURCHASE_ITEM_TYPES,
@@ -92,4 +93,13 @@ Deno.test("each payable union refuses the receivable-only and the retired types"
     assertEquals(PurchaseItemSchema.safeParse({ type }).success, false, `purchase ${type}`);
     assertEquals(PurchaseDocumentItemSchema.safeParse({ type }).success, false, `bill ${type}`);
   }
+});
+
+Deno.test("SIDE_CONTRACTS: each side's custody ladder is the one its custody movements stand on (C11)", () => {
+  // Stated against the movement contracts, never against the table: a payable
+  // receipt is a `purchase` / `subrent_in`, a receivable prep a `prep`.
+  assertEquals(SIDE_CONTRACTS.payable.custody_ladder, MOVEMENT_CONTRACTS.purchase.booking_ladder);
+  assertEquals(SIDE_CONTRACTS.payable.custody_ladder, MOVEMENT_CONTRACTS.subrent_in.booking_ladder);
+  assertEquals(SIDE_CONTRACTS.receivable.custody_ladder, MOVEMENT_CONTRACTS.prep.booking_ladder);
+  assert(SIDE_CONTRACTS.payable.custody_ladder !== SIDE_CONTRACTS.receivable.custody_ladder);
 });

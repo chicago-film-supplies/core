@@ -7,7 +7,7 @@
  * | | receivable | payable |
  * |---|---|---|
  * | initiator | `orders` | `purchases` |
- * | custody | `fulfillments` | `receipts` (planned) |
+ * | custody | `fulfillments` | `purchase-receipts` |
  * | billing | `invoices` | `purchase-bills` |
  * | credit | `credit-notes` | `purchase-credits` |
  *
@@ -31,6 +31,8 @@
  *
  * @module
  */
+import type { BookingLadderType } from "./transaction.ts";
+
 /** The two sides. The spelling `SETTLEMENT_TARGET_SIDE` (`schemas/common.ts`) already uses. */
 export const SIDES: readonly ["receivable", "payable"] = ["receivable", "payable"];
 /** One {@link SIDES} member. */
@@ -106,6 +108,13 @@ export interface SideContract {
   tax: SideTax;
   /** How each posting role's lines state their money. Xero takes no discount on a credit note, so the role decides too. */
   xero_line_money: Readonly<Record<XeroDocumentRole, XeroLineMoney>>;
+  /**
+   * Which custody ladder the side's bookings stand on (C11): the outbound ladder
+   * (`bookings`, `CUSTODY_RULES`) or the inbound one (`bookings-inbound`,
+   * `INBOUND_CUSTODY_RULES`). The api's inbound lever reads it to choose its rule
+   * table; a movement learns its ladder from its own contract (`booking_ladder`).
+   */
+  custody_ladder: BookingLadderType;
 }
 
 /**
@@ -120,6 +129,7 @@ export const SIDE_CONTRACTS: Readonly<Record<Side, SideContract>> = {
     custody: { sale: "custody", rental: "custody", service: "custody", replacement: "none" },
     tax: "resolved",
     xero_line_money: { billing: "unit_amount", credit: "exact_split" },
+    custody_ladder: "outbound",
   },
   payable: {
     line_labels: { sale: "Buy", rental: "Subrent", service: "Charge", replacement: "Replacement" },
@@ -127,5 +137,6 @@ export const SIDE_CONTRACTS: Readonly<Record<Side, SideContract>> = {
     custody: { sale: "custody", rental: "custody", service: "none", replacement: "none" },
     tax: "exempt",
     xero_line_money: { billing: "exact_split", credit: "exact_split" },
+    custody_ladder: "inbound",
   },
 };

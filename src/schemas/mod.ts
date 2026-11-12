@@ -1084,6 +1084,13 @@ export {
   InboundBookingStatusEnum,
   type InboundBookingSource,
   InboundBookingSourceSchema,
+  InboundBookingAction,
+  type InboundBookingActionType,
+  InboundBookingActions,
+  InboundBookingUpdate,
+  type InboundBookingUpdateType,
+  BulkInboundBookingUpdateInput,
+  type BulkInboundBookingUpdateInputType,
 } from "./booking-inbound.ts";
 export {
   BookingAction,

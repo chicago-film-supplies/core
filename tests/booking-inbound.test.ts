@@ -5,7 +5,10 @@
  */
 import { assert, assertEquals } from "@std/assert";
 import {
+  BulkInboundBookingUpdateInput,
   emptyInboundBreakdown,
+  InboundBookingAction,
+  InboundBookingActions,
   emptyInboundUnitSets,
   type InboundBooking,
   InboundBookingSchema,
@@ -108,4 +111,51 @@ Deno.test("inbound booking: quantity_ordered is REQUIRED, and the status is not 
   assertEquals(issues(rest), "quantity_ordered");
   assertEquals(issues({ ...buy(), status: "reserved" }), "status");
   assertEquals(issues({ ...buy(), type: "service" }), "type");
+});
+
+// ── The inbound lever's wire (ruling 75) ──
+
+const ROW = [LEG, PRODUCT];
+
+/** The issue paths an action parse reports, or `""`. */
+function actionIssues(a: unknown): string {
+  const r = InboundBookingAction.safeParse(a);
+  return r.success ? "" : r.error.issues.map((i) => i.path.join(".")).join(" | ");
+}
+
+Deno.test("inbound lever: an action names its row, and a settle is the record's, never the wire's", () => {
+  assertEquals(actionIssues({ rule: "receive", quantity: 2, path_source_item: ROW }), "");
+  assertEquals(actionIssues({ rule: "receive", quantity: 2 }), "path_source_item");
+  assertEquals(actionIssues({ rule: "settle_lost", quantity: 1, path_source_item: ROW }), "rule");
+  assertEquals(actionIssues({ rule: "settle_damaged_undo", quantity: 1, path_source_item: ROW }), "rule");
+  assertEquals(actionIssues({ rule: "send_back", quantity: 1, path_source_item: ROW }), "");
+});
+
+Deno.test("inbound lever: allocations sum to the quantity, units are exactly `quantity` and ascending", () => {
+  const shelf = "LLLLLLLLLLLLLLLLLLLL";
+  assertEquals(actionIssues({ rule: "put_away", quantity: 2, path_source_item: ROW, allocations: [{ uid_location: shelf, quantity: 2 }] }), "");
+  assertEquals(actionIssues({ rule: "put_away", quantity: 3, path_source_item: ROW, allocations: [{ uid_location: shelf, quantity: 2 }] }), "quantity");
+  assertEquals(actionIssues({ rule: "receive", quantity: 2, path_source_item: ROW, units: [{ number: 3001 }, { number: 3002 }] }), "");
+  assertEquals(actionIssues({ rule: "receive", quantity: 2, path_source_item: ROW, units: [{ number: 3001 }] }), "units");
+  assertEquals(actionIssues({ rule: "receive", quantity: 2, path_source_item: ROW, units: [{ number: 3002 }, { number: 3001 }] }), "units.1");
+});
+
+Deno.test("inbound lever: only a receive captures a serial", () => {
+  assertEquals(actionIssues({ rule: "receive", quantity: 1, path_source_item: ROW, units: [{ number: 3001, serial_number: "SN1" }] }), "");
+  assertEquals(
+    actionIssues({ rule: "send_back", quantity: 1, path_source_item: ROW, units: [{ number: 3001, serial_number: "SN1" }] }),
+    "units.0.serial_number",
+  );
+});
+
+Deno.test("inbound lever: one (rule, row) per booking, and one booking per request", () => {
+  const twice = [{ rule: "receive", quantity: 1, path_source_item: ROW }, { rule: "receive", quantity: 1, path_source_item: ROW }];
+  assert(!InboundBookingActions.safeParse(twice).success, "one row received twice in one save would write one movement id twice");
+  const twoRows = [{ rule: "receive", quantity: 1, path_source_item: ROW }, { rule: "receive", quantity: 1, path_source_item: [LEG, "11111111-2222-4333-8444-555555555555", PRODUCT] }];
+  assert(InboundBookingActions.safeParse(twoRows).success, "two rows sharing one booking take their own sub-sessions");
+  const update = { uid: `${PURCHASE}:${PRODUCT}:${LEG}`, version: 0, actions: [{ rule: "receive", quantity: 1, path_source_item: ROW }] };
+  const body = { version: 0, uuid_session: "11111111-1111-4111-8111-111111111111", updates: [update] };
+  assert(BulkInboundBookingUpdateInput.safeParse(body).success);
+  assert(!BulkInboundBookingUpdateInput.safeParse({ ...body, updates: [update, update] }).success);
+  assert(!BulkInboundBookingUpdateInput.safeParse({ ...body, date: "2026-11-12" }).success, "a bare date is refused, as everywhere");
 });

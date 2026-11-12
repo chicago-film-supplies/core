@@ -1245,6 +1245,39 @@ interface BulkBookingUpdateResponseType {
 }
 ```
 
+### `BulkInboundBookingUpdateInput`
+
+Zod schema for {@link BulkInboundBookingUpdateInputType}.
+
+```ts
+const BulkInboundBookingUpdateInput: z.ZodType<BulkInboundBookingUpdateInputType>;
+```
+
+### `BulkInboundBookingUpdateInputType`
+
+Body of `PUT /purchase-receipts/{uid}/bookings` — the inbound lever, the twin
+of `BulkBookingUpdateInput` (`PUT /fulfillments/{uid}/bookings`).
+
+- `version` — the receipt document's version at read time.
+- `uuid_session` — ONE session for the operator action, reused across retries
+  (see `UpdateBookingInputType.uuid_session`); each row's movements take the
+  row's sub-session under it.
+- `date` — the physical instant the step happened. ⚠️ **A divergence from the
+  outbound wire, kept on purpose:** a delivery is routinely recorded after it
+  arrived, and the receipt route this replaces took the arrival instant. Absent
+  is now.
+- `reference` — the supplier's delivery note, stamped on every movement.
+
+```ts
+interface BulkInboundBookingUpdateInputType {
+  version: number;
+  updates: InboundBookingUpdateType[];
+  uuid_session: string;
+  date?: string;
+  reference?: string;
+}
+```
+
 ### `CARD_BEARING_ORDER_STATUSES`
 
 These carry live event cards (`cardBearing`): `{quoted, reserved, active, complete}`.
@@ -5918,6 +5951,59 @@ interface InboundBooking {
 }
 ```
 
+### `InboundBookingAction`
+
+Zod schema for {@link InboundBookingActionType}.
+
+```ts
+const InboundBookingAction: z.ZodType<InboundBookingActionType>;
+```
+
+### `InboundBookingActionType`
+
+One step an operator takes on an inbound booking — the twin of
+`BookingAction` (`schemas/custody.ts`) over the inbound rule table
+(`INBOUND_CUSTODY_RULES`). One lever route takes these (ruling 75, owner
+2026-11-12): the receipt, return and reversal routes are retired onto it, and
+a rewind is a `*_undo` rule row, never a movement reversal (C3).
+
+- `path_source_item` — the purchase ROW this step acts for (ruling 65). Two
+  lines of one product on one leg share a booking, so the booking alone cannot
+  say which line's price a receipt posts; the movement names the row, and its
+  leg and product must be the booking id's (`checkMovementContract`).
+- `allocations` — where the units land (`receive`: absent is the store's
+  default staging location; `put_away`: absent is the product's default
+  storage) or leave from (`send_back`: absent lets the writer pick, as a
+  check-out does). The api refuses a location the step cannot use.
+- `units` — on a serialized product, exactly `quantity`, ascending. Only a
+  `receive` captures a serial; every other step names units by number.
+
+⚠️ **A settle is not an operator row.** `settle_lost` / `settle_damaged` and
+their undos move only in the out-of-service record's `return_to_supplier`
+commit (C4, the 0b lost-subrent trace), which reaches the lever as an internal
+row; on this wire they are refused, as `reclassify_*` is on the outbound one.
+
+```ts
+interface InboundBookingActionType {
+  rule: InboundCustodyRuleId;
+  quantity: number;
+  path_source_item: string[];
+  allocations?: MovementAllocationInputType[];
+  units?: MovementUnitInputType[];
+}
+```
+
+### `InboundBookingActions`
+
+An ordered list of actions on ONE inbound booking. Each (rule, row) pair at
+most once: a movement's id is `{session}|{type}|{subject}` under the ROW's
+sub-session (ruling 65), so a repeat would write one movement twice. Make it
+two saves, or one action with the summed quantity.
+
+```ts
+const InboundBookingActions: z.ZodType<InboundBookingActionType[]>;
+```
+
 ### `InboundBookingSchema`
 
 Zod schema for {@link InboundBooking}. Key order is its own column order.
@@ -5977,6 +6063,26 @@ One inbound booking type.
 
 ```ts
 type InboundBookingTypeType = indexedAccess;
+```
+
+### `InboundBookingUpdate`
+
+Zod schema for {@link InboundBookingUpdateType}.
+
+```ts
+const InboundBookingUpdate: z.ZodType<InboundBookingUpdateType>;
+```
+
+### `InboundBookingUpdateType`
+
+One inbound booking's actions in a lever request — the twin of `BookingUpdate`.
+
+```ts
+interface InboundBookingUpdateType {
+  uid: string;
+  version: number;
+  actions: InboundBookingActionType[];
+}
 ```
 
 ### `InboundBreakdown`
@@ -13608,6 +13714,7 @@ interface SideContract {
   custody: Readonly<Record<SharedLineType, LineCustody>>;
   tax: SideTax;
   xero_line_money: Readonly<Record<XeroDocumentRole, XeroLineMoney>>;
+  custody_ladder: BookingLadderType;
 }
 ```
 
@@ -22557,6 +22664,39 @@ Deliberately absent: an organization or supplier snapshot (the receipt and the
 purchase carry the supplier), `subject`, `shortage` (a purchase draws on no
 shelf), and the CRMS ids.
 
+### `BulkInboundBookingUpdateInput`
+
+Zod schema for {@link BulkInboundBookingUpdateInputType}.
+
+```ts
+const BulkInboundBookingUpdateInput: z.ZodType<BulkInboundBookingUpdateInputType>;
+```
+
+### `BulkInboundBookingUpdateInputType`
+
+Body of `PUT /purchase-receipts/{uid}/bookings` — the inbound lever, the twin
+of `BulkBookingUpdateInput` (`PUT /fulfillments/{uid}/bookings`).
+
+- `version` — the receipt document's version at read time.
+- `uuid_session` — ONE session for the operator action, reused across retries
+  (see `UpdateBookingInputType.uuid_session`); each row's movements take the
+  row's sub-session under it.
+- `date` — the physical instant the step happened. ⚠️ **A divergence from the
+  outbound wire, kept on purpose:** a delivery is routinely recorded after it
+  arrived, and the receipt route this replaces took the arrival instant. Absent
+  is now.
+- `reference` — the supplier's delivery note, stamped on every movement.
+
+```ts
+interface BulkInboundBookingUpdateInputType {
+  version: number;
+  updates: InboundBookingUpdateType[];
+  uuid_session: string;
+  date?: string;
+  reference?: string;
+}
+```
+
 ### `INBOUND_BOOKING_STATUSES`
 
 An inbound booking's status, DERIVED from its breakdown and never sent:
@@ -22606,6 +22746,59 @@ interface InboundBooking {
 }
 ```
 
+### `InboundBookingAction`
+
+Zod schema for {@link InboundBookingActionType}.
+
+```ts
+const InboundBookingAction: z.ZodType<InboundBookingActionType>;
+```
+
+### `InboundBookingActionType`
+
+One step an operator takes on an inbound booking — the twin of
+`BookingAction` (`schemas/custody.ts`) over the inbound rule table
+(`INBOUND_CUSTODY_RULES`). One lever route takes these (ruling 75, owner
+2026-11-12): the receipt, return and reversal routes are retired onto it, and
+a rewind is a `*_undo` rule row, never a movement reversal (C3).
+
+- `path_source_item` — the purchase ROW this step acts for (ruling 65). Two
+  lines of one product on one leg share a booking, so the booking alone cannot
+  say which line's price a receipt posts; the movement names the row, and its
+  leg and product must be the booking id's (`checkMovementContract`).
+- `allocations` — where the units land (`receive`: absent is the store's
+  default staging location; `put_away`: absent is the product's default
+  storage) or leave from (`send_back`: absent lets the writer pick, as a
+  check-out does). The api refuses a location the step cannot use.
+- `units` — on a serialized product, exactly `quantity`, ascending. Only a
+  `receive` captures a serial; every other step names units by number.
+
+⚠️ **A settle is not an operator row.** `settle_lost` / `settle_damaged` and
+their undos move only in the out-of-service record's `return_to_supplier`
+commit (C4, the 0b lost-subrent trace), which reaches the lever as an internal
+row; on this wire they are refused, as `reclassify_*` is on the outbound one.
+
+```ts
+interface InboundBookingActionType {
+  rule: InboundCustodyRuleId;
+  quantity: number;
+  path_source_item: string[];
+  allocations?: MovementAllocationInputType[];
+  units?: MovementUnitInputType[];
+}
+```
+
+### `InboundBookingActions`
+
+An ordered list of actions on ONE inbound booking. Each (rule, row) pair at
+most once: a movement's id is `{session}|{type}|{subject}` under the ROW's
+sub-session (ruling 65), so a repeat would write one movement twice. Make it
+two saves, or one action with the summed quantity.
+
+```ts
+const InboundBookingActions: z.ZodType<InboundBookingActionType[]>;
+```
+
 ### `InboundBookingSchema`
 
 Zod schema for {@link InboundBooking}. Key order is its own column order.
@@ -22649,6 +22842,26 @@ One inbound booking status.
 
 ```ts
 type InboundBookingStatusType = indexedAccess;
+```
+
+### `InboundBookingUpdate`
+
+Zod schema for {@link InboundBookingUpdateType}.
+
+```ts
+const InboundBookingUpdate: z.ZodType<InboundBookingUpdateType>;
+```
+
+### `InboundBookingUpdateType`
+
+One inbound booking's actions in a lever request — the twin of `BookingUpdate`.
+
+```ts
+interface InboundBookingUpdateType {
+  uid: string;
+  version: number;
+  actions: InboundBookingActionType[];
+}
 ```
 
 ## `@cfs/core/schemas/custody`

@@ -44,6 +44,16 @@ import {
 import { checkBookingCollection, checkBookingDelivery, checkBookingUnitsWithin } from "./_booking-refines.ts";
 import { BOOKING_CORE, type Booking, type BookingStore } from "./booking.ts";
 import type { FirestoreTimestampType } from "./common.ts";
+import { ItemUid } from "./_uid.ts";
+import { chicagoInstant } from "./_datetime.ts";
+import {
+  allocationUnitsIssue,
+  MovementAllocationInput,
+  type MovementAllocationInputType,
+  MovementUnitInput,
+  type MovementUnitInputType,
+} from "./transaction.ts";
+import { type InboundCustodyRuleId, InboundCustodyRuleIdEnum, inboundCustodyRule } from "./custody.ts";
 
 /**
  * An inbound booking's status, DERIVED from its breakdown and never sent:
@@ -177,3 +187,151 @@ export const InboundBookingSchema: z.ZodType<InboundBooking> = z.strictObject({
       ],
     },
   });
+
+// ── The inbound lever's wire (PUT /purchase-receipts/{uid}/bookings) ───────
+
+/**
+ * One step an operator takes on an inbound booking — the twin of
+ * `BookingAction` (`schemas/custody.ts`) over the inbound rule table
+ * (`INBOUND_CUSTODY_RULES`). One lever route takes these (ruling 75, owner
+ * 2026-11-12): the receipt, return and reversal routes are retired onto it, and
+ * a rewind is a `*_undo` rule row, never a movement reversal (C3).
+ *
+ * - `path_source_item` — the purchase ROW this step acts for (ruling 65). Two
+ *   lines of one product on one leg share a booking, so the booking alone cannot
+ *   say which line's price a receipt posts; the movement names the row, and its
+ *   leg and product must be the booking id's (`checkMovementContract`).
+ * - `allocations` — where the units land (`receive`: absent is the store's
+ *   default staging location; `put_away`: absent is the product's default
+ *   storage) or leave from (`send_back`: absent lets the writer pick, as a
+ *   check-out does). The api refuses a location the step cannot use.
+ * - `units` — on a serialized product, exactly `quantity`, ascending. Only a
+ *   `receive` captures a serial; every other step names units by number.
+ *
+ * ⚠️ **A settle is not an operator row.** `settle_lost` / `settle_damaged` and
+ * their undos move only in the out-of-service record's `return_to_supplier`
+ * commit (C4, the 0b lost-subrent trace), which reaches the lever as an internal
+ * row; on this wire they are refused, as `reclassify_*` is on the outbound one.
+ */
+export interface InboundBookingActionType {
+  rule: InboundCustodyRuleId;
+  quantity: number;
+  path_source_item: string[];
+  allocations?: MovementAllocationInputType[];
+  units?: MovementUnitInputType[];
+}
+
+/** Zod schema for {@link InboundBookingActionType}. */
+export const InboundBookingAction: z.ZodType<InboundBookingActionType> = z.object({
+  rule: InboundCustodyRuleIdEnum,
+  quantity: z.int().min(1),
+  path_source_item: z.array(ItemUid).min(1),
+  allocations: z.array(MovementAllocationInput).min(1).optional(),
+  units: z.array(MovementUnitInput).optional(),
+}).superRefine((a, ctx) => {
+  if (inboundCustodyRule(a.rule).stage === "settle") {
+    ctx.addIssue({
+      code: "custom",
+      path: ["rule"],
+      message: `"${a.rule}" settles a rented unit on its out-of-service record; make it there (return_to_supplier)`,
+    });
+  }
+  if (a.allocations && a.quantity !== a.allocations.reduce((sum, l) => sum + l.quantity, 0)) {
+    ctx.addIssue({ code: "custom", path: ["quantity"], message: "quantity must equal the sum of per-location allocation quantities" });
+  }
+  if (a.units !== undefined) {
+    if (a.units.length !== a.quantity) {
+      ctx.addIssue({ code: "custom", path: ["units"], message: "an action that names units names exactly `quantity` of them" });
+    }
+    for (let i = 1; i < a.units.length; i++) {
+      if (a.units[i].number <= a.units[i - 1].number) {
+        ctx.addIssue({ code: "custom", path: ["units", i], message: "units must be ascending by number, each named once" });
+        break;
+      }
+    }
+    if (a.rule !== "receive") {
+      a.units.forEach((u, i) => {
+        if (u.serial_number !== undefined) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["units", i, "serial_number"],
+            message: "only a receive captures a serial; every other step names units by number",
+          });
+        }
+      });
+    }
+  }
+  const issue = allocationUnitsIssue(a.units?.map((u) => u.number), a.allocations);
+  if (issue !== null) ctx.addIssue({ code: "custom", path: ["allocations"], message: issue });
+});
+
+/**
+ * An ordered list of actions on ONE inbound booking. Each (rule, row) pair at
+ * most once: a movement's id is `{session}|{type}|{subject}` under the ROW's
+ * sub-session (ruling 65), so a repeat would write one movement twice. Make it
+ * two saves, or one action with the summed quantity.
+ */
+export const InboundBookingActions: z.ZodType<InboundBookingActionType[]> = z.array(InboundBookingAction).min(1).superRefine(
+  (actions, ctx) => {
+    const seen = new Set<string>();
+    actions.forEach((a, i) => {
+      const slot = `${a.rule}|${a.path_source_item.join("/")}`;
+      if (seen.has(slot)) {
+        ctx.addIssue({ code: "custom", path: [i], message: `"${a.rule}" is named twice for one row; sum the quantity or make two saves` });
+      }
+      seen.add(slot);
+    });
+  },
+);
+
+/** One inbound booking's actions in a lever request — the twin of `BookingUpdate`. */
+export interface InboundBookingUpdateType {
+  uid: string;
+  /** The booking's version at read time; a stale one is a 409. */
+  version: number;
+  actions: InboundBookingActionType[];
+}
+
+/** Zod schema for {@link InboundBookingUpdateType}. */
+export const InboundBookingUpdate: z.ZodType<InboundBookingUpdateType> = z.object({
+  uid: BookingId,
+  version: z.int().min(0),
+  actions: InboundBookingActions,
+});
+
+/**
+ * Body of `PUT /purchase-receipts/{uid}/bookings` — the inbound lever, the twin
+ * of `BulkBookingUpdateInput` (`PUT /fulfillments/{uid}/bookings`).
+ *
+ * - `version` — the receipt document's version at read time.
+ * - `uuid_session` — ONE session for the operator action, reused across retries
+ *   (see `UpdateBookingInputType.uuid_session`); each row's movements take the
+ *   row's sub-session under it.
+ * - `date` — the physical instant the step happened. ⚠️ **A divergence from the
+ *   outbound wire, kept on purpose:** a delivery is routinely recorded after it
+ *   arrived, and the receipt route this replaces took the arrival instant. Absent
+ *   is now.
+ * - `reference` — the supplier's delivery note, stamped on every movement.
+ */
+export interface BulkInboundBookingUpdateInputType {
+  version: number;
+  updates: InboundBookingUpdateType[];
+  uuid_session: string;
+  date?: string;
+  reference?: string;
+}
+
+/** Zod schema for {@link BulkInboundBookingUpdateInputType}. */
+export const BulkInboundBookingUpdateInput: z.ZodType<BulkInboundBookingUpdateInputType> = z.object({
+  version: z.int().min(0),
+  updates: z.array(InboundBookingUpdate).min(1),
+  uuid_session: z.uuid(),
+  date: chicagoInstant().optional(),
+  reference: z.string().max(200).optional(),
+}).superRefine((b, ctx) => {
+  const seen = new Set<string>();
+  b.updates.forEach((u, i) => {
+    if (seen.has(u.uid)) ctx.addIssue({ code: "custom", path: ["updates", i, "uid"], message: "a booking is addressed once per request" });
+    seen.add(u.uid);
+  });
+});
