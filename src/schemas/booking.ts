@@ -375,13 +375,16 @@ export interface UpdateBookingInputType {
    * request writes takes it as its `date`. The same field on both levers
    * (ruling 76; the inbound twin is `BulkInboundBookingUpdateInputType.date`).
    *
-   * 🔴 **The api bounds it, because the custody replay orders a booking's
-   * movements by `date`** (`journalOrder`). It refuses a date LATER than now (a
-   * custody movement records what happened, and the write moves custody and
-   * stock at once whatever it says; an expected arrival is a pair's dates) and
-   * one EARLIER than the booking's latest movement (it would replay before a
-   * step that was taken first). Only the api's clock decides "now"; a client
-   * check is a courtesy.
+   * 🔴 **The api bounds it** (rulings 76, 77). It refuses a date LATER than now:
+   * a custody movement records what happened, and the write moves custody and
+   * stock at once whatever it says; an expected arrival is a pair's dates. It
+   * refuses a date that would make the booking's journal, replayed in `date`
+   * order (`journalOrder`), take a bucket NEGATIVE at any instant — a step
+   * dated before the step that filled its source bucket, which the replay audit
+   * reads as missing history. Any other backdating is legal. A step whose
+   * movement posts to Xero is refused when its date falls inside Xero's LIVE
+   * lock date, read at the request; CFS keeps no copy of it. Only the api's
+   * clock decides "now"; a client check is a courtesy.
    *
    * ⚠️ **Release order:** a stripping `z.object`, so an api older than this
    * field drops it silently and records the step at now. The api release that

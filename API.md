@@ -1265,8 +1265,8 @@ of `BulkBookingUpdateInput` (`PUT /fulfillments/{uid}/bookings`).
   row's sub-session under it.
 - `date` — the physical instant the steps happened; absent is now. The same
   field as the outbound lever's (ruling 76), with the same api bounds: never
-  later than now, never earlier than the booking's latest movement
-  (`UpdateBookingInputType.date`).
+  later than now, never a date that replays a bucket negative, never inside
+  Xero's live lock date for a step that posts (`UpdateBookingInputType.date`).
 - `reference` — the supplier's delivery note, stamped on every movement.
 
 ```ts
@@ -22687,8 +22687,8 @@ of `BulkBookingUpdateInput` (`PUT /fulfillments/{uid}/bookings`).
   row's sub-session under it.
 - `date` — the physical instant the steps happened; absent is now. The same
   field as the outbound lever's (ruling 76), with the same api bounds: never
-  later than now, never earlier than the booking's latest movement
-  (`UpdateBookingInputType.date`).
+  later than now, never a date that replays a bucket negative, never inside
+  Xero's live lock date for a step that posts (`UpdateBookingInputType.date`).
 - `reference` — the supplier's delivery note, stamped on every movement.
 
 ```ts
