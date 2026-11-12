@@ -37,6 +37,23 @@
  * disagreement**: a divergence is a bug report about the journal, never a
  * licence to rewrite the booking.
  *
+ * ## Two ladders, and a movement's TYPE says which (7a, C10)
+ *
+ * An outbound booking (an order's, `bookings`) and an inbound one (a
+ * purchase's, `bookings-inbound`) keep different breakdowns, and five key
+ * spellings (`quoted`, `lost`, `damaged`, the two transit keys) are shared
+ * between them with a different place on each. So a custody pair cannot be
+ * folded until its LADDER is known, and the ladder is the movement type's
+ * `MovementContract.booking_ladder` ({@link movementLadder}) — never the key,
+ * never the booking id (the two collections share one id grammar).
+ *
+ * Every custody projection therefore takes the ladder it folds and SKIPS every
+ * movement of the other one: {@link custodyByBooking}, {@link custodyByGrain},
+ * {@link orphanedCustody}, {@link unitsByBooking} and {@link replayCustody}.
+ * A caller wanting both runs two projections in one {@link foldJournal} pass.
+ * The inbound identity is the outbound one over `INBOUND_HISTORY_KEYS`, judged
+ * by {@link classifyInboundReplay}.
+ *
  * Lifted from api-cloudrun's custodyReplay module (`replayCustody`,
  * `classifyReplay`; deleted there in stock campaign P3), unchanged in behaviour. How the audit judges each verdict
  * (the cutover instant, `booking.created_at`) stays in the audit.
@@ -45,9 +62,14 @@
  */
 import {
   type BookingBreakdown,
-  type BookingBreakdownKeyType,
+  type BookingLadderType,
   type ComponentTypeType,
   CUSTODY_HISTORY_KEYS,
+  INBOUND_HISTORY_KEYS,
+  type InboundBreakdown,
+  MOVEMENT_CONTRACTS,
+  type MovementCustodyType,
+  type MovementTypeType,
   ownsKey,
 } from "../schemas/mod.ts";
 import type { FirestoreTimestampType, FirestoreTimestampValue } from "../schemas/common.ts";
@@ -157,13 +179,83 @@ export function replayOrder(a: ReplayOrdered, b: ReplayOrdered): number {
   return aRebuilt ? journalOrder(a, b) : recordOrder(a, b);
 }
 
+// ── The two ladders ──────────────────────────────────────────────────
+
+/**
+ * A custody-history key of one ladder: what that ladder's replay identity
+ * covers. The plan keys are not members — they move with the source document's
+ * status, a planning act with no event.
+ */
+export type LadderHistoryKeyType<L extends BookingLadderType> = L extends "inbound"
+  ? typeof INBOUND_HISTORY_KEYS[number]
+  : typeof CUSTODY_HISTORY_KEYS[number];
+
+/** Net units per custody-history key of one ladder, all keys stated. */
+export type LadderNet<L extends BookingLadderType> = Record<LadderHistoryKeyType<L>, number>;
+
+/** Net units per OUTBOUND custody-history key (`CUSTODY_HISTORY_KEYS`). */
+export type CustodyNet = LadderNet<"outbound">;
+
+/** Net units per INBOUND custody-history key (`INBOUND_HISTORY_KEYS`). */
+export type InboundCustodyNet = LadderNet<"inbound">;
+
+const HISTORY_KEYS: Readonly<Record<BookingLadderType, readonly string[]>> = {
+  outbound: CUSTODY_HISTORY_KEYS,
+  inbound: INBOUND_HISTORY_KEYS,
+};
+
+const HISTORY_SETS: Readonly<Record<BookingLadderType, ReadonlySet<string>>> = {
+  outbound: new Set(CUSTODY_HISTORY_KEYS),
+  inbound: new Set(INBOUND_HISTORY_KEYS),
+};
+
+/** One ladder's custody-history keys, in its own order. */
+export function ladderHistoryKeys<L extends BookingLadderType>(ladder: L): readonly LadderHistoryKeyType<L>[] {
+  return HISTORY_KEYS[ladder] as readonly LadderHistoryKeyType<L>[];
+}
+
+/**
+ * The ladder a movement type's custody pair is on — its contract's
+ * `booking_ladder` — or `null` for a type that names no booking. The ONLY way a
+ * fold learns the ladder: a key cannot say (five spellings are shared) and a
+ * booking id cannot either (one grammar, two collections).
+ */
+export function movementLadder(type: MovementTypeType): BookingLadderType | null {
+  return MOVEMENT_CONTRACTS[type].booking_ladder;
+}
+
+function emptyNet<L extends BookingLadderType>(ladder: L): LadderNet<L> {
+  const net: Record<string, number> = {};
+  for (const k of HISTORY_KEYS[ladder]) net[k] = 0;
+  return net as LadderNet<L>;
+}
+
+/**
+ * Add one custody pair to a net of `ladder`. A key outside that ladder's
+ * history (a plan key) contributes nothing on its end. The caller has already
+ * established the pair IS of this ladder.
+ */
+function addCustody(
+  net: Record<string, number>,
+  ladder: BookingLadderType,
+  m: { custody: MovementCustodyType | null; quantity: number },
+): void {
+  if (!m.custody) return;
+  const history = HISTORY_SETS[ladder];
+  if (m.custody.to !== null && history.has(m.custody.to)) net[m.custody.to] += m.quantity;
+  if (m.custody.from !== null && history.has(m.custody.from)) net[m.custody.from] -= m.quantity;
+}
+
 // ── The fold ─────────────────────────────────────────────────────────
 
 /** A movement as the projections read it. */
 export interface JournalMovement extends JournalOrdered {
   uid: string;
+  /** Its type, which decides the LADDER its custody is on ({@link movementLadder}). */
+  type: MovementTypeType;
   uid_booking: string | null;
-  custody: { from: BookingBreakdownKeyType | null; to: BookingBreakdownKeyType | null } | null;
+  /** On either ladder; which one is the type's, never the keys'. */
+  custody: MovementCustodyType | null;
   quantity: number;
   /** The units it names, on a serialized product. */
   units: ReadonlyArray<{ number: number }>;
@@ -203,79 +295,82 @@ export function foldJournal<
   return states as ProjectionStates<P>;
 }
 
-/** Net units per custody-history key, all keys stated. */
-export type CustodyNet = Record<BookingBreakdownKeyType, number>;
-
-function emptyNet(): CustodyNet {
-  const net = {} as CustodyNet;
-  for (const k of CUSTODY_HISTORY_KEYS) net[k] = 0;
-  return net;
+/** Whether a movement carries custody for a booking on `ladder`. */
+function onLadder(m: JournalMovement, ladder: BookingLadderType): m is JournalMovement & { uid_booking: string } {
+  return m.uid_booking !== null && m.custody !== null && movementLadder(m.type) === ladder;
 }
 
-const HISTORY: ReadonlySet<BookingBreakdownKeyType> = new Set(CUSTODY_HISTORY_KEYS);
-
-/** Add one movement's custody pair to a net. A plan key on either end contributes nothing. */
-function addCustody(net: CustodyNet, m: Pick<JournalMovement, "custody" | "quantity">): void {
-  if (!m.custody) return;
-  if (m.custody.to !== null && HISTORY.has(m.custody.to)) net[m.custody.to] += m.quantity;
-  if (m.custody.from !== null && HISTORY.has(m.custody.from)) net[m.custody.from] -= m.quantity;
-}
-
-/** Net custody per booking id — the replay of every booking at once. */
-export function custodyByBooking(): JournalProjection<Map<string, CustodyNet>> {
+/** Net custody per booking id on one ladder — the replay of every booking of it at once. */
+export function custodyByBooking<L extends BookingLadderType>(
+  ladder: L,
+): JournalProjection<Map<string, LadderNet<L>>> {
   return {
     init: () => new Map(),
     step(state, m) {
-      if (m.uid_booking === null || !m.custody) return;
-      const net = state.get(m.uid_booking) ?? emptyNet();
-      addCustody(net, m);
+      if (!onLadder(m, ladder)) return;
+      const net = state.get(m.uid_booking) ?? emptyNet(ladder);
+      addCustody(net, ladder, m);
       state.set(m.uid_booking, net);
     },
   };
 }
 
 /**
- * Net custody per GRAIN — `(order, product, leg)`, every component signature
- * pooled. A grain carry or a re-key moves custody between the bookings of one
- * grain, so a booking can diverge while its grain conserves.
+ * Net custody per GRAIN of one ladder — `(source, product, leg)`, every
+ * component signature pooled. A grain carry or a re-key moves custody between
+ * the bookings of one grain, so a booking can diverge while its grain
+ * conserves. The ladder is part of the grain's identity: an inbound and an
+ * outbound grain are never pooled, because each projection folds one ladder.
  */
-export function custodyByGrain(): JournalProjection<Map<string, CustodyNet>> {
+export function custodyByGrain<L extends BookingLadderType>(
+  ladder: L,
+): JournalProjection<Map<string, LadderNet<L>>> {
   return {
     init: () => new Map(),
     step(state, m) {
-      if (m.uid_booking === null || !m.custody) return;
+      if (!onLadder(m, ladder)) return;
       const p = parseBookingId(m.uid_booking);
       const grain = p === null ? m.uid_booking : `${p.orderUid}:${p.itemUid}:${p.destUid}`;
-      const net = state.get(grain) ?? emptyNet();
-      addCustody(net, m);
+      const net = state.get(grain) ?? emptyNet(ladder);
+      addCustody(net, ladder, m);
       state.set(grain, net);
     },
   };
 }
 
 /**
- * Net custody on movements whose booking no longer exists: per booking id, the
- * net its movements leave. A grain carry or a deleted plan-only booking nets to
- * zero or below; a positive bucket is custody nothing holds any more.
+ * Net custody on one ladder's movements whose booking no longer exists: per
+ * booking id, the net its movements leave. A grain carry or a deleted plan-only
+ * booking nets to zero or below; a positive bucket is custody nothing holds any
+ * more.
+ *
+ * @param existing the booking ids of THIS ladder's collection — an outbound
+ *   movement is never judged against `bookings-inbound`, nor the reverse.
  */
-export function orphanedCustody(existing: ReadonlySet<string>): JournalProjection<Map<string, CustodyNet>> {
+export function orphanedCustody<L extends BookingLadderType>(
+  ladder: L,
+  existing: ReadonlySet<string>,
+): JournalProjection<Map<string, LadderNet<L>>> {
   return {
     init: () => new Map(),
     step(state, m) {
-      if (m.uid_booking === null || existing.has(m.uid_booking) || !m.custody) return;
-      const net = state.get(m.uid_booking) ?? emptyNet();
-      addCustody(net, m);
+      if (!onLadder(m, ladder) || existing.has(m.uid_booking)) return;
+      const net = state.get(m.uid_booking) ?? emptyNet(ladder);
+      addCustody(net, ladder, m);
       state.set(m.uid_booking, net);
     },
   };
 }
 
-/** Each booking's named units per history key, as the journal leaves them. */
-export type UnitSetsByKey = Partial<Record<BookingBreakdownKeyType, Set<number>>>;
+/** Each booking's named units per history key of one ladder, as the journal leaves them. */
+export type UnitSetsByKey<L extends BookingLadderType = "outbound"> = Partial<
+  Record<LadderHistoryKeyType<L>, Set<number>>
+>;
 
 /**
- * Which units each booking holds per history key, folded over the WHOLE journal
- * from empty sets. A unit leaves `custody.from`'s set and joins `custody.to`'s.
+ * Which units each booking of one ladder holds per history key, folded over
+ * the WHOLE journal from empty sets. A unit leaves `custody.from`'s set and
+ * joins `custody.to`'s.
  *
  * ⚠️ **There is no era cut, and none should come back** (api-cloudrun#1253). A
  * roster interval is journaled (`enroll` / `unenroll`), and numbers are never
@@ -285,17 +380,21 @@ export type UnitSetsByKey = Partial<Record<BookingBreakdownKeyType, Set<number>>
  * nothing to cut at all. If a caller ever needs one interval, derive it from that
  * interval's `enroll`, never from a date.
  */
-export function unitsByBooking(): JournalProjection<Map<string, UnitSetsByKey>> {
+export function unitsByBooking<L extends BookingLadderType>(
+  ladder: L,
+): JournalProjection<Map<string, UnitSetsByKey<L>>> {
+  const history = HISTORY_SETS[ladder];
   return {
     init: () => new Map(),
     step(state, m) {
-      if (m.uid_booking === null || !m.custody || m.units.length === 0) return;
-      const sets = state.get(m.uid_booking) ?? {};
+      if (!onLadder(m, ladder) || m.units.length === 0) return;
+      const sets: Partial<Record<string, Set<number>>> = state.get(m.uid_booking) ?? {};
+      const { from, to } = m.custody!;
       for (const { number: n } of m.units) {
-        if (m.custody.from !== null && HISTORY.has(m.custody.from)) sets[m.custody.from]?.delete(n);
-        if (m.custody.to !== null && HISTORY.has(m.custody.to)) (sets[m.custody.to] ??= new Set()).add(n);
+        if (from !== null && history.has(from)) sets[from]?.delete(n);
+        if (to !== null && history.has(to)) (sets[to] ??= new Set()).add(n);
       }
-      state.set(m.uid_booking, sets);
+      state.set(m.uid_booking, sets as UnitSetsByKey<L>);
     },
   };
 }
@@ -393,9 +492,13 @@ export function unitOutSpells(): JournalProjection<UnitOutSpells, UnitJournalMov
 
 // ── The custody replay, judged ───────────────────────────────────────
 
-/** One event's custody transition and when it happened: the parts of a movement the replay reads. */
+/**
+ * One event's custody transition and when it happened: the parts of a movement
+ * the replay reads. The replay is handed ONE booking's events, so they are all
+ * on that booking's ladder, and the caller names it.
+ */
 export interface CustodyEvent {
-  custody: { from: BookingBreakdownKeyType | null; to: BookingBreakdownKeyType | null } | null;
+  custody: MovementCustodyType | null;
   quantity: number;
   date: string;
 }
@@ -414,13 +517,21 @@ export type ReplayVerdict =
 export type ReplayDeltas = Record<string, { stored: number; replayed: number }>;
 
 /**
- * Net units the events place in each custody-history key. A `reverses`
- * reversal carries its custody swapped and nets itself out; a planning key on
- * one end contributes only through the other.
+ * Net units the events place in each custody-history key of `ladder`. A
+ * `reverses` reversal carries its custody swapped and nets itself out; a
+ * planning key on one end contributes only through the other.
+ *
+ * ⚠️ **Pass one booking's events**, which are on one ladder by construction.
+ * The replay cannot check it — a shared spelling (`lost`, `damaged`) folds into
+ * whichever ladder is named — so a caller holding a mixed journal partitions it
+ * by {@link movementLadder} first, as the projections do.
  */
-export function replayCustody(events: readonly CustodyEvent[]): CustodyNet {
-  const net = emptyNet();
-  for (const e of events) addCustody(net, e);
+export function replayCustody<L extends BookingLadderType>(
+  events: readonly CustodyEvent[],
+  ladder: L,
+): LadderNet<L> {
+  const net = emptyNet(ladder);
+  for (const e of events) addCustody(net, ladder, e);
   return net;
 }
 
@@ -429,7 +540,7 @@ export function replayCustody(events: readonly CustodyEvent[]): CustodyNet {
  * missing events from its front. Events sharing one instant fold as ONE step
  * first, so no within-instant order can fake a negative.
  */
-function firstNegativePrefix(events: readonly CustodyEvent[]): boolean {
+function firstNegativePrefix(events: readonly CustodyEvent[], ladder: BookingLadderType): boolean {
   const byInstant = new Map<number, CustodyEvent[]>();
   for (const e of events) {
     const t = Date.parse(e.date);
@@ -440,8 +551,8 @@ function firstNegativePrefix(events: readonly CustodyEvent[]): boolean {
   const running: CustodyEvent[] = [];
   for (const t of [...byInstant.keys()].sort((a, b) => a - b)) {
     running.push(...byInstant.get(t)!);
-    const net = replayCustody(running);
-    if (CUSTODY_HISTORY_KEYS.some((k) => net[k] < 0)) return true;
+    const net: Record<string, number> = replayCustody(running, ladder);
+    if (HISTORY_KEYS[ladder].some((k) => net[k] < 0)) return true;
   }
   return false;
 }
@@ -486,7 +597,7 @@ export function classifyReplay(
   events: readonly CustodyEvent[],
   orderProducts: ReadonlySet<string>,
 ): { verdict: ReplayVerdict; deltas: ReplayDeltas } {
-  const net = replayCustody(events);
+  const net = replayCustody(events, "outbound");
   const deltas: ReplayDeltas = {};
   for (const key of CUSTODY_HISTORY_KEYS) {
     const stored = breakdownQuantity(booking.breakdown, key);
@@ -497,7 +608,49 @@ export function classifyReplay(
   if (events.length === 0) {
     return { verdict: orderProducts.has(booking.uid_product) ? "no_events" : "substitution_seeded", deltas };
   }
-  if (firstNegativePrefix(events)) return { verdict: "partial_history", deltas };
+  if (firstNegativePrefix(events, "outbound")) return { verdict: "partial_history", deltas };
   if (!ownsKey(booking.type, "out") && isUntrackedSaleLoss(deltas)) return { verdict: "sale_untracked_loss", deltas };
+  return { verdict: "diverged", deltas };
+}
+
+/**
+ * How an INBOUND booking's events compare with its stored breakdown: the four
+ * verdicts an inbound booking can hold. The outbound-only ones have no inbound
+ * meaning — every inbound type is `sale | rental` (no service arm), a
+ * substitution never seeds an inbound booking, and an inbound loss has always
+ * been a movement (`return_to_supplier`, 0b).
+ */
+export type InboundReplayVerdict = Extract<ReplayVerdict, "ok" | "no_events" | "partial_history" | "diverged">;
+
+/**
+ * Judge one INBOUND booking's events against its stored breakdown — the
+ * outbound identity over `INBOUND_HISTORY_KEYS` (7a, C10).
+ *
+ * - `no_events` — no events and real stored keys: custody the journal never
+ *   recorded. Before the inbound cutover that is a booking the backfill (C12)
+ *   did not reach; after it, a writer that bypassed the lever.
+ * - `partial_history` — some prefix of the log, by time, goes negative.
+ * - `diverged` — anything else that disagrees.
+ *
+ * ⚠️ **A backfilled booking reads `ok` by construction**, because the backfill
+ * mints the booking from the buckets and then writes the movements that reach
+ * it. `ok` there verifies nothing (0b ruling 4); only a booking minted after
+ * the cutover is evidence about the writers. That judgement is the caller's:
+ * the cutover instant is per project and lives in api-cloudrun.
+ *
+ * @param events this booking's events, all on the inbound ladder
+ */
+export function classifyInboundReplay(
+  booking: { breakdown: InboundBreakdown },
+  events: readonly CustodyEvent[],
+): { verdict: InboundReplayVerdict; deltas: ReplayDeltas } {
+  const net = replayCustody(events, "inbound");
+  const deltas: ReplayDeltas = {};
+  for (const key of INBOUND_HISTORY_KEYS) {
+    if (net[key] !== booking.breakdown[key]) deltas[key] = { stored: booking.breakdown[key], replayed: net[key] };
+  }
+  if (Object.keys(deltas).length === 0) return { verdict: "ok", deltas };
+  if (events.length === 0) return { verdict: "no_events", deltas };
+  if (firstNegativePrefix(events, "inbound")) return { verdict: "partial_history", deltas };
   return { verdict: "diverged", deltas };
 }

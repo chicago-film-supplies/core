@@ -12,12 +12,15 @@
  */
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
+  classifyInboundReplay,
   classifyReplay,
   type CustodyEvent,
   custodyByBooking,
   custodyByGrain,
   foldJournal,
   journalOrder,
+  ladderHistoryKeys,
+  movementLadder,
   REBUILD_AT_MS,
   recordOrder,
   replayOrder,
@@ -28,7 +31,17 @@ import {
   unitOutSpells,
   unitsByBooking,
 } from "../src/utils/journal.ts";
-import { type BookingBreakdown, type BookingBreakdownKeyType, CUSTODY_HISTORY_KEYS } from "../src/schemas/mod.ts";
+import {
+  type BookingBreakdown,
+  type BookingBreakdownKeyType,
+  CUSTODY_HISTORY_KEYS,
+  emptyInboundBreakdown,
+  INBOUND_HISTORY_KEYS,
+  type InboundBreakdown,
+  type InboundBreakdownKeyType,
+  MOVEMENT_CONTRACTS,
+  type MovementTypeType,
+} from "../src/schemas/mod.ts";
 
 const FULFILLMENT_KEYS = CUSTODY_HISTORY_KEYS;
 
@@ -77,7 +90,7 @@ Deno.test("custodyReplay - a full prep → check out → return cycle reproduces
     ev("prepped", "out", 3),
     ev("out", "returned", 3),
   ];
-  const net = replayCustody(events);
+  const net = replayCustody(events, "outbound");
   assertEquals(net.prepped, 0);
   assertEquals(net.out, 0);
   assertEquals(net.returned, 3);
@@ -95,8 +108,8 @@ Deno.test("custodyReplay - an un-prepped check-out nets to zero prepped, not to 
   // type occurs twice in one session (they would collide on the derived doc id).
   // The intermediate state must never appear in the fold.
   const events = [ev("reserved", "prepped", 2), ev("prepped", "out", 2)];
-  assertEquals(replayCustody(events).prepped, 0);
-  assertEquals(replayCustody(events).out, 2);
+  assertEquals(replayCustody(events, "outbound").prepped, 0);
+  assertEquals(replayCustody(events, "outbound").out, 2);
   assertEquals(
     classifyReplay({ type: "rental", breakdown: breakdown({ out: 2 }), uid_product: PRODUCT }, events, ON_ORDER).verdict,
     "ok",
@@ -105,8 +118,8 @@ Deno.test("custodyReplay - an un-prepped check-out nets to zero prepped, not to 
 
 Deno.test("custodyReplay - a reversal nets itself out with no special case", () => {
   const events = [ev("prepped", "out", 4), ev("out", "prepped", 4)];
-  assertEquals(replayCustody(events).out, 0);
-  assertEquals(replayCustody(events).prepped, 0);
+  assertEquals(replayCustody(events, "outbound").out, 0);
+  assertEquals(replayCustody(events, "outbound").prepped, 0);
 });
 
 Deno.test("custodyReplay - a partial return leaves the remainder out", () => {
@@ -120,7 +133,7 @@ Deno.test("custodyReplay - a partial return leaves the remainder out", () => {
     ev("out", "returned", 2),
     ev("out", "damaged", 1),
   ];
-  const net = replayCustody(events);
+  const net = replayCustody(events, "outbound");
   assertEquals(net.out, 2);
   assertEquals(net.returned, 2);
   assertEquals(net.damaged, 1);
@@ -366,6 +379,7 @@ Deno.test("custodyReplay - one instant folds as one step: check_out before prep 
 
 const mv = (over: Partial<JournalMovement> & Pick<JournalMovement, "date" | "number">): JournalMovement => ({
   uid: `m${over.number}`,
+  type: "check_in",
   uid_booking: "o:p:d",
   custody: null,
   quantity: 1,
@@ -398,10 +412,10 @@ Deno.test("foldJournal: per booking, per grain, orphaned, and units — one orde
     mv({ date: t(5), number: 6, uid_booking: A2, custody: { from: null, to: "returned" } }),
   ];
   const [byBooking, byGrain, orphans, units] = foldJournal(journal, [
-    custodyByBooking(),
-    custodyByGrain(),
-    orphanedCustody(new Set([A, A2])),
-    unitsByBooking(),
+    custodyByBooking("outbound"),
+    custodyByGrain("outbound"),
+    orphanedCustody("outbound", new Set([A, A2])),
+    unitsByBooking("outbound"),
   ] as const);
   assertEquals(byBooking.get(A)!.returned, 1);
   assertEquals(byBooking.get(A)!.prepped, 0);
@@ -412,6 +426,92 @@ Deno.test("foldJournal: per booking, per grain, orphaned, and units — one orde
   assertEquals([...(units.get(A)!.returned ?? [])], [7]);
   assertEquals([...(units.get(A)!.out ?? [])], []);
   assertEquals([...(units.get(A)!.prepped ?? [])], []);
+});
+
+// ── Two ladders (7a, C10) ────────────────────────────────────────────
+
+Deno.test("movementLadder: a type names a ladder exactly when its contract names a booking", () => {
+  for (const [type, contract] of Object.entries(MOVEMENT_CONTRACTS) as [MovementTypeType, typeof MOVEMENT_CONTRACTS[MovementTypeType]][]) {
+    assertEquals(movementLadder(type) === null, contract.booking === "forbidden", type);
+  }
+  assertEquals(movementLadder("check_in"), "outbound");
+  assertEquals(movementLadder("purchase"), "inbound");
+  assertEquals(movementLadder("put_away_undo"), "inbound", "an undo inherits its forward's ladder");
+});
+
+Deno.test("ladderHistoryKeys: each ladder's identity covers its own history keys", () => {
+  assertEquals(ladderHistoryKeys("outbound"), CUSTODY_HISTORY_KEYS);
+  assertEquals(ladderHistoryKeys("inbound"), INBOUND_HISTORY_KEYS);
+});
+
+Deno.test("foldJournal: a shared spelling folds on its TYPE's ladder, never the other's", () => {
+  const t = (minute: number) => `2026-11-12T10:${String(minute).padStart(2, "0")}:00.000-06:00`;
+  // One id on both ladders: the two collections share an id grammar, so only the type can tell them apart.
+  const B = "src:prod:leg";
+  const journal = [
+    mv({ date: t(1), number: 1, type: "check_out", uid_booking: B, custody: { from: "prepped", to: "out" } }),
+    mv({ date: t(2), number: 2, type: "mark_lost", uid_booking: B, custody: { from: "out", to: "lost" } }),
+    mv({ date: t(1), number: 3, type: "subrent_in", uid_booking: B, custody: { from: "ordered", to: "received" }, quantity: 2 }),
+    mv({ date: t(2), number: 4, type: "put_away", uid_booking: B, custody: { from: "received", to: "stocked" }, quantity: 2 }),
+    mv({ date: t(3), number: 5, type: "return_to_supplier", uid_booking: B, custody: { from: "stocked", to: "lost" } }),
+  ];
+  const [outbound, inbound, outboundOrphans, inboundOrphans, outboundGrain, inboundGrain] = foldJournal(journal, [
+    custodyByBooking("outbound"),
+    custodyByBooking("inbound"),
+    orphanedCustody("outbound", new Set([B])),
+    orphanedCustody("inbound", new Set()),
+    custodyByGrain("outbound"),
+    custodyByGrain("inbound"),
+  ] as const);
+  assertEquals(outbound.get(B), { cleaning: 0, damaged: 0, lost: 1, maintenance: 0, out: 0, prepped: -1, returned: 0 });
+  assertEquals(inbound.get(B), {
+    transit_inbound: 0,
+    received: 0,
+    stocked: 1,
+    transit_outbound: 0,
+    sent_back: 0,
+    lost: 1,
+    damaged: 0,
+  });
+  assertEquals(outboundOrphans.size, 0, "an inbound movement is never an outbound orphan");
+  assertEquals(inboundOrphans.get(B)!.stocked, 1, "orphaned against its OWN collection's ids");
+  assertEquals(outboundGrain.get(B)!.lost, 1);
+  assertEquals(inboundGrain.get(B)!.lost, 1, "an inbound and an outbound grain are never pooled");
+  assertEquals(replayCustody(journal.filter((m) => movementLadder(m.type) === "inbound"), "inbound").lost, 1);
+});
+
+function inbound(over: Partial<InboundBreakdown> = {}): InboundBreakdown {
+  return { ...emptyInboundBreakdown(), ...over };
+}
+const iev = (from: InboundBreakdownKeyType | null, to: InboundBreakdownKeyType | null, quantity: number, date?: string) =>
+  ev(from as BookingBreakdownKeyType | null, to as BookingBreakdownKeyType | null, quantity, date);
+
+Deno.test("classifyInboundReplay: receive, put away, send back reproduces a subrent's breakdown", () => {
+  const events = [iev("ordered", "received", 4), iev("received", "stocked", 4), iev("stocked", "sent_back", 3)];
+  const r = classifyInboundReplay({ breakdown: inbound({ ordered: 6, stocked: 1, sent_back: 3 }) }, events);
+  assertEquals(r.verdict, "ok", "ordered is a plan key, outside the identity");
+  assertEquals(r.deltas, {});
+});
+
+Deno.test("classifyInboundReplay: a reversal or a typed undo nets out with no special case", () => {
+  const events = [iev("ordered", "received", 2), iev("received", "ordered", 2)];
+  assertEquals(classifyInboundReplay({ breakdown: inbound({ ordered: 2 }) }, events).verdict, "ok");
+});
+
+Deno.test("classifyInboundReplay: a missing event diverges; custody with no events is no_events", () => {
+  const short = classifyInboundReplay(
+    { breakdown: inbound({ stocked: 3 }) },
+    [iev("ordered", "received", 3), iev("received", "stocked", 2)],
+  );
+  assertEquals(short.verdict, "diverged");
+  assertEquals(short.deltas, { received: { stored: 0, replayed: 1 }, stocked: { stored: 3, replayed: 2 } });
+  assertEquals(classifyInboundReplay({ breakdown: inbound({ stocked: 3 }) }, []).verdict, "no_events");
+  assertEquals(classifyInboundReplay({ breakdown: inbound({ ordered: 3 }) }, []).verdict, "ok");
+});
+
+Deno.test("classifyInboundReplay: a log missing its front is partial_history", () => {
+  const r = classifyInboundReplay({ breakdown: inbound({ sent_back: 2 }) }, [iev("stocked", "sent_back", 2)]);
+  assertEquals(r.verdict, "partial_history");
 });
 
 // ── recordOrder / replayOrder (api-cloudrun#1255) ────────────────────
@@ -566,7 +666,7 @@ Deno.test("unitOutSpells: shares one fold with the existing projections", () => 
     custody: { from: "reserved", to: "out" },
     lines: [line([3030], SHELF_L, BK_A)],
   });
-  const [spells, byBooking] = foldJournal([enroll, out], [unitOutSpells(), unitsByBooking()] as const);
+  const [spells, byBooking] = foldJournal([enroll, out], [unitOutSpells(), unitsByBooking("outbound")] as const);
   assertEquals(spells.spells.get(3030)?.length, 1);
   assertEquals([...(byBooking.get(BK_A)?.out ?? [])], [3030]);
 });

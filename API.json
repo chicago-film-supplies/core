@@ -21875,24 +21875,36 @@
     },
     {
       "entrypoint": "@cfs/core/utils/journal",
-      "moduleDoc": "The movement journal, folded: the orders a fold may use, and the custody\nreplay as projections over it (stock campaign P1, api-cloudrun#1240).\n\n```ts\nimport { foldJournal, journalOrder, custodyByBooking } from \"@cfs/core/utils/journal\";\n```\n\n## Two orders, because two questions\n\nThree folds each ordered the journal their own way: the custody replay\ngrouped by `date` instant with no tiebreak; the ledger replay sorted `date_fs`\nthen `number`; and the unit replay sorted `created_at` then `number`. They\nanswer two different questions, so they need exactly two orders:\n\n- **What happened, in what order** — {@link journalOrder}: the movement's own\n  `date` instant, then its `number`. Custody folds use it. A rebook pair is\n  numbered `rebook_out` first precisely so that a fold takes it first.\n- **What a writer applied, in what order** — {@link replayOrder}: what a\n  replay must use to reproduce a stored ledger or roster, since basis and\n  roster state depend on the order movements were applied, not the order\n  they happened (api-cloudrun#1255). {@link recordOrder} is its live-writer\n  half.\n\n## The replay identity, and why it covers exactly the history keys\n\n`calculateBookingBreakdown` carries every custody-history key forward\nverbatim and re-derives only the plan keys, so the order path never\nORIGINATES a unit in a history key; only the fulfillment ladder does, and it\nwrites a movement for every step. Hence\n\n    net[k] = Σ(movements with custody.to === k) − Σ(movements with custody.from === k)\n    net[k] === booking.breakdown[k]        for k in CUSTODY_HISTORY_KEYS\n\nThe plan keys move with an order's status, a planning act with no event, so\nthey are deliberately outside the identity. **The stored breakdown wins on\ndisagreement**: a divergence is a bug report about the journal, never a\nlicence to rewrite the booking.\n\nLifted from api-cloudrun's custodyReplay module (`replayCustody`,\n`classifyReplay`; deleted there in stock campaign P3), unchanged in behaviour. How the audit judges each verdict\n(the cutover instant, `booking.created_at`) stays in the audit.",
+      "moduleDoc": "The movement journal, folded: the orders a fold may use, and the custody\nreplay as projections over it (stock campaign P1, api-cloudrun#1240).\n\n```ts\nimport { foldJournal, journalOrder, custodyByBooking } from \"@cfs/core/utils/journal\";\n```\n\n## Two orders, because two questions\n\nThree folds each ordered the journal their own way: the custody replay\ngrouped by `date` instant with no tiebreak; the ledger replay sorted `date_fs`\nthen `number`; and the unit replay sorted `created_at` then `number`. They\nanswer two different questions, so they need exactly two orders:\n\n- **What happened, in what order** — {@link journalOrder}: the movement's own\n  `date` instant, then its `number`. Custody folds use it. A rebook pair is\n  numbered `rebook_out` first precisely so that a fold takes it first.\n- **What a writer applied, in what order** — {@link replayOrder}: what a\n  replay must use to reproduce a stored ledger or roster, since basis and\n  roster state depend on the order movements were applied, not the order\n  they happened (api-cloudrun#1255). {@link recordOrder} is its live-writer\n  half.\n\n## The replay identity, and why it covers exactly the history keys\n\n`calculateBookingBreakdown` carries every custody-history key forward\nverbatim and re-derives only the plan keys, so the order path never\nORIGINATES a unit in a history key; only the fulfillment ladder does, and it\nwrites a movement for every step. Hence\n\n    net[k] = Σ(movements with custody.to === k) − Σ(movements with custody.from === k)\n    net[k] === booking.breakdown[k]        for k in CUSTODY_HISTORY_KEYS\n\nThe plan keys move with an order's status, a planning act with no event, so\nthey are deliberately outside the identity. **The stored breakdown wins on\ndisagreement**: a divergence is a bug report about the journal, never a\nlicence to rewrite the booking.\n\n## Two ladders, and a movement's TYPE says which (7a, C10)\n\nAn outbound booking (an order's, `bookings`) and an inbound one (a\npurchase's, `bookings-inbound`) keep different breakdowns, and five key\nspellings (`quoted`, `lost`, `damaged`, the two transit keys) are shared\nbetween them with a different place on each. So a custody pair cannot be\nfolded until its LADDER is known, and the ladder is the movement type's\n`MovementContract.booking_ladder` ({@link movementLadder}) — never the key,\nnever the booking id (the two collections share one id grammar).\n\nEvery custody projection therefore takes the ladder it folds and SKIPS every\nmovement of the other one: {@link custodyByBooking}, {@link custodyByGrain},\n{@link orphanedCustody}, {@link unitsByBooking} and {@link replayCustody}.\nA caller wanting both runs two projections in one {@link foldJournal} pass.\nThe inbound identity is the outbound one over `INBOUND_HISTORY_KEYS`, judged\nby {@link classifyInboundReplay}.\n\nLifted from api-cloudrun's custodyReplay module (`replayCustody`,\n`classifyReplay`; deleted there in stock campaign P3), unchanged in behaviour. How the audit judges each verdict\n(the cutover instant, `booking.created_at`) stays in the audit.",
       "symbols": [
         {
           "kind": "interface",
           "name": "CustodyEvent",
-          "declaration": "interface CustodyEvent {\n  custody: typeLiteral | null;\n  quantity: number;\n  date: string;\n}",
-          "doc": "One event's custody transition and when it happened: the parts of a movement the replay reads."
+          "declaration": "interface CustodyEvent {\n  custody: MovementCustodyType | null;\n  quantity: number;\n  date: string;\n}",
+          "doc": "One event's custody transition and when it happened: the parts of a movement\nthe replay reads. The replay is handed ONE booking's events, so they are all\non that booking's ladder, and the caller names it."
         },
         {
           "kind": "typeAlias",
           "name": "CustodyNet",
-          "declaration": "type CustodyNet = Record<BookingBreakdownKeyType, number>;",
-          "doc": "Net units per custody-history key, all keys stated."
+          "declaration": "type CustodyNet = LadderNet<\"outbound\">;",
+          "doc": "Net units per OUTBOUND custody-history key (`CUSTODY_HISTORY_KEYS`)."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InboundCustodyNet",
+          "declaration": "type InboundCustodyNet = LadderNet<\"inbound\">;",
+          "doc": "Net units per INBOUND custody-history key (`INBOUND_HISTORY_KEYS`)."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InboundReplayVerdict",
+          "declaration": "type InboundReplayVerdict = Extract<ReplayVerdict, \"ok\" | \"no_events\" | \"partial_history\" | \"diverged\">;",
+          "doc": "How an INBOUND booking's events compare with its stored breakdown: the four\nverdicts an inbound booking can hold. The outbound-only ones have no inbound\nmeaning — every inbound type is `sale | rental` (no service arm), a\nsubstitution never seeds an inbound booking, and an inbound loss has always\nbeen a movement (`return_to_supplier`, 0b)."
         },
         {
           "kind": "interface",
           "name": "JournalMovement",
-          "declaration": "interface JournalMovement {\n  uid: string;\n  uid_booking: string | null;\n  custody: typeLiteral | null;\n  quantity: number;\n  units: ReadonlyArray<typeLiteral>;\n}",
+          "declaration": "interface JournalMovement {\n  uid: string;\n  type: MovementTypeType;\n  uid_booking: string | null;\n  custody: MovementCustodyType | null;\n  quantity: number;\n  units: ReadonlyArray<typeLiteral>;\n}",
           "doc": "A movement as the projections read it."
         },
         {
@@ -21906,6 +21918,18 @@
           "name": "JournalProjection",
           "declaration": "interface JournalProjection {\n  init(): S;\n  step(state: S, movement: M): void;\n}",
           "doc": "One thing a journal fold accumulates. `M` is the movement shape it reads:\n{@link JournalMovement} by default, wider for a projection that needs more of\nthe movement (as {@link unitOutSpells} does)."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "LadderHistoryKeyType",
+          "declaration": "type LadderHistoryKeyType = conditional;",
+          "doc": "A custody-history key of one ladder: what that ladder's replay identity\ncovers. The plan keys are not members — they move with the source document's\nstatus, a planning act with no event."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "LadderNet",
+          "declaration": "type LadderNet = Record<LadderHistoryKeyType<L>, number>;",
+          "doc": "Net units per custody-history key of one ladder, all keys stated."
         },
         {
           "kind": "typeAlias",
@@ -21970,8 +21994,21 @@
         {
           "kind": "typeAlias",
           "name": "UnitSetsByKey",
-          "declaration": "type UnitSetsByKey = Partial<Record<BookingBreakdownKeyType, Set<number>>>;",
-          "doc": "Each booking's named units per history key, as the journal leaves them."
+          "declaration": "type UnitSetsByKey = Partial<Record<LadderHistoryKeyType<L>, Set<number>>>;",
+          "doc": "Each booking's named units per history key of one ladder, as the journal leaves them."
+        },
+        {
+          "kind": "function",
+          "name": "classifyInboundReplay",
+          "signature": "classifyInboundReplay(booking: typeLiteral, events: readonly CustodyEvent[]): typeLiteral",
+          "doc": "Judge one INBOUND booking's events against its stored breakdown — the\noutbound identity over `INBOUND_HISTORY_KEYS` (7a, C10).\n\n- `no_events` — no events and real stored keys: custody the journal never\n  recorded. Before the inbound cutover that is a booking the backfill (C12)\n  did not reach; after it, a writer that bypassed the lever.\n- `partial_history` — some prefix of the log, by time, goes negative.\n- `diverged` — anything else that disagrees.\n\n⚠️ **A backfilled booking reads `ok` by construction**, because the backfill\nmints the booking from the buckets and then writes the movements that reach\nit. `ok` there verifies nothing (0b ruling 4); only a booking minted after\nthe cutover is evidence about the writers. That judgement is the caller's:\nthe cutover instant is per project and lives in api-cloudrun.",
+          "paramTags": [
+            {
+              "name": "events",
+              "doc": "this booking's events, all on the inbound ladder"
+            }
+          ],
+          "returnsTag": null
         },
         {
           "kind": "function",
@@ -21989,16 +22026,16 @@
         {
           "kind": "function",
           "name": "custodyByBooking",
-          "signature": "custodyByBooking(): JournalProjection<Map<string, CustodyNet>>",
-          "doc": "Net custody per booking id — the replay of every booking at once.",
+          "signature": "custodyByBooking(ladder: L): JournalProjection<Map<string, LadderNet<L>>>",
+          "doc": "Net custody per booking id on one ladder — the replay of every booking of it at once.",
           "paramTags": [],
           "returnsTag": null
         },
         {
           "kind": "function",
           "name": "custodyByGrain",
-          "signature": "custodyByGrain(): JournalProjection<Map<string, CustodyNet>>",
-          "doc": "Net custody per GRAIN — `(order, product, leg)`, every component signature\npooled. A grain carry or a re-key moves custody between the bookings of one\ngrain, so a booking can diverge while its grain conserves.",
+          "signature": "custodyByGrain(ladder: L): JournalProjection<Map<string, LadderNet<L>>>",
+          "doc": "Net custody per GRAIN of one ladder — `(source, product, leg)`, every\ncomponent signature pooled. A grain carry or a re-key moves custody between\nthe bookings of one grain, so a booking can diverge while its grain\nconserves. The ladder is part of the grain's identity: an inbound and an\noutbound grain are never pooled, because each projection folds one ladder.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -22020,10 +22057,31 @@
         },
         {
           "kind": "function",
-          "name": "orphanedCustody",
-          "signature": "orphanedCustody(existing: ReadonlySet<string>): JournalProjection<Map<string, CustodyNet>>",
-          "doc": "Net custody on movements whose booking no longer exists: per booking id, the\nnet its movements leave. A grain carry or a deleted plan-only booking nets to\nzero or below; a positive bucket is custody nothing holds any more.",
+          "name": "ladderHistoryKeys",
+          "signature": "ladderHistoryKeys(ladder: L): readonly LadderHistoryKeyType<L>[]",
+          "doc": "One ladder's custody-history keys, in its own order.",
           "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "movementLadder",
+          "signature": "movementLadder(type: MovementTypeType): BookingLadderType | null",
+          "doc": "The ladder a movement type's custody pair is on — its contract's\n`booking_ladder` — or `null` for a type that names no booking. The ONLY way a\nfold learns the ladder: a key cannot say (five spellings are shared) and a\nbooking id cannot either (one grammar, two collections).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "orphanedCustody",
+          "signature": "orphanedCustody(ladder: L, existing: ReadonlySet<string>): JournalProjection<Map<string, LadderNet<L>>>",
+          "doc": "Net custody on one ladder's movements whose booking no longer exists: per\nbooking id, the net its movements leave. A grain carry or a deleted plan-only\nbooking nets to zero or below; a positive bucket is custody nothing holds any\nmore.",
+          "paramTags": [
+            {
+              "name": "existing",
+              "doc": "the booking ids of THIS ladder's collection — an outbound\nmovement is never judged against `bookings-inbound`, nor the reverse."
+            }
+          ],
           "returnsTag": null
         },
         {
@@ -22037,8 +22095,8 @@
         {
           "kind": "function",
           "name": "replayCustody",
-          "signature": "replayCustody(events: readonly CustodyEvent[]): CustodyNet",
-          "doc": "Net units the events place in each custody-history key. A `reverses`\nreversal carries its custody swapped and nets itself out; a planning key on\none end contributes only through the other.",
+          "signature": "replayCustody(events: readonly CustodyEvent[], ladder: L): LadderNet<L>",
+          "doc": "Net units the events place in each custody-history key of `ladder`. A\n`reverses` reversal carries its custody swapped and nets itself out; a\nplanning key on one end contributes only through the other.\n\n⚠️ **Pass one booking's events**, which are on one ladder by construction.\nThe replay cannot check it — a shared spelling (`lost`, `damaged`) folds into\nwhichever ladder is named — so a caller holding a mixed journal partitions it\nby {@link movementLadder} first, as the projections do.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -22061,8 +22119,8 @@
         {
           "kind": "function",
           "name": "unitsByBooking",
-          "signature": "unitsByBooking(): JournalProjection<Map<string, UnitSetsByKey>>",
-          "doc": "Which units each booking holds per history key, folded over the WHOLE journal\nfrom empty sets. A unit leaves `custody.from`'s set and joins `custody.to`'s.\n\n⚠️ **There is no era cut, and none should come back** (api-cloudrun#1253). A\nroster interval is journaled (`enroll` / `unenroll`), and numbers are never\nreused, so a movement naming unit N can only mean that one unit, in whichever\ninterval it was written. An earlier `since` cut the fold by business `date`,\nwhich disagreed with the unit replay's `created_at` cut and was then left with\nnothing to cut at all. If a caller ever needs one interval, derive it from that\ninterval's `enroll`, never from a date.",
+          "signature": "unitsByBooking(ladder: L): JournalProjection<Map<string, UnitSetsByKey<L>>>",
+          "doc": "Which units each booking of one ladder holds per history key, folded over\nthe WHOLE journal from empty sets. A unit leaves `custody.from`'s set and\njoins `custody.to`'s.\n\n⚠️ **There is no era cut, and none should come back** (api-cloudrun#1253). A\nroster interval is journaled (`enroll` / `unenroll`), and numbers are never\nreused, so a movement naming unit N can only mean that one unit, in whichever\ninterval it was written. An earlier `since` cut the fold by business `date`,\nwhich disagreed with the unit replay's `created_at` cut and was then left with\nnothing to cut at all. If a caller ever needs one interval, derive it from that\ninterval's `enroll`, never from a date.",
           "paramTags": [],
           "returnsTag": null
         }

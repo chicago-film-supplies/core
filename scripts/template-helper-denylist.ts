@@ -587,11 +587,14 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // projections (stock campaign P1). A template renders one document and is
   // handed no journal. Listed in UTIL_MODULES only so the drift guard sees its exports.
   journal: [
+    "classifyInboundReplay",
     "classifyReplay",
     "custodyByBooking",
     "custodyByGrain",
     "foldJournal",
     "journalOrder",
+    "ladderHistoryKeys",
+    "movementLadder",
     "orphanedCustody",
     "recordOrder",
     "replayCustody",
