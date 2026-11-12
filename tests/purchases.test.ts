@@ -787,8 +787,12 @@ Deno.test("PurchaseItemInput: each arm's own requirements, one field at a time",
   const charge = lineHead(3);
   assertEquals(issuePaths(PurchaseItemInput, sub), []);
   assertEquals(issuePaths(PurchaseItemInput, { ...sub, ledger_account: 1999 }), ["ledger_account"]);
-  // A charge's account and name are the operator's: there is no default.
-  assertEquals(issuePaths(PurchaseItemInput, { type: "service", ...charge, name: "Freight", amount_cents: 1 }), ["ledger_account"]);
+  // A charge's name is the operator's. Its account may be left to the writer, which
+  // defaults only a PLACED charge (ruling 74), so the input takes it absent; a null
+  // is a kit header's and a charge is never one; a stated one is the operator's.
+  assertEquals(issuePaths(PurchaseItemInput, { type: "service", ...charge, name: "Freight", amount_cents: 1 }), []);
+  assertEquals(issuePaths(PurchaseItemInput, { type: "service", ...charge, name: "Freight", amount_cents: 1, ledger_account: null }), ["ledger_account"]);
+  assertEquals(issuePaths(PurchaseItemInput, { type: "replacement", ...charge, name: "Lost", amount_cents: 1, out_of_service: [] }).includes("ledger_account"), false);
   assertEquals(issuePaths(PurchaseItemInput, { type: "service", ...charge, amount_cents: 1, ledger_account: 5300 }), ["name"]);
   assertEquals(issuePaths(PurchaseItemInput, { ...sub, price: { discount: { rate: 101, type: "percent" } } }), ["price.discount.rate"]);
   assertEquals(issuePaths(PurchaseItemInput, { ...buyInput, ledger_account: 5100 }), ["ledger_account"]);

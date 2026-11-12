@@ -5463,8 +5463,8 @@
         {
           "kind": "interface",
           "name": "PurchaseServiceItemInputType",
-          "declaration": "interface PurchaseServiceItemInputType {\n  type: \"service\";\n  name: string;\n  quantity?: number;\n  amount_cents?: number | null;\n  ledger_account: COACodeType;\n  uid_units?: never;\n}",
-          "doc": "A service (Charge) item as an operator raises it. Its account is the operator's — there is no default."
+          "declaration": "interface PurchaseServiceItemInputType {\n  type: \"service\";\n  name: string;\n  quantity?: number;\n  amount_cents?: number | null;\n  ledger_account?: COACodeType;\n  uid_units?: never;\n}",
+          "doc": "A service (Charge) item as an operator raises it. Its account is the\noperator's, except that a charge PLACED under a line and stating none takes\nthat line's (ruling 74); see {@link PurchaseItemInputBase}."
         },
         {
           "kind": "variable",
@@ -13934,8 +13934,8 @@
         {
           "kind": "interface",
           "name": "PurchaseServiceItemInputType",
-          "declaration": "interface PurchaseServiceItemInputType {\n  type: \"service\";\n  name: string;\n  quantity?: number;\n  amount_cents?: number | null;\n  ledger_account: COACodeType;\n  uid_units?: never;\n}",
-          "doc": "A service (Charge) item as an operator raises it. Its account is the operator's — there is no default."
+          "declaration": "interface PurchaseServiceItemInputType {\n  type: \"service\";\n  name: string;\n  quantity?: number;\n  amount_cents?: number | null;\n  ledger_account?: COACodeType;\n  uid_units?: never;\n}",
+          "doc": "A service (Charge) item as an operator raises it. Its account is the\noperator's, except that a charge PLACED under a line and stating none takes\nthat line's (ruling 74); see {@link PurchaseItemInputBase}."
         },
         {
           "kind": "variable",

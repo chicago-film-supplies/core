@@ -1499,9 +1499,12 @@ export interface PurchaseLinePriceInputType {
  * the product's category — never "untracked"; a uid SETS it and must name a
  * live category. `ledger_account` is absent-KEEPS, value-SETS, with the writer's
  * default on a new item (D4): a sale's is `xeroPostingFor("purchase", …)`'s asset
- * account, a rental's 5100, a service's its cost entry's `coa_cost` when it
- * names a product with one. Whichever account is stated, the arm's
- * {@link payablePostingIssues} class binds.
+ * account, a rental's 5100, and a `service` or `replacement` charge's its
+ * nearest ancestor LINE's account as the writer resolves it in the same build
+ * (ruling 74): a charge placed under a row costs that row, so it posts where the
+ * row posts until the operator states otherwise. A top-level charge has no
+ * default, so absent on a new one is a 400. Whichever account is stated, the
+ * arm's {@link payablePostingIssues} class binds.
  *
  * `description` absent KEEPS what is stored and is `""` on a new item;
  * `uid_tax_class_override` absent KEEPS, `null` clears it. The line's
@@ -1556,13 +1559,18 @@ export interface PurchaseRentalItemInputType extends PurchaseItemInputBase {
   uid_units?: string[];
 }
 
-/** A service (Charge) item as an operator raises it. Its account is the operator's — there is no default. */
+/**
+ * A service (Charge) item as an operator raises it. Its account is the
+ * operator's, except that a charge PLACED under a line and stating none takes
+ * that line's (ruling 74); see {@link PurchaseItemInputBase}.
+ */
 export interface PurchaseServiceItemInputType extends PurchaseItemInputBase {
   type: "service";
   name: string;
   quantity?: number;
   amount_cents?: number | null;
-  ledger_account: COACodeType;
+  /** Absent KEEPS on an amend; on a new item the writer's default, which only a placed charge has. */
+  ledger_account?: COACodeType;
   /** Retired — see `retiredUnitsKey`. Present is a 400. */
   uid_units?: never;
 }
@@ -1631,7 +1639,8 @@ const noCustodyInput = {
   name: LineItemCore.name,
   quantity: z.int().min(1).optional(),
   amount_cents: z.int().min(0).nullable().optional(),
-  ledger_account: COACode,
+  // Optional, not nullable: `null` is a kit header's, and a charge is never one.
+  ledger_account: COACode.optional(),
   uid_units: retiredUnitsKey(),
 };
 

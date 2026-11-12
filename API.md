@@ -12251,7 +12251,9 @@ interface PurchaseServiceItem {
 
 ### `PurchaseServiceItemInputType`
 
-A service (Charge) item as an operator raises it. Its account is the operator's — there is no default.
+A service (Charge) item as an operator raises it. Its account is the
+operator's, except that a charge PLACED under a line and stating none takes
+that line's (ruling 74); see {@link PurchaseItemInputBase}.
 
 ```ts
 interface PurchaseServiceItemInputType {
@@ -12259,7 +12261,7 @@ interface PurchaseServiceItemInputType {
   name: string;
   quantity?: number;
   amount_cents?: number | null;
-  ledger_account: COACodeType;
+  ledger_account?: COACodeType;
   uid_units?: never;
 }
 ```
@@ -29723,7 +29725,9 @@ interface PurchaseServiceItem {
 
 ### `PurchaseServiceItemInputType`
 
-A service (Charge) item as an operator raises it. Its account is the operator's — there is no default.
+A service (Charge) item as an operator raises it. Its account is the
+operator's, except that a charge PLACED under a line and stating none takes
+that line's (ruling 74); see {@link PurchaseItemInputBase}.
 
 ```ts
 interface PurchaseServiceItemInputType {
@@ -29731,7 +29735,7 @@ interface PurchaseServiceItemInputType {
   name: string;
   quantity?: number;
   amount_cents?: number | null;
-  ledger_account: COACodeType;
+  ledger_account?: COACodeType;
   uid_units?: never;
 }
 ```
