@@ -22,6 +22,8 @@ const validStore = (overrides: Record<string, unknown> = {}) => ({
   default_location: null,
   crms_store_id: 100,
   jurisdiction: "chicago",
+  // Required since one-document-model 7a: a purchase at the store arrives here.
+  uid_destination: "testdest100000000000",
   active: true,
   ...ts,
   ...overrides,
@@ -33,6 +35,13 @@ Deno.test("StoreSchema validates a complete document", () => {
 
 Deno.test("StoreSchema rejects missing required fields", () => {
   assertEquals(StoreSchema.safeParse({ uid: "teststore10000000000" }).success, false);
+});
+
+Deno.test("StoreSchema requires the store's own destination, and refuses a null one", () => {
+  const doc = validStore();
+  delete (doc as Record<string, unknown>).uid_destination;
+  assertEquals(StoreSchema.safeParse(doc).success, false);
+  assertEquals(StoreSchema.safeParse(validStore({ uid_destination: null })).success, false);
 });
 
 Deno.test("StoreSchema rejects additional properties", () => {

@@ -42,9 +42,14 @@ export interface Store {
    * store's stock filled this line*, per line, from `storeAllocation`. Origin
    * sourcing is a property of the DOCUMENT.
    *
-   * Optional through api-cloudrun#409 Phase 1.
+   * 🔴 **REQUIRED and non-nullable since one-document-model 7a** (owner,
+   * 2026-11-12). It is also where a PURCHASE's goods arrive: a purchase pair at
+   * the store names this destination, as an order's in-store leg does
+   * (api-cloudrun `substituteStoreEndpoints`), and every inbound booking must
+   * name a place. A store with no address of its own is not a state CFS has —
+   * both prod stores set one (CSR, deactivated, names its old 5660 W Taylor).
    */
-  uid_destination?: string | null;
+  uid_destination: string;
   /**
    * **The ORIGIN** — the jurisdiction this store collects as, and the bottom of
    * `deriveJurisdiction`'s case 3 (origin sourcing). A Naperville delivery from
@@ -107,7 +112,7 @@ export const StoreSchema: z.ZodType<Store> = z.strictObject({
   default_location: UidNameRef.nullable().meta({ label: "Default Location" }),
   // No `column: true` — `display-columns.test.ts` bans a heading ending in
   // "Uid", and there is no name to show in its place (see the docblock).
-  uid_destination: FirestoreId.nullable().optional(),
+  uid_destination: FirestoreId,
   jurisdiction: JurisdictionEnum.meta({
     column: true,
     label: "Jurisdiction",
@@ -139,6 +144,8 @@ export interface CreateStoreInputType {
    * API could no longer create a store, and only a script could repair one.
    */
   jurisdiction: JurisdictionType;
+  /** The store's own `destinations/{uid}`. Required for the reason `jurisdiction` is: the stored field is. */
+  uid_destination: string;
 }
 /** Input schema for creating a store. */
 export const CreateStoreInput: z.ZodType<CreateStoreInputType> = z.object({
@@ -147,6 +154,7 @@ export const CreateStoreInput: z.ZodType<CreateStoreInputType> = z.object({
   crms_store_id: z.int(),
   default: z.boolean().optional(),
   jurisdiction: JurisdictionEnum,
+  uid_destination: FirestoreId,
 });
 
 /** Input type for updating a store. */
@@ -163,6 +171,8 @@ export interface UpdateStoreInputType {
    * the state the required field exists to forbid.
    */
   jurisdiction?: JurisdictionType;
+  /** Optional, never nullable: a store's address can be repointed, not removed. */
+  uid_destination?: string;
   version: number;
 }
 /** Input schema for updating a store. */
@@ -173,5 +183,6 @@ export const UpdateStoreInput: z.ZodType<UpdateStoreInputType> = z.object({
   default: z.boolean().optional(),
   active: z.boolean().optional(),
   jurisdiction: JurisdictionEnum.optional(),
+  uid_destination: FirestoreId.optional(),
   version: z.int().min(0),
 });
