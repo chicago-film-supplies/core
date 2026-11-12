@@ -233,6 +233,7 @@ export type RuleId =
   | "undo-extend-rental:bookings-to-transactions"
   // purchases.ts
   | "update-purchase:purchase-to-bills"
+  | "update-purchase:purchase-to-movement-paths"
   | "create-purchase-bill:bill-to-purchase"
   | "create-purchase-bill:bill-to-settlements"
   | "settle-purchase-bill:xero-to-settlements"

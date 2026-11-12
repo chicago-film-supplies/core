@@ -373,7 +373,30 @@ const PURCHASE_BILL_SYNC_SEMANTICS: EnforcementRef = {
   gates: true,
 };
 
+/** The row-move re-point, asserted at the purchase writer (ruling 65a). */
+const ROW_MOVE_REPOINT: EnforcementRef = {
+  kind: "assertion",
+  ref: "api-cloudrun/src/services/purchases.ts::updatePurchase",
+  clause:
+    "the writer pairs the stored and next lines (`purchaseRowMoves`, the order's `pairItemsAcrossRebuild`), refuses a touched row whose booking grain would change (`assertMovesKeepTheirGrain`), reads the purchase's whole journal as a claimed range, and re-points every movement naming a moved row to its new path in the same commit, each patch checked by `assertMovementPatch`; a bill or credit still billing a moved row where it stood (settled, linked, or any credit) refuses the move (`assertBillingFollowedMoves`)",
+  gates: true,
+};
+
 const updatePurchaseBillRules: CollectionRule[] = [
+  {
+    id: "update-purchase:purchase-to-movement-paths",
+    source: "purchases",
+    target: "transactions",
+    mode: "co-write",
+    invariant:
+      "A purchase row that MOVES within its booking grain (between groups of its pair; one-document-model ruling 65a, owner 2026-11-12) takes its movements with it: in the commit that moves the row, every movement whose `path_source_item` names the row's old path names its new one. `path_source_item` is a POINTER (`journal: \"annotation\"`), so the patch changes nothing a custody or ledger replay reads. A move that changes the grain (another pair, a component out of its kit) is refused while the row holds a receipt, a return or a bill; so is one a bill or credit that cannot follow (settled, linked and not cleared, or any credit) still bills where it stood.",
+    enforced_by: [ROW_MOVE_REPOINT],
+    transaction: "update-purchase",
+    trigger: "a received, returned or billed purchase row's path changes within its pair",
+    fields: [
+      { source: ["items", "path"], target: ["path_source_item"], transform: "the row's new path, through the old → new map the writer pairs" },
+    ],
+  },
   {
     id: "update-purchase:purchase-to-bills",
     source: "purchases",
@@ -1294,6 +1317,7 @@ const updatePurchaseTransaction: TransactionDefinition = {
     "cowrite-thread:cards-to-thread",
     "cowrite-thread:thread-to-cards",
     "update-purchase:purchase-to-bills",
+    "update-purchase:purchase-to-movement-paths",
   ],
 };
 
