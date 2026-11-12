@@ -265,6 +265,7 @@ export type RuleId =
   | "purchase-custody:receipt-to-inbound-bookings"
   | "purchase-custody:inbound-bookings-to-purchase"
   | "update-inbound-booking:booking-to-transactions"
+  | "update-inbound-booking:booking-to-out-of-service"
   | "purchase-billed:bills-to-purchase"
   | "purchase-billed:credits-to-purchase"
   | "update-out-of-service-record:record-to-inbound-booking"

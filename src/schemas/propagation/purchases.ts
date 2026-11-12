@@ -261,6 +261,14 @@ const INBOUND_LEVER: EnforcementRef = {
  * inbound booking writes its movement. The movement's fold onto the ledger and
  * the shelves is `create-transaction`'s, which the lever's transaction lists.
  */
+const RECEIVE_DAMAGED_RECORD: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/unit/receiveDamagedRecord.test.ts::receive_damaged opens a record keyed on its flag, sourced to the purchase and its inbound booking",
+  clause:
+    "a `receive_damaged` step opens ONE out-of-service record keyed on its `receive_flag` movement's id and numbered by it, reason `damaged`, its units flagged on the staging shelf (away on an uncounted product), sourced to the purchase and the inbound booking and never `bookings:`, with its default thread, in the lever's batch; `planReceiveDamagedUndo` cancels the booking's records newest first, whole, refusing a partial, a resolved or a mark-less one. Hermetic; the lever's batch is type-checked only until the window converts test",
+  gates: true,
+};
+
 const updateInboundBookingRules: CollectionRule[] = [
   {
     id: "update-inbound-booking:booking-to-transactions",
@@ -275,6 +283,25 @@ const updateInboundBookingRules: CollectionRule[] = [
       { source: ["breakdown"], target: ["custody"], transform: "the action's rule pair, `from → to`" },
       { source: ["uid"], target: ["uid_booking"] },
       { source: ["source"], target: ["sources"], transform: "the purchase the booking's source names" },
+    ],
+  },
+  {
+    id: "update-inbound-booking:booking-to-out-of-service",
+    source: "bookings-inbound",
+    target: "out-of-service",
+    mode: "co-write",
+    invariant:
+      "A unit received damaged (`receive_damaged`, ruling 80) opens one out-of-service record per step: its id and number are the step's `receive_flag` movement's, its reason `damaged`, its units flagged where the receipt put them (away on an uncounted product), its sources the purchase and the inbound booking (never `bookings:`, which core reads as the outbound owner), its supplier the purchase's, with its default thread. `receive_damaged_undo` cancels the booking's open records newest first, whole; a partial undo, a record with resolved units, or one no receipt of this booking opened is a 400.",
+    enforced_by: [RECEIVE_DAMAGED_RECORD],
+    transaction: "update-inbound-booking",
+    fields: [
+      { source: ["breakdown", "damaged"], target: ["breakdown", "flagged"], transform: "the step's quantity; `away` on an uncounted product" },
+      { source: ["units", "damaged"], target: ["units", "flagged"], transform: "serialized only: the step's named units" },
+      {
+        source: [],
+        target: ["sources"],
+        transform: "[{collection:'purchases', uid, label: 'PO-' + number}, {collection:'bookings-inbound', uid: booking.uid, label}]",
+      },
     ],
   },
 ];
@@ -1286,9 +1313,10 @@ const closePurchaseTransaction: TransactionDefinition = {
 const updateInboundBookingTransaction: TransactionDefinition = {
   id: "update-inbound-booking",
   description:
-    "The inbound lever (`PUT /purchase-receipts/{uid}/bookings`, ruling 75): operator custody steps on a purchase's inbound bookings — receive, put away, send back, a flag on arrival, and each one's undo. A settle is the out-of-service record's (`update-out-of-service-record:record-to-inbound-booking`), not this lever's. Each step writes its movement and folds it onto the ledger and the shelves through the one ledger writer, claiming `stock-locks/{P}`; then the purchase is finalized from its committed bookings. A receipt posts nothing to Xero. Fires on: every custody step on an inbound booking. The unit roster steps fire when a step names units.",
+    "The inbound lever (`PUT /purchase-receipts/{uid}/bookings`, ruling 75): operator custody steps on a purchase's inbound bookings — receive, put away, send back, a flag on arrival, and each one's undo. A flag on arrival opens an out-of-service record (ruling 80) and its undo cancels it. A settle is the out-of-service record's (`update-out-of-service-record:record-to-inbound-booking`), not this lever's. Each step writes its movement and folds it onto the ledger and the shelves through the one ledger writer, claiming `stock-locks/{P}`; then the purchase is finalized from its committed bookings. A receipt posts nothing to Xero. Fires on: every custody step on an inbound booking. The unit roster steps fire when a step names units.",
   steps: [
     "update-inbound-booking:booking-to-transactions",
+    "update-inbound-booking:booking-to-out-of-service",
     "create-transaction:transaction-to-ledger",
     "create-transaction:transaction-to-locations",
     ...STOCK_STEPS,
