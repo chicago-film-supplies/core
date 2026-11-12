@@ -67,7 +67,7 @@ import {
   NO_LINE_CUSTODY,
 } from "../src/utils/purchases.ts";
 import { apportionCents } from "../src/utils/money.ts";
-import { flatPurchaseLineMoney } from "../src/utils/purchases.ts";
+import { costedProductUid, flatPurchaseLineMoney } from "../src/utils/purchases.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 import { asCreditRows, payablePrice, purchaseDivider, purchasePair, payableLine, withPayableMoney } from "./helpers/payable.ts";
 
@@ -1925,4 +1925,44 @@ Deno.test("purchaseLineCloseOutcome: a buy drops to received, a flat charge to b
 Deno.test("landedCostWeightCents: a line with nothing left to arrive weighs nothing, an over-receipt included", () => {
   assertEquals(landedCostWeightCents(line({ quantity: 2, amount_cents: 1_000 }), 2), 0);
   assertEquals(landedCostWeightCents(line({ quantity: 2, amount_cents: 1_000 }), 3), 0);
+});
+
+Deno.test("costedProductUid: a placed charge costs the line above it; a top-level charge has none (C15, rulings 70-71)", () => {
+  const PO = "testpurch00000000001";
+  const LEG = "11111111-1111-4111-8111-111111111111";
+  const GROUP = "22222222-2222-4222-8222-222222222222";
+  const HOTSPOT = "testprod00000000hot1";
+  const SIM = "testprod00000000sim1";
+  const KIT = "testprod00000000kit1";
+  const FREIGHT = "custom-33333333-3333-4333-8333-333333333333";
+  const CARRIER = "custom-44444444-4444-4444-8444-444444444444";
+  const rows = [
+    { type: "destination", uid: LEG, path: [LEG] },
+    { type: "group", uid: GROUP, path: [LEG, GROUP] },
+    { type: "rental", uid: HOTSPOT, path: [LEG, GROUP, HOTSPOT] },
+    { type: "rental", uid: SIM, path: [LEG, GROUP, HOTSPOT, SIM] },
+    { type: "service", uid: FREIGHT, path: [LEG, GROUP, HOTSPOT, FREIGHT] },
+    { type: "service", uid: CARRIER, path: [LEG, CARRIER] },
+    { type: "sale", uid: KIT, path: [LEG, KIT] },
+    { type: "service", uid: FREIGHT, path: [LEG, KIT, FREIGHT] },
+  ];
+  // Placed under the subrent row: through the group divider, which is skipped.
+  assertEquals(costedProductUid(rows[4], rows), HOTSPOT);
+  // A component's costed product is the row it is a component of.
+  assertEquals(costedProductUid(rows[3], rows), HOTSPOT);
+  // A kit header counts: it names its product.
+  assertEquals(costedProductUid(rows[7], rows), KIT);
+  // Top-level (only dividers above): null, and the caller takes the line's own product.
+  assertEquals(costedProductUid(rows[5], rows), null);
+  assertEquals(costedProductUid(rows[2], rows), null, "a top-level product row costs nothing above it");
+
+  // A bill row sits under the purchase divider; joined to the PURCHASE's rows it
+  // passes its path relative to its purchase block.
+  const billRow = { type: "service", uid: FREIGHT, path: [PO, LEG, GROUP, HOTSPOT, FREIGHT] };
+  assertEquals(costedProductUid({ path: billRow.path.slice(1) }, rows), HOTSPOT);
+  // Walked within the bill's own rows, the purchase divider is skipped too.
+  const billRows = [{ type: "purchase", uid: PO, path: [PO] }, ...rows.map((r) => ({ ...r, path: [PO, ...r.path] }))];
+  assertEquals(costedProductUid(billRow, billRows), HOTSPOT);
+  // Unrelated path spaces never match: an unrelativized bill row against purchase rows finds nothing.
+  assertEquals(costedProductUid(billRow, rows), null);
 });

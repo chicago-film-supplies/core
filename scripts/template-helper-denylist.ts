@@ -761,6 +761,9 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "remainingToBill",
     "remainingToReceive",
     "remainingToReturn",
+    // The cost-attribution join (C15) for the margin fold, the tracking default and
+    // the api's readers. A render shows a placed charge in its tree, under its row.
+    "costedProductUid",
   ],
   // `utils/purchase-actions.ts` is the purchase twin of `invoice-actions`: which
   // action an operator may take. Every export answers a question about a WRITE.

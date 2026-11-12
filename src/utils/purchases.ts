@@ -26,6 +26,7 @@ import {
   type PurchaseRentalItemInputType,
   purchaseItemBasis,
   type PurchaseItem,
+  isLineItemType,
   isPurchaseLine,
 } from "../schemas/mod.ts";
 import { apportionCents, roundDivHalfUp, toCentsBig } from "./money.ts";
@@ -351,6 +352,50 @@ export function remainingToBill(
  */
 export function remainingToReturn(custody: PurchaseLineCustody): number {
   return custody.received - custody.returned;
+}
+
+// ── Cost attribution (C15, rulings 70–73) ─────────────────────────
+
+/** The row shape {@link costedProductUid} reads: any purchase, bill or credit row. */
+export interface CostedProductRow {
+  type: string;
+  uid: string;
+  path: readonly string[];
+}
+
+/**
+ * The product a payable row COSTS, read off its placement: the uid of the
+ * nearest LINE above it (dividers skipped), or `null` for a row with no line
+ * above it. Attribution is placement (ruling 70): freight for a subrent is a
+ * row beneath that subrent's row, as a kit component is, so no line carries a
+ * pointer key (ruling 67). A kit header counts, since its uid names its product.
+ *
+ * `null` is the top-level answer, and the caller decides what it means: a
+ * top-level charge costs its OWN product (ruling 71), so the margin fold keeps
+ * it on the purchase line and the default tracking category reads the line's
+ * own product. ⚠️ An ancestor's uid is returned as stored, so a `custom-`
+ * ancestor yields a `custom-` uid, which names no product; the caller treats
+ * it as it treats a `custom-` line of its own.
+ *
+ * Walks the row's path prefixes through a by-path index, never
+ * `closestAncestor` (`utils/item-pairing.ts`), which picks among duplicate-uid
+ * candidates during a REBUILD; a stored purchase's paths are unique
+ * (`itemIdentityIssues`). `row` and `rows` must share one path space: a
+ * bill-side caller joining to its PURCHASE's rows passes the row's path
+ * relative to its purchase block (`path.slice(1)`), as the margin fold does.
+ *
+ * @param row - The row whose costed product is asked
+ * @param rows - Every row of the document (or purchase block) the row sits in
+ * @returns The costed product's uid, or `null` when no line sits above the row
+ */
+export function costedProductUid(row: { path: readonly string[] }, rows: readonly CostedProductRow[]): string | null {
+  const byPath = new Map<string, CostedProductRow>();
+  for (const r of rows) byPath.set(JSON.stringify(r.path), r);
+  for (let end = row.path.length - 1; end > 0; end--) {
+    const ancestor = byPath.get(JSON.stringify(row.path.slice(0, end)));
+    if (ancestor !== undefined && isLineItemType(ancestor.type)) return ancestor.uid;
+  }
+  return null;
 }
 
 // ── Pack expansion (api-cloudrun#1081) ───────────────────────────

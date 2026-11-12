@@ -25539,6 +25539,12 @@
       "symbols": [
         {
           "kind": "interface",
+          "name": "CostedProductRow",
+          "declaration": "interface CostedProductRow {\n  type: string;\n  uid: string;\n  path: readonly string[];\n}",
+          "doc": "The row shape {@link costedProductUid} reads: any purchase, bill or credit row."
+        },
+        {
+          "kind": "interface",
           "name": "LandedCostTarget",
           "declaration": "interface LandedCostTarget {\n  line: Pick<PurchaseSaleItem, \"amount_cents\" | \"quantity\">;\n  received: number;\n}",
           "doc": "One buy line as {@link allocateLandedCostCents} weighs it: the line and its row's received count."
@@ -25598,6 +25604,23 @@
           "doc": "Spread one landed amount over several buy lines, in proportion to each\nline's value still to arrive ({@link landedCostWeightCents}), with\n{@link apportionCents}. Σ is exactly `amountCents`.\n\nThe client runs it so the preview it shows is the split it sends; a line with\nweight 0 gets 0, and the caller drops it rather than send a 0-cent entry.",
           "paramTags": [],
           "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "costedProductUid",
+          "signature": "costedProductUid(row: typeLiteral, rows: readonly CostedProductRow[]): string | null",
+          "doc": "The product a payable row COSTS, read off its placement: the uid of the\nnearest LINE above it (dividers skipped), or `null` for a row with no line\nabove it. Attribution is placement (ruling 70): freight for a subrent is a\nrow beneath that subrent's row, as a kit component is, so no line carries a\npointer key (ruling 67). A kit header counts, since its uid names its product.\n\n`null` is the top-level answer, and the caller decides what it means: a\ntop-level charge costs its OWN product (ruling 71), so the margin fold keeps\nit on the purchase line and the default tracking category reads the line's\nown product. ⚠️ An ancestor's uid is returned as stored, so a `custom-`\nancestor yields a `custom-` uid, which names no product; the caller treats\nit as it treats a `custom-` line of its own.\n\nWalks the row's path prefixes through a by-path index, never\n`closestAncestor` (`utils/item-pairing.ts`), which picks among duplicate-uid\ncandidates during a REBUILD; a stored purchase's paths are unique\n(`itemIdentityIssues`). `row` and `rows` must share one path space: a\nbill-side caller joining to its PURCHASE's rows passes the row's path\nrelative to its purchase block (`path.slice(1)`), as the margin fold does.",
+          "paramTags": [
+            {
+              "name": "row",
+              "doc": "The row whose costed product is asked"
+            },
+            {
+              "name": "rows",
+              "doc": "Every row of the document (or purchase block) the row sits in"
+            }
+          ],
+          "returnsTag": "The costed product's uid, or `null` when no line sits above the row"
         },
         {
           "kind": "function",

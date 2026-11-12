@@ -53068,6 +53068,18 @@ pushed bill line, the per-line headroom, and the status rule.
 
 Design: api-cloudrun#1210.
 
+### `CostedProductRow`
+
+The row shape {@link costedProductUid} reads: any purchase, bill or credit row.
+
+```ts
+interface CostedProductRow {
+  type: string;
+  uid: string;
+  path: readonly string[];
+}
+```
+
 ### `LandedCostTarget`
 
 One buy line as {@link allocateLandedCostCents} weighs it: the line and its row's received count.
@@ -53186,6 +53198,35 @@ line's value still to arrive ({@link landedCostWeightCents}), with
 
 The client runs it so the preview it shows is the split it sends; a line with
 weight 0 gets 0, and the caller drops it rather than send a 0-cent entry.
+
+### `costedProductUid(row: typeLiteral, rows: readonly CostedProductRow[]): string | null`
+
+The product a payable row COSTS, read off its placement: the uid of the
+nearest LINE above it (dividers skipped), or `null` for a row with no line
+above it. Attribution is placement (ruling 70): freight for a subrent is a
+row beneath that subrent's row, as a kit component is, so no line carries a
+pointer key (ruling 67). A kit header counts, since its uid names its product.
+
+`null` is the top-level answer, and the caller decides what it means: a
+top-level charge costs its OWN product (ruling 71), so the margin fold keeps
+it on the purchase line and the default tracking category reads the line's
+own product. ⚠️ An ancestor's uid is returned as stored, so a `custom-`
+ancestor yields a `custom-` uid, which names no product; the caller treats
+it as it treats a `custom-` line of its own.
+
+Walks the row's path prefixes through a by-path index, never
+`closestAncestor` (`utils/item-pairing.ts`), which picks among duplicate-uid
+candidates during a REBUILD; a stored purchase's paths are unique
+(`itemIdentityIssues`). `row` and `rows` must share one path space: a
+bill-side caller joining to its PURCHASE's rows passes the row's path
+relative to its purchase block (`path.slice(1)`), as the margin fold does.
+
+**Parameters**
+
+- `row` — The row whose costed product is asked
+- `rows` — Every row of the document (or purchase block) the row sits in
+
+**Returns** — The costed product's uid, or `null` when no line sits above the row
 
 ### `cumulativeShareCents(amountCents: number, quantity: number, before: number, after: number): number`
 
