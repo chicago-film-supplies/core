@@ -234,6 +234,10 @@ export const PERMISSIONS = [
   // `purchase-receipts` (ruling 58). Moving custody stays `purchases.receive`
   // until 6e-0d's role-namespace migration (ruling 48).
   "receipts.read",
+  // Searching them (the `purchase-receipts` and `bookings-inbound` Typesense
+  // aliases): a list surface is Typesense-backed, so a read without this renders
+  // an empty page, as `fulfillment.read` without `fulfillment.search` did.
+  "receipts.search",
   "stockSummaries.read",
   "typesenseSync.read",
 

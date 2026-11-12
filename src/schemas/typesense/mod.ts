@@ -36,6 +36,7 @@ export {
 export type {
   TypesenseAddressFields,
   BookingDocument,
+  BookingsInboundDocument,
   ChartOfAccountsDocument,
   CommentDocument,
   ContactDocument,
@@ -52,6 +53,7 @@ export type {
   PurchaseBillDocument,
   PurchaseCreditDocument,
   PurchaseDocument,
+  PurchaseReceiptDocument,
   StoreDocument,
   SupplierDocument,
   TagDocument,
@@ -66,6 +68,7 @@ export type {
 } from "./documents.ts";
 
 export { bookings } from "./bookings.ts";
+export { bookingsInbound } from "./bookings-inbound.ts";
 export { cards } from "./cards.ts";
 export { chartOfAccounts } from "./chart-of-accounts.ts";
 export { comments } from "./comments.ts";
@@ -80,6 +83,7 @@ export { organizations } from "./organizations.ts";
 export { outOfService } from "./out-of-service.ts";
 export { products } from "./products.ts";
 export { purchases } from "./purchases.ts";
+export { purchaseReceipts } from "./purchase-receipts.ts";
 export { purchaseBills } from "./purchase-bills.ts";
 export { purchaseCredits } from "./purchase-credits.ts";
 export { stores } from "./stores.ts";
@@ -109,6 +113,7 @@ export {
 import type { Permission } from "../permissions.ts";
 import type { TypesenseCollectionConfig } from "./types.ts";
 import { bookings } from "./bookings.ts";
+import { bookingsInbound } from "./bookings-inbound.ts";
 import { cards } from "./cards.ts";
 import { chartOfAccounts } from "./chart-of-accounts.ts";
 import { comments } from "./comments.ts";
@@ -123,6 +128,7 @@ import { organizations } from "./organizations.ts";
 import { outOfService } from "./out-of-service.ts";
 import { products } from "./products.ts";
 import { purchases } from "./purchases.ts";
+import { purchaseReceipts } from "./purchase-receipts.ts";
 import { purchaseBills } from "./purchase-bills.ts";
 import { purchaseCredits } from "./purchase-credits.ts";
 import { stores } from "./stores.ts";
@@ -137,6 +143,7 @@ import { webshopProducts } from "./webshop-products.ts";
 
 const allSchemas: TypesenseCollectionConfig[] = [
   bookings,
+  bookingsInbound,
   cards,
   chartOfAccounts,
   comments,
@@ -153,6 +160,7 @@ const allSchemas: TypesenseCollectionConfig[] = [
   purchases,
   purchaseBills,
   purchaseCredits,
+  purchaseReceipts,
   stores,
   suppliers,
   tags,
@@ -167,6 +175,7 @@ const allSchemas: TypesenseCollectionConfig[] = [
 /** Union of all Typesense collection alias names. */
 export type TypesenseAlias =
   | "bookings"
+  | "bookings-inbound"
   | "cards"
   | "chart-of-accounts"
   | "comments"
@@ -183,6 +192,7 @@ export type TypesenseAlias =
   | "purchases"
   | "purchase-bills"
   | "purchase-credits"
+  | "purchase-receipts"
   | "stores"
   | "suppliers"
   | "tags"
@@ -282,6 +292,12 @@ export const SEARCH_PERMISSION_BY_ALIAS: Partial<Record<TypesenseAlias, Permissi
   "purchases": "purchases.search",
   "purchase-bills": "purchases.search",
   "purchase-credits": "purchases.search",
+  // A purchase's custody documents share ONE verb, as their reads share
+  // `receipts.read` (one-document-model 7a, C13) — the twin of the outbound
+  // pair's `fulfillment.search` / `bookings.search`, folded into one because
+  // the supplier side has one custody role.
+  "purchase-receipts": "receipts.search",
+  "bookings-inbound": "receipts.search",
   "stores": "stores.search",
   "suppliers": "suppliers.search",
   "tags": "tags.search",

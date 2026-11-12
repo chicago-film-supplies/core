@@ -1242,8 +1242,67 @@ export interface PurchaseCreditDocument {
   updated_at?: number;
 }
 
+/** A purchase receipt as indexed in Typesense (one-document-model 7a): the fulfillment's twin, no price. */
+export interface PurchaseReceiptDocument {
+  id: string;
+  uid: string;
+  number: number;
+  number_str?: string;
+  status: string;
+  supplier: { uid?: string; name: string };
+  subject?: string;
+  reference?: string;
+  destinations: Array<{
+    delivery?: { uid?: string; address?: TypesenseAddressFields };
+    collection?: { uid?: string; address?: TypesenseAddressFields };
+    dates?: { delivery_start_fs?: number; collection_start_fs?: number; collection_end_fs?: number };
+  }>;
+  items?: Array<{ uid?: string; name?: string; type?: string; quantity?: number; path?: string }>;
+  due_at_fs?: number;
+  created_at?: number;
+  updated_at: number;
+}
+
+/** An inbound booking as indexed in Typesense (one-document-model 7a): the booking's twin on the supplier ladder. */
+export interface BookingsInboundDocument {
+  id: string;
+  uid: string;
+  uid_product: string;
+  /** The purchase the booking belongs to. */
+  source: { uid: string };
+  number: number;
+  number_str?: string;
+  status: string;
+  type: string;
+  name: string;
+  quantity: number;
+  quantity_ordered: number;
+  breakdown: {
+    quoted: number;
+    ordered: number;
+    transit_inbound: number;
+    received: number;
+    stocked: number;
+    transit_outbound: number;
+    sent_back: number;
+    lost: number;
+    damaged: number;
+  };
+  dates: { start_fs?: number; end_fs?: number };
+  destinations?: {
+    delivery?: { uid?: string; address?: TypesenseAddressFields };
+    collection?: { uid?: string; address?: TypesenseAddressFields };
+  };
+  stores?: Array<{ uid_store?: string; name?: string; quantity?: number }>;
+  uid_destination_delivery?: string;
+  uid_destination_collection?: string;
+  created_at?: number;
+  updated_at: number;
+}
+
 export interface TypesenseDocumentMap {
   bookings: BookingDocument;
+  "bookings-inbound": BookingsInboundDocument;
   cards: CardDocument;
   "chart-of-accounts": ChartOfAccountsDocument;
   comments: CommentDocument;
@@ -1260,6 +1319,7 @@ export interface TypesenseDocumentMap {
   purchases: PurchaseDocument;
   "purchase-bills": PurchaseBillDocument;
   "purchase-credits": PurchaseCreditDocument;
+  "purchase-receipts": PurchaseReceiptDocument;
   stores: StoreDocument;
   tags: TagDocument;
   suppliers: SupplierDocument;
