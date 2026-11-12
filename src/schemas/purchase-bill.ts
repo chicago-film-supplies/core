@@ -109,6 +109,7 @@ import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import { PriceFormulaRefSchema, RateKey, RateSnapshotSchema, TierCountSchema, type TierCountType } from "./price-formula.ts";
 import { deriveInvoiceStatus } from "./_invoice-freeze.ts";
 import {
+  type OutOfServiceLinkCarrier,
   ActorRef,
   type ActorRefType,
   DocSource,
@@ -278,7 +279,6 @@ export interface PurchaseDocumentProductItem extends Omit<PurchaseDocumentLineBa
   /** `null` marks a kit header (`isKitHeaderLine`). */
   ledger_account: COACodeType | null;
   type: PurchaseProductItemTypeType;
-  uid_product: string;
   /**
    * A MOVE pointer (the `path_order_item` twin): the purchase item this line
    * bills when it sits at another path in its purchase's block, relative to
@@ -323,10 +323,10 @@ export interface PurchaseDocumentServiceItem extends PurchaseDocumentLineBase {
  * 2026-11 a `charge` with a single record id). A `mark_lost` record's id is a
  * `MovementId`, hence `OutOfServiceId`.
  *
- * `uid_product` is the lost rental's money-only twin, never the rental (owner
- * ruling 15; see `PurchaseReplacementItem`).
+ * Its uid names the lost rental's money-only twin when it names a product, never
+ * the rental (owner ruling 15; see `PurchaseReplacementItem`).
  */
-export interface PurchaseDocumentReplacementItem extends Omit<PurchaseDocumentServiceItem, "type"> {
+export interface PurchaseDocumentReplacementItem extends Omit<PurchaseDocumentServiceItem, "type" | "uid_product"> {
   type: "replacement";
   /**
    * The records this line bills, each with its share of `quantity` (ruling 16).
@@ -482,7 +482,6 @@ const PurchaseDocumentProductItemInner = z.strictObject({
   ...docItemHead,
   ...docItemShape,
   ledger_account: PayableKitLedgerAccount,
-  uid_product: FirestoreId,
   // The move pointer, exactly as invoice's `path_order_item`.
   path_purchase_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
   // Plain `.optional()`, matching the invoice line's. Only a substitute carries it.
@@ -492,8 +491,6 @@ const PurchaseDocumentProductItemInner = z.strictObject({
 const noCustodyLine = {
   ...docItemHead,
   ...docItemShape,
-  // Permanent `.optional()`: freight and fees attribute nothing (api-cloudrun#1360).
-  uid_product: FirestoreId.optional(),
   // `seed: false`: `[]` fails `.min(1)`, so the form seed must omit the key —
   // exactly as invoice's `path_order_item`.
   path_purchase_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
@@ -502,6 +499,9 @@ const noCustodyLine = {
 const PurchaseDocumentServiceItemInner = z.strictObject({
   type: z.literal("service").meta({ column: true, label: "Type" }),
   ...noCustodyLine,
+  // Attribution, never identity (the uid is `custom-`). Permanent `.optional()`:
+  // freight and fees attribute nothing (api-cloudrun#1360).
+  uid_product: FirestoreId.optional(),
 });
 
 const PurchaseDocumentReplacementItemInner = z.strictObject({
@@ -1326,7 +1326,7 @@ export interface PurchaseBillDividerInputType {
  * row that moved keeps them. A row no stored row pairs with is, in order: a
  * split's clone if it states {@link path_purchase_item}; a line of the purchase
  * named by its path; or a line the bill itself authors, which states its name,
- * account, quantity and money (and `uid_product` on a sale or rental).
+ * account, quantity and money; a sale or rental names its product by its uid.
  *
  * On a TIME line `price.rates` restates each unit rate; a flat line's
  * `amount_cents` is stated directly (gross when a discount is set).
@@ -1346,7 +1346,7 @@ export interface PurchaseBillLineInputType {
   amount_cents?: number;
   /** `null` is a stored kit header echoed back; the writer decides what a `none` product holds. */
   ledger_account?: COACodeType | null;
-  /** The product a bill-authored sale or rental bills. A stored line's product never changes. */
+  /** A SERVICE row's attribution only. A sale, rental or replacement names its product by its uid. */
   uid_product?: string;
   /** A kit component's flag, as on an order line's input. */
   zero_priced?: boolean | null;
@@ -1412,35 +1412,41 @@ export const PurchaseBillDestinationInput: z.ZodType<PurchaseBillDestinationInpu
 const billDividerInput = (type: "purchase" | "destination" | "group") =>
   z.object({ type: z.literal(type), uid: ItemUid, path: z.array(ItemUid).min(1), name: LineItemCore.name.optional() });
 
-const billLineInput = (type: SharedLineType) =>
-  z.object({
-    type: z.literal(type),
-    uid: ItemUid,
-    path: z.array(ItemUid).min(1),
-    name: LineItemCore.name.optional(),
-    description: LineItemCore.description.optional(),
-    quantity: z.int().min(1).optional(),
-    amount_cents: z.int().min(0).optional(),
-    ledger_account: COACode.nullable().optional(),
-    uid_product: FirestoreId.optional(),
-    zero_priced: z.boolean().nullable().optional(),
-    quantity_per_parent: z.number().min(0).nullable().optional(),
-    out_of_service: OutOfServiceListInput.optional().meta({ seed: false }),
-    path_purchase_item: z.array(ItemUid).min(1).optional(),
-    substituted_for: SubstitutedForListInput.optional(),
-    uid_tax_class_override: FirestoreId.nullable().optional(),
-    uid_tracking_category: FirestoreId.nullable().optional(),
-    price: z.object({
-      uid_price_formula: FirestoreId.optional(),
-      rates: z.array(z.object({ rate_key: RateKey, amount_cents: z.int() })).optional(),
-      discount: DiscountInput.nullable().optional(),
-    }).optional(),
-  }).superRefine((row, ctx) => {
-    // A row naming its product is keyed by it (W4K), as a purchase line input is.
-    const message = payableInputUidIssue(row);
-    if (message !== null) ctx.addIssue({ code: "custom", path: ["uid"], message });
-    for (const [path, msg] of outOfServiceLinkIssues(row)) ctx.addIssue({ code: "custom", path, message: msg });
-  });
+const billLineShape = (type: SharedLineType) => ({
+  type: z.literal(type),
+  uid: ItemUid,
+  path: z.array(ItemUid).min(1),
+  name: LineItemCore.name.optional(),
+  description: LineItemCore.description.optional(),
+  quantity: z.int().min(1).optional(),
+  amount_cents: z.int().min(0).optional(),
+  ledger_account: COACode.nullable().optional(),
+  zero_priced: z.boolean().nullable().optional(),
+  quantity_per_parent: z.number().min(0).nullable().optional(),
+  out_of_service: OutOfServiceListInput.optional().meta({ seed: false }),
+  path_purchase_item: z.array(ItemUid).min(1).optional(),
+  substituted_for: SubstitutedForListInput.optional(),
+  uid_tax_class_override: FirestoreId.nullable().optional(),
+  uid_tracking_category: FirestoreId.nullable().optional(),
+  price: z.object({
+    uid_price_formula: FirestoreId.optional(),
+    rates: z.array(z.object({ rate_key: RateKey, amount_cents: z.int() })).optional(),
+    discount: DiscountInput.nullable().optional(),
+  }).optional(),
+});
+
+function billLineIssues(row: { type: string; uid: string } & OutOfServiceLinkCarrier, ctx: z.RefinementCtx): void {
+  // A sale or rental row names its product by its uid (W4K, 7a), as a purchase line input does.
+  const message = payableInputUidIssue(row);
+  if (message !== null) ctx.addIssue({ code: "custom", path: ["uid"], message });
+  for (const [path, msg] of outOfServiceLinkIssues(row)) ctx.addIssue({ code: "custom", path, message: msg });
+}
+
+const billLineInput = (type: SharedLineType) => z.object(billLineShape(type)).superRefine(billLineIssues);
+
+// The one arm carrying `uid_product`: a service row's attribution, never its identity.
+const billServiceLineInput = z.object({ ...billLineShape("service"), uid_product: FirestoreId.optional() })
+  .superRefine(billLineIssues);
 
 /** Zod schema for one {@link PurchaseBillRowInputType}. */
 export const PurchaseBillRowInput: z.ZodType<PurchaseBillRowInputType> = z.discriminatedUnion("type", [
@@ -1449,7 +1455,7 @@ export const PurchaseBillRowInput: z.ZodType<PurchaseBillRowInputType> = z.discr
   billDividerInput("group"),
   billLineInput("sale"),
   billLineInput("rental"),
-  billLineInput("service"),
+  billServiceLineInput,
   billLineInput("replacement"),
 ]);
 

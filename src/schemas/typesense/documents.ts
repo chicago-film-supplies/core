@@ -1169,7 +1169,7 @@ export interface PurchaseDocument {
   subject?: string;
   reference?: string;
   /** Every item arm; `type` is the buy/subrent/usage/direct facet that replaced the document `kind` (api-cloudrun#1407). */
-  items?: Array<{ type?: string; uid_product?: string; name?: string }>;
+  items?: Array<{ type?: string; uid?: string; name?: string }>;
   /** 6e-0a (ruling 32): the bill mirror. */
   bills?: Array<{ uid: string; number: number; status: string }>;
   /** 6e-0a (ruling 32): the supplier-credit mirror. */
@@ -1197,7 +1197,7 @@ export interface PurchaseBillDocument {
   xero_id?: string;
   subject?: string;
   reference?: string;
-  items?: Array<{ type?: string; uid_product?: string; name?: string }>;
+  items?: Array<{ type?: string; uid?: string; name?: string }>;
   totals?: {
     total_cents?: number;
     total_cents_str?: string;
@@ -1230,7 +1230,7 @@ export interface PurchaseCreditDocument {
   status: string;
   xero_id?: string;
   reference?: string;
-  items?: Array<{ type?: string; uid_product?: string; name?: string }>;
+  items?: Array<{ type?: string; uid?: string; name?: string }>;
   total_cents?: number;
   total_cents_str?: string;
   remaining_credit_cents?: number;

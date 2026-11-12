@@ -164,7 +164,6 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
       description: "",
       zero_priced: null,
       uid_tax_class: "AAAAAAAAAAAAAAAAAAAA",
-      uid_product: "AAAAAAAAAAAAAAAAAAAA",
       quantity: 1,
       amount_cents: 0,
       // The stated-total money at amount 0 (one-document-model Phase 2).
@@ -207,7 +206,6 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
       zero_priced: null,
       uid_tax_class: "AAAAAAAAAAAAAAAAAAAA",
       // A catalog line's uid IS its product's (W4K), so the product is the row uid.
-      uid_product: "AAAAAAAAAAAAAAAAAAAB",
       quantity: 1,
       amount_cents: 0,
       price: {

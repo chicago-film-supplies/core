@@ -11,6 +11,10 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  * credit), which is one more reason every `items*` field is optional.
  *
  * v3 (one-document-model Phase 4): `uid_purchase` is gone with the stored key.
+ *
+ * v4 (one-document-model 7a): `items.uid_product` → `items.uid`. A line names its
+ * product by its uid (owner, 2026-11-11); only a service line keeps a
+ * `uid_product`, as attribution.
  * `query_by_sources` is not indexed (the indexer strips every `query_by_*`), as
  * on `credit-notes`.
  *
@@ -23,12 +27,12 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  */
 export const purchaseCredits: TypesenseCollectionConfig = {
   alias: "purchase-credits",
-  version: 3,
+  version: 4,
   firestoreCollection: "purchase-credits",
-  collectionName: "purchase-credits_v3",
+  collectionName: "purchase-credits_v4",
   enabled: true,
   schema: {
-    name: "purchase-credits_v3",
+    name: "purchase-credits_v4",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -44,7 +48,7 @@ export const purchaseCredits: TypesenseCollectionConfig = {
       { name: "reference", type: "string", stem: true, sort: true, optional: true },
       { name: "items", type: "object[]", optional: true },
       { name: "items.type", type: "string[]", facet: true, optional: true },
-      { name: "items.uid_product", type: "string[]", facet: false, optional: true },
+      { name: "items.uid", type: "string[]", facet: false, optional: true },
       { name: "items.name", type: "string[]", stem: true, optional: true },
       { name: "total_cents", type: "int64", sort: true, optional: true, money: true },
       { name: "total_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },

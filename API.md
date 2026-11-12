@@ -9683,9 +9683,11 @@ const PURCHASE_ITEM_TYPES: readonly ["sale", "rental", "service", "replacement"]
 
 ### `PURCHASE_PRODUCT_ITEM_TYPES`
 
-The arms that ORDER a product (a required `uid_product`) — the payable types
-whose `SIDE_CONTRACTS.payable.custody` is `"custody"`. A `service` or
-`replacement` line's `uid_product` is attribution only, so it is not one.
+The arms that ORDER a product — the payable types whose
+`SIDE_CONTRACTS.payable.custody` is `"custody"`. The line's `uid` IS the
+product (ruling 12), as an order line's is. A `service` line's `uid_product`
+is attribution only, and a `replacement` line's product is its lost rental's
+money-only twin, so neither is one.
 
 ```ts
 const PURCHASE_PRODUCT_ITEM_TYPES: readonly ["sale", "rental"];
@@ -9823,7 +9825,6 @@ The payable line fields {@link payableLineUid} reads.
 interface PayableLineUidFields {
   type: string;
   uid: string;
-  uid_product?: string;
 }
 ```
 
@@ -11125,7 +11126,7 @@ ancestry), and the paired row is the base for every key this row omits, so a
 row that moved keeps them. A row no stored row pairs with is, in order: a
 split's clone if it states {@link path_purchase_item}; a line of the purchase
 named by its path; or a line the bill itself authors, which states its name,
-account, quantity and money (and `uid_product` on a sale or rental).
+account, quantity and money; a sale or rental names its product by its uid.
 
 On a TIME line `price.rates` restates each unit rate; a flat line's
 `amount_cents` is stated directly (gross when a discount is set).
@@ -11595,7 +11596,6 @@ sit in the type's class (`payablePostingIssues`).
 interface PurchaseDocumentProductItem {
   ledger_account: COACodeType | null;
   type: PurchaseProductItemTypeType;
-  uid_product: string;
   path_purchase_item?: string[];
   substituted_for?: SubstitutedForEntryType[];
 }
@@ -11616,8 +11616,8 @@ lost or damaged in CFS's hands, naming the out-of-service record(s) (until
 2026-11 a `charge` with a single record id). A `mark_lost` record's id is a
 `MovementId`, hence `OutOfServiceId`.
 
-`uid_product` is the lost rental's money-only twin, never the rental (owner
-ruling 15; see `PurchaseReplacementItem`).
+Its uid names the lost rental's money-only twin when it names a product, never
+the rental (owner ruling 15; see `PurchaseReplacementItem`).
 
 ```ts
 interface PurchaseDocumentReplacementItem {
@@ -12064,7 +12064,6 @@ A RENTAL (Subrent) item — `quantity` units borrowed for a hire window and give
 interface PurchaseRentalItem {
   ledger_account: COACodeType | null;
   type: "rental";
-  uid_product: string;
   amount_cents: number | null;
   price: PurchaseLinePrice;
   quantity_billed: number | null;
@@ -12082,7 +12081,6 @@ only (gross when discounted). Its hire window is its pair's dates, stated on
 ```ts
 interface PurchaseRentalItemInputType {
   type: "rental";
-  uid_product: string;
   quantity: number;
   amount_cents?: number | null;
   ledger_account?: COACodeType | null;
@@ -12107,13 +12105,14 @@ damaged in CFS's hands, naming the out-of-service record(s) the loss opened
 settlement movement (`return_to_supplier`) moves the units, not this line.
 Otherwise a {@link PurchaseServiceItem}.
 
-⚠️ **`uid_product` is the lost rental's money-only TWIN, never the rental**
+⚠️ **Its `uid` names the lost rental's money-only TWIN, never the rental**
 (owner ruling 15, 2026-11-10): the rental's `uid_linked_replacement`, a
 `stock_method: "none"` product, which the writer derives from the record —
-as an invoice's replacement line names its twin. The line is keyed by it
-({@link payableLineUid}), so naming the rental itself would sit the line at
-the subrent line's own path. With no twin it names no product and keys
-`custom-`. The lost rental stays reachable through the record's `uid_product`.
+as an invoice's replacement line names its twin by its uid. Naming the rental
+itself would sit the line at the subrent line's own path. With no twin it
+names no product and keys `custom-`. The lost rental stays reachable through
+the record's `uid_product`. (The line's own `uid_product` key retired in 7a:
+the uid is the one place a line names its product.)
 
 ```ts
 interface PurchaseReplacementItem {
@@ -12125,8 +12124,8 @@ interface PurchaseReplacementItem {
 ### `PurchaseReplacementItemInputType`
 
 A replacement item as an operator raises it: a {@link PurchaseServiceItemInputType}
-naming its record(s) in `out_of_service`. `uid_product` is the lost rental's
-twin (ruling 15).
+naming its record(s) in `out_of_service`. Its uid names the lost rental's twin
+when the writer derives one (ruling 15), else the writer mints `custom-`.
 
 ```ts
 interface PurchaseReplacementItemInputType {
@@ -12187,7 +12186,6 @@ A SALE (Buy) item — ownership of `quantity` units of one product. Always flat.
 interface PurchaseSaleItem {
   type: "sale";
   ledger_account: COACodeType | null;
-  uid_product: string;
   amount_cents: number;
   price: PurchaseLinePrice;
   quantity_billed: number;
@@ -12202,7 +12200,6 @@ A sale (Buy) item as an operator orders it — the buckets are the server's.
 ```ts
 interface PurchaseSaleItemInputType {
   type: "sale";
-  uid_product: string;
   quantity: number;
   amount_cents: number;
   ledger_account?: COACodeType | null;
@@ -18603,41 +18600,34 @@ no availability answer moves; the rule just stops having two answers.
 
 ### `payableInputUidIssue(line: typeLiteral): string | null`
 
-Why a line INPUT that names its product carries another uid, or `null`.
-
-Only the product half of {@link payableLineUidIssue}: a `service` (or
-product-less `replacement`) input's `custom-` uid is the writer's to mint.
+Why a line INPUT carries a uid that cannot be its product, or `null`: a
+`sale` or `rental` input names its product BY its uid, so a `custom-` one is
+refused. A `service` (or product-less `replacement`) input's `custom-` uid is
+the writer's to mint.
 
 ### `payableLineUid(line: PayableLineUidFields): string`
 
 The `uid` a payable line takes: its product's, as an order or invoice
 catalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).
+Since 7a the uid is the ONLY place a line names its product — the separate
+`uid_product` key retired on every arm but a service line's attribution
+(owner, 2026-11-11), so the payable line has the order line's shape.
 
-- `sale` / `rental` → `uid_product`.
-- `replacement` → `uid_product` when stated, as an invoice's replacement
-  line takes its replacement product's uid (`utils/replacements.ts`). That
-  product is the lost rental's money-only TWIN (`uid_linked_replacement`),
-  which the writer derives from the out-of-service record — never the
-  rental itself, whose uid keys the subrent line (owner ruling 15).
+- `sale` / `rental` → its own uid, which names the product.
+- `replacement` → its own uid when that names a product (the lost rental's
+  money-only TWIN, `uid_linked_replacement`, ruling 15), as an invoice's
+  replacement line takes its replacement product's uid.
 - `service`, and a `replacement` naming no product → a `custom-` uid. A line
-  already carrying one keeps it; any other becomes `custom-` + its old uid,
-  so a re-key is deterministic and repeatable, and a purchase line and the
-  bill line projected from it (which share the old uid) land on one uid.
-
-A product does not repeat within a group on any document: two of one product
-in one section is a split into a sibling group. Dividers keep their uids and
-are not lines, so this is never asked of one.
+  already carrying one keeps it; any other becomes `custom-` + its old uid.
 
 ### `payableLineUidIssue(line: PayableLineUidFields): string | null`
 
-Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`.
+Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`:
+a `sale` or `rental` line's uid is a product's (never `custom-`), and a
+`service` line's is `custom-`. A `replacement` may be either.
 
 Attached to every stored purchase line arm and, through `documentItemsIssues`
-(`schemas/purchase-bill.ts`), to every bill and supplier-credit line — at
-W4K's contract publish (2026-11-10), once purchases, bills and credits were
-migrated in prod, dev and `test`
-(`api-cloudrun/scripts/migrate-payable-line-uids.ts`). The input refine
-({@link payableInputUidIssue}) went live a publish earlier.
+(`schemas/purchase-bill.ts`), to every bill and supplier-credit line.
 
 ### `payablePostingIssues(type: SharedLineType, account: number | null): typeLiteral[]`
 
@@ -18754,8 +18744,9 @@ line, whose cost is decided as it accrues.
 
 ### `purchaseItemProduct(item: PurchaseItem): string | undefined`
 
-The product an item ORDERS, or `undefined` — a service or replacement line's
-`uid_product` is attribution, not an order.
+The product an item ORDERS — a sale or rental line's uid — or `undefined`: a
+service line's `uid_product` is attribution, and a replacement's twin is not
+an order.
 
 ### `purchaseLineKeyOf(row: Pick<PurchaseDocumentItem, "path" | "path_purchase_item">): string | null`
 
@@ -29064,9 +29055,11 @@ const PURCHASE_ITEM_TYPES: readonly ["sale", "rental", "service", "replacement"]
 
 ### `PURCHASE_PRODUCT_ITEM_TYPES`
 
-The arms that ORDER a product (a required `uid_product`) — the payable types
-whose `SIDE_CONTRACTS.payable.custody` is `"custody"`. A `service` or
-`replacement` line's `uid_product` is attribution only, so it is not one.
+The arms that ORDER a product — the payable types whose
+`SIDE_CONTRACTS.payable.custody` is `"custody"`. The line's `uid` IS the
+product (ruling 12), as an order line's is. A `service` line's `uid_product`
+is attribution only, and a `replacement` line's product is its lost rental's
+money-only twin, so neither is one.
 
 ```ts
 const PURCHASE_PRODUCT_ITEM_TYPES: readonly ["sale", "rental"];
@@ -29112,7 +29105,6 @@ The payable line fields {@link payableLineUid} reads.
 interface PayableLineUidFields {
   type: string;
   uid: string;
-  uid_product?: string;
 }
 ```
 
@@ -29535,7 +29527,6 @@ A RENTAL (Subrent) item — `quantity` units borrowed for a hire window and give
 interface PurchaseRentalItem {
   ledger_account: COACodeType | null;
   type: "rental";
-  uid_product: string;
   amount_cents: number | null;
   price: PurchaseLinePrice;
   quantity_billed: number | null;
@@ -29553,7 +29544,6 @@ only (gross when discounted). Its hire window is its pair's dates, stated on
 ```ts
 interface PurchaseRentalItemInputType {
   type: "rental";
-  uid_product: string;
   quantity: number;
   amount_cents?: number | null;
   ledger_account?: COACodeType | null;
@@ -29578,13 +29568,14 @@ damaged in CFS's hands, naming the out-of-service record(s) the loss opened
 settlement movement (`return_to_supplier`) moves the units, not this line.
 Otherwise a {@link PurchaseServiceItem}.
 
-⚠️ **`uid_product` is the lost rental's money-only TWIN, never the rental**
+⚠️ **Its `uid` names the lost rental's money-only TWIN, never the rental**
 (owner ruling 15, 2026-11-10): the rental's `uid_linked_replacement`, a
 `stock_method: "none"` product, which the writer derives from the record —
-as an invoice's replacement line names its twin. The line is keyed by it
-({@link payableLineUid}), so naming the rental itself would sit the line at
-the subrent line's own path. With no twin it names no product and keys
-`custom-`. The lost rental stays reachable through the record's `uid_product`.
+as an invoice's replacement line names its twin by its uid. Naming the rental
+itself would sit the line at the subrent line's own path. With no twin it
+names no product and keys `custom-`. The lost rental stays reachable through
+the record's `uid_product`. (The line's own `uid_product` key retired in 7a:
+the uid is the one place a line names its product.)
 
 ```ts
 interface PurchaseReplacementItem {
@@ -29596,8 +29587,8 @@ interface PurchaseReplacementItem {
 ### `PurchaseReplacementItemInputType`
 
 A replacement item as an operator raises it: a {@link PurchaseServiceItemInputType}
-naming its record(s) in `out_of_service`. `uid_product` is the lost rental's
-twin (ruling 15).
+naming its record(s) in `out_of_service`. Its uid names the lost rental's twin
+when the writer derives one (ruling 15), else the writer mints `custom-`.
 
 ```ts
 interface PurchaseReplacementItemInputType {
@@ -29658,7 +29649,6 @@ A SALE (Buy) item — ownership of `quantity` units of one product. Always flat.
 interface PurchaseSaleItem {
   type: "sale";
   ledger_account: COACodeType | null;
-  uid_product: string;
   amount_cents: number;
   price: PurchaseLinePrice;
   quantity_billed: number;
@@ -29673,7 +29663,6 @@ A sale (Buy) item as an operator orders it — the buckets are the server's.
 ```ts
 interface PurchaseSaleItemInputType {
   type: "sale";
-  uid_product: string;
   quantity: number;
   amount_cents: number;
   ledger_account?: COACodeType | null;
@@ -30000,41 +29989,34 @@ A kit header holds no money: a `null` account requires a flat line stating $0.
 
 ### `payableInputUidIssue(line: typeLiteral): string | null`
 
-Why a line INPUT that names its product carries another uid, or `null`.
-
-Only the product half of {@link payableLineUidIssue}: a `service` (or
-product-less `replacement`) input's `custom-` uid is the writer's to mint.
+Why a line INPUT carries a uid that cannot be its product, or `null`: a
+`sale` or `rental` input names its product BY its uid, so a `custom-` one is
+refused. A `service` (or product-less `replacement`) input's `custom-` uid is
+the writer's to mint.
 
 ### `payableLineUid(line: PayableLineUidFields): string`
 
 The `uid` a payable line takes: its product's, as an order or invoice
 catalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).
+Since 7a the uid is the ONLY place a line names its product — the separate
+`uid_product` key retired on every arm but a service line's attribution
+(owner, 2026-11-11), so the payable line has the order line's shape.
 
-- `sale` / `rental` → `uid_product`.
-- `replacement` → `uid_product` when stated, as an invoice's replacement
-  line takes its replacement product's uid (`utils/replacements.ts`). That
-  product is the lost rental's money-only TWIN (`uid_linked_replacement`),
-  which the writer derives from the out-of-service record — never the
-  rental itself, whose uid keys the subrent line (owner ruling 15).
+- `sale` / `rental` → its own uid, which names the product.
+- `replacement` → its own uid when that names a product (the lost rental's
+  money-only TWIN, `uid_linked_replacement`, ruling 15), as an invoice's
+  replacement line takes its replacement product's uid.
 - `service`, and a `replacement` naming no product → a `custom-` uid. A line
-  already carrying one keeps it; any other becomes `custom-` + its old uid,
-  so a re-key is deterministic and repeatable, and a purchase line and the
-  bill line projected from it (which share the old uid) land on one uid.
-
-A product does not repeat within a group on any document: two of one product
-in one section is a split into a sibling group. Dividers keep their uids and
-are not lines, so this is never asked of one.
+  already carrying one keeps it; any other becomes `custom-` + its old uid.
 
 ### `payableLineUidIssue(line: PayableLineUidFields): string | null`
 
-Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`.
+Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`:
+a `sale` or `rental` line's uid is a product's (never `custom-`), and a
+`service` line's is `custom-`. A `replacement` may be either.
 
 Attached to every stored purchase line arm and, through `documentItemsIssues`
-(`schemas/purchase-bill.ts`), to every bill and supplier-credit line — at
-W4K's contract publish (2026-11-10), once purchases, bills and credits were
-migrated in prod, dev and `test`
-(`api-cloudrun/scripts/migrate-payable-line-uids.ts`). The input refine
-({@link payableInputUidIssue}) went live a publish earlier.
+(`schemas/purchase-bill.ts`), to every bill and supplier-credit line.
 
 ### `payablePostingIssues(type: SharedLineType, account: number | null): typeLiteral[]`
 
@@ -30075,8 +30057,9 @@ line, whose cost is decided as it accrues.
 
 ### `purchaseItemProduct(item: PurchaseItem): string | undefined`
 
-The product an item ORDERS, or `undefined` — a service or replacement line's
-`uid_product` is attribution, not an order.
+The product an item ORDERS — a sale or rental line's uid — or `undefined`: a
+service line's `uid_product` is attribution, and a replacement's twin is not
+an order.
 
 ### `purchaseLineMoneyIssues(item: typeLiteral, _: unknown): typeLiteral[]`
 
@@ -30389,7 +30372,7 @@ ancestry), and the paired row is the base for every key this row omits, so a
 row that moved keeps them. A row no stored row pairs with is, in order: a
 split's clone if it states {@link path_purchase_item}; a line of the purchase
 named by its path; or a line the bill itself authors, which states its name,
-account, quantity and money (and `uid_product` on a sale or rental).
+account, quantity and money; a sale or rental names its product by its uid.
 
 On a TIME line `price.rates` restates each unit rate; a flat line's
 `amount_cents` is stated directly (gross when a discount is set).
@@ -30768,7 +30751,6 @@ sit in the type's class (`payablePostingIssues`).
 interface PurchaseDocumentProductItem {
   ledger_account: COACodeType | null;
   type: PurchaseProductItemTypeType;
-  uid_product: string;
   path_purchase_item?: string[];
   substituted_for?: SubstitutedForEntryType[];
 }
@@ -30789,8 +30771,8 @@ lost or damaged in CFS's hands, naming the out-of-service record(s) (until
 2026-11 a `charge` with a single record id). A `mark_lost` record's id is a
 `MovementId`, hence `OutOfServiceId`.
 
-`uid_product` is the lost rental's money-only twin, never the rental (owner
-ruling 15; see `PurchaseReplacementItem`).
+Its uid names the lost rental's money-only twin when it names a product, never
+the rental (owner ruling 15; see `PurchaseReplacementItem`).
 
 ```ts
 interface PurchaseDocumentReplacementItem {
@@ -35103,7 +35085,8 @@ is `optional: true`: a direct item may name no product.
 v4 (one-document-model Phase 4): adds `status`, the invoice's vocabulary.
 
 v5 (one-document-model 7a): adds `subject`, its purchase's, as an invoice
-carries its order's (owner, 2026-11-11).
+carries its order's (owner, 2026-11-11), and `items.uid_product` becomes
+`items.uid`, the one key a line names its product by.
 
 v3 (one-document-model Phase 3): `uid_purchase` → `number_purchases`, the
 invoice's `number_orders` twin, because one bill may now bill several
@@ -35132,6 +35115,10 @@ to one `items` array, as on the bill. A credit's `items` may be EMPTY (a $0
 credit), which is one more reason every `items*` field is optional.
 
 v3 (one-document-model Phase 4): `uid_purchase` is gone with the stored key.
+
+v4 (one-document-model 7a): `items.uid_product` → `items.uid`. A line names its
+product by its uid (owner, 2026-11-11); only a service line keeps a
+`uid_product`, as attribution.
 `query_by_sources` is not indexed (the indexer strips every `query_by_*`), as
 on `credit-notes`.
 
@@ -35189,7 +35176,8 @@ facet the manager labels from its stores cache (the order's key), and
 `items.quantity_returned` goes: a line's custody lives on its inbound
 booking. `total_cents` stays until 6e-0b1 (ruling 62). It also gains `subject`,
 the order's field on the payable side (owner, 2026-11-11), declared as the
-order's and invoice's are.
+order's and invoice's are; and `items.uid_product` becomes `items.uid`, the
+one key a line names its product by (owner, 2026-11-11).
 
 ```ts
 const purchases: TypesenseCollectionConfig;
@@ -53037,7 +53025,6 @@ The payable line fields {@link payableLineUid} reads.
 interface PayableLineUidFields {
   type: string;
   uid: string;
-  uid_product?: string;
 }
 ```
 
@@ -53318,41 +53305,34 @@ One row's custody from a {@link custodyBySourceItem} map — none when no moveme
 
 ### `payableInputUidIssue(line: typeLiteral): string | null`
 
-Why a line INPUT that names its product carries another uid, or `null`.
-
-Only the product half of {@link payableLineUidIssue}: a `service` (or
-product-less `replacement`) input's `custom-` uid is the writer's to mint.
+Why a line INPUT carries a uid that cannot be its product, or `null`: a
+`sale` or `rental` input names its product BY its uid, so a `custom-` one is
+refused. A `service` (or product-less `replacement`) input's `custom-` uid is
+the writer's to mint.
 
 ### `payableLineUid(line: PayableLineUidFields): string`
 
 The `uid` a payable line takes: its product's, as an order or invoice
 catalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).
+Since 7a the uid is the ONLY place a line names its product — the separate
+`uid_product` key retired on every arm but a service line's attribution
+(owner, 2026-11-11), so the payable line has the order line's shape.
 
-- `sale` / `rental` → `uid_product`.
-- `replacement` → `uid_product` when stated, as an invoice's replacement
-  line takes its replacement product's uid (`utils/replacements.ts`). That
-  product is the lost rental's money-only TWIN (`uid_linked_replacement`),
-  which the writer derives from the out-of-service record — never the
-  rental itself, whose uid keys the subrent line (owner ruling 15).
+- `sale` / `rental` → its own uid, which names the product.
+- `replacement` → its own uid when that names a product (the lost rental's
+  money-only TWIN, `uid_linked_replacement`, ruling 15), as an invoice's
+  replacement line takes its replacement product's uid.
 - `service`, and a `replacement` naming no product → a `custom-` uid. A line
-  already carrying one keeps it; any other becomes `custom-` + its old uid,
-  so a re-key is deterministic and repeatable, and a purchase line and the
-  bill line projected from it (which share the old uid) land on one uid.
-
-A product does not repeat within a group on any document: two of one product
-in one section is a split into a sibling group. Dividers keep their uids and
-are not lines, so this is never asked of one.
+  already carrying one keeps it; any other becomes `custom-` + its old uid.
 
 ### `payableLineUidIssue(line: PayableLineUidFields): string | null`
 
-Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`.
+Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`:
+a `sale` or `rental` line's uid is a product's (never `custom-`), and a
+`service` line's is `custom-`. A `replacement` may be either.
 
 Attached to every stored purchase line arm and, through `documentItemsIssues`
-(`schemas/purchase-bill.ts`), to every bill and supplier-credit line — at
-W4K's contract publish (2026-11-10), once purchases, bills and credits were
-migrated in prod, dev and `test`
-(`api-cloudrun/scripts/migrate-payable-line-uids.ts`). The input refine
-({@link payableInputUidIssue}) went live a publish earlier.
+(`schemas/purchase-bill.ts`), to every bill and supplier-credit line.
 
 ### `purchaseItemCommittedCents(item: PurchaseItem): number`
 
@@ -53362,8 +53342,9 @@ line, whose cost is decided as it accrues.
 
 ### `purchaseItemProduct(item: PurchaseItem): string | undefined`
 
-The product an item ORDERS, or `undefined` — a service or replacement line's
-`uid_product` is attribution, not an order.
+The product an item ORDERS — a sale or rental line's uid — or `undefined`: a
+service line's `uid_product` is attribution, and a replacement's twin is not
+an order.
 
 ### `purchaseLineCloseOutcome(item: PurchaseItem, custody: PurchaseLineCustody): PurchaseLineCloseOutcome`
 

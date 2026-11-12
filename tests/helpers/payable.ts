@@ -9,7 +9,20 @@
  * ⚠️ The money is computed by the rule, not by `priceStatedTotalLine`, so a
  * fixture built here can still catch a regression in the pricer.
  */
-import type { DiscountType, PriceFormulaRef, PriceModifierType } from "../../src/schemas/mod.ts";
+import {
+  type DiscountType,
+  type PriceFormulaRef,
+  type PriceModifierType,
+  type PurchaseRentalItem,
+  PurchaseRentalItemSchema,
+  type PurchaseReplacementItem,
+  PurchaseReplacementItemSchema,
+  type PurchaseSaleItem,
+  PurchaseSaleItemSchema,
+  type PurchaseServiceItem,
+  PurchaseServiceItemSchema,
+} from "../../src/schemas/mod.ts";
+import { getTestDoc } from "../../src/schemas/testing.ts";
 import { canonicalChargeWindows } from "../../src/utils/dates.ts";
 import { tsAt } from "./timestamp.ts";
 
@@ -137,4 +150,58 @@ export function asCreditRows<R extends { type: string }>(rows: readonly R[]): R[
       ? r
       : { ...r, reverses_billing: true }
   );
+}
+
+// ── Purchase line fixtures ───────────────────────────────────────────
+
+/** The purchase line arms {@link payableLine} builds, by type. */
+interface PayableLineByType {
+  sale: PurchaseSaleItem;
+  rental: PurchaseRentalItem;
+  service: PurchaseServiceItem;
+  replacement: PurchaseReplacementItem;
+}
+
+/** The default pair a {@link payableLine} sits under when the caller names none. */
+export const DEFAULT_PAYABLE_PAIR = "9a1b2c3d-0000-4000-8000-0000000000d1";
+
+const SEED: { [K in keyof PayableLineByType]: { schema: unknown; uid: string; ledger_account: number; extra?: Record<string, unknown> } } = {
+  sale: { schema: PurchaseSaleItemSchema, uid: "testprod000000000001", ledger_account: 1999 },
+  rental: { schema: PurchaseRentalItemSchema, uid: "testprod000000000002", ledger_account: 5100 },
+  service: { schema: PurchaseServiceItemSchema, uid: "custom-0b9e2f4a-0000-4000-8000-000000000003", ledger_account: 5300 },
+  replacement: {
+    schema: PurchaseReplacementItemSchema,
+    uid: "testprod000000000004",
+    ledger_account: 5300,
+    extra: { out_of_service: [{ uid: "testoos0000000000001", quantity: 1 }] },
+  },
+};
+
+/**
+ * ONE purchase line builder for every payable test (7a): a valid SEED for the
+ * arm from its schema (`getTestDoc`, so a new required key reaches every
+ * fixture with no edit here), the product keying rule (`uid` names the product
+ * — or is `custom-` on a service — and `path` is `[pair, uid]`), then the
+ * caller's overrides, then the money restated from the line's own amount
+ * ({@link withPayableMoney}).
+ *
+ * ⚠️ **The overrides are NOT re-parsed**, on purpose: negative tests build a
+ * line the schema must refuse. Only the seed is guaranteed valid.
+ *
+ * @param type - The arm
+ * @param over - Field overrides; an override of `uid` re-keys `path` unless `path` is given too
+ * @param pair - The destination divider the line sits under
+ */
+export function payableLine<K extends keyof PayableLineByType>(
+  type: K,
+  over: Partial<PayableLineByType[K]> = {},
+  pair: string = DEFAULT_PAYABLE_PAIR,
+): PayableLineByType[K] {
+  const seed = SEED[type];
+  const uid = (over.uid as string | undefined) ?? seed.uid;
+  const base = getTestDoc(
+    seed.schema as typeof PurchaseSaleItemSchema,
+    { uid: seed.uid, path: [pair, seed.uid], ledger_account: seed.ledger_account, ...(seed.extra ?? {}) } as never,
+  ) as unknown as PayableLineByType[K];
+  return withPayableMoney({ ...base, uid, path: [pair, uid], ...over } as PayableLineByType[K]);
 }

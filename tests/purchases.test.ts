@@ -68,7 +68,7 @@ import {
 import { apportionCents } from "../src/utils/money.ts";
 import { flatPurchaseLineMoney } from "../src/utils/purchases.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
-import { asCreditRows, payablePrice, purchaseDivider, purchasePair, withPayableMoney } from "./helpers/payable.ts";
+import { asCreditRows, payablePrice, purchaseDivider, purchasePair, payableLine, withPayableMoney } from "./helpers/payable.ts";
 
 /** The tax class every payable test line is stamped with: exempt on this side, so it prices nothing. */
 const TAX_CLASS = "TaxClassResale000000";
@@ -198,24 +198,18 @@ const D = "9a1b2c3d-0000-4000-8000-0000000000d1";
 
 const line = (over: Partial<PurchaseSaleItem> = {}): PurchaseSaleItem => {
   const uid = over.uid ?? lid(1);
-  return withPayableMoney({
-    type: "sale",
+  return payableLine("sale", {
     uid,
-    path: [D, uid],
-    description: "",
-    zero_priced: null,
     name: "Walkie Talkie",
-    uid_product: uid,
     quantity: 3,
     amount_cents: 140985,
     price: flatPrice,
     ledger_account: 1999,
-    uid_tracking_category: null,
     uid_tax_class: TAX_CLASS,
     quantity_billed: 0,
     landed_costs: [],
     ...over,
-  });
+  }, D);
 };
 
 const HIRE = { start: "2026-10-18T09:00:00.000-05:00", end: "2026-10-25T17:00:00.000-05:00" };
@@ -237,25 +231,19 @@ const weeklyPrice = {
 /** A FLAT subrent item of 10 steamers. Its custody is the movements', handed in beside it (C8). */
 const hireLine = (over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem => {
   const uid = over.uid ?? lid(2);
-  return withPayableMoney({
-    type: "rental",
+  return payableLine("rental", {
     uid,
-    path: [D, uid],
-    description: "",
-    zero_priced: null,
     name: "Steamer",
-    uid_product: uid,
     quantity: 10,
     amount_cents: 50_000,
     price: flatPrice,
     ledger_account: 5100,
-    uid_tracking_category: null,
     uid_tax_class: TAX_CLASS,
     quantity_billed: 0,
     uid_orders: [ORDER_1074],
     uid_units: [],
     ...over,
-  });
+  }, D);
 };
 
 /** A TIME subrent — Vision's hotspots, "weekly while on". */
@@ -265,46 +253,35 @@ const timeHire = (over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem =>
 /** A TIME charge — a Verizon device line, "monthly unless suspended". */
 const carrierLine = (over: Partial<PurchaseServiceItem> = {}): PurchaseServiceItem => {
   const uid = over.uid ?? `custom-${lid(3)}`;
-  return withPayableMoney({
-    type: "service",
+  return payableLine("service", {
     uid,
-    path: [D, uid],
-    description: "",
-    zero_priced: null,
     name: "Hotspot (Unlimited)",
     quantity: 1,
     amount_cents: null,
     price: { ...payablePrice(0, { formula: MONTHLY }), rates: [{ rate_key: "month", amount_cents: 8000 }] },
     ledger_account: 5150,
-    uid_tracking_category: null,
     uid_tax_class: TAX_CLASS,
     quantity_billed: null,
     uid_units: [],
-    uid_product: PRODUCT,
     ...over,
-  });
+  }, D);
 };
 
 /** A FLAT charge — freight. */
 const freight = (over: Partial<PurchaseServiceItem> = {}): PurchaseServiceItem => {
   const uid = over.uid ?? `custom-${lid(4)}`;
-  return withPayableMoney({
-    type: "service",
+  return payableLine("service", {
     uid,
-    path: [D, uid],
-    description: "",
-    zero_priced: null,
     name: "Freight",
     quantity: 1,
     amount_cents: 1_500,
     price: flatPrice,
     ledger_account: 5300,
-    uid_tracking_category: null,
     uid_tax_class: TAX_CLASS,
     quantity_billed: 0,
     uid_units: [],
     ...over,
-  });
+  }, D);
 };
 
 // ── status ───────────────────────────────────────────────────────────
@@ -647,8 +624,8 @@ const destRow = (uid = PAIR_A) => ({ type: "destination", uid, path: [uid] });
 const lineHead = (n: number, pair = PAIR_A) => ({ uid: iuid(n), path: [pair, iuid(n)] });
 /** The n-th product's uid. */
 const pid = (n: number) => `testprod${String(n).padStart(12, "0")}`;
-/** A catalog line's head, keyed by its product (W4K): uid, path leaf and `uid_product` agree. */
-const keyedHead = (n: number, pair = PAIR_A) => ({ uid: pid(n), path: [pair, pid(n)], uid_product: pid(n) });
+/** A catalog line's head, keyed by its product (W4K): the uid and the path leaf ARE the product (7a). */
+const keyedHead = (n: number, pair = PAIR_A) => ({ uid: pid(n), path: [pair, pid(n)] });
 const buyInput = { type: "sale", ...keyedHead(1), quantity: 1, amount_cents: 100 };
 const nullDates = { delivery_start: null, delivery_end: null, collection_start: null, collection_end: null, charge_windows: null };
 /** A hire in the order's shape (api-cloudrun#1469): possession to `collection_start`, `collection_end` following it. */
@@ -902,7 +879,6 @@ const billItem = (over: Record<string, unknown> = {}) => {
     description: "",
     zero_priced: null,
     name: "Walkie Talkie",
-    uid_product: uid,
     quantity: 3,
     amount_cents: 140985,
     price: { ...flatPrice, counts: [] },
@@ -1017,7 +993,6 @@ Deno.test("PurchaseBillSchema: a replacement item names its record (a mark_lost 
     type: "replacement",
     uid: PRODUCT,
     name: "Loss charge — steamer",
-    uid_product: PRODUCT,
     uid_tracking_category: "testtrack10000000000",
     out_of_service: [{ uid: movementId, quantity: 1 }],
   });
@@ -1384,13 +1359,17 @@ Deno.test("W4K contract: every stored payable line is keyed by its product, or c
   const minted = iuid(77);
   // A purchase: each arm's refine, at the line's own `uid`.
   assertEquals(issuePaths(PurchaseSchema, withItems([line()])), [], "control");
-  assertEquals(issuePaths(PurchaseSchema, withItems([line({ uid: minted, path: [D, minted], uid_product: lid(1) })])), ["items.1.uid"]);
-  assertEquals(issuePaths(PurchaseSchema, withItems([hireLine({ uid: lid(1), path: [D, lid(1)], uid_product: lid(2) })])), ["items.1.uid"]);
+  // A sale or rental names its product BY its uid (7a), so a custom- one is refused.
+  const custom = `custom-${minted}`;
+  // The product IS the uid, so the product mirror disagrees too: both refusals, exactly.
+  assertEquals(issuePaths(PurchaseSchema, withItems([line({ uid: custom, path: [D, custom] })])), ["items.1.uid", "query_by_products.0"]);
+  assertEquals(issuePaths(PurchaseSchema, withItems([hireLine({ uid: custom, path: [D, custom] })])), ["items.1.uid", "query_by_products.0"]);
   assertEquals(issuePaths(PurchaseSchema, withItems([freight({ uid: minted, path: [D, minted] })])), ["items.1.uid"], "a service is custom-");
   // A bill and a credit: the document-level line rules, at `items.N.uid`.
   assertEquals(issuePaths(PurchaseBillSchema, bill()), [], "control");
-  assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [billItem({ uid_product: lid(2) })] })), ["items.2.uid"]);
-  assertEquals(issuePaths(PurchaseCreditSchema, credit({ items: [billItem({ quantity: 1, amount_cents: 46995, uid_product: lid(2) })] })), ["items.2.uid"]);
+  const customRow = { uid: `custom-${minted}`, path: [P, D, `custom-${minted}`] };
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [billItem(customRow)] })), ["items.2.uid"]);
+  assertEquals(issuePaths(PurchaseCreditSchema, credit({ items: [billItem({ quantity: 1, amount_cents: 46995, ...customRow })] })), ["items.2.uid"]);
 });
 
 Deno.test("PurchaseCreditSchema accepts an issued credit and an applied one", () => {
@@ -1509,8 +1488,8 @@ const CATALOG = new Map<string, PurchaseExpansionProduct>([
 ]);
 
 /** A buy line keyed by its product (W4K), as a client sends it. */
-const buy = (uid_product: string, quantity: number, amount_cents: number, over: Record<string, unknown> = {}) =>
-  ({ type: "sale" as const, uid: uid_product, path: [PAIR_A, uid_product], uid_product, quantity, amount_cents, ...over });
+const buy = (product: string, quantity: number, amount_cents: number, over: Record<string, unknown> = {}) =>
+  ({ type: "sale" as const, uid: product, path: [PAIR_A, product], quantity, amount_cents, ...over });
 
 Deno.test("expandPurchaseItems: a stocked product passes through unchanged", () => {
   const items = [buy("410", 7, 700, { description: "" })];
@@ -1579,7 +1558,6 @@ Deno.test("expandPurchaseItems: a subrent pack expands carrying its price and or
     type: "rental" as const,
     uid: "118",
     path: [PAIR_A, "118"],
-    uid_product: "118",
     quantity: 1,
     amount_cents: 900,
     price: { uid_price_formula: FIXED.uid },
@@ -1591,7 +1569,7 @@ Deno.test("expandPurchaseItems: a subrent pack expands carrying its price and or
   ];
   assertEquals(expandPurchaseItems([sub, ...other], CATALOG), {
     ok: true,
-    items: [{ ...sub, uid: "410", path: [PAIR_A, "410"], uid_product: "410", quantity: 40 }, ...other],
+    items: [{ ...sub, uid: "410", path: [PAIR_A, "410"], quantity: 40 }, ...other],
   });
 });
 
@@ -1710,8 +1688,8 @@ function journalAlong(l: PurchaseSaleItem, path: number[]): number[] {
 }
 
 Deno.test("landed cost: $100 over two lines, two partial receipts each — Σ receipts is goods + $100 exactly", () => {
-  const a = line({ uid_product: "testprod1000000000aa", quantity: 4, amount_cents: 40_000 });
-  const b = line({ uid_product: "testprod1000000000bb", quantity: 3, amount_cents: 20_000 });
+  const a = line({ uid: "testprod1000000000aa", path: [D, "testprod1000000000aa"], quantity: 4, amount_cents: 40_000 });
+  const b = line({ uid: "testprod1000000000bb", path: [D, "testprod1000000000bb"], quantity: 3, amount_cents: 20_000 });
   const split = allocateLandedCostCents(10_000, [{ line: a, received: 0 }, { line: b, received: 0 }]);
   assertEquals(split, [6_667, 3_333]);
   const withA = { ...a, landed_costs: [entry({ amount_cents: split[0], quantity: 4 })] };

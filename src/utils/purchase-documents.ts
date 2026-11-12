@@ -728,14 +728,11 @@ function attributionOf(
   switch (item.type) {
     case "sale":
     case "rental":
-      return { uid_product: item.uid_product };
+      return {};
     case "service":
       return item.uid_product !== undefined ? { uid_product: item.uid_product } : {};
     case "replacement":
-      return {
-        ...(item.uid_product !== undefined ? { uid_product: item.uid_product } : {}),
-        out_of_service: fitOutOfServiceEntries(item.out_of_service, quantity),
-      };
+      return { out_of_service: fitOutOfServiceEntries(item.out_of_service, quantity) };
     default: {
       const unreachable: never = item;
       throw new Error(`attributionOf: unknown purchase item ${JSON.stringify(unreachable)}`);
@@ -832,7 +829,7 @@ function projectTimeLine(item: PurchaseItem, opts: ProjectBillLineOptions): Purc
   switch (item.type) {
     case "sale":
     case "rental":
-      return { type: item.type, ...head, uid_product: item.uid_product };
+      return { type: item.type, ...head };
     case "service":
       return { type: "service", ...head, ledger_account: item.ledger_account };
     case "replacement":
@@ -1138,7 +1135,7 @@ export function payableScopedSync(prev: Purchase, next: Purchase): {
     adopts: (item, row) => {
       const source = original.get(item);
       return source !== undefined && (source.type === "sale" || source.type === "rental") &&
-        row.type === source.type && row.uid_product === source.uid_product;
+        row.type === source.type && row.uid === source.uid;
     },
     // A flat line states its money, so a substitution moving its units moves money
     // too (W5). A row still at its share of its purchase line follows that line's
@@ -1349,6 +1346,7 @@ export interface RekeyablePayableRow {
   type: string;
   uid: string;
   path: readonly string[];
+  /** A LEGACY pre-W4K row's product key; the re-key reads it from stored history only. */
   uid_product?: string;
 }
 

@@ -445,7 +445,8 @@ export function unavailableFromOOS(o: StockOOSSource): StockUnavailableEntry | n
 export type StockPurchaseItemSource =
   | {
     type: "sale" | "rental";
-    uid_product: string;
+    /** The product the line orders: its uid IS the product (ruling 12). */
+    uid: string;
     quantity: number;
     path: readonly string[];
   }
@@ -514,7 +515,7 @@ export function supplyFromPurchase(
     if (isKitHeaderLine(item)) continue; // A header holds no units; its components supply.
     switch (item.type) {
       case "rental": {
-        if (item.uid_product !== uidProduct) break;
+        if (item.uid !== uidProduct) break;
         const quantity = item.quantity - lineCustodyAt(custody, item.path).returned;
         if (quantity <= 0) break;
         const pair = p.destinations.find((d) => d.uid === item.path[0]);
@@ -525,7 +526,7 @@ export function supplyFromPurchase(
         break;
       }
       case "sale": {
-        if (item.uid_product !== uidProduct) break;
+        if (item.uid !== uidProduct) break;
         const start = p.destinations.find((d) => d.uid === item.path[0])?.dates.delivery_start ?? null;
         if (start === null) break;
         const quantity = remainingToReceive(item, lineCustodyAt(custody, item.path));

@@ -44,7 +44,15 @@ export function purchaseBillXeroProjection(bill: PurchaseBillXeroFields): unknow
     // Phase 3; the `invoiceXeroProjection` filter is the precedent).
     items: purchaseDocumentLines(bill.items).map((item) => ({
       type: item.type,
-      uid_product: item.uid_product ?? null,
+      // 🔴 The SAME value the retired line key held, so no stored bill's hash
+      // moves and nothing re-pushes (7a dropped `uid_product` from every line but a
+      // service's attribution): the uid on a sale, rental or product-naming
+      // replacement line, the attribution on a service line, else null.
+      uid_product: item.type === "service"
+        ? (item.uid_product ?? null)
+        : item.type === "replacement" && item.uid.startsWith("custom-")
+        ? null
+        : item.uid,
       name: item.name,
       quantity: item.quantity,
       amount_cents: item.amount_cents,

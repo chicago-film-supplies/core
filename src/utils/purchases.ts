@@ -430,8 +430,8 @@ export function expandPurchaseItems(
       expanded.push(item);
       continue;
     }
-    const product = products.get(item.uid_product);
-    if (!product) throw new Error(`expandPurchaseItems: product ${item.uid_product} was not read`);
+    const product = products.get(item.uid);
+    if (!product) throw new Error(`expandPurchaseItems: product ${item.uid} was not read`);
     if (product.stock_method !== "none" || isInKitRows(item, items)) {
       expanded.push(item);
       continue;
@@ -478,7 +478,6 @@ function expandOnto(
     return {
       ...item,
       ...keyed,
-      uid_product: uidProduct,
       quantity,
       ...(item.landed_costs !== undefined ? { landed_costs: item.landed_costs.map((e) => ({ ...e })) } : {}),
     };
@@ -486,7 +485,6 @@ function expandOnto(
   return {
     ...item,
     ...keyed,
-    uid_product: uidProduct,
     quantity,
     ...(item.uid_orders !== undefined ? { uid_orders: [...item.uid_orders] } : {}),
   };

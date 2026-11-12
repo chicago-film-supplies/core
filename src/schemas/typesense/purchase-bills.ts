@@ -14,7 +14,8 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  * v4 (one-document-model Phase 4): adds `status`, the invoice's vocabulary.
  *
  * v5 (one-document-model 7a): adds `subject`, its purchase's, as an invoice
- * carries its order's (owner, 2026-11-11).
+ * carries its order's (owner, 2026-11-11), and `items.uid_product` becomes
+ * `items.uid`, the one key a line names its product by.
  *
  * v3 (one-document-model Phase 3): `uid_purchase` → `number_purchases`, the
  * invoice's `number_orders` twin, because one bill may now bill several
@@ -52,7 +53,7 @@ export const purchaseBills: TypesenseCollectionConfig = {
       { name: "reference", type: "string", stem: true, sort: true, optional: true },
       { name: "items", type: "object[]", optional: true },
       { name: "items.type", type: "string[]", facet: true, optional: true },
-      { name: "items.uid_product", type: "string[]", facet: false, optional: true },
+      { name: "items.uid", type: "string[]", facet: false, optional: true },
       { name: "items.name", type: "string[]", stem: true, optional: true },
       { name: "totals", type: "object", optional: true },
       { name: "totals.total_cents", type: "int64", sort: true, optional: true, money: true },

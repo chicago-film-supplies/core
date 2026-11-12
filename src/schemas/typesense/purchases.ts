@@ -42,7 +42,8 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  * `items.quantity_returned` goes: a line's custody lives on its inbound
  * booking. `total_cents` stays until 6e-0b1 (ruling 62). It also gains `subject`,
  * the order's field on the payable side (owner, 2026-11-11), declared as the
- * order's and invoice's are.
+ * order's and invoice's are; and `items.uid_product` becomes `items.uid`, the
+ * one key a line names its product by (owner, 2026-11-11).
  */
 export const purchases: TypesenseCollectionConfig = {
   alias: "purchases",
@@ -66,7 +67,7 @@ export const purchases: TypesenseCollectionConfig = {
       { name: "reference", type: "string", stem: true, sort: true, optional: true },
       { name: "items", type: "object[]", optional: true },
       { name: "items.type", type: "string[]", facet: true, optional: true },
-      { name: "items.uid_product", type: "string[]", facet: false, optional: true },
+      { name: "items.uid", type: "string[]", facet: false, optional: true },
       { name: "items.name", type: "string[]", stem: true, optional: true },
       // 6e-0a (ruling 32): the bill and supplier-credit mirrors, the twins of
       // `orders.invoices` / `orders.credit_notes`; optional through the expand.

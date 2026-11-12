@@ -817,7 +817,7 @@ const got = (path: readonly string[], received: number, returned = 0) => new Map
 const NOTHING = new Map<string, { received: number; returned: number }>();
 
 Deno.test("supplyFromPurchase: the hire window is read off the line's pair; a pair with no start supplies nothing", () => {
-  const sub = { type: "rental" as const, uid_product: "P", quantity: 2, path: ["H", "1"] };
+  const sub = { type: "rental" as const, uid: "P", quantity: 2, path: ["H", "1"] };
   const other = { ...sub, path: ["K", "1"] };
   const destinations = [hire("H", H_START, H_END), hire("K", "2026-11-01T00:00:00.000-05:00", null)];
   assertEquals(supplyFromPurchase({ status: "active", items: [sub, other], destinations }, "P", NOTHING), [
@@ -829,8 +829,8 @@ Deno.test("supplyFromPurchase: the hire window is read off the line's pair; a pa
 });
 
 Deno.test("supplyFromPurchase: a live subrent item, net of what its row returned; [] for anything else", () => {
-  const item = { type: "rental" as const, uid_product: "P", quantity: 10, path: ["H", "1"] };
-  const p = { status: "active" as const, items: [item, { ...item, uid_product: "Q" }], destinations: [hire("H", H_START, H_END)] };
+  const item = { type: "rental" as const, uid: "P", quantity: 10, path: ["H", "1"] };
+  const p = { status: "active" as const, items: [item, { ...item, uid: "Q" }], destinations: [hire("H", H_START, H_END)] };
   assertEquals(supplyFromPurchase(p, "P", NOTHING), [sup(H_START, H_END, 10)]);
   assertEquals(supplyFromPurchase({ ...p, items: [{ ...item, quantity: 6 }] }, "P", got(item.path, 3, 3)), [sup(H_START, H_END, 3)]);
   // Liveness and zero are ONE filter.
@@ -843,7 +843,7 @@ Deno.test("supplyFromPurchase: a live subrent item, net of what its row returned
 });
 
 Deno.test("supplyFromPurchase: a STANDING subrent (end null) is +∞; a charge item supplies nothing", () => {
-  const standing = { type: "rental" as const, uid_product: "P", quantity: 4, path: ["H", "1"] };
+  const standing = { type: "rental" as const, uid: "P", quantity: 4, path: ["H", "1"] };
   const p = {
     status: "active" as const,
     items: [{ type: "destination" as const }, standing, { type: "service" as const }],
@@ -855,8 +855,8 @@ Deno.test("supplyFromPurchase: a STANDING subrent (end null) is +∞; a charge i
 });
 
 Deno.test("supplyFromPurchase: one product on TWO items gives two entries (D2)", () => {
-  const buy = { type: "sale" as const, uid_product: "P", quantity: 3, path: ["B", "1"] };
-  const sub = { type: "rental" as const, uid_product: "P", quantity: 2, path: ["H", "2"] };
+  const buy = { type: "sale" as const, uid: "P", quantity: 3, path: ["B", "1"] };
+  const sub = { type: "rental" as const, uid: "P", quantity: 2, path: ["H", "2"] };
   const destinations = [hire("H", H_START, H_END), hire("B", EXPECTED_EARLY, null)];
   assertEquals(supplyFromPurchase({ status: "active", items: [buy, sub, { ...buy, quantity: 5, path: ["B", "3"] }], destinations }, "P", NOTHING), [
     { start: EXPECTED_EARLY, end: null, quantity: 3, kind: "inbound" },
@@ -877,8 +877,8 @@ const EXPECTED = "2026-10-21T00:00:00.000-05:00";
 const inb = (start: string, quantity: number): StockSupplyEntry => ({ start, end: null, quantity, kind: "inbound" });
 
 Deno.test("supplyFromPurchase: a live buy item is open-ended inbound for its unreceived remainder", () => {
-  const item = { type: "sale" as const, uid_product: "P", quantity: 10, path: ["B", "1"] };
-  const p = { status: "active" as const, items: [item, { ...item, uid_product: "Q" }], destinations: [hire("B", EXPECTED, null)] };
+  const item = { type: "sale" as const, uid: "P", quantity: 10, path: ["B", "1"] };
+  const p = { status: "active" as const, items: [item, { ...item, uid: "Q" }], destinations: [hire("B", EXPECTED, null)] };
   assertEquals(supplyFromPurchase(p, "P", NOTHING), [inb(EXPECTED, 10)]);
   // A partial receipt moves units out of inbound (and into held).
   assertEquals(supplyFromPurchase(p, "P", got(item.path, 4)), [inb(EXPECTED, 6)]);
@@ -912,7 +912,7 @@ Deno.test("inbound: an open-ended entry counts in every window from its start on
 });
 
 Deno.test("inbound: a partial receipt leaves held + inbound unchanged", () => {
-  const item = { type: "sale" as const, uid_product: "P", quantity: 10, path: ["B", "1"] };
+  const item = { type: "sale" as const, uid: "P", quantity: 10, path: ["B", "1"] };
   const p = { status: "active" as const, items: [item], destinations: [hire("B", EXPECTED, null)] };
   const w = win("2026-10-22", "2026-10-24");
   const ordered = stock(10, [iv(B_START, B_END, 15)], supplyFromPurchase(p, "P", NOTHING));

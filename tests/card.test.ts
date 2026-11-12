@@ -10,7 +10,7 @@ import {
   purchaseCardDue,
 } from "../src/utils/cards.ts";
 import type { PurchaseSaleItem, PurchaseRentalItem } from "../src/schemas/purchase.ts";
-import { payablePrice, purchasePair } from "./helpers/payable.ts";
+import { payableLine, payablePrice, purchasePair } from "./helpers/payable.ts";
 
 /**
  * A genuine ORDER-DERIVED EVENT CARD — `sources` names an order, so
@@ -478,17 +478,11 @@ const PAIR = "9a1b2c3d-0000-4000-8000-0000000000d1";
 
 const pline = (over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem => {
   const uid = over.uid ?? "9a1b2c3d-0000-4000-8000-000000000002";
-  return {
-    type: "rental",
+  return payableLine("rental", {
     uid,
-    path: [PAIR, uid],
-    description: "",
-    zero_priced: null,
-    uid_product: "testprod100000000000",
     name: "J-2000",
     quantity: 10,
     ledger_account: 5100,
-    uid_tracking_category: null,
     uid_tax_class: "TaxClassResale000000",
     amount_cents: 50_000,
     price: payablePrice(50_000),
@@ -496,7 +490,7 @@ const pline = (over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem => {
     uid_orders: [],
     uid_units: [],
     ...over,
-  };
+  }, PAIR);
 };
 
 /** A buy item on the same purchase — a return card never reads it (D3). */
@@ -506,7 +500,6 @@ const bline: PurchaseSaleItem = {
   path: [PAIR, "9a1b2c3d-0000-4000-8000-000000000001"],
   description: "",
   zero_priced: null,
-  uid_product: "testprod200000000000",
   name: "Gaff tape",
   quantity: 5,
   amount_cents: 1_000,
