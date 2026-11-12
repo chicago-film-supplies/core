@@ -382,7 +382,9 @@ export const MOVEMENT_TYPES = [
   // - `put_away` moves received units from CFS staging onto a storage shelf,
   //   `received → stocked`. It is lineless where nothing physically moves (an
   //   uncounted product, or the backfill's put-away of units a historic receipt
-  //   already shelved, under the applier's `historical_receipt` exemption).
+  //   already shelved — written by the backfill itself with the ledger
+  //   untouched, never through the api applier, whose `historical_receipt`
+  //   exemption covers only that put-away's lineless UNDO).
   // - `subrent_rebook_out` / `subrent_rebook_in` are the inbound twins of the
   //   rebook pair: a subrent Extend moves `stocked` units from leg A's inbound
   //   booking to leg B's (ruling 57). Twins rather than the outbound pair
@@ -1038,7 +1040,8 @@ const FORWARD_CONTRACTS: Readonly<Record<ForwardMovementTypeType, BaseMovementCo
   // Staging → storage. Cost-forbidden: the units are already owned (a buy) or
   // already in custody (a subrent); the put-away changes only where they are.
   // `lineless` for the uncounted product and for the backfill's put-away of
-  // units a historic receipt already shelved (the applier's
+  // units a historic receipt already shelved (written by the backfill, ledger
+  // untouched; its undo is lineless under the api applier's
   // `historical_receipt` exemption).
   put_away: {
     custody: "required",
