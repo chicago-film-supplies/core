@@ -101,7 +101,9 @@ function movementBase(type: MovementTypeType, over: Record<string, unknown> = {}
     sale_damaged: { from: "out", to: "damaged" },
     sale_damaged_undo: { from: "damaged", to: "out" },
     opening_balance: null,
-    purchase: null,
+    // The inbound ladder (7a, C3): a receipt, a send-back and a settle each
+    // step the line's inbound booking.
+    purchase: { from: "ordered", to: "received" },
     find: null,
     make: null,
     adjustment_increase: null,
@@ -110,9 +112,18 @@ function movementBase(type: MovementTypeType, over: Record<string, unknown> = {}
     write_off: null,
     reclass_out: null,
     reclass_in: null,
-    subrent_in: null,
-    subrent_out: null,
-    return_to_supplier: null,
+    subrent_in: { from: "ordered", to: "received" },
+    subrent_out: { from: "stocked", to: "sent_back" },
+    return_to_supplier: { from: "stocked", to: "lost" },
+    purchase_undo: { from: "received", to: "ordered" },
+    subrent_in_undo: { from: "received", to: "ordered" },
+    subrent_out_undo: { from: "sent_back", to: "stocked" },
+    return_to_supplier_undo: { from: "lost", to: "stocked" },
+    put_away: { from: "received", to: "stocked" },
+    put_away_undo: { from: "stocked", to: "received" },
+    subrent_rebook_out: { from: "stocked", to: null },
+    subrent_rebook_in: { from: null, to: "stocked" },
+    receive_flag: { from: "received", to: "damaged" },
     transfer: null,
     return_to_service: null,
     // `with_booking`: the fixture attaches a booking, so it names the one
@@ -167,6 +178,16 @@ function movementBase(type: MovementTypeType, over: Record<string, unknown> = {}
     subrent_out: null,
     // The fixture's line leaves the record place: a lost unit, settled.
     return_to_supplier: { from: "lost", to: null },
+    purchase_undo: null,
+    subrent_in_undo: null,
+    subrent_out_undo: null,
+    // The mirror: the unit comes back from outside to the record place.
+    return_to_supplier_undo: { from: null, to: "lost" },
+    put_away: null,
+    put_away_undo: null,
+    subrent_rebook_out: null,
+    subrent_rebook_in: null,
+    receive_flag: { from: null, to: "damaged" },
     transfer: null,
     return_to_service: null,
     flag: { from: null, to: "damaged" },
@@ -614,6 +635,11 @@ Deno.test("an uncounted product's step is lineless: the ladder and two record re
     "mark_maintenance_undo",
     // A physical move since api-cloudrun#1302, and lineless for an uncounted product.
     "prep",
+    // The inbound ladder (7a): a put-away of an uncounted product, or of units a
+    // historic receipt already shelved; a received-damaged flag on an uncounted one.
+    "put_away",
+    "put_away_undo",
+    "receive_flag",
     "return_to_service",
     "sale",
     "sale_return",

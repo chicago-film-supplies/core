@@ -68,8 +68,12 @@ import {
   UidNameRef,
   type UidNameRefType,
 } from "./common.ts";
-import { BookingBreakdownKeyEnum, type BookingBreakdownKeyType } from "./booking.ts";
-import type { InboundBreakdownKeyType } from "./_inbound-breakdown.ts";
+import { BOOKING_BREAKDOWN_KEYS, BookingBreakdownKeyEnum, type BookingBreakdownKeyType } from "./booking.ts";
+import {
+  INBOUND_BREAKDOWN_KEYS,
+  InboundBreakdownKeyEnum,
+  type InboundBreakdownKeyType,
+} from "./_inbound-breakdown.ts";
 
 // ── Movement types ──────────────────────────────────────────────────
 
@@ -337,8 +341,9 @@ export const MOVEMENT_TYPES = [
   //
   // Each names its purchase in `sources[]` and its supplier, like a receipt.
   // Neither is manual (they are raised from the purchase, which co-writes
-  // `quantity_received` / `quantity_returned`), neither has an undo type — a
-  // mistake is a `reverses` reversal through the purchase's own lever. On a
+  // `quantity_received` / `quantity_returned`). Since 7a each moves an inbound
+  // booking and its rewind is a typed undo (`subrent_in_undo`,
+  // `subrent_out_undo`); a historic `reverses` reversal stays as stored. On a
   // serialized product they name their units, and a numbered subrent unit's
   // OWNERSHIP is its open history entry's `supplier`, not the movement type
   // (`api-cloudrun/.claude/plans/serialized-subrent.md` § 1).
@@ -359,10 +364,45 @@ export const MOVEMENT_TYPES = [
   // units, basis and the average never move. The operator chooses which one a
   // loss is (D9), because on a bulk product nothing can infer it.
   //
-  // Names the record, the purchase and the supplier. Not manual, no undo type:
-  // a mistake is the record PUT LOWERING `returned_to_supplier`, as a found
-  // write-off lowers `written_off`.
+  // Names the record, the purchase and the supplier. Not manual. Its rewind is
+  // `return_to_supplier_undo`, raised by the record PUT LOWERING
+  // `returned_to_supplier` (as a found write-off lowers `written_off`), never a
+  // `reverses` reversal: `stageReversalMovement` writes `service: null`, and
+  // this type requires a service axis.
   "return_to_supplier",
+  // ── the INBOUND ladder (one-document-model 7a, C3) ──
+  //
+  // A purchase line books units onto an inbound booking (`bookings-inbound`), as
+  // an order line books them onto an outbound one, and every inbound step is a
+  // movement naming that booking. The receive and return types above join the
+  // inbound ladder through {@link INBOUND_LADDER_MOVEMENT_TYPES}; these are the
+  // steps that had no movement before.
+  //
+  // - `put_away` moves received units from CFS staging onto a storage shelf,
+  //   `received → stocked`. It is lineless where nothing physically moves (an
+  //   uncounted product, or the backfill's put-away of units a historic receipt
+  //   already shelved, under the applier's `historical_receipt` exemption).
+  // - `subrent_rebook_out` / `subrent_rebook_in` are the inbound twins of the
+  //   rebook pair: a subrent Extend moves `stocked` units from leg A's inbound
+  //   booking to leg B's (ruling 57). Twins rather than the outbound pair
+  //   widened, because every movement type stays on ONE ladder (ruling 59).
+  // - `receive_flag` is the inbound twin of `flag`: a unit received damaged,
+  //   flagged in place on the staging shelf, `received → damaged` (ruling 54's
+  //   birth-time twin of an order's loss mark).
+  //
+  // Every rewind is a TYPED undo (`*_undo`, {@link MOVEMENT_UNDOES}), never a
+  // `reverses` reversal: the rewind is a new physical fact, and the cost-bearing
+  // one (`purchase_undo`) relieves the basis its receipt restored, read newest
+  // first off the booking's journal as `sale_undo` does.
+  "purchase_undo",
+  "subrent_in_undo",
+  "subrent_out_undo",
+  "return_to_supplier_undo",
+  "put_away",
+  "put_away_undo",
+  "subrent_rebook_out",
+  "subrent_rebook_in",
+  "receive_flag",
   // Placement only — nets to zero on ownership and touches no cost.
   "transfer",
   "return_to_service",
@@ -613,8 +653,14 @@ export interface MovementContract {
    * (one-document-model C14 step 1).
    */
   booking_ladder: BookingLadderType | null;
-  /** Whether the custody axis must, must not, or conditionally appears. */
-  custody: "required" | "forbidden" | "with_booking";
+  /**
+   * Whether the custody axis must, must not, or conditionally appears.
+   * `optional` (ruling 64) admits either, on a type whose booking is required
+   * but one of its uses moves no booking key: `return_to_supplier` settles a
+   * stocked unit (`stocked → lost`) or sends back one received damaged (no
+   * step; the booking keeps `damaged`).
+   */
+  custody: "required" | "forbidden" | "with_booking" | "optional";
   /** Whether the cost axis must or must not appear. */
   cost: "required" | "forbidden";
   /** `null` ⇒ `lines` must be empty (nothing physically moved). */
@@ -834,11 +880,15 @@ const FORWARD_CONTRACTS: Readonly<Record<ForwardMovementTypeType, BaseMovementCo
     units: "allowed",
     uncounted: "refused",
   },
+  // A buy's receipt: `ordered → received` on the line's INBOUND booking (7a,
+  // C3), so the receipt is an inbound custody step as a check-out is an
+  // outbound one. Received units land in CFS staging (`received` places at
+  // `locations`).
   purchase: {
-    custody: "forbidden",
+    custody: "required",
     cost: "required",
     places: { from: ["outside"], to: ["locations"] },
-    booking: "forbidden",
+    booking: "required",
     service: "forbidden",
     units: "allowed",
     uncounted: "refused",
@@ -921,20 +971,25 @@ const FORWARD_CONTRACTS: Readonly<Record<ForwardMovementTypeType, BaseMovementCo
   // unit's number goes vacant like any departure (D8). `service: "forbidden"` on the in/out pair
   // because they move clean units only: a flagged or lost rented unit is
   // settled by `return_to_supplier` from its out-of-service record.
+  //
+  // 7a (C3): both are INBOUND custody steps on the line's inbound booking —
+  // `subrent_in` is `ordered → received`, `subrent_out` is `stocked →
+  // sent_back`. "Custody" here means the inbound ladder; the place rules are
+  // unchanged.
   subrent_in: {
-    custody: "forbidden",
+    custody: "required",
     cost: "forbidden",
     places: { from: ["outside"], to: ["locations"] },
-    booking: "forbidden",
+    booking: "required",
     service: "forbidden",
     units: "allowed",
     uncounted: "refused",
   },
   subrent_out: {
-    custody: "forbidden",
+    custody: "required",
     cost: "forbidden",
     places: { from: ["locations"], to: ["outside"] },
-    booking: "forbidden",
+    booking: "required",
     service: "forbidden",
     units: "allowed",
     uncounted: "refused",
@@ -949,14 +1004,54 @@ const FORWARD_CONTRACTS: Readonly<Record<ForwardMovementTypeType, BaseMovementCo
   // when the axis is set. At an out-of-service place the per-endpoint rule
   // forces `from` to name the reason; off a shelf `from` is the flag, and the
   // `outside` end forces `to: null` either way.
+  //
+  // 7a (C3): it names the INBOUND booking it settles, so it is the first type
+  // with `booking` AND `service` both required (0b). Custody is `optional`
+  // (ruling 64): a settle moves the booking `stocked → lost` or `stocked →
+  // damaged`, while a unit RECEIVED damaged leaves with no custody step — its
+  // booking already reads `damaged` and keeps it as history, the `write_off`
+  // precedent.
   return_to_supplier: {
-    custody: "forbidden",
+    custody: "optional",
     cost: "forbidden",
     places: { from: ["out-of-service", "locations"], to: ["outside"] },
-    booking: "forbidden",
+    booking: "required",
     service: "required",
     units: "allowed",
     uncounted: "refused",
+  },
+  // ── the inbound ladder's own steps (see `MOVEMENT_TYPES`) ──
+  // Staging → storage. Cost-forbidden: the units are already owned (a buy) or
+  // already in custody (a subrent); the put-away changes only where they are.
+  // `lineless` for the uncounted product and for the backfill's put-away of
+  // units a historic receipt already shelved (the applier's
+  // `historical_receipt` exemption).
+  put_away: {
+    custody: "required",
+    cost: "forbidden",
+    places: { from: ["locations"], to: ["locations"] },
+    booking: "required",
+    service: "forbidden",
+    units: "allowed",
+    uncounted: "lineless",
+  },
+  // The twins of `rebook_out` / `rebook_in` on the inbound ladder (ruling 59):
+  // a subrent Extend moves `stocked` units between two inbound bookings and
+  // nothing physically moves.
+  subrent_rebook_out: { custody: "required", cost: "forbidden", places: null, booking: "required", service: "forbidden", units: "allowed", uncounted: "lineless" },
+  subrent_rebook_in: { custody: "required", cost: "forbidden", places: null, booking: "required", service: "forbidden", units: "allowed", uncounted: "lineless" },
+  // The twin of `flag` on the inbound ladder (ruling 59): a unit received
+  // damaged, flagged where it stands on the staging shelf, custody `received →
+  // damaged`. In place, always, as `flag` is. Booking required: it is always a
+  // step on a purchase's inbound booking.
+  receive_flag: {
+    custody: "required",
+    cost: "forbidden",
+    places: { from: ["locations"], to: ["locations"] },
+    booking: "required",
+    service: "required",
+    units: "allowed",
+    uncounted: "lineless",
   },
   // No custody: the booking keeps `damaged: N` forever — a terminal key and part
   // of its history — so removing it would break `sum(breakdown) === quantity`.
@@ -1150,6 +1245,12 @@ export const UNDO_MOVEMENT_TYPES = [
   "sale_return_undo",
   "sale_lost_undo",
   "sale_damaged_undo",
+  // the inbound ladder's rewinds (7a, C3)
+  "purchase_undo",
+  "subrent_in_undo",
+  "subrent_out_undo",
+  "return_to_supplier_undo",
+  "put_away_undo",
 ] as const;
 
 /** A movement type that undoes another ({@link MOVEMENT_UNDOES}). */
@@ -1170,15 +1271,30 @@ export const MOVEMENT_UNDOES: Readonly<Record<UndoMovementTypeType, ForwardMovem
   sale_return_undo: "sale_return",
   sale_lost_undo: "sale_lost",
   sale_damaged_undo: "sale_damaged",
+  purchase_undo: "purchase",
+  subrent_in_undo: "subrent_in",
+  subrent_out_undo: "subrent_out",
+  return_to_supplier_undo: "return_to_supplier",
+  put_away_undo: "put_away",
 };
 
 /**
  * The forward types whose booking is on the INBOUND ladder — the one
- * declaration {@link MovementContract.booking_ladder} is derived from. Empty
- * until the 7a contract beta moves the purchase receive and return types onto
- * inbound bookings; an undo needs no entry, because it inherits its forward's.
+ * declaration {@link MovementContract.booking_ladder} is derived from. An undo
+ * needs no entry, because it inherits its forward's. Every type stays on ONE
+ * ladder (ruling 59): a type that ever needs both is a new twin type, decided
+ * here at compile time.
  */
-export const INBOUND_LADDER_MOVEMENT_TYPES: readonly ForwardMovementTypeType[] = [];
+export const INBOUND_LADDER_MOVEMENT_TYPES: readonly ForwardMovementTypeType[] = [
+  "purchase",
+  "subrent_in",
+  "subrent_out",
+  "return_to_supplier",
+  "put_away",
+  "subrent_rebook_out",
+  "subrent_rebook_in",
+  "receive_flag",
+];
 
 /** {@link MovementContract.booking_ladder} for one forward contract. */
 function bookingLadderOf(type: ForwardMovementTypeType, contract: BaseMovementContract): BookingLadderType | null {
@@ -1368,16 +1484,40 @@ export const MovementUnit: z.ZodType<MovementUnitType> = z.strictObject({
  * A side may be `null` for a one-sided transition: an order edit that changes
  * the booking's own quantity moves units into or out of the breakdown without a
  * matching opposite key.
+ *
+ * The keys span BOTH ladders (7a, C2): an outbound booking's
+ * (`BOOKING_BREAKDOWN_KEYS`) or an inbound booking's (`INBOUND_BREAKDOWN_KEYS`).
+ * Five spellings are shared and mean a different place on each ladder, so the
+ * schema alone cannot tell which a key is; `checkMovementContract` reads the
+ * type's {@link MovementContract.booking_ladder} and refuses a key of the other
+ * ladder.
  */
 export interface MovementCustodyType {
-  from: BookingBreakdownKeyType | null;
-  to: BookingBreakdownKeyType | null;
+  from: CustodyKeyType | null;
+  to: CustodyKeyType | null;
 }
+
+/**
+ * A key of either booking ladder's breakdown — what a movement's custody pair
+ * names. Which ladder is the movement type's `booking_ladder`.
+ */
+export type CustodyKeyType = BookingBreakdownKeyType | InboundBreakdownKeyType;
+/** Zod schema for {@link CustodyKeyType}. */
+export const CustodyKeyEnum: z.ZodType<CustodyKeyType> = z.union([
+  BookingBreakdownKeyEnum,
+  InboundBreakdownKeyEnum,
+]);
+
+/** The custody keys of one ladder: what {@link checkMovementContract} admits on a type of it. */
+const LADDER_KEYS: Readonly<Record<BookingLadderType, readonly string[]>> = {
+  outbound: BOOKING_BREAKDOWN_KEYS,
+  inbound: INBOUND_BREAKDOWN_KEYS,
+};
 
 /** Zod schema for a custody transition. */
 export const MovementCustody: z.ZodType<MovementCustodyType> = z.strictObject({
-  from: BookingBreakdownKeyEnum.nullable(),
-  to: BookingBreakdownKeyEnum.nullable(),
+  from: CustodyKeyEnum.nullable(),
+  to: CustodyKeyEnum.nullable(),
 }).refine(
   (c) => c.from !== null || c.to !== null,
   { message: "A custody transition must name at least one side" },
@@ -1657,6 +1797,25 @@ function placeKind(source: DocSourceType | null): PlaceKindType {
   return "outside";
 }
 
+/**
+ * The place kinds a custody key implies, from its LADDER's table —
+ * {@link CUSTODY_PLACE_KINDS} for outbound, {@link INBOUND_CUSTODY_PLACE_KINDS}
+ * for inbound. `null` for a key the ladder does not have.
+ */
+export function placeKindsForCustodyKey(
+  ladder: BookingLadderType,
+  key: CustodyKeyType,
+): readonly PlaceKindType[] | null {
+  if (ladder === "inbound") {
+    return (INBOUND_BREAKDOWN_KEYS as readonly string[]).includes(key)
+      ? INBOUND_CUSTODY_PLACE_KINDS[key as InboundBreakdownKeyType]
+      : null;
+  }
+  return (BOOKING_BREAKDOWN_KEYS as readonly string[]).includes(key)
+    ? CUSTODY_PLACE_KINDS[key as BookingBreakdownKeyType]
+    : null;
+}
+
 /** True when `source` names a real place (not the absence of one). */
 function isPlace(source: DocSourceType | null): boolean {
   return source !== null &&
@@ -1721,6 +1880,22 @@ function checkMovementContract(m: Movement, ctx: z.RefinementCtx): void {
       path: ["custody"],
       message: `"${m.type}" must not carry a custody transition`,
     });
+  }
+  // Every custody key belongs to the type's ladder (7a, C2). A shared spelling
+  // (`lost`, `damaged`, `quoted`, the transit keys) is in both lists, which is
+  // why rule 3 below must ALSO read the ladder's own place table.
+  const ladder: BookingLadderType = contract.booking_ladder ?? "outbound";
+  if (m.custody !== null) {
+    for (const side of ["from", "to"] as const) {
+      const key = m.custody[side];
+      if (key !== null && !LADDER_KEYS[ladder].includes(key)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["custody", side],
+          message: `"${m.type}" moves an ${ladder} booking; "${key}" is not a key of that ladder`,
+        });
+      }
+    }
   }
 
   // ── cost axis ──
@@ -1806,12 +1981,15 @@ function checkMovementContract(m: Movement, ctx: z.RefinementCtx): void {
     }
   });
 
-  // Rule 3: custody and placement must agree on the kind of place.
+  // Rule 3: custody and placement must agree on the kind of place, looked up in
+  // the type's OWN ladder's table. A shared spelling looked up in the outbound
+  // table would validate an inbound key against the wrong place, silently.
   if (m.custody !== null) {
     for (const side of ["from", "to"] as const) {
       const key = m.custody[side];
       if (key === null) continue;
-      const implied = CUSTODY_PLACE_KINDS[key];
+      const implied = placeKindsForCustodyKey(ladder, key);
+      if (implied === null) continue; // the ladder check above already refused it
       m.lines.forEach((line, i) => {
         const kind = placeKind(line.location[side]);
         if (!implied.includes(kind)) {
@@ -2058,7 +2236,7 @@ function checkMovementService(
     ? service
     : { from: service.to, to: service.from };
 
-  if (m.type === "flag") {
+  if (m.type === "flag" || m.type === "receive_flag") {
     // `lost` is a PLACE, never a flag on a shelf: a lost unit is on no shelf.
     for (const side of ["from", "to"] as const) {
       const reason = forward[side];

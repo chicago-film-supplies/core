@@ -1741,6 +1741,18 @@
           "doc": "What one booking type does under a rule. `movement: null` is LEGAL WITH NO\nMOVEMENT (a sale's `out → lost`); a type that may not take the rule at all has\nno arm (`null` on the row)."
         },
         {
+          "kind": "variable",
+          "name": "CustodyKeyEnum",
+          "declaration": "const CustodyKeyEnum: z.ZodType<CustodyKeyType>;",
+          "doc": "Zod schema for {@link CustodyKeyType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CustodyKeyType",
+          "declaration": "type CustodyKeyType = BookingBreakdownKeyType | InboundBreakdownKeyType;",
+          "doc": "A key of either booking ladder's breakdown — what a movement's custody pair\nnames. Which ladder is the movement type's `booking_ladder`."
+        },
+        {
           "kind": "interface",
           "name": "CustodyRule",
           "declaration": "interface CustodyRule {\n  id: CustodyRuleId;\n  from: BookingBreakdownKeyType;\n  to: BookingBreakdownKeyType;\n  rental: CustodyArm | null;\n  sale: CustodyArm | null;\n  service: CustodyServiceShape | null;\n  direction: \"forward\" | \"undo\";\n  stage: \"prep\" | \"checkout\" | \"return\" | \"service\";\n  inverse: CustodyRuleId | null;\n  billable: boolean;\n  description: string;\n  enforced_by: EnforcementRef[];\n}",
@@ -2528,6 +2540,18 @@
         },
         {
           "kind": "variable",
+          "name": "INBOUND_CUSTODY_RULES",
+          "declaration": "const INBOUND_CUSTODY_RULES: readonly InboundCustodyRule[];",
+          "doc": "The inbound table. Settle rows move only in the `return_to_supplier` commit,\nnever at the outbound `mark_lost` (the 0b lost-subrent trace: supply falls\nonce, on the inbound booking). A unit RECEIVED damaged that goes back to the\nsupplier is a `return_to_supplier` with NO custody step — its booking keeps\n`damaged` as history (ruling 64) — so it has no row here.\n\nA received-damaged unit names `purchases:<uid>` and `bookings-inbound:<uid>`\non its record, never `bookings:`, because `recordOwner` and\n`lossUndoRefusal` read `bookings:` as the OUTBOUND owner."
+        },
+        {
+          "kind": "variable",
+          "name": "INBOUND_CUSTODY_RULE_IDS",
+          "declaration": "const INBOUND_CUSTODY_RULE_IDS: \"receive\" | \"receive_undo\" | \"put_away\" | \"put_away_undo\" | \"send_back\" | \"send_back_undo\" | \"settle_lost\" | \"settle_lost_undo\" | \"settle_damaged\" | \"settle_damaged_undo\" | \"receive_damaged\" | \"receive_damaged_undo\"[];",
+          "doc": "Every inbound custody rule id: the steps of a purchase's inbound booking\n(`bookings-inbound`). A TWIN table beside {@link CUSTODY_RULE_IDS}, never a\n`ladder` column on it: `CUSTODY_RULE_IDS` is the runtime wire enum of the\nOUTBOUND lever (`BookingAction.rule`), and `CUSTODY_RULES` is iterated\nunfiltered by every outbound reader, so a column would put inbound ids on the\noutbound wire and into the outbound menus.\n\n`tests/custody.test.ts` asserts it equals the table's ids in both directions."
+        },
+        {
+          "kind": "variable",
           "name": "INBOUND_HISTORY_KEYS",
           "declaration": "const INBOUND_HISTORY_KEYS: \"transit_inbound\" | \"received\" | \"stocked\" | \"transit_outbound\" | \"sent_back\" | \"lost\" | \"damaged\"[];",
           "doc": "Every inbound key but the plan: units something physically happened to. The\ntwin of `CUSTODY_HISTORY_KEYS`, and the set the journal replay folds an\ninbound booking over (`net[k] === breakdown[k]`)."
@@ -2536,7 +2560,7 @@
           "kind": "variable",
           "name": "INBOUND_LADDER_MOVEMENT_TYPES",
           "declaration": "const INBOUND_LADDER_MOVEMENT_TYPES: readonly ForwardMovementTypeType[];",
-          "doc": "The forward types whose booking is on the INBOUND ladder — the one\ndeclaration {@link MovementContract.booking_ladder} is derived from. Empty\nuntil the 7a contract beta moves the purchase receive and return types onto\ninbound bookings; an undo needs no entry, because it inherits its forward's."
+          "doc": "The forward types whose booking is on the INBOUND ladder — the one\ndeclaration {@link MovementContract.booking_ladder} is derived from. An undo\nneeds no entry, because it inherits its forward's. Every type stays on ONE\nladder (ruling 59): a type that ever needs both is a new twin type, decided\nhere at compile time."
         },
         {
           "kind": "variable",
@@ -2627,6 +2651,36 @@
           "name": "InboundBreakdownSchema",
           "declaration": "const InboundBreakdownSchema: z.ZodType<InboundBreakdown>;",
           "doc": "Zod schema for {@link InboundBreakdown}. Keys alphabetical, because a schema's\nkey order is its column order (`core/CLAUDE.md`)."
+        },
+        {
+          "kind": "interface",
+          "name": "InboundCustodyRule",
+          "declaration": "interface InboundCustodyRule {\n  id: InboundCustodyRuleId;\n  from: InboundBreakdownKeyType;\n  to: InboundBreakdownKeyType;\n  rental: CustodyArm | null;\n  sale: CustodyArm | null;\n  service: InboundServiceShape | null;\n  direction: \"forward\" | \"undo\";\n  stage: \"receive\" | \"put_away\" | \"send_back\" | \"settle\";\n  inverse: InboundCustodyRuleId | null;\n  description: string;\n  enforced_by: EnforcementRef[];\n}",
+          "doc": "One legal inbound custody step: the twin of {@link CustodyRule} over the\ninbound breakdown keys. `rental` is a Subrent line, `sale` a Buy line\n(`INBOUND_BOOKING_TYPES`), and an arm is `null` where that line type may not\ntake the step (a Buy is never sent back or settled)."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InboundCustodyRuleId",
+          "declaration": "type InboundCustodyRuleId = indexedAccess;",
+          "doc": "One inbound custody rule id."
+        },
+        {
+          "kind": "variable",
+          "name": "InboundCustodyRuleIdEnum",
+          "declaration": "const InboundCustodyRuleIdEnum: z.ZodType<InboundCustodyRuleId>;",
+          "doc": "Zod schema for {@link InboundCustodyRuleId}."
+        },
+        {
+          "kind": "interface",
+          "name": "InboundServiceShape",
+          "declaration": "interface InboundServiceShape {\n  from: InboundServiceSide;\n  to: InboundServiceSide;\n}",
+          "doc": "An inbound row's service axis."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InboundServiceSide",
+          "declaration": "type InboundServiceSide = \"none\" | \"lost\" | \"damaged\";",
+          "doc": "One side of an inbound row's service axis. Unlike the outbound\n{@link CustodyServiceSide} it carries `lost`: a settle row resolves the\nout-of-service record holding the unit, and a lost rented unit stands at its\nrecord, never on a shelf."
         },
         {
           "kind": "typeAlias",
@@ -3231,7 +3285,7 @@
         {
           "kind": "variable",
           "name": "MOVEMENT_TYPES",
-          "declaration": "const MOVEMENT_TYPES: \"prep\" | \"check_out\" | \"check_in\" | \"mark_damaged\" | \"mark_lost\" | \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_cleaning\" | \"mark_cleaning_undo\" | \"mark_maintenance\" | \"mark_maintenance_undo\" | \"rebook_out\" | \"rebook_in\" | \"sale\" | \"sale_return\" | \"sale_undo\" | \"sale_return_undo\" | \"sale_lost\" | \"sale_lost_undo\" | \"sale_damaged\" | \"sale_damaged_undo\" | \"opening_balance\" | \"purchase\" | \"find\" | \"make\" | \"adjustment_increase\" | \"adjustment_decrease\" | \"trade_in\" | \"write_off\" | \"reclass_out\" | \"reclass_in\" | \"subrent_in\" | \"subrent_out\" | \"return_to_supplier\" | \"transfer\" | \"return_to_service\" | \"flag\" | \"send_away\" | \"count_open\" | \"count_close\" | \"enroll\" | \"unenroll\"[];",
+          "declaration": "const MOVEMENT_TYPES: \"prep\" | \"check_out\" | \"check_in\" | \"mark_damaged\" | \"mark_lost\" | \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_cleaning\" | \"mark_cleaning_undo\" | \"mark_maintenance\" | \"mark_maintenance_undo\" | \"rebook_out\" | \"rebook_in\" | \"sale\" | \"sale_return\" | \"sale_undo\" | \"sale_return_undo\" | \"sale_lost\" | \"sale_lost_undo\" | \"sale_damaged\" | \"sale_damaged_undo\" | \"opening_balance\" | \"purchase\" | \"find\" | \"make\" | \"adjustment_increase\" | \"adjustment_decrease\" | \"trade_in\" | \"write_off\" | \"reclass_out\" | \"reclass_in\" | \"subrent_in\" | \"subrent_out\" | \"return_to_supplier\" | \"purchase_undo\" | \"subrent_in_undo\" | \"subrent_out_undo\" | \"return_to_supplier_undo\" | \"put_away\" | \"put_away_undo\" | \"subrent_rebook_out\" | \"subrent_rebook_in\" | \"receive_flag\" | \"transfer\" | \"return_to_service\" | \"flag\" | \"send_away\" | \"count_open\" | \"count_close\" | \"enroll\" | \"unenroll\"[];",
           "doc": "Every kind of movement, as ONE classifier. There is deliberately no second\n`kind` field: `type` is required in a strict object and drives\n{@link getTransactionMultiplier}, so a document can never be half-classified.\n\nGrouped by which axes the type carries — see {@link MOVEMENT_CONTRACTS}, which\nis the machine-readable form of the same grouping.\n\n**Removed in the journal migration**, all with zero stored instances in prod\nAND dev, unreachable from `MANUAL_TRANSACTION_TYPES` and\n{@link getDisplayTransactionTypes}: `acquisition`, `disposal`,\n`partial_disposal`, `depreciation_tax`, `depreciation_gaap`. They were the\nonly unclassified branch, which is why `getTransactionMultiplier` used to\nthrow — a live 500 waiting on a type nothing could produce.\n\nAsset depreciation IS on the roadmap. When it lands:\n  - **`depreciation` wants to be ONE type with a `book` field** on the cost\n    object, not `depreciation_tax` + `depreciation_gaap`. As types they double\n    every future cost-only event; as a field the book is one dimension.\n    🔴 **The movement shape does NOT already exist.** This note claimed it\n    did — *\"`lines: []` + a negative `cost`, the same shape a late\n    landed-cost adjustment uses\"* — and that was wrong in three independent\n    ways, each measured (core#75):\n      1. **No contract permits it.** `places: null` means \"lines must be\n         empty\", and the only entries carrying it are the rebook pair\n         (`prep` did until api-cloudrun#1302), whose `cost` is `forbidden`. Every cost-bearing type has `places` set, and\n         `checkMovementContract` then requires at least one line — so\n         `MovementSchema` rejects `lines: []` beside a cost on **every**\n         {@link MOVEMENT_TYPES} member. `places: null` + `cost: \"required\"`\n         is a pairing {@link MOVEMENT_CONTRACTS} has never carried.\n      2. **The fold would ignore it anyway.** `applyMovementToLedger`\n         (`utils/movements.ts`) touches `total_cost_basis_cents` only inside\n         `delta > 0` / `delta < 0`, where `delta` is\n         `movementHeldDelta(lines)`. `lines: []` + $500 leaves the basis at\n         0; the same cost on one `+10` line moves it to 50000.\n      3. **And it could not reach Xero.** `xeroPostingFor`\n         (`utils/movements.ts`) terminals a cost-bearing movement whose lines\n         net to zero as `no_ownership_direction`, deliberately, because a\n         document like that is malformed today.\n    So a cost-only event needs all three gates opened, in one change: a\n    contract entry pairing `places: null` with `cost: \"required\"`, a\n    `delta === 0` arm in the fold — which owes its own decision about\n    `average_unit_cost`, since the basis moves while the quantity does not —\n    and a posting decision that is not derived from an ownership direction\n    there is none of.\n    The \"late landed-cost adjustment\" cited as precedent is not writable\n    today either, by the same mechanism. (1) and (2) are pinned in\n    `tests/movements.test.ts` and (3) in `tests/xero-posting.test.ts`, so the\n    day someone mints the contract entry is the day a pin goes red rather\n    than the day the ledger silently stops moving.\n  - **`disposal` wants to come back as its own type**, even though `write_off`\n    already covers the mechanics (`out-of-service → null` + `cost`). Finance\n    reporting a \"disposals\" line has to tell a disposal from a damage\n    write-off, and inferring that from \"is there an OOS record in `sources[]`\"\n    is inferring cause from effect — the same reason a refund is a credit-note\n    link and not a `total_cost > 0` test.\n  - `acquisition` and `partial_disposal` do NOT come back: the first is\n    `purchase`, and the second is a `disposal` whose quantity is less than\n    what's held. Quantity already says it.\n\n`transfer_increase` / `transfer_decrease` collapsed into a single\n{@link MOVEMENT_CONTRACTS} `transfer`: they existed only because one row could\nnot say \"out of A, into B\", which `location: {from, to}` now says. The\nmigration rewrites the stored pairs."
         },
         {
@@ -3321,7 +3375,7 @@
         {
           "kind": "interface",
           "name": "MovementContract",
-          "declaration": "interface MovementContract {\n  undoes: MovementTypeType | null;\n  booking_ladder: BookingLadderType | null;\n  custody: \"required\" | \"forbidden\" | \"with_booking\";\n  cost: \"required\" | \"forbidden\";\n  places: typeLiteral | null;\n  booking: \"required\" | \"forbidden\" | \"optional\";\n  service: \"required\" | \"forbidden\" | \"nullable\";\n  units: \"forbidden\" | \"allowed\";\n  uncounted: \"lineless\" | \"refused\";\n}",
+          "declaration": "interface MovementContract {\n  undoes: MovementTypeType | null;\n  booking_ladder: BookingLadderType | null;\n  custody: \"required\" | \"forbidden\" | \"with_booking\" | \"optional\";\n  cost: \"required\" | \"forbidden\";\n  places: typeLiteral | null;\n  booking: \"required\" | \"forbidden\" | \"optional\";\n  service: \"required\" | \"forbidden\" | \"nullable\";\n  units: \"forbidden\" | \"allowed\";\n  uncounted: \"lineless\" | \"refused\";\n}",
           "doc": ""
         },
         {
@@ -3345,8 +3399,8 @@
         {
           "kind": "interface",
           "name": "MovementCustodyType",
-          "declaration": "interface MovementCustodyType {\n  from: BookingBreakdownKeyType | null;\n  to: BookingBreakdownKeyType | null;\n}",
-          "doc": "The custody transition this event records, as a pair of breakdown keys.\n\nNamed `custody` and deliberately NOT `status` or `state`: `Booking` already\nhas a `status` field (`draft/quoted/reserved/part-prepped/prepped/active/\ncomplete`) that is a different thing from a breakdown key, and the two enums\nshare several words — `status: {from: \"prepped\"}` would misread as\n`booking.status`.\n\nA side may be `null` for a one-sided transition: an order edit that changes\nthe booking's own quantity moves units into or out of the breakdown without a\nmatching opposite key."
+          "declaration": "interface MovementCustodyType {\n  from: CustodyKeyType | null;\n  to: CustodyKeyType | null;\n}",
+          "doc": "The custody transition this event records, as a pair of breakdown keys.\n\nNamed `custody` and deliberately NOT `status` or `state`: `Booking` already\nhas a `status` field (`draft/quoted/reserved/part-prepped/prepped/active/\ncomplete`) that is a different thing from a breakdown key, and the two enums\nshare several words — `status: {from: \"prepped\"}` would misread as\n`booking.status`.\n\nA side may be `null` for a one-sided transition: an order edit that changes\nthe booking's own quantity moves units into or out of the breakdown without a\nmatching opposite key.\n\nThe keys span BOTH ladders (7a, C2): an outbound booking's\n(`BOOKING_BREAKDOWN_KEYS`) or an inbound booking's (`INBOUND_BREAKDOWN_KEYS`).\nFive spellings are shared and mean a different place on each ladder, so the\nschema alone cannot tell which a key is; `checkMovementContract` reads the\ntype's {@link MovementContract.booking_ladder} and refuses a key of the other\nladder."
         },
         {
           "kind": "variable",
@@ -6777,7 +6831,7 @@
         {
           "kind": "variable",
           "name": "UNDO_MOVEMENT_TYPES",
-          "declaration": "const UNDO_MOVEMENT_TYPES: \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_cleaning_undo\" | \"mark_maintenance_undo\" | \"sale_undo\" | \"sale_return_undo\" | \"sale_lost_undo\" | \"sale_damaged_undo\"[];",
+          "declaration": "const UNDO_MOVEMENT_TYPES: \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_cleaning_undo\" | \"mark_maintenance_undo\" | \"sale_undo\" | \"sale_return_undo\" | \"sale_lost_undo\" | \"sale_damaged_undo\" | \"purchase_undo\" | \"subrent_in_undo\" | \"subrent_out_undo\" | \"return_to_supplier_undo\" | \"put_away_undo\"[];",
           "doc": "Every UNDO type and the forward type it says never happened — the one\ndeclaration the undo contracts are built from. Pinned against\n`CUSTODY_RULES[*].inverse` by `tests/custody.test.ts`, so a rule pair and its\nmovement pair cannot disagree.\n\n🔴 **`mark_lost_undo` mirrors `mark_lost` EXACTLY, including the widening on\nits origin.** A loss may come off the booking (`out → lost`) or off a shelf\n(`returned → lost`, api-cloudrun#1118), so its undo puts the unit back at\neither. The writer takes the destination from the consumed record's own mark\nlines — never re-derived from the breakdown.\n\n⚠️ **A rewind is an event in its own right, not a `reverses` reversal**\n(see {@link MOVEMENT_TYPES}): one un-prep can walk back part of each of\nseveral preps. What it shares with a reversal is the mirrored contract, and —\nfor the two that carry cost — the exact relief."
         },
         {
@@ -8124,6 +8178,14 @@
         },
         {
           "kind": "function",
+          "name": "inboundCustodyRule",
+          "signature": "inboundCustodyRule(id: InboundCustodyRuleId): InboundCustodyRule",
+          "doc": "The inbound rule with `id`. Total over {@link InboundCustodyRuleId}; the table test proves it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "inboundOwnsKey",
           "signature": "inboundOwnsKey(type: InboundBookingTypeType, key: InboundBreakdownKeyType): boolean",
           "doc": "Whether CFS OWNS an inbound booking's units in `key` — the inbound twin of\n`ownsKey`. A Buy owns from `received` on; a Subrent owns nothing, ever.\n\n⭐ The movement-cost rule reads this: a receive must carry a cost exactly\nwhen it moves units into an owned key, so a Buy receive costs and a Subrent\nreceive does not.",
@@ -8516,6 +8578,14 @@
           "name": "pickSheetLegDirection",
           "signature": "pickSheetLegDirection(bookings: readonly PickSheetLegCustody[]): PickSheetLegType",
           "doc": "Which way this leg's work is going, from its bookings' custody.\n\n⚠️ **The predicate is `getStageForBookings(…) === \"return\"`, spelled out.**\nThat ladder is reserved → prepped → rental `out`, so \"in flight\" means no\n`reserved` and no `prepped` anywhere on the leg plus at least one RENTAL\nholding `out`. `quoted` is checked after `out` there and so does not enter\nhere either. **A non-rental `out` is terminal — checkout IS delivery for a\nsale** — so it must not pull a leg onto a collection that will never happen.\n\n🔴 **ONE owner, and it lives in a schema module rather than a util** — the\nsame two reasons as {@link pickSheetGateAdmits}. The rule is this vocabulary's\nown semantics, so a second copy beside the enum is how the copies drift; and\n`src/utils/*` entrypoints are walked by the template-helper generator, which\nwould advertise a custody predicate to PDF authors.\n\n⚠️ **This answers what a leg is doing NOW, which is not what a printed\ndocument IS.** Custody moves, so a delivery packing list re-rendered after its\ngoods went out would derive `collection` and change identity. Use this to\nRESOLVE {@link PickSheet.leg} once, at build time; then read the stamped\nfield. Derivation supplies the default; the stamped value is the fact.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "placeKindsForCustodyKey",
+          "signature": "placeKindsForCustodyKey(ladder: BookingLadderType, key: CustodyKeyType): readonly PlaceKindType[] | null",
+          "doc": "The place kinds a custody key implies, from its LADDER's table —\n{@link CUSTODY_PLACE_KINDS} for outbound, {@link INBOUND_CUSTODY_PLACE_KINDS}\nfor inbound. `null` for a key the ladder does not have.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -10499,6 +10569,48 @@
         },
         {
           "kind": "variable",
+          "name": "INBOUND_CUSTODY_RULES",
+          "declaration": "const INBOUND_CUSTODY_RULES: readonly InboundCustodyRule[];",
+          "doc": "The inbound table. Settle rows move only in the `return_to_supplier` commit,\nnever at the outbound `mark_lost` (the 0b lost-subrent trace: supply falls\nonce, on the inbound booking). A unit RECEIVED damaged that goes back to the\nsupplier is a `return_to_supplier` with NO custody step — its booking keeps\n`damaged` as history (ruling 64) — so it has no row here.\n\nA received-damaged unit names `purchases:<uid>` and `bookings-inbound:<uid>`\non its record, never `bookings:`, because `recordOwner` and\n`lossUndoRefusal` read `bookings:` as the OUTBOUND owner."
+        },
+        {
+          "kind": "variable",
+          "name": "INBOUND_CUSTODY_RULE_IDS",
+          "declaration": "const INBOUND_CUSTODY_RULE_IDS: \"receive\" | \"receive_undo\" | \"put_away\" | \"put_away_undo\" | \"send_back\" | \"send_back_undo\" | \"settle_lost\" | \"settle_lost_undo\" | \"settle_damaged\" | \"settle_damaged_undo\" | \"receive_damaged\" | \"receive_damaged_undo\"[];",
+          "doc": "Every inbound custody rule id: the steps of a purchase's inbound booking\n(`bookings-inbound`). A TWIN table beside {@link CUSTODY_RULE_IDS}, never a\n`ladder` column on it: `CUSTODY_RULE_IDS` is the runtime wire enum of the\nOUTBOUND lever (`BookingAction.rule`), and `CUSTODY_RULES` is iterated\nunfiltered by every outbound reader, so a column would put inbound ids on the\noutbound wire and into the outbound menus.\n\n`tests/custody.test.ts` asserts it equals the table's ids in both directions."
+        },
+        {
+          "kind": "interface",
+          "name": "InboundCustodyRule",
+          "declaration": "interface InboundCustodyRule {\n  id: InboundCustodyRuleId;\n  from: InboundBreakdownKeyType;\n  to: InboundBreakdownKeyType;\n  rental: CustodyArm | null;\n  sale: CustodyArm | null;\n  service: InboundServiceShape | null;\n  direction: \"forward\" | \"undo\";\n  stage: \"receive\" | \"put_away\" | \"send_back\" | \"settle\";\n  inverse: InboundCustodyRuleId | null;\n  description: string;\n  enforced_by: EnforcementRef[];\n}",
+          "doc": "One legal inbound custody step: the twin of {@link CustodyRule} over the\ninbound breakdown keys. `rental` is a Subrent line, `sale` a Buy line\n(`INBOUND_BOOKING_TYPES`), and an arm is `null` where that line type may not\ntake the step (a Buy is never sent back or settled)."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InboundCustodyRuleId",
+          "declaration": "type InboundCustodyRuleId = indexedAccess;",
+          "doc": "One inbound custody rule id."
+        },
+        {
+          "kind": "variable",
+          "name": "InboundCustodyRuleIdEnum",
+          "declaration": "const InboundCustodyRuleIdEnum: z.ZodType<InboundCustodyRuleId>;",
+          "doc": "Zod schema for {@link InboundCustodyRuleId}."
+        },
+        {
+          "kind": "interface",
+          "name": "InboundServiceShape",
+          "declaration": "interface InboundServiceShape {\n  from: InboundServiceSide;\n  to: InboundServiceSide;\n}",
+          "doc": "An inbound row's service axis."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InboundServiceSide",
+          "declaration": "type InboundServiceSide = \"none\" | \"lost\" | \"damaged\";",
+          "doc": "One side of an inbound row's service axis. Unlike the outbound\n{@link CustodyServiceSide} it carries `lost`: a settle row resolves the\nout-of-service record holding the unit, and a lost rented unit stands at its\nrecord, never on a shelf."
+        },
+        {
+          "kind": "variable",
           "name": "OWNED_KEYS_BY_TYPE",
           "declaration": "const OWNED_KEYS_BY_TYPE: Readonly<Record<ComponentTypeType, readonly BookingBreakdownKeyType[]>>;",
           "doc": "{@link ownsKey}, tabulated per booking type in breakdown order — for a reader\nthat wants the key list rather than the predicate. Derived, so it cannot\ndrift from the predicate."
@@ -10530,6 +10642,14 @@
           "name": "duplicateCustodySlots",
           "signature": "duplicateCustodySlots(actions: readonly Pick<BookingActionType, \"rule\">[]): string[]",
           "doc": "Where two actions in one list would write the same movement id. Shared by the\nwire refine and by `applyCustodyActions`, so the two cannot disagree.\n\nThe slot is read off the RENTAL arm: a sale's arms are a subset whose\nmovements are distinct per rule, so the rental reading is the stricter one.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "inboundCustodyRule",
+          "signature": "inboundCustodyRule(id: InboundCustodyRuleId): InboundCustodyRule",
+          "doc": "The inbound rule with `id`. Total over {@link InboundCustodyRuleId}; the table test proves it.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -14948,6 +15068,18 @@
           "doc": "Input for creating a manual movement."
         },
         {
+          "kind": "variable",
+          "name": "CustodyKeyEnum",
+          "declaration": "const CustodyKeyEnum: z.ZodType<CustodyKeyType>;",
+          "doc": "Zod schema for {@link CustodyKeyType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CustodyKeyType",
+          "declaration": "type CustodyKeyType = BookingBreakdownKeyType | InboundBreakdownKeyType;",
+          "doc": "A key of either booking ladder's breakdown — what a movement's custody pair\nnames. Which ladder is the movement type's `booking_ladder`."
+        },
+        {
           "kind": "typeAlias",
           "name": "ForwardMovementTypeType",
           "declaration": "type ForwardMovementTypeType = Exclude<MovementTypeType, UndoMovementTypeType>;",
@@ -14963,7 +15095,7 @@
           "kind": "variable",
           "name": "INBOUND_LADDER_MOVEMENT_TYPES",
           "declaration": "const INBOUND_LADDER_MOVEMENT_TYPES: readonly ForwardMovementTypeType[];",
-          "doc": "The forward types whose booking is on the INBOUND ladder — the one\ndeclaration {@link MovementContract.booking_ladder} is derived from. Empty\nuntil the 7a contract beta moves the purchase receive and return types onto\ninbound bookings; an undo needs no entry, because it inherits its forward's."
+          "doc": "The forward types whose booking is on the INBOUND ladder — the one\ndeclaration {@link MovementContract.booking_ladder} is derived from. An undo\nneeds no entry, because it inherits its forward's. Every type stays on ONE\nladder (ruling 59): a type that ever needs both is a new twin type, decided\nhere at compile time."
         },
         {
           "kind": "variable",
@@ -14974,7 +15106,7 @@
         {
           "kind": "variable",
           "name": "MOVEMENT_TYPES",
-          "declaration": "const MOVEMENT_TYPES: \"prep\" | \"check_out\" | \"check_in\" | \"mark_damaged\" | \"mark_lost\" | \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_cleaning\" | \"mark_cleaning_undo\" | \"mark_maintenance\" | \"mark_maintenance_undo\" | \"rebook_out\" | \"rebook_in\" | \"sale\" | \"sale_return\" | \"sale_undo\" | \"sale_return_undo\" | \"sale_lost\" | \"sale_lost_undo\" | \"sale_damaged\" | \"sale_damaged_undo\" | \"opening_balance\" | \"purchase\" | \"find\" | \"make\" | \"adjustment_increase\" | \"adjustment_decrease\" | \"trade_in\" | \"write_off\" | \"reclass_out\" | \"reclass_in\" | \"subrent_in\" | \"subrent_out\" | \"return_to_supplier\" | \"transfer\" | \"return_to_service\" | \"flag\" | \"send_away\" | \"count_open\" | \"count_close\" | \"enroll\" | \"unenroll\"[];",
+          "declaration": "const MOVEMENT_TYPES: \"prep\" | \"check_out\" | \"check_in\" | \"mark_damaged\" | \"mark_lost\" | \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_cleaning\" | \"mark_cleaning_undo\" | \"mark_maintenance\" | \"mark_maintenance_undo\" | \"rebook_out\" | \"rebook_in\" | \"sale\" | \"sale_return\" | \"sale_undo\" | \"sale_return_undo\" | \"sale_lost\" | \"sale_lost_undo\" | \"sale_damaged\" | \"sale_damaged_undo\" | \"opening_balance\" | \"purchase\" | \"find\" | \"make\" | \"adjustment_increase\" | \"adjustment_decrease\" | \"trade_in\" | \"write_off\" | \"reclass_out\" | \"reclass_in\" | \"subrent_in\" | \"subrent_out\" | \"return_to_supplier\" | \"purchase_undo\" | \"subrent_in_undo\" | \"subrent_out_undo\" | \"return_to_supplier_undo\" | \"put_away\" | \"put_away_undo\" | \"subrent_rebook_out\" | \"subrent_rebook_in\" | \"receive_flag\" | \"transfer\" | \"return_to_service\" | \"flag\" | \"send_away\" | \"count_open\" | \"count_close\" | \"enroll\" | \"unenroll\"[];",
           "doc": "Every kind of movement, as ONE classifier. There is deliberately no second\n`kind` field: `type` is required in a strict object and drives\n{@link getTransactionMultiplier}, so a document can never be half-classified.\n\nGrouped by which axes the type carries — see {@link MOVEMENT_CONTRACTS}, which\nis the machine-readable form of the same grouping.\n\n**Removed in the journal migration**, all with zero stored instances in prod\nAND dev, unreachable from `MANUAL_TRANSACTION_TYPES` and\n{@link getDisplayTransactionTypes}: `acquisition`, `disposal`,\n`partial_disposal`, `depreciation_tax`, `depreciation_gaap`. They were the\nonly unclassified branch, which is why `getTransactionMultiplier` used to\nthrow — a live 500 waiting on a type nothing could produce.\n\nAsset depreciation IS on the roadmap. When it lands:\n  - **`depreciation` wants to be ONE type with a `book` field** on the cost\n    object, not `depreciation_tax` + `depreciation_gaap`. As types they double\n    every future cost-only event; as a field the book is one dimension.\n    🔴 **The movement shape does NOT already exist.** This note claimed it\n    did — *\"`lines: []` + a negative `cost`, the same shape a late\n    landed-cost adjustment uses\"* — and that was wrong in three independent\n    ways, each measured (core#75):\n      1. **No contract permits it.** `places: null` means \"lines must be\n         empty\", and the only entries carrying it are the rebook pair\n         (`prep` did until api-cloudrun#1302), whose `cost` is `forbidden`. Every cost-bearing type has `places` set, and\n         `checkMovementContract` then requires at least one line — so\n         `MovementSchema` rejects `lines: []` beside a cost on **every**\n         {@link MOVEMENT_TYPES} member. `places: null` + `cost: \"required\"`\n         is a pairing {@link MOVEMENT_CONTRACTS} has never carried.\n      2. **The fold would ignore it anyway.** `applyMovementToLedger`\n         (`utils/movements.ts`) touches `total_cost_basis_cents` only inside\n         `delta > 0` / `delta < 0`, where `delta` is\n         `movementHeldDelta(lines)`. `lines: []` + $500 leaves the basis at\n         0; the same cost on one `+10` line moves it to 50000.\n      3. **And it could not reach Xero.** `xeroPostingFor`\n         (`utils/movements.ts`) terminals a cost-bearing movement whose lines\n         net to zero as `no_ownership_direction`, deliberately, because a\n         document like that is malformed today.\n    So a cost-only event needs all three gates opened, in one change: a\n    contract entry pairing `places: null` with `cost: \"required\"`, a\n    `delta === 0` arm in the fold — which owes its own decision about\n    `average_unit_cost`, since the basis moves while the quantity does not —\n    and a posting decision that is not derived from an ownership direction\n    there is none of.\n    The \"late landed-cost adjustment\" cited as precedent is not writable\n    today either, by the same mechanism. (1) and (2) are pinned in\n    `tests/movements.test.ts` and (3) in `tests/xero-posting.test.ts`, so the\n    day someone mints the contract entry is the day a pin goes red rather\n    than the day the ledger silently stops moving.\n  - **`disposal` wants to come back as its own type**, even though `write_off`\n    already covers the mechanics (`out-of-service → null` + `cost`). Finance\n    reporting a \"disposals\" line has to tell a disposal from a damage\n    write-off, and inferring that from \"is there an OOS record in `sources[]`\"\n    is inferring cause from effect — the same reason a refund is a credit-note\n    link and not a `total_cost > 0` test.\n  - `acquisition` and `partial_disposal` do NOT come back: the first is\n    `purchase`, and the second is a `disposal` whose quantity is less than\n    what's held. Quantity already says it.\n\n`transfer_increase` / `transfer_decrease` collapsed into a single\n{@link MOVEMENT_CONTRACTS} `transfer`: they existed only because one row could\nnot say \"out of A, into B\", which `location: {from, to}` now says. The\nmigration rewrites the stored pairs."
         },
         {
@@ -15004,7 +15136,7 @@
         {
           "kind": "interface",
           "name": "MovementContract",
-          "declaration": "interface MovementContract {\n  undoes: MovementTypeType | null;\n  booking_ladder: BookingLadderType | null;\n  custody: \"required\" | \"forbidden\" | \"with_booking\";\n  cost: \"required\" | \"forbidden\";\n  places: typeLiteral | null;\n  booking: \"required\" | \"forbidden\" | \"optional\";\n  service: \"required\" | \"forbidden\" | \"nullable\";\n  units: \"forbidden\" | \"allowed\";\n  uncounted: \"lineless\" | \"refused\";\n}",
+          "declaration": "interface MovementContract {\n  undoes: MovementTypeType | null;\n  booking_ladder: BookingLadderType | null;\n  custody: \"required\" | \"forbidden\" | \"with_booking\" | \"optional\";\n  cost: \"required\" | \"forbidden\";\n  places: typeLiteral | null;\n  booking: \"required\" | \"forbidden\" | \"optional\";\n  service: \"required\" | \"forbidden\" | \"nullable\";\n  units: \"forbidden\" | \"allowed\";\n  uncounted: \"lineless\" | \"refused\";\n}",
           "doc": ""
         },
         {
@@ -15028,8 +15160,8 @@
         {
           "kind": "interface",
           "name": "MovementCustodyType",
-          "declaration": "interface MovementCustodyType {\n  from: BookingBreakdownKeyType | null;\n  to: BookingBreakdownKeyType | null;\n}",
-          "doc": "The custody transition this event records, as a pair of breakdown keys.\n\nNamed `custody` and deliberately NOT `status` or `state`: `Booking` already\nhas a `status` field (`draft/quoted/reserved/part-prepped/prepped/active/\ncomplete`) that is a different thing from a breakdown key, and the two enums\nshare several words — `status: {from: \"prepped\"}` would misread as\n`booking.status`.\n\nA side may be `null` for a one-sided transition: an order edit that changes\nthe booking's own quantity moves units into or out of the breakdown without a\nmatching opposite key."
+          "declaration": "interface MovementCustodyType {\n  from: CustodyKeyType | null;\n  to: CustodyKeyType | null;\n}",
+          "doc": "The custody transition this event records, as a pair of breakdown keys.\n\nNamed `custody` and deliberately NOT `status` or `state`: `Booking` already\nhas a `status` field (`draft/quoted/reserved/part-prepped/prepped/active/\ncomplete`) that is a different thing from a breakdown key, and the two enums\nshare several words — `status: {from: \"prepped\"}` would misread as\n`booking.status`.\n\nA side may be `null` for a one-sided transition: an order edit that changes\nthe booking's own quantity moves units into or out of the breakdown without a\nmatching opposite key.\n\nThe keys span BOTH ladders (7a, C2): an outbound booking's\n(`BOOKING_BREAKDOWN_KEYS`) or an inbound booking's (`INBOUND_BREAKDOWN_KEYS`).\nFive spellings are shared and mean a different place on each ladder, so the\nschema alone cannot tell which a key is; `checkMovementContract` reads the\ntype's {@link MovementContract.booking_ladder} and refuses a key of the other\nladder."
         },
         {
           "kind": "variable",
@@ -15148,7 +15280,7 @@
         {
           "kind": "variable",
           "name": "UNDO_MOVEMENT_TYPES",
-          "declaration": "const UNDO_MOVEMENT_TYPES: \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_cleaning_undo\" | \"mark_maintenance_undo\" | \"sale_undo\" | \"sale_return_undo\" | \"sale_lost_undo\" | \"sale_damaged_undo\"[];",
+          "declaration": "const UNDO_MOVEMENT_TYPES: \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_cleaning_undo\" | \"mark_maintenance_undo\" | \"sale_undo\" | \"sale_return_undo\" | \"sale_lost_undo\" | \"sale_damaged_undo\" | \"purchase_undo\" | \"subrent_in_undo\" | \"subrent_out_undo\" | \"return_to_supplier_undo\" | \"put_away_undo\"[];",
           "doc": "Every UNDO type and the forward type it says never happened — the one\ndeclaration the undo contracts are built from. Pinned against\n`CUSTODY_RULES[*].inverse` by `tests/custody.test.ts`, so a rule pair and its\nmovement pair cannot disagree.\n\n🔴 **`mark_lost_undo` mirrors `mark_lost` EXACTLY, including the widening on\nits origin.** A loss may come off the booking (`out → lost`) or off a shelf\n(`returned → lost`, api-cloudrun#1118), so its undo puts the unit back at\neither. The writer takes the destination from the consumed record's own mark\nlines — never re-derived from the breakdown.\n\n⚠️ **A rewind is an event in its own right, not a `reverses` reversal**\n(see {@link MOVEMENT_TYPES}): one un-prep can walk back part of each of\nseveral preps. What it shares with a reversal is the mirrored contract, and —\nfor the two that carry cost — the exact relief."
         },
         {
@@ -15212,6 +15344,14 @@
           "name": "isSubrentMovementType",
           "signature": "isSubrentMovementType(type: MovementTypeType): type is SubrentMovementTypeType",
           "doc": "Whether a movement type is a {@link SUBRENT_MOVEMENT_TYPES} member.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "placeKindsForCustodyKey",
+          "signature": "placeKindsForCustodyKey(ladder: BookingLadderType, key: CustodyKeyType): readonly PlaceKindType[] | null",
+          "doc": "The place kinds a custody key implies, from its LADDER's table —\n{@link CUSTODY_PLACE_KINDS} for outbound, {@link INBOUND_CUSTODY_PLACE_KINDS}\nfor inbound. `null` for a key the ladder does not have.",
           "paramTags": [],
           "returnsTag": null
         }

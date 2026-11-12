@@ -29,6 +29,11 @@ import {
   CUSTODY_RULES,
   type CustodyRuleId,
   custodyRule,
+  INBOUND_CUSTODY_PLACE_KINDS,
+  INBOUND_CUSTODY_RULE_IDS,
+  INBOUND_CUSTODY_RULES,
+  inboundCustodyRule,
+  inboundOwnsKey,
   isLossUndo,
   MOVEMENT_CONTRACTS,
   MOVEMENT_UNDOES,
@@ -186,6 +191,58 @@ Deno.test("custody - every row agrees with MOVEMENT_CONTRACTS", () => {
   assert(checked >= 20, `only ${checked} arms checked — the walk stopped reaching the table`);
 });
 
+Deno.test("custody - INBOUND_CUSTODY_RULE_IDS and the inbound table's ids are the same set, both ways", () => {
+  const ids = INBOUND_CUSTODY_RULES.map((r) => r.id);
+  assertEquals(new Set(ids).size, ids.length, "an inbound rule id repeats");
+  assertEquals([...ids].sort(), [...INBOUND_CUSTODY_RULE_IDS].sort());
+  for (const id of INBOUND_CUSTODY_RULE_IDS) assertEquals(inboundCustodyRule(id).id, id);
+});
+
+Deno.test("custody - every inbound inverse points back, with the custody pair and service axis swapped", () => {
+  for (const r of INBOUND_CUSTODY_RULES) {
+    if (r.inverse === null) continue;
+    const inv = inboundCustodyRule(r.inverse);
+    assertEquals(inv.inverse, r.id, `${r.id} ↔ ${inv.id}`);
+    assertEquals([inv.from, inv.to], [r.to, r.from], `${r.id}'s inverse does not swap its custody pair`);
+    assertEquals(inv.service === null ? null : [inv.service.from, inv.service.to], r.service === null ? null : [r.service.to, r.service.from], `${r.id}'s inverse does not swap its service axis`);
+  }
+});
+
+Deno.test("custody - every inbound row agrees with MOVEMENT_CONTRACTS", () => {
+  const overlaps = (a: readonly string[], b: readonly string[]) => a.some((k) => b.includes(k));
+  let checked = 0;
+  for (const r of INBOUND_CUSTODY_RULES) {
+    assert(r.from !== r.to, `${r.id} moves units between two keys`);
+    for (const [type, arm] of [["rental", r.rental], ["sale", r.sale]] as const) {
+      if (!arm?.movement) continue;
+      checked++;
+      const c = MOVEMENT_CONTRACTS[arm.movement];
+      const where = `${r.id} (${type}, ${arm.movement})`;
+      // One ladder per type (ruling 59): an inbound row writes only inbound types.
+      assertEquals(c.booking_ladder, "inbound", `${where}: not an inbound-ladder type`);
+      assert(c.custody !== "forbidden", `${where}: the contract forbids a custody pair`);
+      assertEquals(c.booking, "required", `${where}: an inbound step always names its booking`);
+      if (c.places !== null) {
+        assert(overlaps(INBOUND_CUSTODY_PLACE_KINDS[r.from], c.places.from), `${where}: ${r.from} is not a place the movement leaves`);
+        assert(overlaps(INBOUND_CUSTODY_PLACE_KINDS[r.to], c.places.to), `${where}: ${r.to} is not a place the movement reaches`);
+      }
+      assertEquals(c.service === "required", r.service !== null, `${where}: the service axis disagrees`);
+      // Cost iff the step crosses ownership: a Buy's receipt costs, a Subrent's never does.
+      const crosses = inboundOwnsKey(type, r.from) !== inboundOwnsKey(type, r.to);
+      assertEquals(c.cost === "required", crosses, `${where}: cost must be required exactly when ownership changes`);
+    }
+  }
+  assertEquals(checked, 18, "every inbound arm reached");
+});
+
+Deno.test("custody - no outbound row writes an inbound type, and no inbound row an outbound one", () => {
+  for (const r of CUSTODY_RULES) {
+    for (const arm of [r.rental, r.sale]) {
+      if (arm?.movement) assert(MOVEMENT_CONTRACTS[arm.movement].booking_ladder !== "inbound", `${r.id} writes ${arm.movement}`);
+    }
+  }
+});
+
 Deno.test("custody - ownership: a line that comes back owns every key, anything else never owns what left with the customer", () => {
   assertEquals(OWNED_KEYS_BY_TYPE.rental, [
     "quoted", "reserved", "prepped", "out", "returned", "lost", "damaged", "cleaning", "maintenance",
@@ -240,9 +297,13 @@ Deno.test("custody - MOVEMENT_UNDOES agrees with the rule table's inverses, arm 
   // movement pair and the rule pair cannot disagree. A `flag` undoes a `flag`
   // (its service axis swaps), so a same-type pair is skipped.
   let checked = 0;
-  for (const r of CUSTODY_RULES) {
-    if (r.direction !== "undo" || r.inverse === null) continue;
-    const fwd = custodyRule(r.inverse);
+  // Both ladders: the inbound table's undo rows (7a, C4) reach the inbound undos.
+  const rows = [
+    ...CUSTODY_RULES.map((r) => ({ r, fwd: r.inverse === null ? null : custodyRule(r.inverse) })),
+    ...INBOUND_CUSTODY_RULES.map((r) => ({ r, fwd: r.inverse === null ? null : inboundCustodyRule(r.inverse) })),
+  ];
+  for (const { r, fwd } of rows) {
+    if (r.direction !== "undo" || fwd === null) continue;
     for (const type of ["rental", "sale"] as const) {
       const undo = (type === "rental" ? r.rental : r.sale)?.movement;
       const forward = (type === "rental" ? fwd.rental : fwd.sale)?.movement;
@@ -253,10 +314,13 @@ Deno.test("custody - MOVEMENT_UNDOES agrees with the rule table's inverses, arm 
   }
   // And every undo type is reached by some row: none is declared for nothing.
   const reached = new Set(
-    CUSTODY_RULES.flatMap((r) => [r.rental?.movement, r.sale?.movement]).filter((m) => m != null),
+    [...CUSTODY_RULES, ...INBOUND_CUSTODY_RULES].flatMap((r) => [r.rental?.movement, r.sale?.movement])
+      .filter((m) => m != null),
   );
   for (const undo of Object.keys(MOVEMENT_UNDOES)) assert(reached.has(undo as MovementTypeType), `${undo} has no rule`);
-  assertEquals(checked, 13);
+  // 13 outbound + 7 inbound (receive_undo ×2, put_away_undo ×2, send_back_undo,
+  // settle_lost_undo, settle_damaged_undo; receive_damaged_undo is a flag pair).
+  assertEquals(checked, 20);
 });
 
 Deno.test("custody - every inverse's places mirror its forward twin's", () => {

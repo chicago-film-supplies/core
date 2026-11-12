@@ -3880,6 +3880,23 @@ interface CustodyArm {
 }
 ```
 
+### `CustodyKeyEnum`
+
+Zod schema for {@link CustodyKeyType}.
+
+```ts
+const CustodyKeyEnum: z.ZodType<CustodyKeyType>;
+```
+
+### `CustodyKeyType`
+
+A key of either booking ladder's breakdown — what a movement's custody pair
+names. Which ladder is the movement type's `booking_ladder`.
+
+```ts
+type CustodyKeyType = BookingBreakdownKeyType | InboundBreakdownKeyType;
+```
+
 ### `CustodyRule`
 
 One legal custody step. Every row moves units between two breakdown keys
@@ -5643,6 +5660,37 @@ unit is gone (`outside`).
 const INBOUND_CUSTODY_PLACE_KINDS: Readonly<Record<InboundBreakdownKeyType, readonly PlaceKindType[]>>;
 ```
 
+### `INBOUND_CUSTODY_RULES`
+
+The inbound table. Settle rows move only in the `return_to_supplier` commit,
+never at the outbound `mark_lost` (the 0b lost-subrent trace: supply falls
+once, on the inbound booking). A unit RECEIVED damaged that goes back to the
+supplier is a `return_to_supplier` with NO custody step — its booking keeps
+`damaged` as history (ruling 64) — so it has no row here.
+
+A received-damaged unit names `purchases:<uid>` and `bookings-inbound:<uid>`
+on its record, never `bookings:`, because `recordOwner` and
+`lossUndoRefusal` read `bookings:` as the OUTBOUND owner.
+
+```ts
+const INBOUND_CUSTODY_RULES: readonly InboundCustodyRule[];
+```
+
+### `INBOUND_CUSTODY_RULE_IDS`
+
+Every inbound custody rule id: the steps of a purchase's inbound booking
+(`bookings-inbound`). A TWIN table beside {@link CUSTODY_RULE_IDS}, never a
+`ladder` column on it: `CUSTODY_RULE_IDS` is the runtime wire enum of the
+OUTBOUND lever (`BookingAction.rule`), and `CUSTODY_RULES` is iterated
+unfiltered by every outbound reader, so a column would put inbound ids on the
+outbound wire and into the outbound menus.
+
+`tests/custody.test.ts` asserts it equals the table's ids in both directions.
+
+```ts
+const INBOUND_CUSTODY_RULE_IDS: "receive" | "receive_undo" | "put_away" | "put_away_undo" | "send_back" | "send_back_undo" | "settle_lost" | "settle_lost_undo" | "settle_damaged" | "settle_damaged_undo" | "receive_damaged" | "receive_damaged_undo"[];
+```
+
 ### `INBOUND_HISTORY_KEYS`
 
 Every inbound key but the plan: units something physically happened to. The
@@ -5656,9 +5704,10 @@ const INBOUND_HISTORY_KEYS: "transit_inbound" | "received" | "stocked" | "transi
 ### `INBOUND_LADDER_MOVEMENT_TYPES`
 
 The forward types whose booking is on the INBOUND ladder — the one
-declaration {@link MovementContract.booking_ladder} is derived from. Empty
-until the 7a contract beta moves the purchase receive and return types onto
-inbound bookings; an undo needs no entry, because it inherits its forward's.
+declaration {@link MovementContract.booking_ladder} is derived from. An undo
+needs no entry, because it inherits its forward's. Every type stays on ONE
+ladder (ruling 59): a type that ever needs both is a new twin type, decided
+here at compile time.
 
 ```ts
 const INBOUND_LADDER_MOVEMENT_TYPES: readonly ForwardMovementTypeType[];
@@ -5849,6 +5898,67 @@ key order is its column order (`core/CLAUDE.md`).
 
 ```ts
 const InboundBreakdownSchema: z.ZodType<InboundBreakdown>;
+```
+
+### `InboundCustodyRule`
+
+One legal inbound custody step: the twin of {@link CustodyRule} over the
+inbound breakdown keys. `rental` is a Subrent line, `sale` a Buy line
+(`INBOUND_BOOKING_TYPES`), and an arm is `null` where that line type may not
+take the step (a Buy is never sent back or settled).
+
+```ts
+interface InboundCustodyRule {
+  id: InboundCustodyRuleId;
+  from: InboundBreakdownKeyType;
+  to: InboundBreakdownKeyType;
+  rental: CustodyArm | null;
+  sale: CustodyArm | null;
+  service: InboundServiceShape | null;
+  direction: "forward" | "undo";
+  stage: "receive" | "put_away" | "send_back" | "settle";
+  inverse: InboundCustodyRuleId | null;
+  description: string;
+  enforced_by: EnforcementRef[];
+}
+```
+
+### `InboundCustodyRuleId`
+
+One inbound custody rule id.
+
+```ts
+type InboundCustodyRuleId = indexedAccess;
+```
+
+### `InboundCustodyRuleIdEnum`
+
+Zod schema for {@link InboundCustodyRuleId}.
+
+```ts
+const InboundCustodyRuleIdEnum: z.ZodType<InboundCustodyRuleId>;
+```
+
+### `InboundServiceShape`
+
+An inbound row's service axis.
+
+```ts
+interface InboundServiceShape {
+  from: InboundServiceSide;
+  to: InboundServiceSide;
+}
+```
+
+### `InboundServiceSide`
+
+One side of an inbound row's service axis. Unlike the outbound
+{@link CustodyServiceSide} it carries `lost`: a settle row resolves the
+out-of-service record holding the unit, and a lost rented unit stands at its
+record, never on a shelf.
+
+```ts
+type InboundServiceSide = "none" | "lost" | "damaged";
 ```
 
 ### `InboundUnitBucketType`
@@ -7201,7 +7311,7 @@ not say "out of A, into B", which `location: {from, to}` now says. The
 migration rewrites the stored pairs.
 
 ```ts
-const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "rebook_out" | "rebook_in" | "sale" | "sale_return" | "sale_undo" | "sale_return_undo" | "sale_lost" | "sale_lost_undo" | "sale_damaged" | "sale_damaged_undo" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "subrent_in" | "subrent_out" | "return_to_supplier" | "transfer" | "return_to_service" | "flag" | "send_away" | "count_open" | "count_close" | "enroll" | "unenroll"[];
+const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "rebook_out" | "rebook_in" | "sale" | "sale_return" | "sale_undo" | "sale_return_undo" | "sale_lost" | "sale_lost_undo" | "sale_damaged" | "sale_damaged_undo" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "subrent_in" | "subrent_out" | "return_to_supplier" | "purchase_undo" | "subrent_in_undo" | "subrent_out_undo" | "return_to_supplier_undo" | "put_away" | "put_away_undo" | "subrent_rebook_out" | "subrent_rebook_in" | "receive_flag" | "transfer" | "return_to_service" | "flag" | "send_away" | "count_open" | "count_close" | "enroll" | "unenroll"[];
 ```
 
 ### `MOVEMENT_UNDOES`
@@ -7414,7 +7524,7 @@ interface MovementAllocationInputType {
 interface MovementContract {
   undoes: MovementTypeType | null;
   booking_ladder: BookingLadderType | null;
-  custody: "required" | "forbidden" | "with_booking";
+  custody: "required" | "forbidden" | "with_booking" | "optional";
   cost: "required" | "forbidden";
   places: typeLiteral | null;
   booking: "required" | "forbidden" | "optional";
@@ -7477,10 +7587,17 @@ A side may be `null` for a one-sided transition: an order edit that changes
 the booking's own quantity moves units into or out of the breakdown without a
 matching opposite key.
 
+The keys span BOTH ladders (7a, C2): an outbound booking's
+(`BOOKING_BREAKDOWN_KEYS`) or an inbound booking's (`INBOUND_BREAKDOWN_KEYS`).
+Five spellings are shared and mean a different place on each ladder, so the
+schema alone cannot tell which a key is; `checkMovementContract` reads the
+type's {@link MovementContract.booking_ladder} and refuses a key of the other
+ladder.
+
 ```ts
 interface MovementCustodyType {
-  from: BookingBreakdownKeyType | null;
-  to: BookingBreakdownKeyType | null;
+  from: CustodyKeyType | null;
+  to: CustodyKeyType | null;
 }
 ```
 
@@ -15121,7 +15238,7 @@ several preps. What it shares with a reversal is the mirrored contract, and —
 for the two that carry cost — the exact relief.
 
 ```ts
-const UNDO_MOVEMENT_TYPES: "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning_undo" | "mark_maintenance_undo" | "sale_undo" | "sale_return_undo" | "sale_lost_undo" | "sale_damaged_undo"[];
+const UNDO_MOVEMENT_TYPES: "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning_undo" | "mark_maintenance_undo" | "sale_undo" | "sale_return_undo" | "sale_lost_undo" | "sale_damaged_undo" | "purchase_undo" | "subrent_in_undo" | "subrent_out_undo" | "return_to_supplier_undo" | "put_away_undo"[];
 ```
 
 ### `UNIT_ROSTER_STATES`
@@ -17770,6 +17887,10 @@ differently and each answer is right for its own document.
 
 Whether a movement type carries a cost object. Derived from the contract.
 
+### `inboundCustodyRule(id: InboundCustodyRuleId): InboundCustodyRule`
+
+The inbound rule with `id`. Total over {@link InboundCustodyRuleId}; the table test proves it.
+
 ### `inboundOwnsKey(type: InboundBookingTypeType, key: InboundBreakdownKeyType): boolean`
 
 Whether CFS OWNS an inbound booking's units in `key` — the inbound twin of
@@ -18330,6 +18451,12 @@ document IS.** Custody moves, so a delivery packing list re-rendered after its
 goods went out would derive `collection` and change identity. Use this to
 RESOLVE {@link PickSheet.leg} once, at build time; then read the stamped
 field. Derivation supplies the default; the stamped value is the fact.
+
+### `placeKindsForCustodyKey(ladder: BookingLadderType, key: CustodyKeyType): readonly PlaceKindType[] | null`
+
+The place kinds a custody key implies, from its LADDER's table —
+{@link CUSTODY_PLACE_KINDS} for outbound, {@link INBOUND_CUSTODY_PLACE_KINDS}
+for inbound. `null` for a key the ladder does not have.
 
 ### `priceFormulaBasis(rule: Pick<PriceFormulaRule, "meter">): PriceFormulaBasis`
 
@@ -22331,6 +22458,98 @@ the same list (it restated it as `FLAG_ID_REASONS`).
 const FLAG_SLOT_REASONS: "cleaning" | "maintenance"[];
 ```
 
+### `INBOUND_CUSTODY_RULES`
+
+The inbound table. Settle rows move only in the `return_to_supplier` commit,
+never at the outbound `mark_lost` (the 0b lost-subrent trace: supply falls
+once, on the inbound booking). A unit RECEIVED damaged that goes back to the
+supplier is a `return_to_supplier` with NO custody step — its booking keeps
+`damaged` as history (ruling 64) — so it has no row here.
+
+A received-damaged unit names `purchases:<uid>` and `bookings-inbound:<uid>`
+on its record, never `bookings:`, because `recordOwner` and
+`lossUndoRefusal` read `bookings:` as the OUTBOUND owner.
+
+```ts
+const INBOUND_CUSTODY_RULES: readonly InboundCustodyRule[];
+```
+
+### `INBOUND_CUSTODY_RULE_IDS`
+
+Every inbound custody rule id: the steps of a purchase's inbound booking
+(`bookings-inbound`). A TWIN table beside {@link CUSTODY_RULE_IDS}, never a
+`ladder` column on it: `CUSTODY_RULE_IDS` is the runtime wire enum of the
+OUTBOUND lever (`BookingAction.rule`), and `CUSTODY_RULES` is iterated
+unfiltered by every outbound reader, so a column would put inbound ids on the
+outbound wire and into the outbound menus.
+
+`tests/custody.test.ts` asserts it equals the table's ids in both directions.
+
+```ts
+const INBOUND_CUSTODY_RULE_IDS: "receive" | "receive_undo" | "put_away" | "put_away_undo" | "send_back" | "send_back_undo" | "settle_lost" | "settle_lost_undo" | "settle_damaged" | "settle_damaged_undo" | "receive_damaged" | "receive_damaged_undo"[];
+```
+
+### `InboundCustodyRule`
+
+One legal inbound custody step: the twin of {@link CustodyRule} over the
+inbound breakdown keys. `rental` is a Subrent line, `sale` a Buy line
+(`INBOUND_BOOKING_TYPES`), and an arm is `null` where that line type may not
+take the step (a Buy is never sent back or settled).
+
+```ts
+interface InboundCustodyRule {
+  id: InboundCustodyRuleId;
+  from: InboundBreakdownKeyType;
+  to: InboundBreakdownKeyType;
+  rental: CustodyArm | null;
+  sale: CustodyArm | null;
+  service: InboundServiceShape | null;
+  direction: "forward" | "undo";
+  stage: "receive" | "put_away" | "send_back" | "settle";
+  inverse: InboundCustodyRuleId | null;
+  description: string;
+  enforced_by: EnforcementRef[];
+}
+```
+
+### `InboundCustodyRuleId`
+
+One inbound custody rule id.
+
+```ts
+type InboundCustodyRuleId = indexedAccess;
+```
+
+### `InboundCustodyRuleIdEnum`
+
+Zod schema for {@link InboundCustodyRuleId}.
+
+```ts
+const InboundCustodyRuleIdEnum: z.ZodType<InboundCustodyRuleId>;
+```
+
+### `InboundServiceShape`
+
+An inbound row's service axis.
+
+```ts
+interface InboundServiceShape {
+  from: InboundServiceSide;
+  to: InboundServiceSide;
+}
+```
+
+### `InboundServiceSide`
+
+One side of an inbound row's service axis. Unlike the outbound
+{@link CustodyServiceSide} it carries `lost`: a settle row resolves the
+out-of-service record holding the unit, and a lost rented unit stands at its
+record, never on a shelf.
+
+```ts
+type InboundServiceSide = "none" | "lost" | "damaged";
+```
+
 ### `OWNED_KEYS_BY_TYPE`
 
 {@link ownsKey}, tabulated per booking type in breakdown order — for a reader
@@ -22374,6 +22593,10 @@ wire refine and by `applyCustodyActions`, so the two cannot disagree.
 
 The slot is read off the RENTAL arm: a sale's arms are a subset whose
 movements are distinct per rule, so the rental reading is the stricter one.
+
+### `inboundCustodyRule(id: InboundCustodyRuleId): InboundCustodyRule`
+
+The inbound rule with `id`. Total over {@link InboundCustodyRuleId}; the table test proves it.
 
 ### `isCustomerCustodyStep(type: MovementTypeType, custody: typeLiteral | null): boolean`
 
@@ -31689,6 +31912,23 @@ interface CreateTransactionInputType {
 }
 ```
 
+### `CustodyKeyEnum`
+
+Zod schema for {@link CustodyKeyType}.
+
+```ts
+const CustodyKeyEnum: z.ZodType<CustodyKeyType>;
+```
+
+### `CustodyKeyType`
+
+A key of either booking ladder's breakdown — what a movement's custody pair
+names. Which ladder is the movement type's `booking_ladder`.
+
+```ts
+type CustodyKeyType = BookingBreakdownKeyType | InboundBreakdownKeyType;
+```
+
 ### `ForwardMovementTypeType`
 
 Every movement type that is not an undo.
@@ -31720,9 +31960,10 @@ const INBOUND_CUSTODY_PLACE_KINDS: Readonly<Record<InboundBreakdownKeyType, read
 ### `INBOUND_LADDER_MOVEMENT_TYPES`
 
 The forward types whose booking is on the INBOUND ladder — the one
-declaration {@link MovementContract.booking_ladder} is derived from. Empty
-until the 7a contract beta moves the purchase receive and return types onto
-inbound bookings; an undo needs no entry, because it inherits its forward's.
+declaration {@link MovementContract.booking_ladder} is derived from. An undo
+needs no entry, because it inherits its forward's. Every type stays on ONE
+ladder (ruling 59): a type that ever needs both is a new twin type, decided
+here at compile time.
 
 ```ts
 const INBOUND_LADDER_MOVEMENT_TYPES: readonly ForwardMovementTypeType[];
@@ -31807,7 +32048,7 @@ not say "out of A, into B", which `location: {from, to}` now says. The
 migration rewrites the stored pairs.
 
 ```ts
-const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "rebook_out" | "rebook_in" | "sale" | "sale_return" | "sale_undo" | "sale_return_undo" | "sale_lost" | "sale_lost_undo" | "sale_damaged" | "sale_damaged_undo" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "subrent_in" | "subrent_out" | "return_to_supplier" | "transfer" | "return_to_service" | "flag" | "send_away" | "count_open" | "count_close" | "enroll" | "unenroll"[];
+const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "rebook_out" | "rebook_in" | "sale" | "sale_return" | "sale_undo" | "sale_return_undo" | "sale_lost" | "sale_lost_undo" | "sale_damaged" | "sale_damaged_undo" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "subrent_in" | "subrent_out" | "return_to_supplier" | "purchase_undo" | "subrent_in_undo" | "subrent_out_undo" | "return_to_supplier_undo" | "put_away" | "put_away_undo" | "subrent_rebook_out" | "subrent_rebook_in" | "receive_flag" | "transfer" | "return_to_service" | "flag" | "send_away" | "count_open" | "count_close" | "enroll" | "unenroll"[];
 ```
 
 ### `MOVEMENT_UNDOES`
@@ -31884,7 +32125,7 @@ interface MovementAllocationInputType {
 interface MovementContract {
   undoes: MovementTypeType | null;
   booking_ladder: BookingLadderType | null;
-  custody: "required" | "forbidden" | "with_booking";
+  custody: "required" | "forbidden" | "with_booking" | "optional";
   cost: "required" | "forbidden";
   places: typeLiteral | null;
   booking: "required" | "forbidden" | "optional";
@@ -31947,10 +32188,17 @@ A side may be `null` for a one-sided transition: an order edit that changes
 the booking's own quantity moves units into or out of the breakdown without a
 matching opposite key.
 
+The keys span BOTH ladders (7a, C2): an outbound booking's
+(`BOOKING_BREAKDOWN_KEYS`) or an inbound booking's (`INBOUND_BREAKDOWN_KEYS`).
+Five spellings are shared and mean a different place on each ladder, so the
+schema alone cannot tell which a key is; `checkMovementContract` reads the
+type's {@link MovementContract.booking_ladder} and refuses a key of the other
+ladder.
+
 ```ts
 interface MovementCustodyType {
-  from: BookingBreakdownKeyType | null;
-  to: BookingBreakdownKeyType | null;
+  from: CustodyKeyType | null;
+  to: CustodyKeyType | null;
 }
 ```
 
@@ -32212,7 +32460,7 @@ several preps. What it shares with a reversal is the mirrored contract, and —
 for the two that carry cost — the exact relief.
 
 ```ts
-const UNDO_MOVEMENT_TYPES: "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning_undo" | "mark_maintenance_undo" | "sale_undo" | "sale_return_undo" | "sale_lost_undo" | "sale_damaged_undo"[];
+const UNDO_MOVEMENT_TYPES: "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning_undo" | "mark_maintenance_undo" | "sale_undo" | "sale_return_undo" | "sale_lost_undo" | "sale_damaged_undo" | "purchase_undo" | "subrent_in_undo" | "subrent_out_undo" | "return_to_supplier_undo" | "put_away_undo"[];
 ```
 
 ### `UNIT_SERIAL_IN_TYPES`
@@ -32325,6 +32573,12 @@ Whether a movement type carries a cost object. Derived from the contract.
 ### `isSubrentMovementType(type: MovementTypeType): type is SubrentMovementTypeType`
 
 Whether a movement type is a {@link SUBRENT_MOVEMENT_TYPES} member.
+
+### `placeKindsForCustodyKey(ladder: BookingLadderType, key: CustodyKeyType): readonly PlaceKindType[] | null`
+
+The place kinds a custody key implies, from its LADDER's table —
+{@link CUSTODY_PLACE_KINDS} for outbound, {@link INBOUND_CUSTODY_PLACE_KINDS}
+for inbound. `null` for a key the ladder does not have.
 
 ## `@cfs/core/schemas/unit`
 

@@ -52,6 +52,7 @@ import {
   OUT_OF_SERVICE_KEYS,
   type OutOfServiceKeyType,
 } from "./_breakdown.ts";
+import type { InboundBreakdownKeyType } from "./_inbound-breakdown.ts";
 import type { MovementTypeType } from "./transaction.ts";
 import type { EnforcementRef } from "./propagation/types.ts";
 import { COMPONENT_TYPES, type ComponentTypeType, type OOSFlagReasonType } from "./common.ts";
@@ -636,6 +637,272 @@ export function custodyRule(id: CustodyRuleId): CustodyRule {
   return rule;
 }
 
+// ── The INBOUND ladder (one-document-model 7a, C4) ───────────────────
+
+/**
+ * Every inbound custody rule id: the steps of a purchase's inbound booking
+ * (`bookings-inbound`). A TWIN table beside {@link CUSTODY_RULE_IDS}, never a
+ * `ladder` column on it: `CUSTODY_RULE_IDS` is the runtime wire enum of the
+ * OUTBOUND lever (`BookingAction.rule`), and `CUSTODY_RULES` is iterated
+ * unfiltered by every outbound reader, so a column would put inbound ids on the
+ * outbound wire and into the outbound menus.
+ *
+ * `tests/custody.test.ts` asserts it equals the table's ids in both directions.
+ */
+export const INBOUND_CUSTODY_RULE_IDS = [
+  "receive",
+  "receive_undo",
+  "put_away",
+  "put_away_undo",
+  "send_back",
+  "send_back_undo",
+  "settle_lost",
+  "settle_lost_undo",
+  "settle_damaged",
+  "settle_damaged_undo",
+  "receive_damaged",
+  "receive_damaged_undo",
+] as const;
+
+/** One inbound custody rule id. */
+export type InboundCustodyRuleId = typeof INBOUND_CUSTODY_RULE_IDS[number];
+/** Zod schema for {@link InboundCustodyRuleId}. */
+export const InboundCustodyRuleIdEnum: z.ZodType<InboundCustodyRuleId> = z.enum(INBOUND_CUSTODY_RULE_IDS);
+
+/**
+ * One side of an inbound row's service axis. Unlike the outbound
+ * {@link CustodyServiceSide} it carries `lost`: a settle row resolves the
+ * out-of-service record holding the unit, and a lost rented unit stands at its
+ * record, never on a shelf.
+ */
+export type InboundServiceSide = "none" | "lost" | "damaged";
+
+/** An inbound row's service axis. */
+export interface InboundServiceShape {
+  from: InboundServiceSide;
+  to: InboundServiceSide;
+}
+
+/**
+ * One legal inbound custody step: the twin of {@link CustodyRule} over the
+ * inbound breakdown keys. `rental` is a Subrent line, `sale` a Buy line
+ * (`INBOUND_BOOKING_TYPES`), and an arm is `null` where that line type may not
+ * take the step (a Buy is never sent back or settled).
+ */
+export interface InboundCustodyRule {
+  id: InboundCustodyRuleId;
+  from: InboundBreakdownKeyType;
+  to: InboundBreakdownKeyType;
+  /** `null` ⇒ a Subrent may not take this step. */
+  rental: CustodyArm | null;
+  /** `null` ⇒ a Buy may not take this step. */
+  sale: CustodyArm | null;
+  /**
+   * The movement's service axis: a received-damaged flag (`none → damaged`) or
+   * the record a settle resolves (`lost → none`, `damaged → none`). `null` on
+   * every other row.
+   */
+  service: InboundServiceShape | null;
+  /** `undo` ⇒ says the forward step never happened. */
+  direction: "forward" | "undo";
+  /** Menu grouping (C4). */
+  stage: "receive" | "put_away" | "send_back" | "settle";
+  /** The rule that walks this one back, or `null`. */
+  inverse: InboundCustodyRuleId | null;
+  /** One sentence for a reader, and for the generated rung table. */
+  description: string;
+  /** What enforces the row, in the propagation catalog's terms. */
+  enforced_by: EnforcementRef[];
+}
+
+const INBOUND_TABLE_TEST: EnforcementRef = {
+  kind: "test",
+  ref: "core/tests/custody.test.ts::custody - every inbound row agrees with MOVEMENT_CONTRACTS",
+  clause: "the row's movement carries its custody pair in places of the right kind on the inbound ladder",
+  gates: true,
+};
+
+const SUBRENT_ONLY = (movement: MovementTypeType): Pick<InboundCustodyRule, "rental" | "sale"> => ({
+  rental: { movement },
+  sale: null,
+});
+
+/**
+ * The inbound table. Settle rows move only in the `return_to_supplier` commit,
+ * never at the outbound `mark_lost` (the 0b lost-subrent trace: supply falls
+ * once, on the inbound booking). A unit RECEIVED damaged that goes back to the
+ * supplier is a `return_to_supplier` with NO custody step — its booking keeps
+ * `damaged` as history (ruling 64) — so it has no row here.
+ *
+ * A received-damaged unit names `purchases:<uid>` and `bookings-inbound:<uid>`
+ * on its record, never `bookings:`, because `recordOwner` and
+ * `lossUndoRefusal` read `bookings:` as the OUTBOUND owner.
+ */
+export const INBOUND_CUSTODY_RULES: readonly InboundCustodyRule[] = [
+  // ── receive ──
+  {
+    id: "receive",
+    from: "ordered",
+    to: "received",
+    rental: { movement: "subrent_in" },
+    sale: { movement: "purchase" },
+    service: null,
+    direction: "forward",
+    stage: "receive",
+    inverse: "receive_undo",
+    description: "Units arrive from the supplier into CFS staging. A Buy's units become CFS's here and carry their cost.",
+    enforced_by: [INBOUND_TABLE_TEST],
+  },
+  {
+    id: "receive_undo",
+    from: "received",
+    to: "ordered",
+    rental: { movement: "subrent_in_undo" },
+    // A typed reversal of the receipt: the basis it added is relieved exactly.
+    sale: { movement: "purchase_undo" },
+    service: null,
+    direction: "undo",
+    stage: "receive",
+    inverse: "receive",
+    description: "A receipt that never happened: the units leave staging and are owed by the supplier again.",
+    enforced_by: [INBOUND_TABLE_TEST],
+  },
+  {
+    id: "receive_damaged",
+    from: "received",
+    to: "damaged",
+    rental: { movement: "receive_flag" },
+    sale: { movement: "receive_flag" },
+    service: { from: "none", to: "damaged" },
+    direction: "forward",
+    stage: "receive",
+    inverse: "receive_damaged_undo",
+    description: "A received unit is found damaged: flagged where it stands in staging.",
+    enforced_by: [INBOUND_TABLE_TEST],
+  },
+  {
+    id: "receive_damaged_undo",
+    from: "damaged",
+    to: "received",
+    rental: { movement: "receive_flag" },
+    sale: { movement: "receive_flag" },
+    service: { from: "damaged", to: "none" },
+    direction: "undo",
+    stage: "receive",
+    inverse: "receive_damaged",
+    description: "The damage on receipt never happened: a clearing flag, and the unit stays where it is.",
+    enforced_by: [INBOUND_TABLE_TEST],
+  },
+  // ── put away ──
+  {
+    id: "put_away",
+    from: "received",
+    to: "stocked",
+    rental: { movement: "put_away" },
+    sale: { movement: "put_away" },
+    service: null,
+    direction: "forward",
+    stage: "put_away",
+    inverse: "put_away_undo",
+    description: "Received units move from staging onto a storage shelf, ready to go out.",
+    enforced_by: [INBOUND_TABLE_TEST],
+  },
+  {
+    id: "put_away_undo",
+    from: "stocked",
+    to: "received",
+    rental: { movement: "put_away_undo" },
+    sale: { movement: "put_away_undo" },
+    service: null,
+    direction: "undo",
+    stage: "put_away",
+    inverse: "put_away",
+    description: "A put-away that never happened: the units go back to the staging location they left.",
+    enforced_by: [INBOUND_TABLE_TEST],
+  },
+  // ── send back (a Subrent only) ──
+  {
+    id: "send_back",
+    from: "stocked",
+    to: "sent_back",
+    ...SUBRENT_ONLY("subrent_out"),
+    service: null,
+    direction: "forward",
+    stage: "send_back",
+    inverse: "send_back_undo",
+    description: "Rented units go back to the supplier off a CFS shelf.",
+    enforced_by: [INBOUND_TABLE_TEST],
+  },
+  {
+    id: "send_back_undo",
+    from: "sent_back",
+    to: "stocked",
+    ...SUBRENT_ONLY("subrent_out_undo"),
+    service: null,
+    direction: "undo",
+    stage: "send_back",
+    inverse: "send_back",
+    description: "A send-back that never happened: the units are on the shelf they left.",
+    enforced_by: [INBOUND_TABLE_TEST],
+  },
+  // ── settle (a Subrent only) ──
+  {
+    id: "settle_lost",
+    from: "stocked",
+    to: "lost",
+    ...SUBRENT_ONLY("return_to_supplier"),
+    service: { from: "lost", to: "none" },
+    direction: "forward",
+    stage: "settle",
+    inverse: "settle_lost_undo",
+    description: "A rented unit lost at a customer is settled with the supplier; it leaves CFS custody from its out-of-service record.",
+    enforced_by: [INBOUND_TABLE_TEST],
+  },
+  {
+    id: "settle_lost_undo",
+    from: "lost",
+    to: "stocked",
+    ...SUBRENT_ONLY("return_to_supplier_undo"),
+    service: { from: "none", to: "lost" },
+    direction: "undo",
+    stage: "settle",
+    inverse: "settle_lost",
+    description: "The settle never happened: the unit is back at its out-of-service record, still owed to the supplier.",
+    enforced_by: [INBOUND_TABLE_TEST],
+  },
+  {
+    id: "settle_damaged",
+    from: "stocked",
+    to: "damaged",
+    ...SUBRENT_ONLY("return_to_supplier"),
+    service: { from: "damaged", to: "none" },
+    direction: "forward",
+    stage: "settle",
+    inverse: "settle_damaged_undo",
+    description: "A rented unit damaged beyond return is settled with the supplier; it leaves CFS custody.",
+    enforced_by: [INBOUND_TABLE_TEST],
+  },
+  {
+    id: "settle_damaged_undo",
+    from: "damaged",
+    to: "stocked",
+    ...SUBRENT_ONLY("return_to_supplier_undo"),
+    service: { from: "none", to: "damaged" },
+    direction: "undo",
+    stage: "settle",
+    inverse: "settle_damaged",
+    description: "The settle never happened: the damaged unit is back where it stood, still owed to the supplier.",
+    enforced_by: [INBOUND_TABLE_TEST],
+  },
+];
+
+/** The inbound rule with `id`. Total over {@link InboundCustodyRuleId}; the table test proves it. */
+export function inboundCustodyRule(id: InboundCustodyRuleId): InboundCustodyRule {
+  const rule = INBOUND_CUSTODY_RULES.find((r) => r.id === id);
+  if (!rule) throw new Error(`inbound custody rule "${id}" has no row`);
+  return rule;
+}
+
 /**
  * The movement-id slot an action occupies in one save, or `null` when it writes
  * no movement for that booking type.
@@ -704,14 +971,17 @@ export function markReasonOf(type: MovementTypeType): OutOfServiceKeyType | null
  */
 export function isCustomerCustodyStep(
   type: MovementTypeType,
-  custody: { from: BookingBreakdownKeyType | null; to: BookingBreakdownKeyType | null } | null,
+  custody: { from: string | null; to: string | null } | null,
 ): boolean {
   if (custody === null || custody.from === null || custody.to === null) return false;
   const { from, to } = custody;
+  // `CUSTODY_RULES` is the OUTBOUND table, so an inbound-ladder movement (7a)
+  // matches no row and is never a customer-side step.
   return CUSTODY_RULES.some((rule) =>
     rule.from === from && rule.to === to &&
     (["rental", "sale"] as const).some((bt) =>
-      (bt === "rental" ? rule.rental : rule.sale)?.movement === type && !ownsKey(bt, from) && !ownsKey(bt, to)
+      (bt === "rental" ? rule.rental : rule.sale)?.movement === type && !ownsKey(bt, rule.from) &&
+      !ownsKey(bt, rule.to)
     )
   );
 }

@@ -1079,6 +1079,14 @@ export {
   custodyRule,
   duplicateCustodySlots,
   FLAG_SLOT_REASONS,
+  INBOUND_CUSTODY_RULE_IDS,
+  INBOUND_CUSTODY_RULES,
+  type InboundCustodyRule,
+  type InboundCustodyRuleId,
+  InboundCustodyRuleIdEnum,
+  inboundCustodyRule,
+  type InboundServiceShape,
+  type InboundServiceSide,
   isCustomerCustodyStep,
   isLossUndo,
   markReasonOf,
@@ -1290,6 +1298,9 @@ export {
   type BookingLadderType,
   INBOUND_CUSTODY_PLACE_KINDS,
   INBOUND_LADDER_MOVEMENT_TYPES,
+  CustodyKeyEnum,
+  type CustodyKeyType,
+  placeKindsForCustodyKey,
 } from "./transaction.ts";
 
 export {

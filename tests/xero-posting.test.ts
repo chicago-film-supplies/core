@@ -114,7 +114,9 @@ Deno.test("every OTHER posting bill totals zero", () => {
     for (const productType of ["sale", "rental"] as const) {
       const d = xeroPostingFor(type, productType, 0, null);
       if (d.kind !== "bill") continue;
-      if (type === "purchase") continue;
+      // A purchase and its typed undo move real Accounts Payable (7a C3: the
+      // undo posts exactly what a `reverses` reversal of the receipt posts).
+      if (type === "purchase" || type === "purchase_undo") continue;
       assertEquals(d.zero_total, true, `${type}/${productType} must total zero`);
     }
   }

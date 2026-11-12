@@ -48,6 +48,10 @@ const RULED_CHANGES: Record<string, { fields: Record<string, unknown>; why: stri
     fields: { booking: "optional" },
     why: "api-cloudrun#1302 ruling 9: a restage is a transfer naming its booking",
   },
+  purchase: {
+    fields: { booking: "required", custody: "required" },
+    why: "one-document-model 7a C3: a receipt is `ordered → received` on the line's inbound booking",
+  },
 };
 
 Deno.test("pins: every pre-campaign contract is unchanged, field for field, except the ruled changes", () => {
