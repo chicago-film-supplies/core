@@ -314,6 +314,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "purchaseDocumentsBefore", expr: "it.purchase-documents.purchaseDocumentsBefore(bill, purchase, bills, credits)", desc: "**The documents of one purchase dated before `bill`** — by date, then number — with `bill` itself left out. A time line re-seeded on `bill` is billed for its pair's time less what THESE documents bill (one-document-model item 5): a later document's billing does not limit what an earlier one may bill. The bill writer and the manager's optimistic reprice both read it, so the two cannot disagree.", returns: "typeLiteral" },
     { name: "substituteKitSubtree", expr: "it.purchase-documents.substituteKitSubtree(rows, path)", desc: "The rows a substitute KIT's root binds on a bill: its line rows strictly below it, when it is a substitution's root (W5) and has any. Empty for every other row, which a credit copies alone (ruling 23).", returns: "PurchaseDocumentItem[]" },
   ],
+  "purchase-receipts": [
+
+  ],
   "purchases": [
     { name: "allocateLandedCostCents", expr: "it.purchases.allocateLandedCostCents(amountCents, lines)", desc: "Spread one landed amount over several buy lines, in proportion to each line's value still to arrive ({@link landedCostWeightCents}), with {@link apportionCents}. Σ is exactly `amountCents`.", returns: "number[]" },
     { name: "isLandedCostFrozen", expr: "it.purchases.isLandedCostFrozen(entry, received)", desc: "Is a landed cost frozen? A receipt has priced part of it once the line's `received` count (its row's custody, `custodyBySourceItem`) passes `received_at_entry`.", returns: "boolean" },

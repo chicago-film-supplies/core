@@ -88,6 +88,8 @@ const SENTINEL_DEFAULTS: ReadonlyMap<string, string> = new Map([
   ["department-types.version", "written as `FieldValue.increment(1)`"],
   ["destinations.version", "written as `FieldValue.increment(1)`"],
   ["fulfillments.version", "written as `FieldValue.increment(1)`"],
+  // The receipt is the fulfillment's twin (7a C9), bumped by the same convention.
+  ["purchase-receipts.version", "written as `FieldValue.increment(1)`"],
   ["holiday-definitions.version", "written as `FieldValue.increment(1)`"],
   ["invoices.version", "written as `FieldValue.increment(1)`"],
   ["lists.version", "written as `FieldValue.increment(1)`"],

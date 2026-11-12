@@ -30,6 +30,7 @@ import * as allocationUtils from "../src/utils/allocation.ts";
 import * as bookingIdUtils from "../src/utils/booking-id.ts";
 import * as bookingUtils from "../src/utils/bookings.ts";
 import * as bookingInboundUtils from "../src/utils/bookings-inbound.ts";
+import * as purchaseReceiptUtils from "../src/utils/purchase-receipts.ts";
 import * as cogsUtils from "../src/utils/cogs.ts";
 import * as priceFormulaUtils from "../src/utils/price-formulas.ts";
 import * as cardUtils from "../src/utils/cards.ts";
@@ -142,6 +143,10 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // status — write-path rules shared by the API and the manager.
   // Listed so the drift guard sees its exports.
   purchases: purchaseUtils,
+  // `utils/purchase-receipts.ts` is the receipt's row-provenance classifier
+  // (7a C9), write-path like `fulfillment-items`. Listed so the drift guard
+  // sees its exports.
+  "purchase-receipts": purchaseReceiptUtils,
   // `utils/purchase-documents.ts` defaults, meters, prices and syncs a bill's
   // write- or review-path machinery over documents a template has already been
   // handed priced. Listed so the drift guard sees their exports.

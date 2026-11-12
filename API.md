@@ -2526,6 +2526,8 @@ interface CollectionDocs {
   suppliers: Supplier;
   purchase: Purchase;
   purchases: Purchase;
+  purchase-receipt: PurchaseReceipt;
+  purchase-receipts: PurchaseReceipt;
   purchase-bill: PurchaseBill;
   purchase-bills: PurchaseBill;
   purchase-credit: PurchaseCredit;
@@ -6932,7 +6934,7 @@ const LOCATION_ROLES: "storage" | "staging"[];
 Which document a {@link leadingDividerViolations} call is judging.
 
 ```ts
-type LeadingDividerGrain = "order" | "fulfillment" | "invoice" | "purchase" | "purchase_document";
+type LeadingDividerGrain = "order" | "fulfillment" | "invoice" | "purchase" | "purchase_receipt" | "purchase_document";
 ```
 
 ### `LeadingDividerViolation`
@@ -11952,6 +11954,102 @@ One {@link PURCHASE_PRODUCT_ITEM_TYPES} member.
 
 ```ts
 type PurchaseProductItemTypeType = indexedAccess;
+```
+
+### `PurchaseReceipt`
+
+A purchase receipt: the custody projection of one purchase, keyed by its uid.
+
+```ts
+interface PurchaseReceipt {
+  uid: string;
+  number: number;
+  status: PurchaseStatusType;
+  supplier: UidNameRefType;
+  destinations: PurchaseDestination[];
+  items: PurchaseReceiptItemType[];
+  reference: string | null;
+  query_by_items: string[];
+  query_by_contacts: string[];
+  query_by_dates: string[];
+  version: number;
+  created_by: ActorRefType | null;
+  updated_by: ActorRefType | null;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `PurchaseReceiptDestinationItemType`
+
+Destination divider in a receipt's items array — the purchase's own divider arm.
+
+```ts
+interface PurchaseReceiptDestinationItemType {
+  uid: string;
+  type: "destination";
+  name: string;
+  path: string[];
+  description: string;
+}
+```
+
+### `PurchaseReceiptGroupItemType`
+
+Group divider in a receipt's items array — the purchase's own divider arm.
+
+```ts
+interface PurchaseReceiptGroupItemType {
+  uid: string;
+  type: "group";
+  name: string;
+  path: string[];
+  description: string;
+}
+```
+
+### `PurchaseReceiptItem`
+
+```ts
+const PurchaseReceiptItem: z.ZodType<PurchaseReceiptItemType>;
+```
+
+### `PurchaseReceiptItemType`
+
+Any row of a receipt's `items[]`.
+
+```ts
+type PurchaseReceiptItemType = PurchaseReceiptLineItemType | PurchaseReceiptDestinationItemType | PurchaseReceiptGroupItemType;
+```
+
+### `PurchaseReceiptLineItem`
+
+```ts
+const PurchaseReceiptLineItem: z.ZodType<PurchaseReceiptLineItemType>;
+```
+
+### `PurchaseReceiptLineItemType`
+
+A receipt line — one custody row of the purchase, with no price.
+
+```ts
+interface PurchaseReceiptLineItemType {
+  uid: string;
+  type: PurchaseProductItemTypeType;
+  name: string;
+  description: string;
+  quantity: number;
+  zero_priced: boolean | null;
+  quantity_per_parent?: number | null;
+  path: string[];
+  quantity_ordered: number | null;
+}
+```
+
+### `PurchaseReceiptSchema`
+
+```ts
+const PurchaseReceiptSchema: z.ZodType<PurchaseReceipt>;
 ```
 
 ### `PurchaseRentalItem`
@@ -18309,6 +18407,13 @@ supplier. Keyed on the PAYLOAD, not the source; see {@link CardPurchasesSource}.
 
 Is this row a line (not a divider)?
 
+### `isPurchaseReceiptLineItem(item: PurchaseReceiptItemType): item is PurchaseReceiptLineItemType`
+
+Narrows a receipt row to a line (excludes the two dividers).
+
+⚠️ Not a key-presence test: the decision is the row's TYPE, as
+`isFulfillmentLineItem`'s is.
+
 ### `isReceivableSettlement(s: Settlement): s is ReceivableSettlement`
 
 Narrow a settlement to {@link ReceivableSettlement}. A reader that scans the
@@ -18354,7 +18459,7 @@ guard calls it rather than keeping a second copy (api-cloudrun#1154).
 
 | grain | `items[0]` must be |
 |---|---|
-| order, fulfillment | a `destination` divider |
+| order, fulfillment, purchase, purchase receipt | a `destination` divider |
 | invoice with a source order (`linked`) | an `order` divider |
 | invoice with no source order | unruled |
 
@@ -25709,7 +25814,7 @@ interface ItemPriceType {
 Which document a {@link leadingDividerViolations} call is judging.
 
 ```ts
-type LeadingDividerGrain = "order" | "fulfillment" | "invoice" | "purchase" | "purchase_document";
+type LeadingDividerGrain = "order" | "fulfillment" | "invoice" | "purchase" | "purchase_receipt" | "purchase_document";
 ```
 
 ### `LeadingDividerViolation`
@@ -26823,7 +26928,7 @@ guard calls it rather than keeping a second copy (api-cloudrun#1154).
 
 | grain | `items[0]` must be |
 |---|---|
-| order, fulfillment | a `destination` divider |
+| order, fulfillment, purchase, purchase receipt | a `destination` divider |
 | invoice with a source order (`linked`) | an `order` divider |
 | invoice with no source order | unruled |
 
@@ -30856,6 +30961,161 @@ The purchase line a bill or credit line bills, as `[purchase uid, ...path in
 that purchase]` joined by `/` — its move pointer when it has one, else its
 own path under its purchase divider — or `null` for a line outside any
 purchase divider. The one join key for "which purchase line is this".
+
+## `@cfs/core/schemas/purchase-receipt`
+
+Purchase receipt schemas — Firestore collection: `purchase-receipts`.
+
+The CUSTODY document of the payable side: what a supplier actually sent, the
+twin of the fulfillment (`schemas/fulfillment.ts`), which is what the
+warehouse actually did for an order (one-document-model ruling 37, 7a C9).
+
+| | receivable | payable |
+|---|---|---|
+| initiator | `orders` | `purchases` |
+| custody | `fulfillments` (id = order id) | `purchase-receipts` (id = purchase id) |
+
+## It mirrors the fulfillment field for field
+
+- `uid` and `number` ARE the purchase's, as a fulfillment's are its order's;
+- `status` IS the purchase's status, so it reuses `PURCHASE_STATUSES` rather
+  than restating it (the fulfillment reuses `ORDER_STATUSES` for the same
+  reason: a member added to one list alone would fail every projection write);
+- `supplier` stands where the fulfillment's `organization` does — the
+  purchase's `{ uid, name }`, taken whole;
+- `destinations` are the purchase's own pair schema, so the three arguments to
+  the merge are already in the receipt's shape;
+- `reference`, the three `query_by_*` mirrors, `version`, the actors and the
+  timestamps are the fulfillment's;
+- `items` are the purchase's CUSTODY rows (its `sale` and `rental` rows, kit
+  headers included) and its dividers, at order depth, each line carrying a
+  physical `quantity` and the purchase's `quantity_ordered`.
+
+No price: money is not a receiving concern, exactly as it is not a picking one.
+A `service` or `replacement` purchase line moves no custody, so it has no row.
+
+## The receiver owns the row's quantity, and nothing writes the receipt from the bookings
+
+The direction is the outbound one (conformance on the 7a spec: the draft's
+"bookings project into the receipt" was a second upstream, a new pattern). A
+short or extra delivery is a receipt-row EDIT, as a short pick is a
+fulfillment-row edit; the inbound bookings reconcile from the receipt, and the
+custody steps act on the bookings through the inbound lever. The purchase →
+receipt cascade is a three-way merge over {@link PurchaseReceipt}'s shared
+fields (`purchaseReceiptSharedFields`, `utils/shared-fields.ts`), with the
+custody keep at booking grain.
+
+⚠️ **`number`, `status` and `reference` classify as homonyms and the merge
+skips them**: the purchase tags them `propagate: false` because a BILL's
+number, status and reference are its own. On a receipt all three are genuine
+copies of the purchase's, so the writer sets them unconditionally, as
+`stageOrderFulfillmentSync` does a fulfillment's `number` and `status`.
+
+Why a row exists that the purchase does not carry is ONE classifier,
+`receiptRowSources` (`utils/purchase-receipts.ts`).
+
+### `PurchaseReceipt`
+
+A purchase receipt: the custody projection of one purchase, keyed by its uid.
+
+```ts
+interface PurchaseReceipt {
+  uid: string;
+  number: number;
+  status: PurchaseStatusType;
+  supplier: UidNameRefType;
+  destinations: PurchaseDestination[];
+  items: PurchaseReceiptItemType[];
+  reference: string | null;
+  query_by_items: string[];
+  query_by_contacts: string[];
+  query_by_dates: string[];
+  version: number;
+  created_by: ActorRefType | null;
+  updated_by: ActorRefType | null;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `PurchaseReceiptDestinationItemType`
+
+Destination divider in a receipt's items array — the purchase's own divider arm.
+
+```ts
+interface PurchaseReceiptDestinationItemType {
+  uid: string;
+  type: "destination";
+  name: string;
+  path: string[];
+  description: string;
+}
+```
+
+### `PurchaseReceiptGroupItemType`
+
+Group divider in a receipt's items array — the purchase's own divider arm.
+
+```ts
+interface PurchaseReceiptGroupItemType {
+  uid: string;
+  type: "group";
+  name: string;
+  path: string[];
+  description: string;
+}
+```
+
+### `PurchaseReceiptItem`
+
+```ts
+const PurchaseReceiptItem: z.ZodType<PurchaseReceiptItemType>;
+```
+
+### `PurchaseReceiptItemType`
+
+Any row of a receipt's `items[]`.
+
+```ts
+type PurchaseReceiptItemType = PurchaseReceiptLineItemType | PurchaseReceiptDestinationItemType | PurchaseReceiptGroupItemType;
+```
+
+### `PurchaseReceiptLineItem`
+
+```ts
+const PurchaseReceiptLineItem: z.ZodType<PurchaseReceiptLineItemType>;
+```
+
+### `PurchaseReceiptLineItemType`
+
+A receipt line — one custody row of the purchase, with no price.
+
+```ts
+interface PurchaseReceiptLineItemType {
+  uid: string;
+  type: PurchaseProductItemTypeType;
+  name: string;
+  description: string;
+  quantity: number;
+  zero_priced: boolean | null;
+  quantity_per_parent?: number | null;
+  path: string[];
+  quantity_ordered: number | null;
+}
+```
+
+### `PurchaseReceiptSchema`
+
+```ts
+const PurchaseReceiptSchema: z.ZodType<PurchaseReceipt>;
+```
+
+### `isPurchaseReceiptLineItem(item: PurchaseReceiptItemType): item is PurchaseReceiptLineItemType`
+
+Narrows a receipt row to a line (excludes the two dividers).
+
+⚠️ Not a key-presence test: the decision is the row's TYPE, as
+`isFulfillmentLineItem`'s is.
 
 ## `@cfs/core/schemas/recurrence`
 
@@ -52646,6 +52906,84 @@ Pairs follow the invoice's rule, per field (`syncScopedDestinations`).
 `total_cents` and `amount_due_cents` move together (an unfrozen bill has no
 money settlement, so the identity holds with what is due).
 
+## `@cfs/core/utils/purchase-receipts`
+
+Purchase receipt rows — why a stored receipt row exists.
+
+The receipt (`schemas/purchase-receipt.ts`) is the payable side's custody
+document, the twin of the fulfillment. This module holds the receipt's twin
+of `fulfillmentRowSources` (`utils/fulfillment-items.ts`): ONE classifier for
+"why does this row exist", which every reader of a receipt row asks through
+(the receiver's save, the purchase → receipt sync, the drift audit), so a new
+kind of receipt-only row is a new member of the union rather than a branch
+taught to some readers and not others (core#129's lesson on the fulfillment).
+
+### `ReceiptRowSource`
+
+Why a stored receipt LINE row exists — {@link receiptRowSources}.
+
+| source | the row is | how it is told |
+|---|---|---|
+| `purchase` | the purchase's own custody line | a `sale` or `rental` purchase row is at its path |
+| `kept` | a line the purchase closed while its units were held (ruling 47) | `quantity_ordered: 0` |
+| `receipt_extra` | a line the supplier sent that the PO lacks (ruling 35) | `quantity_ordered: null` |
+| `unexplained` | none of these — a finding | — |
+
+The fulfillment's `substitution`, `exchange` and `invoice_projected` have no
+twin here: nothing substitutes on a receipt, an Exchange on a subrent is a
+PURCHASE-side operation (ruling 7), and no billing document projects onto the
+receipt.
+
+```ts
+type ReceiptRowSource = "purchase" | "kept" | "receipt_extra" | "unexplained";
+```
+
+### `ReceiptRowSourcePurchase`
+
+The purchase fields {@link receiptRowSources} reads.
+
+```ts
+interface ReceiptRowSourcePurchase {
+  items: ReadonlyArray<typeLiteral>;
+}
+```
+
+### `ReceiptRowSourceReceipt`
+
+The receipt fields {@link receiptRowSources} reads.
+
+```ts
+interface ReceiptRowSourceReceipt {
+  items: ReadonlyArray<PurchaseReceiptItemType | T>;
+}
+```
+
+### `receiptRowSources(receipt: ReceiptRowSourceReceipt<T>, purchase: ReceiptRowSourcePurchase): Map<T, ReceiptRowSource>`
+
+Classify every LINE row of a stored receipt by why it exists.
+
+**Precedence is the table's order**, top first: a row at a purchase custody
+path is `purchase` whatever its `quantity_ordered` says (the sync re-stamps
+that field later in the same transaction than the bookings read it, so it is
+never the ownership test). Off the purchase, `quantity_ordered` is the
+server's signature: `0` is a row the sync KEPT, `null` is a row a receiver
+added, and a positive count names a purchase line that is not there — a sync
+that did not run, which is the finding.
+
+⚠️ **Only the purchase's `sale` and `rental` rows count**, kit headers
+included: a `service` or `replacement` line moves no custody, so a receipt row
+at its path is not the purchase's.
+
+⚠️ **Dividers are not classified** — their survival is a placement question
+(`placeStoredOnlyRows`), not a provenance one, as on the fulfillment.
+
+**Parameters**
+
+- `receipt` — The stored receipt
+- `purchase` — The purchase it projects
+
+**Returns** — Each line row, by object identity, mapped to its source
+
 ## `@cfs/core/utils/purchases`
 
 Purchase helpers — the cumulative share that prices every receipt and every
@@ -54343,6 +54681,20 @@ interface ProjectionCollectionPair {
 }
 ```
 
+### `PurchaseReceiptSharedFields`
+
+The fields a purchase shares with its receipt (`purchase-receipts`), split by
+the unit the merge runs on — the payable twin of
+{@link OrderFulfillmentSharedFields}, and the same shape for the same reason.
+
+```ts
+interface PurchaseReceiptSharedFields {
+  line: readonly SharedField[];
+  pair: readonly SharedField[];
+  doc: readonly SharedField[];
+}
+```
+
 ### `SHARED_GROUP_META_KEY`
 
 The meta key that puts a shared scalar — or a `shared: "value"` field — in a
@@ -54515,6 +54867,27 @@ genuine copies of the order's — the uid IS the order's uid, the number IS the
 order's number, and `FulfillmentSchema` reuses `ORDER_STATUSES` for exactly
 that reason. They stay on the caller's unconditional-copy list; the tag says
 "not a propagated VALUE", not "leave it stale".
+
+### `purchaseReceiptSharedFields(): PurchaseReceiptSharedFields`
+
+{@link PurchaseReceiptSharedFields}, classified once per process, over
+`classifySharedFields(PurchaseSchema, PurchaseReceiptSchema)`.
+
+As on the fulfillment, `PurchaseReceipt.destinations` is the purchase's own
+pair schema, so the three arguments to {@link mergeSharedFields} are already in
+the receipt's shape and pairs match on `pair.uid` alone.
+
+⚠️ **`quantity` keeps the purchase's `flat_money` group, and on this pair the
+group has ONE member.** The receipt carries no `amount_cents` or
+`out_of_service`, so the group decides the physical quantity alone, which is
+exactly the per-field rule: an untouched row follows the purchase, a row the
+receiver edited keeps its count.
+
+⚠️ **`number`, `status` and `reference` are homonyms here and the merge skips
+them**: the purchase tags them `propagate: false` for its bills, and a tag on
+either schema decides. On a receipt they are copies of the purchase's, so the
+writer sets them unconditionally, as it does a fulfillment's `number` and
+`status`.
 
 ### `resolveMergedPairDates(merged: D, source: D, downstream: D, holidays: readonly string[], canonicalize: fnOrConstructor): D | null`
 

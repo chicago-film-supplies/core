@@ -632,6 +632,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "fieldsUnder",
     "mergeSharedFields",
     "orderFulfillmentSharedFields",
+    "purchaseReceiptSharedFields",
     "resolveMergedPairDates",
     "sameSharedValue",
   ],
@@ -827,6 +828,13 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "mergeOutOfServiceEntries",
     "outOfServiceEntries",
     "splitOutOfServiceEntries",
+  ],
+  // `utils/purchase-receipts.ts` is the receipt's twin of `fulfillmentRowSources`
+  // below: write-path provenance for the purchase -> receipt sync, the
+  // receiver's save and the drift audit. It needs the purchase AND the stored
+  // receipt at once; a template renders one document.
+  "purchase-receipts": [
+    "receiptRowSources",
   ],
   // `utils/fulfillment-items.ts` is WRITE-PATH machinery shared by the API and
   // the manager — it rebuilds a fulfillment's items array from a picker

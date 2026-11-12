@@ -903,6 +903,18 @@ export {
 } from "./purchase-bill.ts";
 
 export {
+  isPurchaseReceiptLineItem,
+  type PurchaseReceipt,
+  type PurchaseReceiptDestinationItemType,
+  type PurchaseReceiptGroupItemType,
+  PurchaseReceiptItem,
+  type PurchaseReceiptItemType,
+  PurchaseReceiptLineItem,
+  type PurchaseReceiptLineItemType,
+  PurchaseReceiptSchema,
+} from "./purchase-receipt.ts";
+
+export {
   LocationTypeSchema,
   CreateLocationTypeInput,
   UpdateLocationTypeInput,
@@ -1773,6 +1785,7 @@ import type { OutOfService } from "./out-of-service.ts";
 import type { Settlement } from "./settlement.ts";
 import type { Supplier } from "./supplier.ts";
 import type { Purchase } from "./purchase.ts";
+import type { PurchaseReceipt } from "./purchase-receipt.ts";
 import type { PurchaseBill, PurchaseCredit } from "./purchase-bill.ts";
 import type { CreditNote } from "./credit-note.ts";
 import type { PasswordReset } from "./password-reset.ts";
@@ -1886,6 +1899,7 @@ import { OutOfServiceSchema } from "./out-of-service.ts";
 import { SettlementSchema } from "./settlement.ts";
 import { SupplierSchema } from "./supplier.ts";
 import { PurchaseSchema } from "./purchase.ts";
+import { PurchaseReceiptSchema } from "./purchase-receipt.ts";
 import { PurchaseBillSchema, PurchaseCreditSchema } from "./purchase-bill.ts";
 import { CreditNoteSchema } from "./credit-note.ts";
 import { PasswordResetSchema } from "./password-reset.ts";
@@ -2050,6 +2064,8 @@ export interface CollectionDocs {
   suppliers: Supplier;
   purchase: Purchase;
   purchases: Purchase;
+  "purchase-receipt": PurchaseReceipt;
+  "purchase-receipts": PurchaseReceipt;
   "purchase-bill": PurchaseBill;
   "purchase-bills": PurchaseBill;
   "purchase-credit": PurchaseCredit;
@@ -2158,6 +2174,7 @@ const schemasTyped: { [C in CollectionName]: z.ZodType<CollectionDocs[C]> } = {
   "settlement": SettlementSchema, "settlements": SettlementSchema,
   "supplier": SupplierSchema, "suppliers": SupplierSchema,
   "purchase": PurchaseSchema, "purchases": PurchaseSchema,
+  "purchase-receipt": PurchaseReceiptSchema, "purchase-receipts": PurchaseReceiptSchema,
   "purchase-bill": PurchaseBillSchema, "purchase-bills": PurchaseBillSchema,
   "purchase-credit": PurchaseCreditSchema, "purchase-credits": PurchaseCreditSchema,
   // `stock` is both the singular and the plural, so it takes one key rather than

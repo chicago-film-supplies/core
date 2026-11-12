@@ -185,6 +185,12 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["purchases.destinations[].collection.address.user_coordinates", "array-member-uncensusable"],
   ["purchases.destinations[].delivery.address.address_coordinates", "array-member-uncensusable"],
   ["purchases.destinations[].delivery.address.user_coordinates", "array-member-uncensusable"],
+  // The receipt reuses the purchase's pair schema and `LineItemCore` (7a C9).
+  ["purchase-receipts.destinations[].collection.address.address_coordinates", "array-member-uncensusable"],
+  ["purchase-receipts.destinations[].collection.address.user_coordinates", "array-member-uncensusable"],
+  ["purchase-receipts.destinations[].delivery.address.address_coordinates", "array-member-uncensusable"],
+  ["purchase-receipts.destinations[].delivery.address.user_coordinates", "array-member-uncensusable"],
+  ["purchase-receipts.items[].quantity_per_parent", "array-member-uncensusable"],
   ["purchase-bills.destinations[].collection.address.address_coordinates", "array-member-uncensusable"],
   ["purchase-bills.destinations[].collection.address.user_coordinates", "array-member-uncensusable"],
   ["purchase-bills.destinations[].delivery.address.address_coordinates", "array-member-uncensusable"],

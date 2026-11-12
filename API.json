@@ -1113,7 +1113,7 @@
         {
           "kind": "interface",
           "name": "CollectionDocs",
-          "declaration": "interface CollectionDocs {\n  activity: Activity;\n  activities: Activity;\n  booking: Booking;\n  bookings: Booking;\n  bookings-inbound: InboundBooking;\n  card: Card;\n  cards: Card;\n  counter: Counter;\n  counters: Counter;\n  cache-geocodes: CacheGeocodes;\n  chart-of-accounts: ChartOfAccounts;\n  comment: Comment;\n  comments: Comment;\n  contact: Contact;\n  contacts: Contact;\n  destination: Destination;\n  destinations: Destination;\n  email-verification: EmailVerification;\n  email-verifications: EmailVerification;\n  holiday-dates: HolidayDates;\n  dates: HolidayDates;\n  holiday-definition: HolidayDefinition;\n  holiday-definitions: HolidayDefinition;\n  holiday-snapshot: HolidaySnapshot;\n  settings: SettingsDocument;\n  inventory-ledger: InventoryLedger;\n  inventory-ledgers: InventoryLedger;\n  invite: Invite;\n  invites: Invite;\n  invoice: Invoice;\n  invoices: Invoice;\n  list: List;\n  lists: List;\n  location: Location;\n  locations: Location;\n  location-type: LocationType;\n  location-types: LocationType;\n  department-type: DepartmentType;\n  department-types: DepartmentType;\n  order: Order;\n  orders: Order;\n  fulfillment: Fulfillment;\n  fulfillments: Fulfillment;\n  organization: Organization;\n  organizations: Organization;\n  out-of-service: OutOfService;\n  password-reset: PasswordReset;\n  password-resets: PasswordReset;\n  product: Product;\n  products: Product;\n  quote: Quote;\n  quotes: Quote;\n  statement-documents: StatementDocument;\n  template: Template;\n  templates: Template;\n  templates-versions: TemplateVersion;\n  template-components: TemplateComponent;\n  rate-limit: RateLimit;\n  rate-limits: RateLimit;\n  recurrence: Recurrence;\n  recurrences: Recurrence;\n  role: Role;\n  roles: Role;\n  session: Session;\n  sessions: Session;\n  credit-note: CreditNote;\n  credit-notes: CreditNote;\n  settlement: Settlement;\n  settlements: Settlement;\n  supplier: Supplier;\n  suppliers: Supplier;\n  purchase: Purchase;\n  purchases: Purchase;\n  purchase-bill: PurchaseBill;\n  purchase-bills: PurchaseBill;\n  purchase-credit: PurchaseCredit;\n  purchase-credits: PurchaseCredit;\n  stock: Stock;\n  stock-lock: StockLock;\n  stock-locks: StockLock;\n  store: Store;\n  stores: Store;\n  tag: Tag;\n  tags: Tag;\n  taxes-codes: TaxCode;\n  taxes-rates: TaxRate;\n  taxes-classes: TaxClass;\n  price-formula: PriceFormula;\n  price-formulas: PriceFormula;\n  thread: Thread;\n  threads: Thread;\n  tracking-category: TrackingCategory;\n  tracking-categories: TrackingCategory;\n  transaction: Movement;\n  transactions: Movement;\n  unit: UnitType;\n  units: UnitType;\n  unit-roster: UnitRoster;\n  unit-rosters: UnitRoster;\n  user: User;\n  users: User;\n  webhook-event: WebhookEvent;\n  webhook-events: WebhookEvent;\n  events: WebhookEvent;\n  webshop-product: WebshopProduct;\n  webshop-products: WebshopProduct;\n  typesense-config: TypesenseConfig;\n  typesense: TypesenseConfig;\n  uploadcare-sweep: UploadcareSweepRun;\n  uploadcare-worklist: UploadcareWorkListEntry;\n  xero-budget: XeroBudget;\n  xero-sync: XeroSyncState;\n  documents: OrderDocument;\n  template_previews: PreviewRecord;\n  mcp-oauth-clients: McpOAuthClient;\n  mcp-oauth-authorize-requests: McpOAuthAuthorizeRequest;\n  mcp-oauth-codes: McpOAuthCode;\n  mcp-oauth-tokens: McpOAuthToken;\n}",
+          "declaration": "interface CollectionDocs {\n  activity: Activity;\n  activities: Activity;\n  booking: Booking;\n  bookings: Booking;\n  bookings-inbound: InboundBooking;\n  card: Card;\n  cards: Card;\n  counter: Counter;\n  counters: Counter;\n  cache-geocodes: CacheGeocodes;\n  chart-of-accounts: ChartOfAccounts;\n  comment: Comment;\n  comments: Comment;\n  contact: Contact;\n  contacts: Contact;\n  destination: Destination;\n  destinations: Destination;\n  email-verification: EmailVerification;\n  email-verifications: EmailVerification;\n  holiday-dates: HolidayDates;\n  dates: HolidayDates;\n  holiday-definition: HolidayDefinition;\n  holiday-definitions: HolidayDefinition;\n  holiday-snapshot: HolidaySnapshot;\n  settings: SettingsDocument;\n  inventory-ledger: InventoryLedger;\n  inventory-ledgers: InventoryLedger;\n  invite: Invite;\n  invites: Invite;\n  invoice: Invoice;\n  invoices: Invoice;\n  list: List;\n  lists: List;\n  location: Location;\n  locations: Location;\n  location-type: LocationType;\n  location-types: LocationType;\n  department-type: DepartmentType;\n  department-types: DepartmentType;\n  order: Order;\n  orders: Order;\n  fulfillment: Fulfillment;\n  fulfillments: Fulfillment;\n  organization: Organization;\n  organizations: Organization;\n  out-of-service: OutOfService;\n  password-reset: PasswordReset;\n  password-resets: PasswordReset;\n  product: Product;\n  products: Product;\n  quote: Quote;\n  quotes: Quote;\n  statement-documents: StatementDocument;\n  template: Template;\n  templates: Template;\n  templates-versions: TemplateVersion;\n  template-components: TemplateComponent;\n  rate-limit: RateLimit;\n  rate-limits: RateLimit;\n  recurrence: Recurrence;\n  recurrences: Recurrence;\n  role: Role;\n  roles: Role;\n  session: Session;\n  sessions: Session;\n  credit-note: CreditNote;\n  credit-notes: CreditNote;\n  settlement: Settlement;\n  settlements: Settlement;\n  supplier: Supplier;\n  suppliers: Supplier;\n  purchase: Purchase;\n  purchases: Purchase;\n  purchase-receipt: PurchaseReceipt;\n  purchase-receipts: PurchaseReceipt;\n  purchase-bill: PurchaseBill;\n  purchase-bills: PurchaseBill;\n  purchase-credit: PurchaseCredit;\n  purchase-credits: PurchaseCredit;\n  stock: Stock;\n  stock-lock: StockLock;\n  stock-locks: StockLock;\n  store: Store;\n  stores: Store;\n  tag: Tag;\n  tags: Tag;\n  taxes-codes: TaxCode;\n  taxes-rates: TaxRate;\n  taxes-classes: TaxClass;\n  price-formula: PriceFormula;\n  price-formulas: PriceFormula;\n  thread: Thread;\n  threads: Thread;\n  tracking-category: TrackingCategory;\n  tracking-categories: TrackingCategory;\n  transaction: Movement;\n  transactions: Movement;\n  unit: UnitType;\n  units: UnitType;\n  unit-roster: UnitRoster;\n  unit-rosters: UnitRoster;\n  user: User;\n  users: User;\n  webhook-event: WebhookEvent;\n  webhook-events: WebhookEvent;\n  events: WebhookEvent;\n  webshop-product: WebshopProduct;\n  webshop-products: WebshopProduct;\n  typesense-config: TypesenseConfig;\n  typesense: TypesenseConfig;\n  uploadcare-sweep: UploadcareSweepRun;\n  uploadcare-worklist: UploadcareWorkListEntry;\n  xero-budget: XeroBudget;\n  xero-sync: XeroSyncState;\n  documents: OrderDocument;\n  template_previews: PreviewRecord;\n  mcp-oauth-clients: McpOAuthClient;\n  mcp-oauth-authorize-requests: McpOAuthAuthorizeRequest;\n  mcp-oauth-codes: McpOAuthCode;\n  mcp-oauth-tokens: McpOAuthToken;\n}",
           "doc": "The ONE place a collection name is bound to its document type.\n\n`schemas` below is annotated by a mapped type over this interface, so the two\ncannot drift: a key here with no entry there is an error at the object\nliteral, and an entry there with no key here is an excess property. That is\nthe compiler enforcing the parity — not a test that can go stale, and not the\n\"parity assertion between two hand-maintained lists\" the workspace rules warn\nabout. It fails at `deno task check`.\n\n⚠️ **Both halves are written out explicitly, and that is deliberate.** JSR's\nnpm declaration emit is SYNTACTIC — it writes declarations without running\ninference — so a type it has to COMPUTE from an initializer can publish\nwrongly to npm consumers while Deno consumers, this suite, `deno task check`\nand `deno publish --dry-run` all agree with the source. That is core#43: nine\n`as const` members emitted as one, and 57 phantom type errors on manager's\nnext pin bump. An interface and a written mapped-type annotation are text the\nemitter copies verbatim, so neither needs expanding.\n\n⚠️ Measured 2026-08-14, because the obvious reasoning is wrong: the\ninference-requiring form (`= {…} satisfies Record<string, z.ZodType>` plus\n`keyof typeof`) **also passes** `deno publish --dry-run`'s slow-types check.\nPassing that check is NOT evidence the emit is right. The explicit form is\nchosen because it needs no expansion at all, which is a reasoned preference\nrather than a measured one.\n\n⚠️ The line above used to add *\"core#44 closed as 'no post-publish declaration\ngate', so nothing here can see a wrong published declaration.\"* **That is no\nlonger true**: core#44 reopened on a second divergence and\n`deno task check:declarations` now runs `isolatedDeclarations` over all of\n`src/`. It is still not a check of JSR's *emitter* — it is a conservative\nover-approximation of it — so \"passing does not prove the emit is right\"\nsurvives; what does not survive is \"nothing can see it\".\n\nSingular and plural both appear because the registry has always carried both.\n⚠️ The singular half may be vestigial — there are zero literal `schemas[\"order\"]`\n-style lookups across api-cloudrun, manager and templates, and every call site\nfound passes a plural or the literal `\"events\"`. Removing them would halve this\nfile's hand-written surface, but it is a breaking change to a published API and\nwants the dynamic callers' domain established first. Not folded in here."
         },
         {
@@ -3123,7 +3123,7 @@
         {
           "kind": "typeAlias",
           "name": "LeadingDividerGrain",
-          "declaration": "type LeadingDividerGrain = \"order\" | \"fulfillment\" | \"invoice\" | \"purchase\" | \"purchase_document\";",
+          "declaration": "type LeadingDividerGrain = \"order\" | \"fulfillment\" | \"invoice\" | \"purchase\" | \"purchase_receipt\" | \"purchase_document\";",
           "doc": "Which document a {@link leadingDividerViolations} call is judging."
         },
         {
@@ -5321,6 +5321,54 @@
           "name": "PurchaseProductItemTypeType",
           "declaration": "type PurchaseProductItemTypeType = indexedAccess;",
           "doc": "One {@link PURCHASE_PRODUCT_ITEM_TYPES} member."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseReceipt",
+          "declaration": "interface PurchaseReceipt {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  destinations: PurchaseDestination[];\n  items: PurchaseReceiptItemType[];\n  reference: string | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_by: ActorRefType | null;\n  updated_by: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "A purchase receipt: the custody projection of one purchase, keyed by its uid."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseReceiptDestinationItemType",
+          "declaration": "interface PurchaseReceiptDestinationItemType {\n  uid: string;\n  type: \"destination\";\n  name: string;\n  path: string[];\n  description: string;\n}",
+          "doc": "Destination divider in a receipt's items array — the purchase's own divider arm."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseReceiptGroupItemType",
+          "declaration": "interface PurchaseReceiptGroupItemType {\n  uid: string;\n  type: \"group\";\n  name: string;\n  path: string[];\n  description: string;\n}",
+          "doc": "Group divider in a receipt's items array — the purchase's own divider arm."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseReceiptItem",
+          "declaration": "const PurchaseReceiptItem: z.ZodType<PurchaseReceiptItemType>;",
+          "doc": ""
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PurchaseReceiptItemType",
+          "declaration": "type PurchaseReceiptItemType = PurchaseReceiptLineItemType | PurchaseReceiptDestinationItemType | PurchaseReceiptGroupItemType;",
+          "doc": "Any row of a receipt's `items[]`."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseReceiptLineItem",
+          "declaration": "const PurchaseReceiptLineItem: z.ZodType<PurchaseReceiptLineItemType>;",
+          "doc": ""
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseReceiptLineItemType",
+          "declaration": "interface PurchaseReceiptLineItemType {\n  uid: string;\n  type: PurchaseProductItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  path: string[];\n  quantity_ordered: number | null;\n}",
+          "doc": "A receipt line — one custody row of the purchase, with no price."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseReceiptSchema",
+          "declaration": "const PurchaseReceiptSchema: z.ZodType<PurchaseReceipt>;",
+          "doc": ""
         },
         {
           "kind": "interface",
@@ -8460,6 +8508,14 @@
         },
         {
           "kind": "function",
+          "name": "isPurchaseReceiptLineItem",
+          "signature": "isPurchaseReceiptLineItem(item: PurchaseReceiptItemType): item is PurchaseReceiptLineItemType",
+          "doc": "Narrows a receipt row to a line (excludes the two dividers).\n\n⚠️ Not a key-presence test: the decision is the row's TYPE, as\n`isFulfillmentLineItem`'s is.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "isReceivableSettlement",
           "signature": "isReceivableSettlement(s: Settlement): s is ReceivableSettlement",
           "doc": "Narrow a settlement to {@link ReceivableSettlement}. A reader that scans the\ncollection (an audit, a per-customer statement built from a full read) holds\npayable rows too and MUST filter before treating `uid_organization` as set.",
@@ -8502,7 +8558,7 @@
           "kind": "function",
           "name": "leadingDividerViolations",
           "signature": "leadingDividerViolations(items: ReadonlyArray<unknown>, grain: LeadingDividerGrain, linked: boolean): LeadingDividerViolation[]",
-          "doc": "Whether a document's `items[0]` is the top divider its grain leads with —\nthe rule {@link checkLeadingDivider} enforces on the stored order, fulfillment\nand invoice schemas, as data, so a WRITER can refuse the same input with a 400\nbefore it builds a document the schema would reject with a 500. One author:\nthe refinement is this function plus an `addIssue`, and api-cloudrun's write\nguard calls it rather than keeping a second copy (api-cloudrun#1154).\n\n| grain | `items[0]` must be |\n|---|---|\n| order, fulfillment | a `destination` divider |\n| invoice with a source order (`linked`) | an `order` divider |\n| invoice with no source order | unruled |\n\n⚠️ **Only the FIRST row, deliberately.** An order-linked invoice may carry\norder-level lines (a card fee, a replacement, a service) between its `order`\ndivider and its first `destination` — 11 prod invoices do (measured\n2026-09-28), so an `items[1] === \"destination\"` rule would refuse correct\ndocuments.\n\n⚠️ **The order-less invoice is unruled, not exempted by accident.** 31 legacy\ninvoices carry no source order and bill a bare line first; no writer produces\nthat shape any more, and api-cloudrun's invoice writers require a source\norder rather than a refine here, so those 31 stay readable.\n\nEmpty `items` returns `[]`: an empty order or fulfillment is `items.min(1)`'s\nerror, not this one's, so the two never report one defect twice.",
+          "doc": "Whether a document's `items[0]` is the top divider its grain leads with —\nthe rule {@link checkLeadingDivider} enforces on the stored order, fulfillment\nand invoice schemas, as data, so a WRITER can refuse the same input with a 400\nbefore it builds a document the schema would reject with a 500. One author:\nthe refinement is this function plus an `addIssue`, and api-cloudrun's write\nguard calls it rather than keeping a second copy (api-cloudrun#1154).\n\n| grain | `items[0]` must be |\n|---|---|\n| order, fulfillment, purchase, purchase receipt | a `destination` divider |\n| invoice with a source order (`linked`) | an `order` divider |\n| invoice with no source order | unruled |\n\n⚠️ **Only the FIRST row, deliberately.** An order-linked invoice may carry\norder-level lines (a card fee, a replacement, a service) between its `order`\ndivider and its first `destination` — 11 prod invoices do (measured\n2026-09-28), so an `items[1] === \"destination\"` rule would refuse correct\ndocuments.\n\n⚠️ **The order-less invoice is unruled, not exempted by accident.** 31 legacy\ninvoices carry no source order and bill a bare line first; no writer produces\nthat shape any more, and api-cloudrun's invoice writers require a source\norder rather than a refine here, so those 31 stay readable.\n\nEmpty `items` returns `[]`: an empty order or fulfillment is `items.min(1)`'s\nerror, not this one's, so the two never report one defect twice.",
           "paramTags": [
             {
               "name": "linked",
@@ -12130,7 +12186,7 @@
         {
           "kind": "typeAlias",
           "name": "LeadingDividerGrain",
-          "declaration": "type LeadingDividerGrain = \"order\" | \"fulfillment\" | \"invoice\" | \"purchase\" | \"purchase_document\";",
+          "declaration": "type LeadingDividerGrain = \"order\" | \"fulfillment\" | \"invoice\" | \"purchase\" | \"purchase_receipt\" | \"purchase_document\";",
           "doc": "Which document a {@link leadingDividerViolations} call is judging."
         },
         {
@@ -12594,7 +12650,7 @@
           "kind": "function",
           "name": "leadingDividerViolations",
           "signature": "leadingDividerViolations(items: ReadonlyArray<unknown>, grain: LeadingDividerGrain, linked: boolean): LeadingDividerViolation[]",
-          "doc": "Whether a document's `items[0]` is the top divider its grain leads with —\nthe rule {@link checkLeadingDivider} enforces on the stored order, fulfillment\nand invoice schemas, as data, so a WRITER can refuse the same input with a 400\nbefore it builds a document the schema would reject with a 500. One author:\nthe refinement is this function plus an `addIssue`, and api-cloudrun's write\nguard calls it rather than keeping a second copy (api-cloudrun#1154).\n\n| grain | `items[0]` must be |\n|---|---|\n| order, fulfillment | a `destination` divider |\n| invoice with a source order (`linked`) | an `order` divider |\n| invoice with no source order | unruled |\n\n⚠️ **Only the FIRST row, deliberately.** An order-linked invoice may carry\norder-level lines (a card fee, a replacement, a service) between its `order`\ndivider and its first `destination` — 11 prod invoices do (measured\n2026-09-28), so an `items[1] === \"destination\"` rule would refuse correct\ndocuments.\n\n⚠️ **The order-less invoice is unruled, not exempted by accident.** 31 legacy\ninvoices carry no source order and bill a bare line first; no writer produces\nthat shape any more, and api-cloudrun's invoice writers require a source\norder rather than a refine here, so those 31 stay readable.\n\nEmpty `items` returns `[]`: an empty order or fulfillment is `items.min(1)`'s\nerror, not this one's, so the two never report one defect twice.",
+          "doc": "Whether a document's `items[0]` is the top divider its grain leads with —\nthe rule {@link checkLeadingDivider} enforces on the stored order, fulfillment\nand invoice schemas, as data, so a WRITER can refuse the same input with a 400\nbefore it builds a document the schema would reject with a 500. One author:\nthe refinement is this function plus an `addIssue`, and api-cloudrun's write\nguard calls it rather than keeping a second copy (api-cloudrun#1154).\n\n| grain | `items[0]` must be |\n|---|---|\n| order, fulfillment, purchase, purchase receipt | a `destination` divider |\n| invoice with a source order (`linked`) | an `order` divider |\n| invoice with no source order | unruled |\n\n⚠️ **Only the FIRST row, deliberately.** An order-linked invoice may carry\norder-level lines (a card fee, a replacement, a service) between its `order`\ndivider and its first `destination` — 11 prod invoices do (measured\n2026-09-28), so an `items[1] === \"destination\"` rule would refuse correct\ndocuments.\n\n⚠️ **The order-less invoice is unruled, not exempted by accident.** 31 legacy\ninvoices carry no source order and bill a bare line first; no writer produces\nthat shape any more, and api-cloudrun's invoice writers require a source\norder rather than a refine here, so those 31 stay readable.\n\nEmpty `items` returns `[]`: an empty order or fulfillment is `items.min(1)`'s\nerror, not this one's, so the two never report one defect twice.",
           "paramTags": [
             {
               "name": "linked",
@@ -14564,6 +14620,68 @@
           "name": "purchaseLineKeyOf",
           "signature": "purchaseLineKeyOf(row: Pick<PurchaseDocumentItem, \"path\" | \"path_purchase_item\">): string | null",
           "doc": "The purchase line a bill or credit line bills, as `[purchase uid, ...path in\nthat purchase]` joined by `/` — its move pointer when it has one, else its\nown path under its purchase divider — or `null` for a line outside any\npurchase divider. The one join key for \"which purchase line is this\".",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/schemas/purchase-receipt",
+      "moduleDoc": "Purchase receipt schemas — Firestore collection: `purchase-receipts`.\n\nThe CUSTODY document of the payable side: what a supplier actually sent, the\ntwin of the fulfillment (`schemas/fulfillment.ts`), which is what the\nwarehouse actually did for an order (one-document-model ruling 37, 7a C9).\n\n| | receivable | payable |\n|---|---|---|\n| initiator | `orders` | `purchases` |\n| custody | `fulfillments` (id = order id) | `purchase-receipts` (id = purchase id) |\n\n## It mirrors the fulfillment field for field\n\n- `uid` and `number` ARE the purchase's, as a fulfillment's are its order's;\n- `status` IS the purchase's status, so it reuses `PURCHASE_STATUSES` rather\n  than restating it (the fulfillment reuses `ORDER_STATUSES` for the same\n  reason: a member added to one list alone would fail every projection write);\n- `supplier` stands where the fulfillment's `organization` does — the\n  purchase's `{ uid, name }`, taken whole;\n- `destinations` are the purchase's own pair schema, so the three arguments to\n  the merge are already in the receipt's shape;\n- `reference`, the three `query_by_*` mirrors, `version`, the actors and the\n  timestamps are the fulfillment's;\n- `items` are the purchase's CUSTODY rows (its `sale` and `rental` rows, kit\n  headers included) and its dividers, at order depth, each line carrying a\n  physical `quantity` and the purchase's `quantity_ordered`.\n\nNo price: money is not a receiving concern, exactly as it is not a picking one.\nA `service` or `replacement` purchase line moves no custody, so it has no row.\n\n## The receiver owns the row's quantity, and nothing writes the receipt from the bookings\n\nThe direction is the outbound one (conformance on the 7a spec: the draft's\n\"bookings project into the receipt\" was a second upstream, a new pattern). A\nshort or extra delivery is a receipt-row EDIT, as a short pick is a\nfulfillment-row edit; the inbound bookings reconcile from the receipt, and the\ncustody steps act on the bookings through the inbound lever. The purchase →\nreceipt cascade is a three-way merge over {@link PurchaseReceipt}'s shared\nfields (`purchaseReceiptSharedFields`, `utils/shared-fields.ts`), with the\ncustody keep at booking grain.\n\n⚠️ **`number`, `status` and `reference` classify as homonyms and the merge\nskips them**: the purchase tags them `propagate: false` because a BILL's\nnumber, status and reference are its own. On a receipt all three are genuine\ncopies of the purchase's, so the writer sets them unconditionally, as\n`stageOrderFulfillmentSync` does a fulfillment's `number` and `status`.\n\nWhy a row exists that the purchase does not carry is ONE classifier,\n`receiptRowSources` (`utils/purchase-receipts.ts`).",
+      "symbols": [
+        {
+          "kind": "interface",
+          "name": "PurchaseReceipt",
+          "declaration": "interface PurchaseReceipt {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  destinations: PurchaseDestination[];\n  items: PurchaseReceiptItemType[];\n  reference: string | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_by: ActorRefType | null;\n  updated_by: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "A purchase receipt: the custody projection of one purchase, keyed by its uid."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseReceiptDestinationItemType",
+          "declaration": "interface PurchaseReceiptDestinationItemType {\n  uid: string;\n  type: \"destination\";\n  name: string;\n  path: string[];\n  description: string;\n}",
+          "doc": "Destination divider in a receipt's items array — the purchase's own divider arm."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseReceiptGroupItemType",
+          "declaration": "interface PurchaseReceiptGroupItemType {\n  uid: string;\n  type: \"group\";\n  name: string;\n  path: string[];\n  description: string;\n}",
+          "doc": "Group divider in a receipt's items array — the purchase's own divider arm."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseReceiptItem",
+          "declaration": "const PurchaseReceiptItem: z.ZodType<PurchaseReceiptItemType>;",
+          "doc": ""
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PurchaseReceiptItemType",
+          "declaration": "type PurchaseReceiptItemType = PurchaseReceiptLineItemType | PurchaseReceiptDestinationItemType | PurchaseReceiptGroupItemType;",
+          "doc": "Any row of a receipt's `items[]`."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseReceiptLineItem",
+          "declaration": "const PurchaseReceiptLineItem: z.ZodType<PurchaseReceiptLineItemType>;",
+          "doc": ""
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseReceiptLineItemType",
+          "declaration": "interface PurchaseReceiptLineItemType {\n  uid: string;\n  type: PurchaseProductItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  path: string[];\n  quantity_ordered: number | null;\n}",
+          "doc": "A receipt line — one custody row of the purchase, with no price."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseReceiptSchema",
+          "declaration": "const PurchaseReceiptSchema: z.ZodType<PurchaseReceipt>;",
+          "doc": ""
+        },
+        {
+          "kind": "function",
+          "name": "isPurchaseReceiptLineItem",
+          "signature": "isPurchaseReceiptLineItem(item: PurchaseReceiptItemType): item is PurchaseReceiptLineItemType",
+          "doc": "Narrows a receipt row to a line (excludes the two dividers).\n\n⚠️ Not a key-presence test: the decision is the row's TYPE, as\n`isFulfillmentLineItem`'s is.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -25347,6 +25465,47 @@
       ]
     },
     {
+      "entrypoint": "@cfs/core/utils/purchase-receipts",
+      "moduleDoc": "Purchase receipt rows — why a stored receipt row exists.\n\nThe receipt (`schemas/purchase-receipt.ts`) is the payable side's custody\ndocument, the twin of the fulfillment. This module holds the receipt's twin\nof `fulfillmentRowSources` (`utils/fulfillment-items.ts`): ONE classifier for\n\"why does this row exist\", which every reader of a receipt row asks through\n(the receiver's save, the purchase → receipt sync, the drift audit), so a new\nkind of receipt-only row is a new member of the union rather than a branch\ntaught to some readers and not others (core#129's lesson on the fulfillment).",
+      "symbols": [
+        {
+          "kind": "typeAlias",
+          "name": "ReceiptRowSource",
+          "declaration": "type ReceiptRowSource = \"purchase\" | \"kept\" | \"receipt_extra\" | \"unexplained\";",
+          "doc": "Why a stored receipt LINE row exists — {@link receiptRowSources}.\n\n| source | the row is | how it is told |\n|---|---|---|\n| `purchase` | the purchase's own custody line | a `sale` or `rental` purchase row is at its path |\n| `kept` | a line the purchase closed while its units were held (ruling 47) | `quantity_ordered: 0` |\n| `receipt_extra` | a line the supplier sent that the PO lacks (ruling 35) | `quantity_ordered: null` |\n| `unexplained` | none of these — a finding | — |\n\nThe fulfillment's `substitution`, `exchange` and `invoice_projected` have no\ntwin here: nothing substitutes on a receipt, an Exchange on a subrent is a\nPURCHASE-side operation (ruling 7), and no billing document projects onto the\nreceipt."
+        },
+        {
+          "kind": "interface",
+          "name": "ReceiptRowSourcePurchase",
+          "declaration": "interface ReceiptRowSourcePurchase {\n  items: ReadonlyArray<typeLiteral>;\n}",
+          "doc": "The purchase fields {@link receiptRowSources} reads."
+        },
+        {
+          "kind": "interface",
+          "name": "ReceiptRowSourceReceipt",
+          "declaration": "interface ReceiptRowSourceReceipt {\n  items: ReadonlyArray<PurchaseReceiptItemType | T>;\n}",
+          "doc": "The receipt fields {@link receiptRowSources} reads."
+        },
+        {
+          "kind": "function",
+          "name": "receiptRowSources",
+          "signature": "receiptRowSources(receipt: ReceiptRowSourceReceipt<T>, purchase: ReceiptRowSourcePurchase): Map<T, ReceiptRowSource>",
+          "doc": "Classify every LINE row of a stored receipt by why it exists.\n\n**Precedence is the table's order**, top first: a row at a purchase custody\npath is `purchase` whatever its `quantity_ordered` says (the sync re-stamps\nthat field later in the same transaction than the bookings read it, so it is\nnever the ownership test). Off the purchase, `quantity_ordered` is the\nserver's signature: `0` is a row the sync KEPT, `null` is a row a receiver\nadded, and a positive count names a purchase line that is not there — a sync\nthat did not run, which is the finding.\n\n⚠️ **Only the purchase's `sale` and `rental` rows count**, kit headers\nincluded: a `service` or `replacement` line moves no custody, so a receipt row\nat its path is not the purchase's.\n\n⚠️ **Dividers are not classified** — their survival is a placement question\n(`placeStoredOnlyRows`), not a provenance one, as on the fulfillment.",
+          "paramTags": [
+            {
+              "name": "receipt",
+              "doc": "The stored receipt"
+            },
+            {
+              "name": "purchase",
+              "doc": "The purchase it projects"
+            }
+          ],
+          "returnsTag": "Each line row, by object identity, mapped to its source"
+        }
+      ]
+    },
+    {
       "entrypoint": "@cfs/core/utils/purchases",
       "moduleDoc": "Purchase helpers — the cumulative share that prices every receipt and every\npushed bill line, the per-line headroom, and the status rule.\n\nDesign: api-cloudrun#1210.",
       "symbols": [
@@ -26343,6 +26502,12 @@
           "doc": "A projection pair as far as {@link deriveProjectionCollection} reads it."
         },
         {
+          "kind": "interface",
+          "name": "PurchaseReceiptSharedFields",
+          "declaration": "interface PurchaseReceiptSharedFields {\n  line: readonly SharedField[];\n  pair: readonly SharedField[];\n  doc: readonly SharedField[];\n}",
+          "doc": "The fields a purchase shares with its receipt (`purchase-receipts`), split by\nthe unit the merge runs on — the payable twin of\n{@link OrderFulfillmentSharedFields}, and the same shape for the same reason."
+        },
+        {
           "kind": "variable",
           "name": "SHARED_GROUP_META_KEY",
           "declaration": "const SHARED_GROUP_META_KEY: \"shared_group\";",
@@ -26428,6 +26593,14 @@
           "name": "orderFulfillmentSharedFields",
           "signature": "orderFulfillmentSharedFields(): OrderFulfillmentSharedFields",
           "doc": "{@link OrderFulfillmentSharedFields}, classified once per process.\n\n⭐ **Simpler than the invoice pair, and the schema is why.**\n`Fulfillment.destinations` is `z.array(DocDestination)` — the ORDER's own pair\nschema — so all three arguments to {@link mergeSharedFields} are already in\nthe downstream shape and there is no `toInvoiceDestinationPair` analogue to\nwrite, and no `uid_order` to key on. Pairs match on `pair.uid` alone.\n\n⚠️ **`number` and `status` classify as `homonym` and the merge therefore skips\nthem, which is correct and is NOT the whole story.** On a fulfillment both are\ngenuine copies of the order's — the uid IS the order's uid, the number IS the\norder's number, and `FulfillmentSchema` reuses `ORDER_STATUSES` for exactly\nthat reason. They stay on the caller's unconditional-copy list; the tag says\n\"not a propagated VALUE\", not \"leave it stale\".",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "purchaseReceiptSharedFields",
+          "signature": "purchaseReceiptSharedFields(): PurchaseReceiptSharedFields",
+          "doc": "{@link PurchaseReceiptSharedFields}, classified once per process, over\n`classifySharedFields(PurchaseSchema, PurchaseReceiptSchema)`.\n\nAs on the fulfillment, `PurchaseReceipt.destinations` is the purchase's own\npair schema, so the three arguments to {@link mergeSharedFields} are already in\nthe receipt's shape and pairs match on `pair.uid` alone.\n\n⚠️ **`quantity` keeps the purchase's `flat_money` group, and on this pair the\ngroup has ONE member.** The receipt carries no `amount_cents` or\n`out_of_service`, so the group decides the physical quantity alone, which is\nexactly the per-field rule: an untouched row follows the purchase, a row the\nreceiver edited keeps its count.\n\n⚠️ **`number`, `status` and `reference` are homonyms here and the merge skips\nthem**: the purchase tags them `propagate: false` for its bills, and a tag on\neither schema decides. On a receipt they are copies of the purchase's, so the\nwriter sets them unconditionally, as it does a fulfillment's `number` and\n`status`.",
           "paramTags": [],
           "returnsTag": null
         },

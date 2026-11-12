@@ -69,7 +69,13 @@
  * @module
  */
 import type { z } from "zod";
-import { FulfillmentSchema, hasCollectionLine, OrderSchema } from "../schemas/mod.ts";
+import {
+  FulfillmentSchema,
+  hasCollectionLine,
+  OrderSchema,
+  PurchaseReceiptSchema,
+  PurchaseSchema,
+} from "../schemas/mod.ts";
 import { readMetaThroughWrappers } from "../schemas/zod-walk.ts";
 
 /** How one shared field propagates — see the module docs. */
@@ -883,6 +889,68 @@ export function orderFulfillmentSharedFields(): OrderFulfillmentSharedFields {
     doc: fieldsUnder(c, ""),
   };
   return orderFulfillmentSharedFieldsMemo;
+}
+
+// ── The purchase → receipt schema pair (7a C9) ──────────────────────────────
+
+/**
+ * The fields a purchase shares with its receipt (`purchase-receipts`), split by
+ * the unit the merge runs on — the payable twin of
+ * {@link OrderFulfillmentSharedFields}, and the same shape for the same reason.
+ */
+export interface PurchaseReceiptSharedFields {
+  /** One `items[]` row, paths relative to the row. */
+  line: readonly SharedField[];
+  /** One `destinations[]` pair, paths relative to the pair. */
+  pair: readonly SharedField[];
+  /** The document itself, every row excluded. */
+  doc: readonly SharedField[];
+}
+
+let purchaseReceiptSharedFieldsMemo: PurchaseReceiptSharedFields | undefined;
+
+/**
+ * {@link PurchaseReceiptSharedFields}, classified once per process, over
+ * `classifySharedFields(PurchaseSchema, PurchaseReceiptSchema)`.
+ *
+ * As on the fulfillment, `PurchaseReceipt.destinations` is the purchase's own
+ * pair schema, so the three arguments to {@link mergeSharedFields} are already in
+ * the receipt's shape and pairs match on `pair.uid` alone.
+ *
+ * ⚠️ **`quantity` keeps the purchase's `flat_money` group, and on this pair the
+ * group has ONE member.** The receipt carries no `amount_cents` or
+ * `out_of_service`, so the group decides the physical quantity alone, which is
+ * exactly the per-field rule: an untouched row follows the purchase, a row the
+ * receiver edited keeps its count.
+ *
+ * ⚠️ **`number`, `status` and `reference` are homonyms here and the merge skips
+ * them**: the purchase tags them `propagate: false` for its bills, and a tag on
+ * either schema decides. On a receipt they are copies of the purchase's, so the
+ * writer sets them unconditionally, as it does a fulfillment's `number` and
+ * `status`.
+ *
+ * @throws Error when the classification reports a node it could not interpret
+ *   or a shared value nobody declared — the merge would otherwise skip or copy it
+ *   silently.
+ */
+export function purchaseReceiptSharedFields(): PurchaseReceiptSharedFields {
+  if (purchaseReceiptSharedFieldsMemo) return purchaseReceiptSharedFieldsMemo;
+  const c = classifySharedFields(PurchaseSchema, PurchaseReceiptSchema);
+  if (c.unhandled.length > 0) {
+    throw new Error(`purchase → receipt shared fields unclassified: ${JSON.stringify(c.unhandled)}`);
+  }
+  if (c.undeclared.length > 0) {
+    throw new Error(
+      `purchase → receipt shared fields undeclared — tag each with .meta({ propagate: true }) ` +
+        `or .meta({ propagate: false }) if it is a homonym: ${c.undeclared.join(", ")}`,
+    );
+  }
+  purchaseReceiptSharedFieldsMemo = {
+    line: fieldsUnder(c, "items[]"),
+    pair: fieldsUnder(c, "destinations[]"),
+    doc: fieldsUnder(c, ""),
+  };
+  return purchaseReceiptSharedFieldsMemo;
 }
 
 /**

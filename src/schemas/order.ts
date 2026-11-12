@@ -980,7 +980,13 @@ export function checkDestinationJoin(
 }
 
 /** Which document a {@link leadingDividerViolations} call is judging. */
-export type LeadingDividerGrain = "order" | "fulfillment" | "invoice" | "purchase" | "purchase_document";
+export type LeadingDividerGrain =
+  | "order"
+  | "fulfillment"
+  | "invoice"
+  | "purchase"
+  | "purchase_receipt"
+  | "purchase_document";
 
 /** A document whose first row is not the divider its grain leads with. */
 export interface LeadingDividerViolation {
@@ -1000,7 +1006,7 @@ export interface LeadingDividerViolation {
  *
  * | grain | `items[0]` must be |
  * |---|---|
- * | order, fulfillment | a `destination` divider |
+ * | order, fulfillment, purchase, purchase receipt | a `destination` divider |
  * | invoice with a source order (`linked`) | an `order` divider |
  * | invoice with no source order | unruled |
  *
@@ -1067,6 +1073,8 @@ export function checkLeadingDivider(
         ? "an order-linked invoice"
         : grain === "purchase_document"
         ? "a purchase-linked bill or credit"
+        : grain === "purchase_receipt"
+        ? "a purchase receipt"
         : `a ${grain}`;
       ctx.addIssue({
         code: "custom",
