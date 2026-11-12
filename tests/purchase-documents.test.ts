@@ -47,7 +47,6 @@ import {
   type PurchaseItem,
   type PurchaseRentalItem,
   purchaseDocumentLines,
-  derivePurchaseStatus,
   PurchaseItemInput,
   purchaseLineKeyOf,
   purchaseLines,
@@ -1055,11 +1054,12 @@ const header = (over: Partial<PurchaseItem> = {}) =>
 const part = (uid: string, over: Partial<PurchaseItem> = {}) =>
   buyLine({ uid, path: [DIV, KIT, uid], quantity: 100, amount_cents: 30000, zero_priced: false, ...over } as Partial<PurchaseItem>);
 
-Deno.test("kit header: it is a row, so purchaseLines drops it and the purchase completes without it", () => {
+Deno.test("kit header: it is a row, so purchaseLines drops it", () => {
+  // The header books nothing either, so it holds no purchase open: since 7a the
+  // status reads inbound bookings (tests/bookings-inbound.test.ts).
   const done = part(VEST, { quantity_received: 100, quantity_billed: 100 } as Partial<PurchaseItem>);
   const items = [purchaseDivider(DIV), header(), done];
   assertEquals(purchaseLines(items).map((l) => l.uid), [VEST]);
-  assertEquals(derivePurchaseStatus({ items }), "complete");
 });
 
 Deno.test("kit header: the schema takes a null account only on a flat row holding no money", () => {

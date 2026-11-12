@@ -4264,7 +4264,7 @@
           "kind": "variable",
           "name": "PURCHASE_ITEM_TYPES",
           "declaration": "const PURCHASE_ITEM_TYPES: readonly [\"sale\", \"rental\", \"service\", \"replacement\"];",
-          "doc": "The item arms — the SHARED line types (`SHARED_LINE_TYPES`,\n`schemas/side.ts`), labelled per side (owner, 2026-11-07): a payable `sale` is\na Buy, `rental` a Subrent, `service` a Charge, and `replacement` a supplier\nbilling CFS for a unit lost in CFS's hands. Until 2026-11 they were stored as\n`buy` / `subrent` / `charge`. `sale` is FIRST so `getInitialValues` seeds a buy.\n\n⚠️ **On this side a line's type is NOT its product's type** — a fleet buy is\na `sale` line naming a RENTAL product (posting to 1999). Never derive a\nproduct type, stock method or asset account from it.\n\n🔴 **Closed, and read through exhaustive switches.** Every reader that\nbranches on an item's arm switches over this union with a `never` default\n(`purchaseItemSupplies`, `purchaseItemResolved`, …), so a new member is a\ncompile error at every one of them rather than a silent fall-through.\n\nExplicit tuple type rather than `as const` alone: core#43 is JSR's npm\n`.d.ts` emit truncating an inferred tuple."
+          "doc": "The item arms — the SHARED line types (`SHARED_LINE_TYPES`,\n`schemas/side.ts`), labelled per side (owner, 2026-11-07): a payable `sale` is\na Buy, `rental` a Subrent, `service` a Charge, and `replacement` a supplier\nbilling CFS for a unit lost in CFS's hands. Until 2026-11 they were stored as\n`buy` / `subrent` / `charge`. `sale` is FIRST so `getInitialValues` seeds a buy.\n\n⚠️ **On this side a line's type is NOT its product's type** — a fleet buy is\na `sale` line naming a RENTAL product (posting to 1999). Never derive a\nproduct type, stock method or asset account from it.\n\n🔴 **Closed, and read through exhaustive switches.** Every reader that\nbranches on an item's arm switches over this union with a `never` default\n(`purchaseItemSupplies`, `purchaseItemCanceled`, …), so a new member is a\ncompile error at every one of them rather than a silent fall-through.\n\nExplicit tuple type rather than `as const` alone: core#43 is JSR's npm\n`.d.ts` emit truncating an inferred tuple."
         },
         {
           "kind": "variable",
@@ -4282,7 +4282,13 @@
           "kind": "variable",
           "name": "PURCHASE_STATUSES",
           "declaration": "const PURCHASE_STATUSES: \"active\" | \"complete\" | \"canceled\"[];",
-          "doc": "Derived by {@link derivePurchaseStatus}, never client-set. The out-of-service\nvocabulary, for the reason `OOS_STATUSES` gives: orders, bookings and cards\nall say `active` for \"in progress\".\n\nPartial progress — some received, some billed — is read off the buckets, not\nencoded here. A status per stage (`partially_received`, `billed`, …) would be\na second rendering of numbers the item already carries."
+          "doc": "Never client-set: `canceled` is an operator cancel, and `active` / `complete`\nare read off the inbound bookings by `derivePurchaseStatus`\n(`@cfs/core/utils/bookings-inbound`, rulings 55, 56, 61). The out-of-service\nvocabulary, for the reason `OOS_STATUSES` gives: orders, bookings and cards\nall say `active` for \"in progress\".\n\nPartial progress — some received, some billed — is read off the buckets, not\nencoded here. A status per stage (`partially_received`, `billed`, …) would be\na second rendering of numbers the item already carries."
+        },
+        {
+          "kind": "variable",
+          "name": "PURCHASE_STATUS_TRAITS",
+          "declaration": "const PURCHASE_STATUS_TRAITS: Readonly<Record<PurchaseStatusType, PurchaseStatusTraits>>;",
+          "doc": "The table. See {@link PurchaseStatusTraits}."
         },
         {
           "kind": "typeAlias",
@@ -5423,6 +5429,12 @@
           "name": "PurchaseStatusEnum",
           "declaration": "const PurchaseStatusEnum: z.ZodType<PurchaseStatusType>;",
           "doc": "Zod schema for PurchaseStatusType."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseStatusTraits",
+          "declaration": "interface PurchaseStatusTraits {\n  authored: boolean;\n  planBucket: \"ordered\" | null;\n}",
+          "doc": "What a purchase status means for its inbound bookings — the twin of\n`ORDER_STATUS_TRAITS` (one-document-model 7a, C6), cut to the two traits the\ninbound ladder reads.\n\n- `authored` — an operator sets it; otherwise it is read off the bookings.\n- `planBucket` — where a booking's unstarted units sit; `null` books no plan\n  (custody stays, as on a canceled order).\n\n`Record<PurchaseStatusType, …>`, so a new status is a compile error here.\n⚠️ `complete`'s plan bucket is `ordered`, as a complete order's is `reserved`:\na raise on a complete purchase books as ordered work and reopens it."
         },
         {
           "kind": "typeAlias",
@@ -7986,14 +7998,6 @@
         },
         {
           "kind": "function",
-          "name": "derivePurchaseStatus",
-          "signature": "derivePurchaseStatus(purchase: Pick<Purchase, \"items\">): PurchaseStatusType",
-          "doc": "The purchase's status, derived — never client-set.\n\n- `canceled` when every item is canceled in full ({@link purchaseItemCanceled}).\n  A cancel is a close with nothing received.\n- `complete` when every item is resolved ({@link purchaseItemResolved}).\n- `active` otherwise.\n\n⚠️ **Received in full but unbilled is `active`, deliberately.** The owner's\nsequence bills before delivery as often as after, and a purchase that reads\n`complete` while a bill is still owed hides exactly the work the split exists\nto show.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
           "name": "deriveQueryByItemTypes",
           "signature": "deriveQueryByItemTypes(rows: readonly Pick<PurchaseRow, \"type\">[]): PurchaseItemTypeType[]",
           "doc": "Derive `query_by_item_types` — the distinct LINE types, in first-seen order (dividers are not a type of purchase).",
@@ -8720,14 +8724,6 @@
           "name": "purchaseItemProduct",
           "signature": "purchaseItemProduct(item: PurchaseItem): string | undefined",
           "doc": "The product an item ORDERS, or `undefined` — a service or replacement line's\n`uid_product` is attribution, not an order.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
-          "name": "purchaseItemResolved",
-          "signature": "purchaseItemResolved(item: PurchaseItem): boolean",
-          "doc": "Has this item nothing left to happen?\n\n- **sale** — every unit received, and billed for at least what is ordered\n  (over-billing is flagged, not held open). A close lowers `quantity` to what\n  came, so a closed line resolves here.\n- **rental** — every unit received, every unit received gone\n  back (a hire with units still in CFS's custody is not finished), and on a\n  flat line billed in full. A TIME line resolves on custody alone (Q7): it\n  bills windows as they accrue, with no count to close.\n- **service** / **replacement** — a flat one when billed in full; a time one\n  only once canceled, since a carrier line accrues for as long as it lives.\n\nPayment is the bill's business and holds nothing open.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -13561,7 +13557,7 @@
     },
     {
       "entrypoint": "@cfs/core/schemas/purchase",
-      "moduleDoc": "Purchase document schema — Firestore collection: `purchases`\n\nWhat CFS ORDERED from a supplier: one ITEM per thing ordered, each with the\nquantity and the amount agreed. It moves nothing. api-cloudrun#1210 split a\n`purchase` movement, which used to be the order, the delivery, the bill and\n(through Xero) the debt all at once, into four facts with four homes:\n\n| fact     | home                                                   | moves                         |\n|----------|--------------------------------------------------------|-------------------------------|\n| ordered  | this document                                          | nothing                       |\n| received | `purchase` movements naming it in `sources[]`          | `quantity_held`, basis, units |\n| billed   | `purchase-bills` / `purchase-credits` naming it        | the Xero document             |\n| paid     | `settlements` rows against a bill                      | the bill's `totals`           |\n\nThe owner's real sequence is order → bill → delivery (days or weeks later,\npossibly partial) → payment, and before this document nothing could hold\n\"billed, not received\" — movement #3882 recorded three radios that had not\narrived. Design: api-cloudrun#1210.\n\n## The shape is the out-of-service record's, on purpose\n\n`schemas/out-of-service.ts` is the package's parent-with-movements shape and this\ncopies every part of it:\n\n- **Its receipts name it in `sources[]`** and it finds them through\n  `query_by_sources`. There is no `Movement.purchase` field and no back-list\n  of movement ids here — the HISTORY of a purchase is the journal.\n- **Co-written buckets** per item (`quantity_received`, `quantity_billed`,\n  the line `status`), each written in the same transaction as the receipt,\n  bill or close that moves it — the analogue of the record's `breakdown`.\n- **A derived status** in the record's vocabulary (`active | complete |\n  canceled`), authored by {@link derivePurchaseStatus} and refined here, so a\n  document asserting one status and holding buckets that say another does not\n  parse.\n\n## Items take the invoice's shape (api-cloudrun#1407)\n\n`items[]` is discriminated on `type`, the house key for a stored line union\n(`OrderDocItem`, `InvoiceDocItem`), and the ARM is per item — there is no\ndocument-level `kind`, so one purchase may mix arms:\n\n| `type` (label) | what CFS gets | custody | supply | priced |\n|---|---|---|---|---|\n| `sale` (Buy) | ownership | receipts raise `quantity_held` and basis | `inbound` until received | flat |\n| `rental` (Subrent) | units for a hire window | `subrent_in` / `subrent_out`, never owned | `subrent` over `dates` | flat or time |\n| `service` (Charge) | a service with no custody — a carrier line on an owned device, freight, a fee | none | none | flat or time |\n| `replacement` | the supplier billing CFS for its unit lost in CFS's hands | none | none | flat or time |\n\nThe types are the receivable side's, labelled per side (`SIDE_CONTRACTS`,\n`schemas/side.ts`; stored as `buy` / `subrent` / `charge` until the\none-document-model Phase 1 migration). (`usage` and `direct` retired into\n`charge`, and the nested `SubrentBilling` union into the price rule below —\npurchases-as-documents Phase 2.)\n\nEach item carries its own **row identity** (`uid`, and `path` = `[uid]`\nuntil a divider type exists — the writer is its one author), so one product\nmay sit on two items: a buy plus a re-order, or two hire windows. Bills and\ncredits name an item by `path` (`path_purchase_item`), the way an invoice line\nnames its order line.\n\nEach item also carries its own **posting** — `ledger_account` and\n`uid_tracking_category` (`LedgerPostingCore`), stamped at write rather than\nworked out at push. The account is constrained per type by\n{@link payablePostingIssues}: a sale posts to an inventory asset account\n(`COA_ASSET_CODES`, or a temporary de minimis expense account), a rental to a\nDirect Costs account (`COA_COST_CODES`), a service or replacement to any\naccount. Both are `propagate: true`, so a bill item follows its purchase\nitem's posting until an operator changes it there.\n\n## Money — flat lines state a total, time lines carry rates\n\nEvery item snapshots the formula it is priced by\n(`price.price_formula = { uid, name, basis }`, see {@link PurchaseLinePrice}):\n\n- **flat** — `amount_cents` is what the whole item costs, NET of any supplier\n  discount, integer cents, and `price.rates` is empty. The k-th receipt or\n  bill against an item is priced by `cumulativeShareCents`\n  (`@cfs/core/utils/purchases`), which rounds the CUMULATIVE share once, so the\n  partials sum to `amount_cents` exactly with no remainder rule. There is no\n  stored per-unit rate: measured on prod, most buys cost a total that does\n  not divide by their quantity, and no reader needs one (`perUnitCostAt4dp`\n  derives the display rate).\n- **time** — commits nothing on the purchase (`amount_cents` and\n  `quantity_billed` null, money zero); each bill meters it from its\n  destination pair's charge windows as an order line is metered, and bills in\n  parts by COUNTS (`remainingTimeCounts`, one-document-model Phase 3).\n\nEither way the line's `price` carries the money `priceDocument` computes —\nsee {@link PurchaseLinePrice}.\n\nA per-line REFINE ({@link purchaseLineMoneyIssues}) rather than union arms,\nbecause `basis` cuts across all three types; arms would split each in two.\nIt also makes `quantity_billed` null exactly on time lines: billed is a\nco-written bucket only on flat lines, and a time line resolves on custody\n(Q7). Over-billing is never refused (D5) — the purchase↔bill diff flags it.\n\n`total_cents` is the COMMITTED amount (owner, 2026-10-30): Σ of the flat\nlines' amounts. A time line adds 0; what was billed against it is its bills'\ntotals.\n\nNo tax is CHARGED on a purchase (owner, 2026-10-05): stock bought for sale or\nrent is bought resale-exempt and the tax is collected from the end user. The\nline still carries a tax class and `taxes: []` — exemption, not absence (see\n{@link PurchaseLinePrice}).\n\nThe document stays one `z.strictObject` with a `superRefine` rather than a\nroot `discriminatedUnion`: no registered document schema has one, and the\ncolumn walker, `getInitialValues`, `getTestDoc` and the stored-defaults walk\nall assume a root object.",
+      "moduleDoc": "Purchase document schema — Firestore collection: `purchases`\n\nWhat CFS ORDERED from a supplier: one ITEM per thing ordered, each with the\nquantity and the amount agreed. It moves nothing. api-cloudrun#1210 split a\n`purchase` movement, which used to be the order, the delivery, the bill and\n(through Xero) the debt all at once, into four facts with four homes:\n\n| fact     | home                                                   | moves                         |\n|----------|--------------------------------------------------------|-------------------------------|\n| ordered  | this document                                          | nothing                       |\n| received | `purchase` movements naming it in `sources[]`          | `quantity_held`, basis, units |\n| billed   | `purchase-bills` / `purchase-credits` naming it        | the Xero document             |\n| paid     | `settlements` rows against a bill                      | the bill's `totals`           |\n\nThe owner's real sequence is order → bill → delivery (days or weeks later,\npossibly partial) → payment, and before this document nothing could hold\n\"billed, not received\" — movement #3882 recorded three radios that had not\narrived. Design: api-cloudrun#1210.\n\n## The shape is the out-of-service record's, on purpose\n\n`schemas/out-of-service.ts` is the package's parent-with-movements shape and this\ncopies every part of it:\n\n- **Its receipts name it in `sources[]`** and it finds them through\n  `query_by_sources`. There is no `Movement.purchase` field and no back-list\n  of movement ids here — the HISTORY of a purchase is the journal.\n- **Co-written buckets** per item (`quantity_received`, `quantity_billed`,\n  the line `status`), each written in the same transaction as the receipt,\n  bill or close that moves it — the analogue of the record's `breakdown`.\n- **A derived status** in the record's vocabulary (`active | complete |\n  canceled`), custody-only (rulings 55, 56): read off the purchase's INBOUND\n  bookings by `derivePurchaseStatus` (`@cfs/core/utils/bookings-inbound`), and\n  written by the writer that finalizes them. It reads another collection, so\n  no document refine can check it, as none checks an order's.\n\n## Items take the invoice's shape (api-cloudrun#1407)\n\n`items[]` is discriminated on `type`, the house key for a stored line union\n(`OrderDocItem`, `InvoiceDocItem`), and the ARM is per item — there is no\ndocument-level `kind`, so one purchase may mix arms:\n\n| `type` (label) | what CFS gets | custody | supply | priced |\n|---|---|---|---|---|\n| `sale` (Buy) | ownership | receipts raise `quantity_held` and basis | `inbound` until received | flat |\n| `rental` (Subrent) | units for a hire window | `subrent_in` / `subrent_out`, never owned | `subrent` over `dates` | flat or time |\n| `service` (Charge) | a service with no custody — a carrier line on an owned device, freight, a fee | none | none | flat or time |\n| `replacement` | the supplier billing CFS for its unit lost in CFS's hands | none | none | flat or time |\n\nThe types are the receivable side's, labelled per side (`SIDE_CONTRACTS`,\n`schemas/side.ts`; stored as `buy` / `subrent` / `charge` until the\none-document-model Phase 1 migration). (`usage` and `direct` retired into\n`charge`, and the nested `SubrentBilling` union into the price rule below —\npurchases-as-documents Phase 2.)\n\nEach item carries its own **row identity** (`uid`, and `path` = `[uid]`\nuntil a divider type exists — the writer is its one author), so one product\nmay sit on two items: a buy plus a re-order, or two hire windows. Bills and\ncredits name an item by `path` (`path_purchase_item`), the way an invoice line\nnames its order line.\n\nEach item also carries its own **posting** — `ledger_account` and\n`uid_tracking_category` (`LedgerPostingCore`), stamped at write rather than\nworked out at push. The account is constrained per type by\n{@link payablePostingIssues}: a sale posts to an inventory asset account\n(`COA_ASSET_CODES`, or a temporary de minimis expense account), a rental to a\nDirect Costs account (`COA_COST_CODES`), a service or replacement to any\naccount. Both are `propagate: true`, so a bill item follows its purchase\nitem's posting until an operator changes it there.\n\n## Money — flat lines state a total, time lines carry rates\n\nEvery item snapshots the formula it is priced by\n(`price.price_formula = { uid, name, basis }`, see {@link PurchaseLinePrice}):\n\n- **flat** — `amount_cents` is what the whole item costs, NET of any supplier\n  discount, integer cents, and `price.rates` is empty. The k-th receipt or\n  bill against an item is priced by `cumulativeShareCents`\n  (`@cfs/core/utils/purchases`), which rounds the CUMULATIVE share once, so the\n  partials sum to `amount_cents` exactly with no remainder rule. There is no\n  stored per-unit rate: measured on prod, most buys cost a total that does\n  not divide by their quantity, and no reader needs one (`perUnitCostAt4dp`\n  derives the display rate).\n- **time** — commits nothing on the purchase (`amount_cents` and\n  `quantity_billed` null, money zero); each bill meters it from its\n  destination pair's charge windows as an order line is metered, and bills in\n  parts by COUNTS (`remainingTimeCounts`, one-document-model Phase 3).\n\nEither way the line's `price` carries the money `priceDocument` computes —\nsee {@link PurchaseLinePrice}.\n\nA per-line REFINE ({@link purchaseLineMoneyIssues}) rather than union arms,\nbecause `basis` cuts across all three types; arms would split each in two.\nIt also makes `quantity_billed` null exactly on time lines: billed is a\nco-written bucket only on flat lines, and a time line resolves on custody\n(Q7). Over-billing is never refused (D5) — the purchase↔bill diff flags it.\n\n`total_cents` is the COMMITTED amount (owner, 2026-10-30): Σ of the flat\nlines' amounts. A time line adds 0; what was billed against it is its bills'\ntotals.\n\nNo tax is CHARGED on a purchase (owner, 2026-10-05): stock bought for sale or\nrent is bought resale-exempt and the tax is collected from the end user. The\nline still carries a tax class and `taxes: []` — exemption, not absence (see\n{@link PurchaseLinePrice}).\n\nThe document stays one `z.strictObject` with a `superRefine` rather than a\nroot `discriminatedUnion`: no registered document schema has one, and the\ncolumn walker, `getInitialValues`, `getTestDoc` and the stored-defaults walk\nall assume a root object.",
       "symbols": [
         {
           "kind": "variable",
@@ -13591,7 +13587,7 @@
           "kind": "variable",
           "name": "PURCHASE_ITEM_TYPES",
           "declaration": "const PURCHASE_ITEM_TYPES: readonly [\"sale\", \"rental\", \"service\", \"replacement\"];",
-          "doc": "The item arms — the SHARED line types (`SHARED_LINE_TYPES`,\n`schemas/side.ts`), labelled per side (owner, 2026-11-07): a payable `sale` is\na Buy, `rental` a Subrent, `service` a Charge, and `replacement` a supplier\nbilling CFS for a unit lost in CFS's hands. Until 2026-11 they were stored as\n`buy` / `subrent` / `charge`. `sale` is FIRST so `getInitialValues` seeds a buy.\n\n⚠️ **On this side a line's type is NOT its product's type** — a fleet buy is\na `sale` line naming a RENTAL product (posting to 1999). Never derive a\nproduct type, stock method or asset account from it.\n\n🔴 **Closed, and read through exhaustive switches.** Every reader that\nbranches on an item's arm switches over this union with a `never` default\n(`purchaseItemSupplies`, `purchaseItemResolved`, …), so a new member is a\ncompile error at every one of them rather than a silent fall-through.\n\nExplicit tuple type rather than `as const` alone: core#43 is JSR's npm\n`.d.ts` emit truncating an inferred tuple."
+          "doc": "The item arms — the SHARED line types (`SHARED_LINE_TYPES`,\n`schemas/side.ts`), labelled per side (owner, 2026-11-07): a payable `sale` is\na Buy, `rental` a Subrent, `service` a Charge, and `replacement` a supplier\nbilling CFS for a unit lost in CFS's hands. Until 2026-11 they were stored as\n`buy` / `subrent` / `charge`. `sale` is FIRST so `getInitialValues` seeds a buy.\n\n⚠️ **On this side a line's type is NOT its product's type** — a fleet buy is\na `sale` line naming a RENTAL product (posting to 1999). Never derive a\nproduct type, stock method or asset account from it.\n\n🔴 **Closed, and read through exhaustive switches.** Every reader that\nbranches on an item's arm switches over this union with a `never` default\n(`purchaseItemSupplies`, `purchaseItemCanceled`, …), so a new member is a\ncompile error at every one of them rather than a silent fall-through.\n\nExplicit tuple type rather than `as const` alone: core#43 is JSR's npm\n`.d.ts` emit truncating an inferred tuple."
         },
         {
           "kind": "variable",
@@ -13609,7 +13605,13 @@
           "kind": "variable",
           "name": "PURCHASE_STATUSES",
           "declaration": "const PURCHASE_STATUSES: \"active\" | \"complete\" | \"canceled\"[];",
-          "doc": "Derived by {@link derivePurchaseStatus}, never client-set. The out-of-service\nvocabulary, for the reason `OOS_STATUSES` gives: orders, bookings and cards\nall say `active` for \"in progress\".\n\nPartial progress — some received, some billed — is read off the buckets, not\nencoded here. A status per stage (`partially_received`, `billed`, …) would be\na second rendering of numbers the item already carries."
+          "doc": "Never client-set: `canceled` is an operator cancel, and `active` / `complete`\nare read off the inbound bookings by `derivePurchaseStatus`\n(`@cfs/core/utils/bookings-inbound`, rulings 55, 56, 61). The out-of-service\nvocabulary, for the reason `OOS_STATUSES` gives: orders, bookings and cards\nall say `active` for \"in progress\".\n\nPartial progress — some received, some billed — is read off the buckets, not\nencoded here. A status per stage (`partially_received`, `billed`, …) would be\na second rendering of numbers the item already carries."
+        },
+        {
+          "kind": "variable",
+          "name": "PURCHASE_STATUS_TRAITS",
+          "declaration": "const PURCHASE_STATUS_TRAITS: Readonly<Record<PurchaseStatusType, PurchaseStatusTraits>>;",
+          "doc": "The table. See {@link PurchaseStatusTraits}."
         },
         {
           "kind": "typeAlias",
@@ -13900,6 +13902,12 @@
           "doc": "Zod schema for PurchaseStatusType."
         },
         {
+          "kind": "interface",
+          "name": "PurchaseStatusTraits",
+          "declaration": "interface PurchaseStatusTraits {\n  authored: boolean;\n  planBucket: \"ordered\" | null;\n}",
+          "doc": "What a purchase status means for its inbound bookings — the twin of\n`ORDER_STATUS_TRAITS` (one-document-model 7a, C6), cut to the two traits the\ninbound ladder reads.\n\n- `authored` — an operator sets it; otherwise it is read off the bookings.\n- `planBucket` — where a booking's unstarted units sit; `null` books no plan\n  (custody stays, as on a canceled order).\n\n`Record<PurchaseStatusType, …>`, so a new status is a compile error here.\n⚠️ `complete`'s plan bucket is `ordered`, as a complete order's is `reserved`:\na raise on a complete purchase books as ordered work and reopens it."
+        },
+        {
           "kind": "typeAlias",
           "name": "PurchaseStatusType",
           "declaration": "type PurchaseStatusType = indexedAccess;",
@@ -13988,14 +13996,6 @@
           "name": "UpdatePurchaseInputType",
           "declaration": "interface UpdatePurchaseInputType {\n  date?: string;\n  reference?: string | null;\n  notes?: string | null;\n  items?: PurchaseRowInputType[];\n  destinations?: PurchaseDestinationInputType[];\n  version: number;\n}",
           "doc": "Input for amending a purchase — a PATCH.\n\n`items`, when present, is the complete next array of dividers and lines, paired\nwith the stored rows by path (then uid and ancestry, `pairItemsAcrossRebuild`),\nnever by uid alone: a line's uid is its product's. A stored item absent from it is removed — refused once it has any\nreceipt, bill or return. A named item may not change `type`. On a buy the\nwriter refuses to cut `quantity` below what is received or billed, and to\nchange `amount_cents` once it has any receipt or bill: a price that moved\nafter goods or a bill exist is a short close plus a new item, because every\nreceipt already carries its share of the old price. Those are cross-document\nfacts the writer holds, so they are not refined here.\n\n⚠️ **A SUBRENT item's price is not frozen by a receipt**, because its receipts\ncarry no cost (`subrent_in` is cost-forbidden). So on a subrent the writer lets\n`amount_cents` and its pair's `dates.collection_end` move after receipt — a\npaid hire extension — with `quantity` still floored at what is received.\n\n`destinations`, when present, states the listed pairs. Absent keeps every\nstored pair as it is."
-        },
-        {
-          "kind": "function",
-          "name": "derivePurchaseStatus",
-          "signature": "derivePurchaseStatus(purchase: Pick<Purchase, \"items\">): PurchaseStatusType",
-          "doc": "The purchase's status, derived — never client-set.\n\n- `canceled` when every item is canceled in full ({@link purchaseItemCanceled}).\n  A cancel is a close with nothing received.\n- `complete` when every item is resolved ({@link purchaseItemResolved}).\n- `active` otherwise.\n\n⚠️ **Received in full but unbilled is `active`, deliberately.** The owner's\nsequence bills before delivery as often as after, and a purchase that reads\n`complete` while a bill is still owed hides exactly the work the split exists\nto show.",
-          "paramTags": [],
-          "returnsTag": null
         },
         {
           "kind": "function",
@@ -14130,14 +14130,6 @@
           "name": "purchaseItemProduct",
           "signature": "purchaseItemProduct(item: PurchaseItem): string | undefined",
           "doc": "The product an item ORDERS, or `undefined` — a service or replacement line's\n`uid_product` is attribution, not an order.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
-          "name": "purchaseItemResolved",
-          "signature": "purchaseItemResolved(item: PurchaseItem): boolean",
-          "doc": "Has this item nothing left to happen?\n\n- **sale** — every unit received, and billed for at least what is ordered\n  (over-billing is flagged, not held open). A close lowers `quantity` to what\n  came, so a closed line resolves here.\n- **rental** — every unit received, every unit received gone\n  back (a hire with units still in CFS's custody is not finished), and on a\n  flat line billed in full. A TIME line resolves on custody alone (Q7): it\n  bills windows as they accrue, with no count to close.\n- **service** / **replacement** — a flat one when billed in full; a time one\n  only once canceled, since a carrier line accrues for as long as it lives.\n\nPayment is the bill's business and holds nothing open.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -17931,6 +17923,74 @@
           "name": "untrackedUnitCount",
           "signature": "untrackedUnitCount(booking: Pick<Booking, \"breakdown\" | \"units\">, key: BookingUnitBucketType, seeded: boolean): number",
           "doc": "How many of a bucket's units are UNTRACKED on a unit-tracked booking:\n`breakdown[k] − units[k].length`. Units a bulk → serialized conversion found\nalready prepped or out and could not name (`api-cloudrun/.claude/plans/serial-tracking.md`\nD1, D9).\n\nDerived, never stored: given the booking refine `units[k].length ≤\nbreakdown[k]`, a stored copy could only restate this, so it could only drift.\n\n🔴 **A stored `units: null` means two things, and only the roster tells them\napart** — hence `seeded`, which is whether the product's unit roster exists.\nUnseeded (bulk, or serialized and not numbered yet), the booking is not\nunit-tracked and the question does not arise: `0`. Seeded, the booking IS\ntracked with nothing named yet — the order path stamps `null` on a new\nbooking of a seeded product on purpose (serial-tracking D2, D5) — so every\nunit in the bucket is untracked: `breakdown[k]`. Reading `null` as `0` there\nis what made this disagree with `rebookProblems` (core#135).",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/utils/bookings-inbound",
+      "moduleDoc": "The inbound booking ladder's derivations: the projection of a purchase line\nonto its inbound booking, the booking's own status, the PURCHASE's status\nread off its inbound bookings, and the cancel refusal — each the twin of an\noutbound function in `utils/bookings.ts`\n(`api-cloudrun/.claude/plans/one-document-model.md` § *7a core spec*, C6–C7).\n\n⭐ **Each ladder has its own function; nothing branches on side** (C6). The\nper-type key sets are the predicates in `schemas/_inbound-breakdown.ts`\n(`isInboundTerminal`, `isInboundLive`), never a table keyed here.",
+      "symbols": [
+        {
+          "kind": "interface",
+          "name": "InboundCancelBlocker",
+          "declaration": "interface InboundCancelBlocker {\n  uid: string;\n  live: Partial<Record<InboundBreakdownKeyType, number>>;\n}",
+          "doc": "One inbound booking that blocks a purchase cancel, and what it still holds."
+        },
+        {
+          "kind": "function",
+          "name": "calculateInboundBreakdown",
+          "signature": "calculateInboundBreakdown(status: PurchaseStatusType, _type: InboundBookingTypeType, quantity: number, existing?: InboundBreakdown): InboundBreakdown",
+          "doc": "Project an inbound booking's breakdown for a PURCHASE status, line type and\nquantity — the twin of `calculateBookingBreakdown`, over\n{@link PURCHASE_STATUS_TRAITS} as that one reads `ORDER_STATUS_TRAITS`.\n\nONE rule: carry every history key as it stands and put the rest of the\nquantity in the status's plan bucket.\n\n| purchase status | breakdown |\n|---|---|\n| `active` / `complete` | `ordered` = quantity − carried, floored at 0 |\n| `canceled` | custody kept, no plan (the outbound `keepCustodyOnly` arm) |\n\nThere is no `draft` (ruling 56: a purchase being written exists only in the\nclient). A `complete` purchase raised past what came books the raise as\n`ordered`, and the purchase re-derives `active` ({@link derivePurchaseStatus}).\n\nThe open bucket is floored at zero, so the result sums to `max(quantity,\ncarried)`: an over-receipt keeps its units, and `quantity` (the PHYSICAL\nnumber) follows the breakdown rather than the paperwork.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "deriveInboundBookingStatus",
+          "signature": "deriveInboundBookingStatus(b: Pick<InboundBooking, \"type\" | \"breakdown\">): InboundBookingStatusType",
+          "doc": "An inbound booking's status, read off its breakdown — never sent:\n`complete` when closed ({@link isInboundBookingClosed}), else `ordered` while\nno unit has left the plan, else `active`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "derivePurchaseStatus",
+          "signature": "derivePurchaseStatus(stored: PurchaseStatusType, bookings: ReadonlyArray<Pick<InboundBooking, \"type\" | \"breakdown\">>): PurchaseStatusType",
+          "doc": "A purchase's status, custody-only (rulings 55, 56, 61): the operator's\n`canceled` stands; otherwise `complete` when every inbound booking is closed,\nelse `active`. Billing holds nothing open: an unbilled line surfaces through\nthe remaining-to-bill engine and the diff (ruling 42), not here.\n\n| stored | status |\n|---|---|\n| `canceled` | `canceled`, always (an operator cancel, refused while custody is live: {@link inboundCancelRefusal}) |\n| `active` / `complete` | `complete` when every inbound booking is closed, else `active` |\n\n⚠️ **A purchase that books nothing is `complete` (ruling 61)** — a PO of only\nCharge lines, or one whose every line was closed to 0. That is the one\ndeliberate divergence from `deriveOrderStatus`, which keeps the STORED status\nwhen the order books nothing: an order's `complete` can be operator-reached,\na purchase's cannot, so there is no stored value worth keeping.\n\nIts guard that \"kept bookings alone never complete the parent\" collapses here\nby the same ruling: a KEPT inbound booking (`quantity_ordered: 0`, its line\nclosed with units in hand) holds the purchase open exactly while it is open,\nand once closed, a purchase of only kept bookings books nothing.\n\nThe status reads ANOTHER collection, so the writer that finalizes the\npurchase's bookings writes it, as `finalizeOrderBookings` writes an order's.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "inboundCancelRefusal",
+          "signature": "inboundCancelRefusal(bookings: ReadonlyArray<Pick<InboundBooking, \"uid\" | \"type\" | \"breakdown\">>): typeLiteral | null",
+          "doc": "Why a purchase may not be canceled yet, or `null` when it may — the twin of\n`cancelRefusal`. Refused while any inbound booking holds LIVE custody\n(`inboundLiveCustody`): a Buy's units arriving or in receiving, and a\nSubrent's anywhere in CFS's hands, rented units on a shelf included. They go\nback to the supplier, or the receipt is undone, first, each an ordinary\ncustody step with its movement.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "inboundLiveCustody",
+          "signature": "inboundLiveCustody(b: Pick<InboundBooking, \"type\" | \"breakdown\">): number",
+          "doc": "Units physically moving or in CFS's hands and not at an end: the\n`isInboundLive` keys for the booking's type. The twin of `liveCustody`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isInboundBookingClosed",
+          "signature": "isInboundBookingClosed(b: Pick<InboundBooking, \"type\" | \"breakdown\">): boolean",
+          "doc": "Per-booking closure rule: every unit sits in a TERMINAL key for its type\n(`isInboundTerminal`). A Buy closes on a shelf or damaged; a Subrent once\nevery unit is back with its supplier or settled lost or damaged — a rented\nunit on a CFS shelf holds the booking open. A booking holding nothing is\nclosed.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "sumInboundBreakdown",
+          "signature": "sumInboundBreakdown(b: InboundBreakdown): number",
+          "doc": "Σ of an inbound breakdown, over every key — never spelled key by key.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -25302,8 +25362,8 @@
         {
           "kind": "function",
           "name": "derivePurchaseStatus",
-          "signature": "derivePurchaseStatus(purchase: Pick<Purchase, \"items\">): PurchaseStatusType",
-          "doc": "The purchase's status, derived — never client-set.\n\n- `canceled` when every item is canceled in full ({@link purchaseItemCanceled}).\n  A cancel is a close with nothing received.\n- `complete` when every item is resolved ({@link purchaseItemResolved}).\n- `active` otherwise.\n\n⚠️ **Received in full but unbilled is `active`, deliberately.** The owner's\nsequence bills before delivery as often as after, and a purchase that reads\n`complete` while a bill is still owed hides exactly the work the split exists\nto show.",
+          "signature": "derivePurchaseStatus(stored: PurchaseStatusType, bookings: ReadonlyArray<Pick<InboundBooking, \"type\" | \"breakdown\">>): PurchaseStatusType",
+          "doc": "A purchase's status, custody-only (rulings 55, 56, 61): the operator's\n`canceled` stands; otherwise `complete` when every inbound booking is closed,\nelse `active`. Billing holds nothing open: an unbilled line surfaces through\nthe remaining-to-bill engine and the diff (ruling 42), not here.\n\n| stored | status |\n|---|---|\n| `canceled` | `canceled`, always (an operator cancel, refused while custody is live: {@link inboundCancelRefusal}) |\n| `active` / `complete` | `complete` when every inbound booking is closed, else `active` |\n\n⚠️ **A purchase that books nothing is `complete` (ruling 61)** — a PO of only\nCharge lines, or one whose every line was closed to 0. That is the one\ndeliberate divergence from `deriveOrderStatus`, which keeps the STORED status\nwhen the order books nothing: an order's `complete` can be operator-reached,\na purchase's cannot, so there is no stored value worth keeping.\n\nIts guard that \"kept bookings alone never complete the parent\" collapses here\nby the same ruling: a KEPT inbound booking (`quantity_ordered: 0`, its line\nclosed with units in hand) holds the purchase open exactly while it is open,\nand once closed, a purchase of only kept bookings books nothing.\n\nThe status reads ANOTHER collection, so the writer that finalizes the\npurchase's bookings writes it, as `finalizeOrderBookings` writes an order's.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25432,14 +25492,6 @@
           "name": "purchaseItemProduct",
           "signature": "purchaseItemProduct(item: PurchaseItem): string | undefined",
           "doc": "The product an item ORDERS, or `undefined` — a service or replacement line's\n`uid_product` is attribution, not an order.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
-          "name": "purchaseItemResolved",
-          "signature": "purchaseItemResolved(item: PurchaseItem): boolean",
-          "doc": "Has this item nothing left to happen?\n\n- **sale** — every unit received, and billed for at least what is ordered\n  (over-billing is flagged, not held open). A close lowers `quantity` to what\n  came, so a closed line resolves here.\n- **rental** — every unit received, every unit received gone\n  back (a hire with units still in CFS's custody is not finished), and on a\n  flat line billed in full. A TIME line resolves on custody alone (Q7): it\n  bills windows as they accrue, with no count to close.\n- **service** / **replacement** — a flat one when billed in full; a time one\n  only once canceled, since a carrier line accrues for as long as it lives.\n\nPayment is the bill's business and holds nothing open.",
           "paramTags": [],
           "returnsTag": null
         },

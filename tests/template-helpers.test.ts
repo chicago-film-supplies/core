@@ -29,6 +29,7 @@ import * as stockUtils from "../src/utils/stock.ts";
 import * as allocationUtils from "../src/utils/allocation.ts";
 import * as bookingIdUtils from "../src/utils/booking-id.ts";
 import * as bookingUtils from "../src/utils/bookings.ts";
+import * as bookingInboundUtils from "../src/utils/bookings-inbound.ts";
 import * as cogsUtils from "../src/utils/cogs.ts";
 import * as priceFormulaUtils from "../src/utils/price-formulas.ts";
 import * as cardUtils from "../src/utils/cards.ts";
@@ -106,6 +107,11 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // derives one. Listed so the drift guard sees its exports.
   "booking-id": bookingIdUtils,
   bookings: bookingUtils,
+  // `utils/bookings-inbound.ts` is the inbound ladder's write-path derivations
+  // (7a): the projection a purchase writer stamps, the status its finalize
+  // writes and the cancel refusal. A template renders a purchase or receipt
+  // that already carries both. Listed so the drift guard sees its exports.
+  "bookings-inbound": bookingInboundUtils,
   destinations: destinationUtils,
   cards: cardUtils,
   "contact-name": contactNameUtils,

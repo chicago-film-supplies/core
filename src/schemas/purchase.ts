@@ -30,9 +30,10 @@
  *   the line `status`), each written in the same transaction as the receipt,
  *   bill or close that moves it — the analogue of the record's `breakdown`.
  * - **A derived status** in the record's vocabulary (`active | complete |
- *   canceled`), authored by {@link derivePurchaseStatus} and refined here, so a
- *   document asserting one status and holding buckets that say another does not
- *   parse.
+ *   canceled`), custody-only (rulings 55, 56): read off the purchase's INBOUND
+ *   bookings by `derivePurchaseStatus` (`@cfs/core/utils/bookings-inbound`), and
+ *   written by the writer that finalizes them. It reads another collection, so
+ *   no document refine can check it, as none checks an order's.
  *
  * ## Items take the invoice's shape (api-cloudrun#1407)
  *
@@ -178,7 +179,9 @@ import {
 // ── Status ───────────────────────────────────────────────────────
 
 /**
- * Derived by {@link derivePurchaseStatus}, never client-set. The out-of-service
+ * Never client-set: `canceled` is an operator cancel, and `active` / `complete`
+ * are read off the inbound bookings by `derivePurchaseStatus`
+ * (`@cfs/core/utils/bookings-inbound`, rulings 55, 56, 61). The out-of-service
  * vocabulary, for the reason `OOS_STATUSES` gives: orders, bookings and cards
  * all say `active` for "in progress".
  *
@@ -191,6 +194,31 @@ export const PURCHASE_STATUSES = ["active", "complete", "canceled"] as const;
 export type PurchaseStatusType = typeof PURCHASE_STATUSES[number];
 /** Zod schema for PurchaseStatusType. */
 export const PurchaseStatusEnum: z.ZodType<PurchaseStatusType> = z.enum(PURCHASE_STATUSES);
+
+/**
+ * What a purchase status means for its inbound bookings — the twin of
+ * `ORDER_STATUS_TRAITS` (one-document-model 7a, C6), cut to the two traits the
+ * inbound ladder reads.
+ *
+ * - `authored` — an operator sets it; otherwise it is read off the bookings.
+ * - `planBucket` — where a booking's unstarted units sit; `null` books no plan
+ *   (custody stays, as on a canceled order).
+ *
+ * `Record<PurchaseStatusType, …>`, so a new status is a compile error here.
+ * ⚠️ `complete`'s plan bucket is `ordered`, as a complete order's is `reserved`:
+ * a raise on a complete purchase books as ordered work and reopens it.
+ */
+export interface PurchaseStatusTraits {
+  authored: boolean;
+  planBucket: "ordered" | null;
+}
+
+/** The table. See {@link PurchaseStatusTraits}. */
+export const PURCHASE_STATUS_TRAITS: Readonly<Record<PurchaseStatusType, PurchaseStatusTraits>> = {
+  active: { authored: false, planBucket: "ordered" },
+  complete: { authored: false, planBucket: "ordered" },
+  canceled: { authored: true, planBucket: null },
+};
 
 // ── Item type ────────────────────────────────────────────────────
 
@@ -207,7 +235,7 @@ export const PurchaseStatusEnum: z.ZodType<PurchaseStatusType> = z.enum(PURCHASE
  *
  * 🔴 **Closed, and read through exhaustive switches.** Every reader that
  * branches on an item's arm switches over this union with a `never` default
- * (`purchaseItemSupplies`, `purchaseItemResolved`, …), so a new member is a
+ * (`purchaseItemSupplies`, `purchaseItemCanceled`, …), so a new member is a
  * compile error at every one of them rather than a silent fall-through.
  *
  * Explicit tuple type rather than `as const` alone: core#43 is JSR's npm
@@ -609,8 +637,8 @@ export interface PurchaseRentalItem extends Omit<PurchaseItemBase, "ledger_accou
    * Never more than received.
    *
    * ⚠️ **A settled unit counts as returned** (api-cloudrun#1360, D3). Every
-   * reader means "no longer owed" — `remainingToReturn`, the return card,
-   * `derivePurchaseStatus` and supply — so the "Returned" column includes units
+   * reader means "no longer owed" — `remainingToReturn`, the return card
+   * and supply — so the "Returned" column includes units
    * that were never physically handed back.
    */
   quantity_returned: number;
@@ -1007,42 +1035,6 @@ function unreachableItem(item: never): never {
   throw new Error(`unknown purchase item type: ${JSON.stringify(item)}`);
 }
 
-/** Has a flat line been billed for everything ordered? Over-billed counts as billed in full. */
-function billedInFull(item: { quantity: number; quantity_billed: number | null }): boolean {
-  return (item.quantity_billed ?? 0) >= item.quantity;
-}
-
-/**
- * Has this item nothing left to happen?
- *
- * - **sale** — every unit received, and billed for at least what is ordered
- *   (over-billing is flagged, not held open). A close lowers `quantity` to what
- *   came, so a closed line resolves here.
- * - **rental** — every unit received, every unit received gone
- *   back (a hire with units still in CFS's custody is not finished), and on a
- *   flat line billed in full. A TIME line resolves on custody alone (Q7): it
- *   bills windows as they accrue, with no count to close.
- * - **service** / **replacement** — a flat one when billed in full; a time one
- *   only once canceled, since a carrier line accrues for as long as it lives.
- *
- * Payment is the bill's business and holds nothing open.
- */
-export function purchaseItemResolved(item: PurchaseItem): boolean {
-  switch (item.type) {
-    case "sale":
-      return item.quantity_received === item.quantity && billedInFull(item);
-    case "rental":
-      return item.quantity_received === item.quantity &&
-        item.quantity_returned === item.quantity_received &&
-        (purchaseItemBasis(item) === "time" || billedInFull(item));
-    case "service":
-    case "replacement":
-      return purchaseItemBasis(item) === "time" ? item.status === "canceled" : billedInFull(item);
-    default:
-      return unreachableItem(item);
-  }
-}
-
 /** Was this item canceled in full — nothing will come and nothing is billed? */
 export function purchaseItemCanceled(item: PurchaseItem): boolean {
   switch (item.type) {
@@ -1072,26 +1064,6 @@ export function purchaseItemCommittedCents(item: PurchaseItem): number {
     default:
       return unreachableItem(item);
   }
-}
-
-/**
- * The purchase's status, derived — never client-set.
- *
- * - `canceled` when every item is canceled in full ({@link purchaseItemCanceled}).
- *   A cancel is a close with nothing received.
- * - `complete` when every item is resolved ({@link purchaseItemResolved}).
- * - `active` otherwise.
- *
- * ⚠️ **Received in full but unbilled is `active`, deliberately.** The owner's
- * sequence bills before delivery as often as after, and a purchase that reads
- * `complete` while a bill is still owed hides exactly the work the split exists
- * to show.
- */
-export function derivePurchaseStatus(purchase: Pick<Purchase, "items">): PurchaseStatusType {
-  const items = purchaseLines(purchase.items);
-  if (items.length === 0) return "active";
-  if (items.every(purchaseItemCanceled)) return "canceled";
-  return items.every(purchaseItemResolved) ? "complete" : "active";
 }
 
 /**
@@ -1438,15 +1410,6 @@ function checkPurchase(p: Purchase, ctx: z.RefinementCtx): void {
       code: "custom",
       path: ["total_cents"],
       message: `total_cents ${p.total_cents} must equal the items' committed ${total}`,
-    });
-  }
-
-  const derived = derivePurchaseStatus(p);
-  if (p.status !== derived) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["status"],
-      message: `status "${p.status}" contradicts the items, which derive "${derived}"`,
     });
   }
 }

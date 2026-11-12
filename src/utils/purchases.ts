@@ -9,7 +9,6 @@
 import {
   type PurchaseSaleItem,
   type PurchaseSaleItemInputType,
-  derivePurchaseStatus,
   deriveQueryByItemTypes,
   deriveQueryByOrders,
   deriveQueryByProducts,
@@ -18,7 +17,6 @@ import {
   purchaseItemCanceled,
   purchaseItemCommittedCents,
   purchaseItemProduct,
-  purchaseItemResolved,
   payableInputUidIssue,
   payableLineUid,
   payableLineUidIssue,
@@ -38,10 +36,12 @@ import { type FormulaDiscount, priceFromFormula } from "../schemas/_line-money.t
 import { componentQuantities, type ComponentRowForWalk } from "./order-lines.ts";
 import { productCountsStock } from "./products.ts";
 import { derivePurchaseCreditStatus, recomputePurchaseBillTotals } from "./invoices.ts";
+import { derivePurchaseStatus } from "./bookings-inbound.ts";
 
 // The payable settlement folds live beside their receivable twins in
-// `utils/invoices.ts`, which owns the one fold; re-exported here so a purchase
-// writer finds them in its own namespace.
+// `utils/invoices.ts`, which owns the one fold, and the custody-only status
+// beside its order twin in `utils/bookings-inbound.ts`; re-exported here so a
+// purchase writer finds them in its own namespace.
 export { derivePurchaseCreditStatus, derivePurchaseStatus, recomputePurchaseBillTotals };
 // The mirror authors and the per-arm rules live beside the refine that checks them.
 export {
@@ -52,7 +52,6 @@ export {
   purchaseItemCanceled,
   purchaseItemCommittedCents,
   purchaseItemProduct,
-  purchaseItemResolved,
 };
 // The payable line uid rule (W4K) lives beside the refines that check it.
 export { payableInputUidIssue, payableLineUid, payableLineUidIssue, type PayableLineUidFields };

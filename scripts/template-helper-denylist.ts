@@ -707,6 +707,18 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "serviceBucketBounds",
     "serviceMovesFor",
   ],
+  // The inbound ladder's write-path derivations (one-document-model 7a, C6–C7):
+  // a purchase writer's projection, its finalize's status and the cancel
+  // refusal. A template renders a purchase or receipt that already carries them.
+  "bookings-inbound": [
+    "calculateInboundBreakdown",
+    "deriveInboundBookingStatus",
+    "derivePurchaseStatus",
+    "inboundCancelRefusal",
+    "inboundLiveCustody",
+    "isInboundBookingClosed",
+    "sumInboundBreakdown",
+  ],
   "out-of-service": [
     "deriveOOSStatus",
     "emptyOOSBreakdown",
@@ -733,7 +745,6 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "purchaseItemCanceled",
     "purchaseItemCommittedCents",
     "purchaseItemProduct",
-    "purchaseItemResolved",
     // The payable line uid rule (W4K): what a writer keys a line by, and its refines.
     "payableInputUidIssue",
     "payableLineUid",

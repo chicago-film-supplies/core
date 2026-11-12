@@ -69,6 +69,7 @@
     "./schemas/comment": "./src/schemas/comment.ts",
     "./utils/booking-id": "./src/utils/booking-id.ts",
     "./utils/bookings": "./src/utils/bookings.ts",
+    "./utils/bookings-inbound": "./src/utils/bookings-inbound.ts",
     "./utils/custody": "./src/utils/custody.ts",
     "./utils/cards": "./src/utils/cards.ts",
     "./utils/contact-name": "./src/utils/contact-name.ts",

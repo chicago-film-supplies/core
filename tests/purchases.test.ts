@@ -18,7 +18,6 @@ import {
   CreatePurchaseInput,
   type PurchaseServiceItem,
   PurchaseServiceItemSchema,
-  derivePurchaseStatus,
   derivePurchaseCreditSources,
   INVOICE_FIELD_CLASSES,
   INVOICE_FIELD_FREEZE,
@@ -62,7 +61,6 @@ import {
   deriveQueryByUnits,
   purchaseItemCanceled,
   purchaseItemCommittedCents,
-  purchaseItemResolved,
   remainingToBill,
   remainingToReceive,
   remainingToReturn,
@@ -318,53 +316,10 @@ const freight = (over: Partial<PurchaseServiceItem> = {}): PurchaseServiceItem =
 };
 
 // ── status ───────────────────────────────────────────────────────────
-
-Deno.test("derivePurchaseStatus — the buy table", () => {
-  const cases: [string, Partial<PurchaseSaleItem>[], string][] = [
-    ["nothing yet", [{}], "active"],
-    ["billed, not received — #3882's real state", [{ quantity_billed: 3 }], "active"],
-    ["received in full, unbilled", [{ quantity_received: 3 }], "active"],
-    ["received and billed", [{ quantity_received: 3, quantity_billed: 3 }], "complete"],
-    ["received and OVER-billed — flagged by the diff, not held open (D5)", [{ quantity_received: 3, quantity_billed: 4 }], "complete"],
-    ["short-closed after 2, billed 2", [{ quantity: 2, quantity_received: 2, quantity_billed: 2 }], "complete"],
-    ["short-closed after 2, billed 1", [{ quantity: 2, quantity_received: 2, quantity_billed: 1 }], "active"],
-    ["canceled outright", [{ quantity: 0, status: "canceled" }], "canceled"],
-    ["one item done, one canceled", [{ quantity_received: 3, quantity_billed: 3 }, { quantity: 0, status: "canceled" }], "complete"],
-    ["one item done, one open", [{ quantity_received: 3, quantity_billed: 3 }, {}], "active"],
-  ];
-  for (const [name, items, want] of cases) {
-    assertEquals(derivePurchaseStatus({ items: items.map((l, k) => line({ uid: iuid(k + 1), ...l })) }), want, name);
-  }
-});
-
-Deno.test("derivePurchaseStatus — a subrent is complete only once every received unit is RETURNED", () => {
-  // Each negative case breaks exactly ONE of the three axes.
-  const done = { quantity_received: 10, quantity_billed: 10, quantity_returned: 10 };
-  const cases: [string, Partial<PurchaseRentalItem>, string][] = [
-    ["received, billed, returned", done, "complete"],
-    ["…not returned", { ...done, quantity_returned: 9 }, "active"],
-    ["…not billed", { ...done, quantity_billed: 9 }, "active"],
-    ["…not received (and so not returned)", { ...done, quantity_received: 9, quantity_returned: 9 }, "active"],
-    ["short-closed after 6, billed 6, returned 6", { quantity: 6, quantity_received: 6, quantity_billed: 6, quantity_returned: 6 }, "complete"],
-    ["canceled outright", { quantity: 0, status: "canceled" }, "canceled"],
-  ];
-  for (const [name, over, want] of cases) {
-    assertEquals(derivePurchaseStatus({ items: [hireLine(over)] }), want, name);
-  }
-});
-
-Deno.test("derivePurchaseStatus — a TIME subrent resolves on custody alone; a time charge only once canceled; a flat charge on billing (Q7)", () => {
-  assertEquals(derivePurchaseStatus({ items: [timeHire({ quantity_received: 10, quantity_returned: 10 })] }), "complete");
-  assertEquals(derivePurchaseStatus({ items: [timeHire({ quantity_received: 10, quantity_returned: 9 })] }), "active");
-  // Control: the same custody on a FLAT subrent is still owed a bill.
-  assertEquals(derivePurchaseStatus({ items: [hireLine({ quantity_received: 10, quantity_returned: 10, quantity_billed: 0 })] }), "active");
-  assertEquals(derivePurchaseStatus({ items: [carrierLine()] }), "active", "a carrier line accrues while it lives");
-  assertEquals(derivePurchaseStatus({ items: [carrierLine({ status: "canceled" })] }), "canceled");
-  assertEquals(derivePurchaseStatus({ items: [freight()] }), "active");
-  assertEquals(derivePurchaseStatus({ items: [freight({ quantity_billed: 1 })] }), "complete");
-  assertEquals(derivePurchaseStatus({ items: [freight({ quantity: 0, status: "canceled" })] }), "canceled");
-  assertEquals(derivePurchaseStatus({ items: [line({ quantity: 0, status: "canceled" }), carrierLine({ uid: iuid(5) })] }), "active");
-});
+//
+// A purchase's status is custody-only since 7a (rulings 55, 56, 61): it reads
+// the inbound bookings, not the lines. Its table is in
+// tests/bookings-inbound.test.ts.
 
 Deno.test("remainingToReceive / remainingToBill are each bounded by the quantity; remainingToReturn is received − returned", () => {
   const l = line({ quantity: 2, quantity_received: 1, quantity_billed: 2 });
@@ -426,7 +381,7 @@ function withItems(items: PurchaseItem[], over: Record<string, unknown> = {}) {
     query_by_products: deriveQueryByProducts(items),
     query_by_orders: deriveQueryByOrders(items),
     query_by_item_types: deriveQueryByItemTypes(items),
-    status: derivePurchaseStatus({ items }),
+    status: "active",
     ...over,
   });
 }
@@ -485,12 +440,12 @@ Deno.test("PurchaseSchema: total_cents is the Σ of the COMMITTED amounts", () =
   assertEquals(issuePaths(PurchaseSchema, withItems(mixed, { total_cents: 140985 + 1_500 + 50_000 })), ["total_cents"]);
 });
 
-Deno.test("PurchaseSchema: a stored status the buckets contradict is refused", () => {
-  assertEquals(issuePaths(PurchaseSchema, purchase({ status: "complete" })), ["status"]);
-  assertEquals(
-    issuePaths(PurchaseSchema, purchase({ status: "complete", items: [line({ quantity_received: 3, quantity_billed: 3 })] })),
-    [],
-  );
+Deno.test("PurchaseSchema: the status is the inbound bookings', so the document refines none of it (7a, ruling 55)", () => {
+  // It used to be refined against the line buckets. It reads another collection
+  // now, so a stored `complete` beside unreceived lines parses, as an order's
+  // does beside reserved bookings; derivePurchaseStatus is the authority.
+  assertEquals(issuePaths(PurchaseSchema, purchase({ status: "complete" })), []);
+  assertEquals(issuePaths(PurchaseSchema, purchase({ status: "draft" })), ["status"]);
 });
 
 Deno.test("PurchaseSchema: a purchase orders at least one item", () => {
@@ -683,11 +638,10 @@ Deno.test("the item-type switches are exhaustive over PURCHASE_ITEM_TYPES", () =
   };
   assertEquals(Object.keys(one).sort(), [...PURCHASE_ITEM_TYPES].sort());
   for (const type of PURCHASE_ITEM_TYPES) {
-    purchaseItemResolved(one[type]);
     purchaseItemCanceled(one[type]);
     purchaseItemCommittedCents(one[type]);
   }
-  assertThrows(() => purchaseItemResolved({ ...line(), type: "lease" } as unknown as PurchaseItem));
+  assertThrows(() => purchaseItemCanceled({ ...line(), type: "lease" } as unknown as PurchaseItem));
 });
 
 // ── item inputs ──────────────────────────────────────────────────────

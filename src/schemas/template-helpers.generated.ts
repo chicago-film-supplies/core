@@ -50,6 +50,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "trackedUnitSets", expr: "it.bookings.trackedUnitSets(booking, seeded)", desc: "A booking's unit sets as the custody rules must read them: on a SEEDED product a stored `units: null` is empty sets, not \"not tracked\".", returns: "conditional" },
     { name: "untrackedUnitCount", expr: "it.bookings.untrackedUnitCount(booking, key, seeded)", desc: "How many of a bucket's units are UNTRACKED on a unit-tracked booking: `breakdown[k] − units[k].length`. Units a bulk → serialized conversion found already prepped or out and could not name (`api-cloudrun/.claude/plans/serial-tracking.md` D1, D9).", returns: "number" },
   ],
+  "bookings-inbound": [
+
+  ],
   "cards": [
     { name: "computeCardActionFromBookings", expr: "it.cards.computeCardActionFromBookings(side, siblings, current)", desc: "Recompute a card's denormalized **next fulfillment action** from its sibling bookings — the value the `CardTile` button shows on surfaces (Dashboard kanban, Calendar agenda) where no bookings are loaded. Pure function — no Firestore reads. Computed in lockstep with `computeCardStatusFromBookings` on every booking write.", returns: "CardAction | null" },
     { name: "computeCardStatusFromBookings", expr: "it.cards.computeCardStatusFromBookings(side, siblings, current)", desc: "Recompute an event card's `status` from its sibling bookings on the destination it belongs to. Pure function — no Firestore reads.", returns: "CardStatus" },
