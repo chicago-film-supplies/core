@@ -13,6 +13,9 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  *
  * v4 (one-document-model Phase 4): adds `status`, the invoice's vocabulary.
  *
+ * v5 (one-document-model 7a): adds `subject`, its purchase's, as an invoice
+ * carries its order's (owner, 2026-11-11).
+ *
  * v3 (one-document-model Phase 3): `uid_purchase` → `number_purchases`, the
  * invoice's `number_orders` twin, because one bill may now bill several
  * purchases. `query_by_purchases` is NOT indexed, as `query_by_orders` is not:
@@ -26,12 +29,12 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  */
 export const purchaseBills: TypesenseCollectionConfig = {
   alias: "purchase-bills",
-  version: 4,
+  version: 5,
   firestoreCollection: "purchase-bills",
-  collectionName: "purchase-bills_v4",
+  collectionName: "purchase-bills_v5",
   enabled: true,
   schema: {
-    name: "purchase-bills_v4",
+    name: "purchase-bills_v5",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -45,6 +48,7 @@ export const purchaseBills: TypesenseCollectionConfig = {
       { name: "origin", type: "string", facet: true },
       { name: "xero_document", type: "string", facet: true },
       { name: "xero_id", type: "string", index: true, sort: false, facet: false, optional: true },
+      { name: "subject", type: "string", stem: true, sort: true, optional: true },
       { name: "reference", type: "string", stem: true, sort: true, optional: true },
       { name: "items", type: "object[]", optional: true },
       { name: "items.type", type: "string[]", facet: true, optional: true },
@@ -82,6 +86,7 @@ export const purchaseBills: TypesenseCollectionConfig = {
       "date_fs",
       "due_date_fs",
       "supplier.name",
+      "subject",
       "reference",
       "totals.total_cents",
       "totals.amount_due_cents",

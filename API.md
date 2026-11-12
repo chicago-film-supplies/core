@@ -3364,6 +3364,7 @@ interface CreatePurchaseInputType {
   supplier: typeLiteral;
   uid_store: string;
   date: string;
+  subject?: string;
   reference?: string | null;
   notes?: string | null;
   items: PurchaseRowInputType[];
@@ -10972,6 +10973,7 @@ interface Purchase {
   uid_store: string;
   date: string;
   date_fs: FirestoreTimestampType;
+  subject: string;
   reference: string | null;
   notes: string | null;
   items: PurchaseRow[];
@@ -11048,6 +11050,7 @@ interface PurchaseBill {
   date_fs: FirestoreTimestampType;
   due_date: string | null;
   due_date_fs?: FirestoreTimestampType | null;
+  subject: string;
   reference: string | null;
   items: PurchaseDocumentRow[];
   destinations: PurchaseDocDestination[];
@@ -11968,6 +11971,7 @@ interface PurchaseReceipt {
   supplier: UidNameRefType;
   destinations: PurchaseDestination[];
   items: PurchaseReceiptItemType[];
+  subject: string;
   reference: string | null;
   query_by_items: string[];
   query_by_contacts: string[];
@@ -16460,6 +16464,7 @@ interface UpdatePurchaseBillInputType {
   version: number;
   date?: string;
   due_date?: string;
+  subject?: string;
   reference?: string | null;
   items?: PurchaseBillRowInputType[];
   destinations?: PurchaseBillDestinationInputType[];
@@ -16499,6 +16504,7 @@ stored pair as it is.
 ```ts
 interface UpdatePurchaseInputType {
   date?: string;
+  subject?: string;
   reference?: string | null;
   notes?: string | null;
   items?: PurchaseRowInputType[];
@@ -29023,6 +29029,7 @@ interface CreatePurchaseInputType {
   supplier: typeLiteral;
   uid_store: string;
   date: string;
+  subject?: string;
   reference?: string | null;
   notes?: string | null;
   items: PurchaseRowInputType[];
@@ -29137,6 +29144,7 @@ interface Purchase {
   uid_store: string;
   date: string;
   date_fs: FirestoreTimestampType;
+  subject: string;
   reference: string | null;
   notes: string | null;
   items: PurchaseRow[];
@@ -29946,6 +29954,7 @@ stored pair as it is.
 ```ts
 interface UpdatePurchaseInputType {
   date?: string;
+  subject?: string;
   reference?: string | null;
   notes?: string | null;
   items?: PurchaseRowInputType[];
@@ -30305,6 +30314,7 @@ interface PurchaseBill {
   date_fs: FirestoreTimestampType;
   due_date: string | null;
   due_date_fs?: FirestoreTimestampType | null;
+  subject: string;
   reference: string | null;
   items: PurchaseDocumentRow[];
   destinations: PurchaseDocDestination[];
@@ -30890,6 +30900,7 @@ interface UpdatePurchaseBillInputType {
   version: number;
   date?: string;
   due_date?: string;
+  subject?: string;
   reference?: string | null;
   items?: PurchaseBillRowInputType[];
   destinations?: PurchaseBillDestinationInputType[];
@@ -31026,6 +31037,7 @@ interface PurchaseReceipt {
   supplier: UidNameRefType;
   destinations: PurchaseDestination[];
   items: PurchaseReceiptItemType[];
+  subject: string;
   reference: string | null;
   query_by_items: string[];
   query_by_contacts: string[];
@@ -34289,6 +34301,7 @@ interface PurchaseBillDocument {
   origin: string;
   xero_document: string;
   xero_id?: string;
+  subject?: string;
   reference?: string;
   items?: Array<typeLiteral>;
   totals?: typeLiteral;
@@ -34345,6 +34358,7 @@ interface PurchaseDocument {
   status: string;
   supplier: typeLiteral;
   uid_store: string;
+  subject?: string;
   reference?: string;
   items?: Array<typeLiteral>;
   bills?: Array<typeLiteral>;
@@ -35088,6 +35102,9 @@ is `optional: true`: a direct item may name no product.
 
 v4 (one-document-model Phase 4): adds `status`, the invoice's vocabulary.
 
+v5 (one-document-model 7a): adds `subject`, its purchase's, as an invoice
+carries its order's (owner, 2026-11-11).
+
 v3 (one-document-model Phase 3): `uid_purchase` → `number_purchases`, the
 invoice's `number_orders` twin, because one bill may now bill several
 purchases. `query_by_purchases` is NOT indexed, as `query_by_orders` is not:
@@ -35170,7 +35187,9 @@ backfill still indexes.
 v5 (one-document-model 7a, C8): the `store` snapshot becomes `uid_store`, a
 facet the manager labels from its stores cache (the order's key), and
 `items.quantity_returned` goes: a line's custody lives on its inbound
-booking. `total_cents` stays until 6e-0b1 (ruling 62).
+booking. `total_cents` stays until 6e-0b1 (ruling 62). It also gains `subject`,
+the order's field on the payable side (owner, 2026-11-11), declared as the
+order's and invoice's are.
 
 ```ts
 const purchases: TypesenseCollectionConfig;

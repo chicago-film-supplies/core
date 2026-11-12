@@ -1515,7 +1515,7 @@
         {
           "kind": "interface",
           "name": "CreatePurchaseInputType",
-          "declaration": "interface CreatePurchaseInputType {\n  supplier: typeLiteral;\n  uid_store: string;\n  date: string;\n  reference?: string | null;\n  notes?: string | null;\n  items: PurchaseRowInputType[];\n  destinations: PurchaseDestinationInputType[];\n  uuid_session: string;\n}",
+          "declaration": "interface CreatePurchaseInputType {\n  supplier: typeLiteral;\n  uid_store: string;\n  date: string;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n  items: PurchaseRowInputType[];\n  destinations: PurchaseDestinationInputType[];\n  uuid_session: string;\n}",
           "doc": "Input for creating a purchase.\n\n`supplier` is a uid only — the server resolves the name, as\n`CreateTransactionInput.supplier` does, so a snapshot never disagrees with\nits document. `uid_store` is stored as sent. Items of any arm may mix (D3).\n\n⚠️ **`store` → `uid_store` (C8) has no safe order between the API and the\nmanager**: a required key on a stripping input. It ships under the 7a\nwindow's manager freeze."
         },
         {
@@ -4875,7 +4875,7 @@
         {
           "kind": "interface",
           "name": "Purchase",
-          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  uid_store: string;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseRow[];\n  destinations: PurchaseDestination[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  bills: Array<typeLiteral>;\n  credits: Array<typeLiteral>;\n  query_by_credits: string[];\n  query_by_units?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  uid_store: string;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseRow[];\n  destinations: PurchaseDestination[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  bills: Array<typeLiteral>;\n  credits: Array<typeLiteral>;\n  query_by_credits: string[];\n  query_by_units?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A purchase order placed with a supplier."
         },
         {
@@ -4905,7 +4905,7 @@
         {
           "kind": "interface",
           "name": "PurchaseBill",
-          "declaration": "interface PurchaseBill {\n  uid: string;\n  number: number;\n  query_by_purchases: string[];\n  number_purchases: number[];\n  status: InvoiceStatusType;\n  supplier: UidNameRefType;\n  origin: PurchaseDocumentOriginType;\n  xero_document: PurchaseBillXeroDocumentType;\n  xero_id: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date: string | null;\n  due_date_fs?: FirestoreTimestampType | null;\n  reference: string | null;\n  items: PurchaseDocumentRow[];\n  destinations: PurchaseDocDestination[];\n  totals: PurchaseBillTotals;\n  voided_at?: FirestoreTimestampType;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface PurchaseBill {\n  uid: string;\n  number: number;\n  query_by_purchases: string[];\n  number_purchases: number[];\n  status: InvoiceStatusType;\n  supplier: UidNameRefType;\n  origin: PurchaseDocumentOriginType;\n  xero_document: PurchaseBillXeroDocumentType;\n  xero_id: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date: string | null;\n  due_date_fs?: FirestoreTimestampType | null;\n  subject: string;\n  reference: string | null;\n  items: PurchaseDocumentRow[];\n  destinations: PurchaseDocDestination[];\n  totals: PurchaseBillTotals;\n  voided_at?: FirestoreTimestampType;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A supplier bill against one or more purchases."
         },
         {
@@ -5325,7 +5325,7 @@
         {
           "kind": "interface",
           "name": "PurchaseReceipt",
-          "declaration": "interface PurchaseReceipt {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  destinations: PurchaseDestination[];\n  items: PurchaseReceiptItemType[];\n  reference: string | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_by: ActorRefType | null;\n  updated_by: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface PurchaseReceipt {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  destinations: PurchaseDestination[];\n  items: PurchaseReceiptItemType[];\n  subject: string;\n  reference: string | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_by: ActorRefType | null;\n  updated_by: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A purchase receipt: the custody projection of one purchase, keyed by its uid."
         },
         {
@@ -7383,7 +7383,7 @@
         {
           "kind": "interface",
           "name": "UpdatePurchaseBillInputType",
-          "declaration": "interface UpdatePurchaseBillInputType {\n  version: number;\n  date?: string;\n  due_date?: string;\n  reference?: string | null;\n  items?: PurchaseBillRowInputType[];\n  destinations?: PurchaseBillDestinationInputType[];\n}",
+          "declaration": "interface UpdatePurchaseBillInputType {\n  version: number;\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  items?: PurchaseBillRowInputType[];\n  destinations?: PurchaseBillDestinationInputType[];\n}",
           "doc": "Input for editing a bill (`PUT /purchase-bills/{uid}`). `items`, when present,\nis the WHOLE array in its new order, the invoice's shape (one-document-model\nPhase 5): a row it omits is removed. Refused per field class once the bill is\nsettled (`INVOICE_FIELD_FREEZE`); a settled linked bill takes a tracking edit\nalone. An accepted edit is pushed to Xero through the ACCPAY edit push (D5).\n\n`destinations`, when present, edits the pairs it names, each stated whole; a\npair it leaves out is unchanged. A pair's membership follows its divider in\n`items`, as on an invoice."
         },
         {
@@ -7395,7 +7395,7 @@
         {
           "kind": "interface",
           "name": "UpdatePurchaseInputType",
-          "declaration": "interface UpdatePurchaseInputType {\n  date?: string;\n  reference?: string | null;\n  notes?: string | null;\n  items?: PurchaseRowInputType[];\n  destinations?: PurchaseDestinationInputType[];\n  version: number;\n}",
+          "declaration": "interface UpdatePurchaseInputType {\n  date?: string;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n  items?: PurchaseRowInputType[];\n  destinations?: PurchaseDestinationInputType[];\n  version: number;\n}",
           "doc": "Input for amending a purchase — a PATCH.\n\n`items`, when present, is the complete next array of dividers and lines, paired\nwith the stored rows by path (then uid and ancestry, `pairItemsAcrossRebuild`),\nnever by uid alone: a line's uid is its product's. A stored item absent from it is removed — refused once it has any\nreceipt, bill or return. A named item may not change `type`. On a buy the\nwriter refuses to cut `quantity` below what is received or billed, and to\nchange `amount_cents` once it has any receipt or bill: a price that moved\nafter goods or a bill exist is a short close plus a new item, because every\nreceipt already carries its share of the old price. Those are cross-document\nfacts the writer holds, so they are not refined here.\n\n⚠️ **A SUBRENT item's price is not frozen by a receipt**, because its receipts\ncarry no cost (`subrent_in` is cost-forbidden). So on a subrent the writer lets\n`amount_cents` and its pair's `dates.collection_end` move after receipt — a\npaid hire extension — with `quantity` still floored at what is received.\n\n`destinations`, when present, states the listed pairs. Absent keeps every\nstored pair as it is."
         },
         {
@@ -13640,7 +13640,7 @@
         {
           "kind": "interface",
           "name": "CreatePurchaseInputType",
-          "declaration": "interface CreatePurchaseInputType {\n  supplier: typeLiteral;\n  uid_store: string;\n  date: string;\n  reference?: string | null;\n  notes?: string | null;\n  items: PurchaseRowInputType[];\n  destinations: PurchaseDestinationInputType[];\n  uuid_session: string;\n}",
+          "declaration": "interface CreatePurchaseInputType {\n  supplier: typeLiteral;\n  uid_store: string;\n  date: string;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n  items: PurchaseRowInputType[];\n  destinations: PurchaseDestinationInputType[];\n  uuid_session: string;\n}",
           "doc": "Input for creating a purchase.\n\n`supplier` is a uid only — the server resolves the name, as\n`CreateTransactionInput.supplier` does, so a snapshot never disagrees with\nits document. `uid_store` is stored as sent. Items of any arm may mix (D3).\n\n⚠️ **`store` → `uid_store` (C8) has no safe order between the API and the\nmanager**: a required key on a stripping input. It ships under the 7a\nwindow's manager freeze."
         },
         {
@@ -13688,7 +13688,7 @@
         {
           "kind": "interface",
           "name": "Purchase",
-          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  uid_store: string;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseRow[];\n  destinations: PurchaseDestination[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  bills: Array<typeLiteral>;\n  credits: Array<typeLiteral>;\n  query_by_credits: string[];\n  query_by_units?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  uid_store: string;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseRow[];\n  destinations: PurchaseDestination[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  bills: Array<typeLiteral>;\n  credits: Array<typeLiteral>;\n  query_by_credits: string[];\n  query_by_units?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A purchase order placed with a supplier."
         },
         {
@@ -14042,7 +14042,7 @@
         {
           "kind": "interface",
           "name": "UpdatePurchaseInputType",
-          "declaration": "interface UpdatePurchaseInputType {\n  date?: string;\n  reference?: string | null;\n  notes?: string | null;\n  items?: PurchaseRowInputType[];\n  destinations?: PurchaseDestinationInputType[];\n  version: number;\n}",
+          "declaration": "interface UpdatePurchaseInputType {\n  date?: string;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n  items?: PurchaseRowInputType[];\n  destinations?: PurchaseDestinationInputType[];\n  version: number;\n}",
           "doc": "Input for amending a purchase — a PATCH.\n\n`items`, when present, is the complete next array of dividers and lines, paired\nwith the stored rows by path (then uid and ancestry, `pairItemsAcrossRebuild`),\nnever by uid alone: a line's uid is its product's. A stored item absent from it is removed — refused once it has any\nreceipt, bill or return. A named item may not change `type`. On a buy the\nwriter refuses to cut `quantity` below what is received or billed, and to\nchange `amount_cents` once it has any receipt or bill: a price that moved\nafter goods or a bill exist is a short close plus a new item, because every\nreceipt already carries its share of the old price. Those are cross-document\nfacts the writer holds, so they are not refined here.\n\n⚠️ **A SUBRENT item's price is not frozen by a receipt**, because its receipts\ncarry no cost (`subrent_in` is cost-forbidden). So on a subrent the writer lets\n`amount_cents` and its pair's `dates.collection_end` move after receipt — a\npaid hire extension — with `quantity` still floored at what is received.\n\n`destinations`, when present, states the listed pairs. Absent keeps every\nstored pair as it is."
         },
         {
@@ -14274,7 +14274,7 @@
         {
           "kind": "interface",
           "name": "PurchaseBill",
-          "declaration": "interface PurchaseBill {\n  uid: string;\n  number: number;\n  query_by_purchases: string[];\n  number_purchases: number[];\n  status: InvoiceStatusType;\n  supplier: UidNameRefType;\n  origin: PurchaseDocumentOriginType;\n  xero_document: PurchaseBillXeroDocumentType;\n  xero_id: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date: string | null;\n  due_date_fs?: FirestoreTimestampType | null;\n  reference: string | null;\n  items: PurchaseDocumentRow[];\n  destinations: PurchaseDocDestination[];\n  totals: PurchaseBillTotals;\n  voided_at?: FirestoreTimestampType;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface PurchaseBill {\n  uid: string;\n  number: number;\n  query_by_purchases: string[];\n  number_purchases: number[];\n  status: InvoiceStatusType;\n  supplier: UidNameRefType;\n  origin: PurchaseDocumentOriginType;\n  xero_document: PurchaseBillXeroDocumentType;\n  xero_id: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date: string | null;\n  due_date_fs?: FirestoreTimestampType | null;\n  subject: string;\n  reference: string | null;\n  items: PurchaseDocumentRow[];\n  destinations: PurchaseDocDestination[];\n  totals: PurchaseBillTotals;\n  voided_at?: FirestoreTimestampType;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A supplier bill against one or more purchases."
         },
         {
@@ -14556,7 +14556,7 @@
         {
           "kind": "interface",
           "name": "UpdatePurchaseBillInputType",
-          "declaration": "interface UpdatePurchaseBillInputType {\n  version: number;\n  date?: string;\n  due_date?: string;\n  reference?: string | null;\n  items?: PurchaseBillRowInputType[];\n  destinations?: PurchaseBillDestinationInputType[];\n}",
+          "declaration": "interface UpdatePurchaseBillInputType {\n  version: number;\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  items?: PurchaseBillRowInputType[];\n  destinations?: PurchaseBillDestinationInputType[];\n}",
           "doc": "Input for editing a bill (`PUT /purchase-bills/{uid}`). `items`, when present,\nis the WHOLE array in its new order, the invoice's shape (one-document-model\nPhase 5): a row it omits is removed. Refused per field class once the bill is\nsettled (`INVOICE_FIELD_FREEZE`); a settled linked bill takes a tracking edit\nalone. An accepted edit is pushed to Xero through the ACCPAY edit push (D5).\n\n`destinations`, when present, edits the pairs it names, each stated whole; a\npair it leaves out is unchanged. A pair's membership follows its divider in\n`items`, as on an invoice."
         },
         {
@@ -14632,7 +14632,7 @@
         {
           "kind": "interface",
           "name": "PurchaseReceipt",
-          "declaration": "interface PurchaseReceipt {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  destinations: PurchaseDestination[];\n  items: PurchaseReceiptItemType[];\n  reference: string | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_by: ActorRefType | null;\n  updated_by: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface PurchaseReceipt {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  destinations: PurchaseDestination[];\n  items: PurchaseReceiptItemType[];\n  subject: string;\n  reference: string | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_by: ActorRefType | null;\n  updated_by: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A purchase receipt: the custody projection of one purchase, keyed by its uid."
         },
         {
@@ -16020,7 +16020,7 @@
         {
           "kind": "interface",
           "name": "PurchaseBillDocument",
-          "declaration": "interface PurchaseBillDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  number_purchases: number[];\n  status: string;\n  supplier: typeLiteral;\n  origin: string;\n  xero_document: string;\n  xero_id?: string;\n  reference?: string;\n  items?: Array<typeLiteral>;\n  totals?: typeLiteral;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  due_date_fs?: number;\n  created_at?: number;\n  updated_at?: number;\n}",
+          "declaration": "interface PurchaseBillDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  number_purchases: number[];\n  status: string;\n  supplier: typeLiteral;\n  origin: string;\n  xero_document: string;\n  xero_id?: string;\n  subject?: string;\n  reference?: string;\n  items?: Array<typeLiteral>;\n  totals?: typeLiteral;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  due_date_fs?: number;\n  created_at?: number;\n  updated_at?: number;\n}",
           "doc": "A purchase bill as indexed in Typesense. No `store`, no `status`."
         },
         {
@@ -16032,7 +16032,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocument",
-          "declaration": "interface PurchaseDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  status: string;\n  supplier: typeLiteral;\n  uid_store: string;\n  reference?: string;\n  items?: Array<typeLiteral>;\n  bills?: Array<typeLiteral>;\n  credits?: Array<typeLiteral>;\n  total_cents?: number;\n  total_cents_str?: string;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  created_at?: number;\n  updated_at?: number;\n}",
+          "declaration": "interface PurchaseDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  status: string;\n  supplier: typeLiteral;\n  uid_store: string;\n  subject?: string;\n  reference?: string;\n  items?: Array<typeLiteral>;\n  bills?: Array<typeLiteral>;\n  credits?: Array<typeLiteral>;\n  total_cents?: number;\n  total_cents_str?: string;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  created_at?: number;\n  updated_at?: number;\n}",
           "doc": "A purchase as indexed in Typesense (api-cloudrun#1220). `reference` is\noptional here and `string | null` on the stored document: the translate path\nomits a null rather than sending one."
         },
         {
@@ -16389,7 +16389,7 @@
           "kind": "variable",
           "name": "purchaseBills",
           "declaration": "const purchaseBills: TypesenseCollectionConfig;",
-          "doc": "Typesense collection config for purchase bills (api-cloudrun#1220) — the\nsupplier's ACCPAY bill against one purchase.\n\n⚠️ **Not the purchase skeleton.** A bill has no `store`.\n\nv2 (api-cloudrun#1407): `lines` + `direct_lines` → one `items` array, product\nprojections and direct items together, each carrying `type` and `name` — so\n`items.type` is a facet and `items.name` is searchable. Every `items.*` field\nis `optional: true`: a direct item may name no product.\n\nv4 (one-document-model Phase 4): adds `status`, the invoice's vocabulary.\n\nv3 (one-document-model Phase 3): `uid_purchase` → `number_purchases`, the\ninvoice's `number_orders` twin, because one bill may now bill several\npurchases. `query_by_purchases` is NOT indexed, as `query_by_orders` is not:\nthe indexer strips every `query_by_*` mirror, and a purchase's own bills are\na Firestore `array-contains`, not a search. `items.type` now also carries the divider\ntypes (`purchase`, `destination`, `group`), as an invoice's does.\n\n`supplier.name` stays `facet: false` — see `typesense/suppliers.ts`.\n`xero_id` and `reference` are `optional: true` because their Zod leaves are\n`.nullable()`."
+          "doc": "Typesense collection config for purchase bills (api-cloudrun#1220) — the\nsupplier's ACCPAY bill against one purchase.\n\n⚠️ **Not the purchase skeleton.** A bill has no `store`.\n\nv2 (api-cloudrun#1407): `lines` + `direct_lines` → one `items` array, product\nprojections and direct items together, each carrying `type` and `name` — so\n`items.type` is a facet and `items.name` is searchable. Every `items.*` field\nis `optional: true`: a direct item may name no product.\n\nv4 (one-document-model Phase 4): adds `status`, the invoice's vocabulary.\n\nv5 (one-document-model 7a): adds `subject`, its purchase's, as an invoice\ncarries its order's (owner, 2026-11-11).\n\nv3 (one-document-model Phase 3): `uid_purchase` → `number_purchases`, the\ninvoice's `number_orders` twin, because one bill may now bill several\npurchases. `query_by_purchases` is NOT indexed, as `query_by_orders` is not:\nthe indexer strips every `query_by_*` mirror, and a purchase's own bills are\na Firestore `array-contains`, not a search. `items.type` now also carries the divider\ntypes (`purchase`, `destination`, `group`), as an invoice's does.\n\n`supplier.name` stays `facet: false` — see `typesense/suppliers.ts`.\n`xero_id` and `reference` are `optional: true` because their Zod leaves are\n`.nullable()`."
         },
         {
           "kind": "variable",
@@ -16401,7 +16401,7 @@
           "kind": "variable",
           "name": "purchases",
           "declaration": "const purchases: TypesenseCollectionConfig;",
-          "doc": "Typesense collection config for purchases (api-cloudrun#1220).\n\nThe index behind manager's `/purchases` list: what CFS ORDERED from a\nsupplier. `number` is the `default_sorting_field` and is stored bare, as on\n`credit-notes` — a prefixed display label would turn the sort field into a\nstring.\n\n🔴 **`supplier.name` MUST stay `facet: false`.** manager's\n`getQueryByStringFields` builds `query_by` from string fields that are\n`!f.facet` and covered by a declared display column, so a faceted name drops\nout of `query_by` and every search returns zero rows with no error. The same\nline in `typesense/suppliers.ts` carries the full argument.\n\n`items.name` is indexed so \"which PO has product X\" is one query. `notes` is\ndeliberately NOT declared — free text no list column needs; add it when\nsomeone wants to search on it.\n\n⚠️ `reference` is `optional: true` because its Zod leaf is `.nullable()`:\nthe translate path omits a null rather than sending one, and a non-optional\ndeclaration over a nullable leaf is a permanent, invisible sync 400.\n\nv2 (subrent purchase orders) added a `kind` facet and\n`lines.quantity_returned`.\n\nv3 (api-cloudrun#1407, the invoice shape): `lines` → `items` and the document\n`kind` is retired. The buy/subrent split is now the `items.type` facet — the\ninvoice's `items.type`, nested rather than a top-level mirror, so there is no\nderived Typesense field to declare. Every `items.*` field is `optional: true`\nbecause the arms disagree: a direct item names no product (and, until v5,\nonly a subrent item carried `quantity_returned`).\n\nv4 (one-document-model 6e-0a, ruling 32): the `bills[]` and `credits[]`\ndiscovery mirrors, `{ uid, number, status }` each, status faceted. Every field\nis `optional: true` through the expand, so a purchase stored before the\nbackfill still indexes.\n\nv5 (one-document-model 7a, C8): the `store` snapshot becomes `uid_store`, a\nfacet the manager labels from its stores cache (the order's key), and\n`items.quantity_returned` goes: a line's custody lives on its inbound\nbooking. `total_cents` stays until 6e-0b1 (ruling 62)."
+          "doc": "Typesense collection config for purchases (api-cloudrun#1220).\n\nThe index behind manager's `/purchases` list: what CFS ORDERED from a\nsupplier. `number` is the `default_sorting_field` and is stored bare, as on\n`credit-notes` — a prefixed display label would turn the sort field into a\nstring.\n\n🔴 **`supplier.name` MUST stay `facet: false`.** manager's\n`getQueryByStringFields` builds `query_by` from string fields that are\n`!f.facet` and covered by a declared display column, so a faceted name drops\nout of `query_by` and every search returns zero rows with no error. The same\nline in `typesense/suppliers.ts` carries the full argument.\n\n`items.name` is indexed so \"which PO has product X\" is one query. `notes` is\ndeliberately NOT declared — free text no list column needs; add it when\nsomeone wants to search on it.\n\n⚠️ `reference` is `optional: true` because its Zod leaf is `.nullable()`:\nthe translate path omits a null rather than sending one, and a non-optional\ndeclaration over a nullable leaf is a permanent, invisible sync 400.\n\nv2 (subrent purchase orders) added a `kind` facet and\n`lines.quantity_returned`.\n\nv3 (api-cloudrun#1407, the invoice shape): `lines` → `items` and the document\n`kind` is retired. The buy/subrent split is now the `items.type` facet — the\ninvoice's `items.type`, nested rather than a top-level mirror, so there is no\nderived Typesense field to declare. Every `items.*` field is `optional: true`\nbecause the arms disagree: a direct item names no product (and, until v5,\nonly a subrent item carried `quantity_returned`).\n\nv4 (one-document-model 6e-0a, ruling 32): the `bills[]` and `credits[]`\ndiscovery mirrors, `{ uid, number, status }` each, status faceted. Every field\nis `optional: true` through the expand, so a purchase stored before the\nbackfill still indexes.\n\nv5 (one-document-model 7a, C8): the `store` snapshot becomes `uid_store`, a\nfacet the manager labels from its stores cache (the order's key), and\n`items.quantity_returned` goes: a line's custody lives on its inbound\nbooking. `total_cents` stays until 6e-0b1 (ruling 62). It also gains `subject`,\nthe order's field on the payable side (owner, 2026-11-11), declared as the\norder's and invoice's are."
         },
         {
           "kind": "variable",

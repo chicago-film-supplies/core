@@ -1166,6 +1166,7 @@ export interface PurchaseDocument {
   supplier: { uid?: string; name: string };
   /** The store the goods come to (v5, C8): a uid, labelled by the reader. */
   uid_store: string;
+  subject?: string;
   reference?: string;
   /** Every item arm; `type` is the buy/subrent/usage/direct facet that replaced the document `kind` (api-cloudrun#1407). */
   items?: Array<{ type?: string; uid_product?: string; name?: string }>;
@@ -1194,6 +1195,7 @@ export interface PurchaseBillDocument {
   origin: string;
   xero_document: string;
   xero_id?: string;
+  subject?: string;
   reference?: string;
   items?: Array<{ type?: string; uid_product?: string; name?: string }>;
   totals?: {

@@ -37,7 +37,14 @@
  */
 import { assert, assertEquals } from "@std/assert";
 import { z } from "zod";
-import { FulfillmentSchema, InvoiceSchema, OrderSchema } from "../src/schemas/mod.ts";
+import {
+  FulfillmentSchema,
+  InvoiceSchema,
+  OrderSchema,
+  PurchaseBillSchema,
+  PurchaseReceiptSchema,
+  PurchaseSchema,
+} from "../src/schemas/mod.ts";
 
 /** The `z.strictObject` shape behind an annotated `z.ZodType<T>` schema. */
 // deno-lint-ignore no-explicit-any
@@ -52,6 +59,12 @@ const GRAINS = [
   ["OrderSchema", OrderSchema, "orderDetail"],
   ["InvoiceSchema", InvoiceSchema, "invoiceDetail"],
   ["FulfillmentSchema", FulfillmentSchema, "fulfillmentDetail"],
+  // The payable side (owner, 2026-11-11): the purchase, its receipt and its bills,
+  // as the order, its fulfillment and its invoices. A supplier credit carries
+  // none, as a credit note carries none.
+  ["PurchaseSchema", PurchaseSchema, "purchaseDetail"],
+  ["PurchaseReceiptSchema", PurchaseReceiptSchema, "purchaseDetail"],
+  ["PurchaseBillSchema", PurchaseBillSchema, "purchaseBillDetail"],
 ] as const;
 
 Deno.test("subject parity: every grain accepts a string and refuses absence and null", () => {

@@ -1214,6 +1214,13 @@ export interface Purchase {
   /** The day the order was placed. A calendar date. */
   date: string;
   date_fs: FirestoreTimestampType;
+  /**
+   * What the purchase is FOR, operator-typed, `""` for none — the order's
+   * `subject`, on the payable side (owner, 2026-11-11: one model, no divergence
+   * by default). It reaches the receipt and the bills by the shared-field merge.
+   * `pii: "mask"`: operators type shoot addresses into it on the order.
+   */
+  subject: string;
   /** The supplier's order or quote number, or `null`. */
   reference: string | null;
   /** Internal note, or `null` for none. */
@@ -1362,6 +1369,8 @@ export const PurchaseSchema: z.ZodType<Purchase> = z.strictObject({
   uid_store: FirestoreId.meta({ column: true, label: "Store" }),
   date: chicagoStartOfDay().meta({ serverSortVia: "date_fs", column: true, label: "Date", ...homonym }),
   date_fs: FirestoreTimestamp.meta(homonym),
+  // Bare `z.string()`, as on the order, fulfillment and invoice (`tests/subject-parity.test.ts`).
+  subject: z.string().meta({ pii: "mask", column: true, label: "Subject", linkTo: "purchaseDetail", propagate: true }),
   reference: z.string().max(200).nullable().meta({ column: true, label: "Reference", ...homonym }),
   notes: z.string().meta({ pii: "mask", column: true, label: "Notes" }).nullable(),
   items: z.array(PurchaseRowSchema).min(1).meta({ label: "Item" }),
@@ -1396,7 +1405,7 @@ export const PurchaseSchema: z.ZodType<Purchase> = z.strictObject({
   title: "Purchase",
   collection: "purchases",
   displayDefaults: {
-    columns: ["number", "date", "supplier.name", "status", "total_cents"],
+    columns: ["number", "date", "supplier.name", "subject", "status", "total_cents"],
     filters: { status: [] },
     sort: { column: "number", direction: "desc" },
     groupBy: [
@@ -1838,6 +1847,7 @@ export interface CreatePurchaseInputType {
   supplier: { uid: string };
   uid_store: string;
   date: string;
+  subject?: string;
   reference?: string | null;
   notes?: string | null;
   /**
@@ -1860,6 +1870,7 @@ export const CreatePurchaseInput: z.ZodType<CreatePurchaseInputType> = z.object(
   supplier: z.object({ uid: FirestoreId }),
   uid_store: FirestoreId,
   date: chicagoStartOfDay(),
+  subject: z.string().optional(),
   reference: z.string().max(200).nullable().optional(),
   notes: z.string().meta({ pii: "mask" }).nullable().optional(),
   items: z.array(PurchaseRowInput).min(1),
@@ -1890,6 +1901,7 @@ export const CreatePurchaseInput: z.ZodType<CreatePurchaseInputType> = z.object(
  */
 export interface UpdatePurchaseInputType {
   date?: string;
+  subject?: string;
   reference?: string | null;
   notes?: string | null;
   items?: PurchaseRowInputType[];
@@ -1900,6 +1912,7 @@ export interface UpdatePurchaseInputType {
 /** Zod schema for UpdatePurchaseInputType. */
 export const UpdatePurchaseInput: z.ZodType<UpdatePurchaseInputType> = z.object({
   date: chicagoStartOfDay().optional(),
+  subject: z.string().optional(),
   reference: z.string().max(200).nullable().optional(),
   notes: z.string().meta({ pii: "mask" }).nullable().optional(),
   items: z.array(PurchaseRowInput).min(1).optional(),

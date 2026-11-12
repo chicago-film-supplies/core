@@ -692,6 +692,8 @@ export interface PurchaseBill {
    * before it carries no mirror, and a required key would make those unreadable.
    */
   due_date_fs?: FirestoreTimestampType | null;
+  /** What the bill is for: its purchase's `subject`, followed by the shared-field merge, as an invoice's follows its order. */
+  subject: string;
   /** The supplier's own invoice number. */
   reference: string | null;
   /** Product projections and charge items under their dividers ({@link PurchaseDocumentRow}). */
@@ -801,6 +803,7 @@ export const PurchaseBillSchema: z.ZodType<PurchaseBill> = z.strictObject({
   date_fs: FirestoreTimestamp,
   due_date: chicagoStartOfDay().nullable().meta({ column: true, label: "Due Date", serverSortVia: "due_date_fs" }),
   due_date_fs: FirestoreTimestamp.nullable().optional(),
+  subject: z.string().meta({ pii: "mask", column: true, label: "Subject", linkTo: "purchaseBillDetail" }),
   reference: z.string().max(255).nullable().meta({ column: true, label: "Reference" }),
   // `.min(1)`: a bill bills at least one item. With charge items in the same
   // array that holds without a special case — a historic Vision bill is one
@@ -818,7 +821,7 @@ export const PurchaseBillSchema: z.ZodType<PurchaseBill> = z.strictObject({
   title: "Purchase Bill",
   collection: "purchase-bills",
   displayDefaults: {
-    columns: ["number", "date", "supplier.name", "reference", "status", "totals.total_cents", "totals.amount_due_cents"],
+    columns: ["number", "date", "supplier.name", "subject", "reference", "status", "totals.total_cents", "totals.amount_due_cents"],
     filters: { status: [] },
     sort: { column: "number", direction: "desc" },
     groupBy: [
@@ -1195,6 +1198,7 @@ export type CreatePurchaseBillInputType =
     mode: "push";
     date: string;
     due_date: string;
+    subject?: string;
     reference?: string | null;
     items: PurchaseDocumentItemInputType[];
     charge_items?: PurchaseDocumentChargeItemInputType[];
@@ -1214,6 +1218,7 @@ const pushBillInput = z.object({
   mode: z.literal("push"),
   date: chicagoStartOfDay(),
   due_date: chicagoStartOfDay(),
+  subject: z.string().optional(),
   reference: z.string().max(255).nullable().optional(),
   items: z.array(PurchaseDocumentItemInput),
   charge_items: z.array(PurchaseDocumentChargeItemInput).optional(),
@@ -1383,6 +1388,7 @@ export interface UpdatePurchaseBillInputType {
   version: number;
   date?: string;
   due_date?: string;
+  subject?: string;
   reference?: string | null;
   items?: PurchaseBillRowInputType[];
   destinations?: PurchaseBillDestinationInputType[];
@@ -1452,6 +1458,7 @@ export const UpdatePurchaseBillInput: z.ZodType<UpdatePurchaseBillInputType> = z
   version: z.int().min(0),
   date: chicagoStartOfDay().optional(),
   due_date: chicagoStartOfDay().optional(),
+  subject: z.string().optional(),
   reference: z.string().max(255).nullable().optional(),
   items: z.array(PurchaseBillRowInput).optional(),
   destinations: z.array(PurchaseBillDestinationInput).optional(),

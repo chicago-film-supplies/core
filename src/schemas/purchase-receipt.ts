@@ -179,6 +179,8 @@ export interface PurchaseReceipt {
   supplier: UidNameRefType;
   destinations: PurchaseDestination[];
   items: PurchaseReceiptItemType[];
+  /** The purchase's `subject`, merged per field as a fulfillment's is its order's. */
+  subject: string;
   /** The purchase's reference. */
   reference: string | null;
   /** The products this receipt carries (its line rows' uids), for reverse lookup. */
@@ -204,6 +206,7 @@ export const PurchaseReceiptSchema: z.ZodType<PurchaseReceipt> = z.strictObject(
   supplier: UidNameRef.meta({ label: "Supplier" }),
   destinations: z.array(PurchaseDestinationSchema).min(1).meta({ label: "Destination" }),
   items: z.array(PurchaseReceiptItem).min(1).meta({ label: "Item" }).superRefine(checkZeroPricedComponents),
+  subject: z.string().meta({ pii: "mask", column: true, label: "Subject", linkTo: "purchaseDetail" }),
   reference: z.string().max(200).nullable().meta({ column: true, label: "Reference" }),
   query_by_items: z.array(z.string()),
   query_by_contacts: z.array(z.string()),
@@ -218,7 +221,7 @@ export const PurchaseReceiptSchema: z.ZodType<PurchaseReceipt> = z.strictObject(
   title: "Purchase Receipt",
   collection: "purchase-receipts",
   displayDefaults: {
-    columns: ["number", "supplier.name", "status"],
+    columns: ["number", "supplier.name", "subject", "status"],
     filters: { status: [] },
     sort: { column: "number", direction: "desc" },
   },

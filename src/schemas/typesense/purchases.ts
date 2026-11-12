@@ -40,7 +40,9 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  * v5 (one-document-model 7a, C8): the `store` snapshot becomes `uid_store`, a
  * facet the manager labels from its stores cache (the order's key), and
  * `items.quantity_returned` goes: a line's custody lives on its inbound
- * booking. `total_cents` stays until 6e-0b1 (ruling 62).
+ * booking. `total_cents` stays until 6e-0b1 (ruling 62). It also gains `subject`,
+ * the order's field on the payable side (owner, 2026-11-11), declared as the
+ * order's and invoice's are.
  */
 export const purchases: TypesenseCollectionConfig = {
   alias: "purchases",
@@ -60,6 +62,7 @@ export const purchases: TypesenseCollectionConfig = {
       { name: "supplier.uid", type: "string", facet: false, optional: true },
       { name: "supplier.name", type: "string", sort: true, stem: true, facet: false },
       { name: "uid_store", type: "string", facet: true },
+      { name: "subject", type: "string", stem: true, sort: true, optional: true },
       { name: "reference", type: "string", stem: true, sort: true, optional: true },
       { name: "items", type: "object[]", optional: true },
       { name: "items.type", type: "string[]", facet: true, optional: true },
@@ -92,7 +95,7 @@ export const purchases: TypesenseCollectionConfig = {
   synonyms: [],
   pulseShards: 1,
   displayDefaults: {
-    columns: ["number", "date_fs", "supplier.name", "status", "total_cents"],
+    columns: ["number", "date_fs", "supplier.name", "subject", "status", "total_cents"],
     filters: { status: [] },
   },
 };
