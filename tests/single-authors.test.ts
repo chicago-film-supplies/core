@@ -228,6 +228,25 @@ Deno.test("row 8: the seven older classes, and a shelf write-off stays reversibl
   assertEquals(standaloneReversalRefusal({ type: "count_open" }), { code: "count_boundary" });
   assertEquals(standaloneReversalRefusal({ type: "unenroll" }), { code: "roster_boundary" });
   assertEquals(standaloneReversalRefusal({ type: "check_out" as never, uid_booking: "B" }), { code: "booking", uid: "B" });
+  // The ladder of the type picks the lever: an inbound booking's movement is
+  // never pointed at PUT /bookings (7a, C3).
+  const po = [{ collection: "purchases", uid: "PO" }] as never;
+  for (const type of ["purchase", "subrent_in", "subrent_out", "put_away", "receive_flag", "purchase_undo"] as const) {
+    assertEquals(
+      standaloneReversalRefusal({ type, uid_booking: "IB", sources: po }),
+      { code: "inbound_booking", uid: "IB" },
+      type,
+    );
+  }
+  // A settle names its inbound booking too, and its record still answers.
+  assertEquals(
+    standaloneReversalRefusal({
+      type: "return_to_supplier",
+      uid_booking: "IB",
+      sources: [{ collection: "purchases", uid: "PO" }, { collection: "out-of-service", uid: "R" }] as never,
+    }),
+    { code: "out_of_service", uid: "R" },
+  );
   assertEquals(
     standaloneReversalRefusal({ type: "purchase", sources: [{ collection: "purchases", uid: "PO" }] as never }),
     { code: "purchase_receipt", uid: "PO" },

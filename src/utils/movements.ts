@@ -142,11 +142,21 @@ export type StandaloneReversalRefusalCode =
   | "roster_boundary"
   /** Half of a twin reclass — reversed only as a pair (`POST /stock-reclasses/{uid}/reverse`). */
   | "reclass_pair"
-  /** A booking's movement — undone by lowering the booking's breakdown. */
+  /** An OUTBOUND booking's movement — undone by lowering the booking's breakdown (`PUT /bookings`). */
   | "booking"
-  /** A purchase receipt — `purchase` or a subrent's `subrent_in` — reversed with the purchase line (`…/receipts/{uid}/reverse`). */
+  /**
+   * An INBOUND booking's movement (a type whose `booking_ladder` is `inbound`) —
+   * undone by the inbound lever's undo rule on that booking, from its purchase.
+   */
+  | "inbound_booking"
+  /**
+   * A purchase receipt — `purchase` or a subrent's `subrent_in` — that names no
+   * booking. Reachable only by a movement stored before 7a's backfill stamps
+   * every purchase-family movement with its inbound booking; retired with the
+   * receipt routes when C8 converges them on the inbound lever.
+   */
   | "purchase_receipt"
-  /** A subrent's `subrent_out` — reversed with the purchase line (`…/returns/{uid}/reverse`). */
+  /** A subrent's `subrent_out` that names no booking — as `purchase_receipt`. */
   | "purchase_return"
   /** A line with an `out-of-service` endpoint — the record's buckets are the other half. */
   | "out_of_service"
@@ -183,16 +193,19 @@ export interface StandaloneReversalRefusal {
  *   return to one product while the other still holds them, and the Xero
  *   mirror posts one side of a 2510 pair, unbalancing it. The pair reverses
  *   together, at the original amounts.
- * - **A booking's movement** — the booking's `breakdown` is the other half.
- * - **A purchase receipt** — the line's INBOUND BOOKING is (`ordered →
- *   received`, one-document-model C8); and a subrent's **return**
- *   (`subrent_out`, `stocked → sent_back`), so it earns its own code and lever.
+ * - **A booking's movement** — the booking's `breakdown` is the other half. The
+ *   LADDER of its type (`MovementContract.booking_ladder`) decides which lever:
+ *   an outbound booking's is `PUT /bookings` (`booking`), an inbound booking's
+ *   the purchase's inbound lever (`inbound_booking`) — a receipt, put-away,
+ *   send-back or received-damaged flag.
+ * - **A purchase receipt or return naming no booking** — only a movement stored
+ *   before 7a's backfill; the purchase line answers.
  * - **An `out-of-service` endpoint, or a flag** (`service` set) — the record's
  *   buckets and `stores[]` are. A reason edit's SPLIT names two records.
- * - **A `return_to_supplier`** — it names a purchase too, but its lever is the
- *   RECORD PUT lowering `returned_to_supplier`, which moves the inbound
- *   booking back in the same write. So it answers `out_of_service`
- *   with the record, checked before the purchase branch.
+ * - **A `return_to_supplier`** — it names a purchase AND (since 7a) its inbound
+ *   booking, but its lever is the RECORD PUT lowering `returned_to_supplier`,
+ *   which moves the inbound booking back in the same write. So it answers
+ *   `out_of_service` with the record, checked before the booking branch.
  *
  * Keyed on endpoints, sources and type — a shelf `write_off`
  * (`locations → outside`) touches none of these and stays reversible.
@@ -206,11 +219,14 @@ export function standaloneReversalRefusal(
     const partner = reclassPartnerUid({ type: m.type, sources: m.sources ?? [] });
     return partner === null ? { code: "reclass_pair" } : { code: "reclass_pair", uid: partner };
   }
-  if (m.uid_booking) return { code: "booking", uid: m.uid_booking };
   const sources = m.sources ?? [];
   if (m.type === "return_to_supplier") {
     const owner = sources.find((s) => s.collection === "out-of-service");
     return owner ? { code: "out_of_service", uid: owner.uid } : { code: "out_of_service" };
+  }
+  if (m.uid_booking) {
+    const inbound = m.type !== undefined && MOVEMENT_CONTRACTS[m.type].booking_ladder === "inbound";
+    return { code: inbound ? "inbound_booking" : "booking", uid: m.uid_booking };
   }
   const purchase = sources.find((s) => s.collection === "purchases");
   if (purchase) {
