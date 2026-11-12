@@ -710,8 +710,8 @@ function projectedLineHead(item: PurchaseItem, uidPurchase: string) {
 }
 
 /**
- * What a purchase line's bill line attributes: the product a sale or rental
- * orders, or a service's optional product, and a replacement's record(s).
+ * What a purchase line's bill line carries beyond its head: a replacement's
+ * record(s). (The product is the line's uid on every arm since 7a.)
  *
  * A replacement's `out_of_service` list is re-shared over the bill line's
  * `quantity` (`fitOutOfServiceEntries`), so a partial bill's shares sum to its
@@ -724,13 +724,12 @@ function projectedLineHead(item: PurchaseItem, uidPurchase: string) {
 function attributionOf(
   item: PurchaseItem,
   quantity: number,
-): { uid_product?: string; out_of_service?: OutOfServiceEntryType[] } {
+): { out_of_service?: OutOfServiceEntryType[] } {
   switch (item.type) {
     case "sale":
     case "rental":
-      return {};
     case "service":
-      return item.uid_product !== undefined ? { uid_product: item.uid_product } : {};
+      return {};
     case "replacement":
       return { out_of_service: fitOutOfServiceEntries(item.out_of_service, quantity) };
     default: {

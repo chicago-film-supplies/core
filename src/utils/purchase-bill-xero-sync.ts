@@ -45,14 +45,11 @@ export function purchaseBillXeroProjection(bill: PurchaseBillXeroFields): unknow
     items: purchaseDocumentLines(bill.items).map((item) => ({
       type: item.type,
       // 🔴 The SAME value the retired line key held, so no stored bill's hash
-      // moves and nothing re-pushes (7a dropped `uid_product` from every line but a
-      // service's attribution): the uid on a sale, rental or product-naming
-      // replacement line, the attribution on a service line, else null.
-      uid_product: item.type === "service"
-        ? (item.uid_product ?? null)
-        : item.type === "replacement" && item.uid.startsWith("custom-")
-        ? null
-        : item.uid,
+      // moves and nothing re-pushes (7a dropped `uid_product` from every line):
+      // the product the uid names, or null on a `custom-` line. Measured
+      // 2026-11-11, every stored service line is `custom-` with no attribution,
+      // so it hashed null before and after.
+      uid_product: item.uid.startsWith("custom-") ? null : item.uid,
       name: item.name,
       quantity: item.quantity,
       amount_cents: item.amount_cents,

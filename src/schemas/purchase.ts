@@ -639,8 +639,11 @@ export interface PurchaseRentalItem extends Omit<PurchaseItemBase, "ledger_accou
  * line on a device CFS owns (Verizon), freight, a fee, Vision's standing history
  * line. Flat (freight: one amount) or time (a carrier line).
  *
- * `uid_product` is attribution only (api-cloudrun#1360, #1364): the product the
- * spend is for. Permanently optional — freight attributes nothing.
+ * Its uid is its catalog SERVICE product's when it has one, as an order or
+ * invoice service line's is, else `custom-` ({@link payableLineUid}). There is
+ * no attribution key (owner, 2026-11-11): a carrier line names its device
+ * through `uid_units`, and attributing a cost to the product it costs is an
+ * open modelling question (api-cloudrun#1488).
  */
 export interface PurchaseServiceItem extends PurchaseItemBase {
   type: "service";
@@ -651,7 +654,6 @@ export interface PurchaseServiceItem extends PurchaseItemBase {
   quantity_billed: number | null;
   /** See {@link PurchaseRentalItem.uid_units} — a Verizon line names its device. `[]` for freight. */
   uid_units: string[];
-  uid_product?: string;
 }
 
 /**
@@ -670,7 +672,7 @@ export interface PurchaseServiceItem extends PurchaseItemBase {
  * the record's `uid_product`. (The line's own `uid_product` key retired in 7a:
  * the uid is the one place a line names its product.)
  */
-export interface PurchaseReplacementItem extends Omit<PurchaseServiceItem, "type" | "uid_product"> {
+export interface PurchaseReplacementItem extends Omit<PurchaseServiceItem, "type"> {
   type: "replacement";
   /**
    * The records this line bills (a `mark_lost` record's id is a MovementId, so
@@ -920,10 +922,6 @@ const ServiceItemInner = z.strictObject({
   type: z.literal("service").meta({ column: true, label: "Type", propagate: true }),
   ...itemHead,
   ...noCustodyShape,
-  // Attribution, never identity: a service line's uid is `custom-` (ruling 12),
-  // and the product it names is the spend's subject, not the line. Permanent
-  // `.optional()`: freight and fees attribute nothing (api-cloudrun#1360).
-  uid_product: FirestoreId.optional().meta({ propagate: true }),
 }).superRefine((item, ctx) => noCustodyIssues(item, ctx));
 
 const ReplacementItemInner = z.strictObject({
@@ -1020,20 +1018,23 @@ export interface PayableLineUidFields {
 }
 
 const isCustomUid = (uid: string): boolean => uid.startsWith(CUSTOM_LINE_PREFIX);
+/** A uid shaped like a catalog document's: a Firestore id, as a product's is. */
+const isCatalogUid = (uid: string): boolean => FirestoreId.safeParse(uid).success;
 
 /**
- * The `uid` a payable line takes: its product's, as an order or invoice
- * catalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).
- * Since 7a the uid is the ONLY place a line names its product — the separate
- * `uid_product` key retired on every arm but a service line's attribution
- * (owner, 2026-11-11), so the payable line has the order line's shape.
+ * The `uid` a payable line takes: its product's, as an order or invoice line's
+ * is (one-document-model W4K, owner ruling 12). Since 7a the uid is the ONLY
+ * place a line names its product: no line carries `uid_product` (owner,
+ * 2026-11-11), so the payable line has the order line's shape exactly.
  *
  * - `sale` / `rental` → its own uid, which names the product.
- * - `replacement` → its own uid when that names a product (the lost rental's
- *   money-only TWIN, `uid_linked_replacement`, ruling 15), as an invoice's
- *   replacement line takes its replacement product's uid.
- * - `service`, and a `replacement` naming no product → a `custom-` uid. A line
- *   already carrying one keeps it; any other becomes `custom-` + its old uid.
+ * - `service` / `replacement` → its own uid when it names a catalog product (a
+ *   `service` product; a replacement's lost-rental TWIN, ruling 15), else a
+ *   `custom-` uid. A line already carrying one keeps it; any other becomes
+ *   `custom-` + its old uid, so a re-key is deterministic and repeatable.
+ *
+ * Which catalog product a service line may name (a `service` product, never
+ * the rental it costs) is the WRITER's check: it needs the product's type.
  *
  * @throws when a `sale` or `rental` line carries a `custom-` uid, which every
  *   schema arm for those types refuses.
@@ -1043,26 +1044,25 @@ export function payableLineUid(line: PayableLineUidFields): string {
     if (isCustomUid(line.uid)) throw new Error(`payableLineUid: a ${line.type} line names no product`);
     return line.uid;
   }
-  if (line.type === "replacement") return line.uid;
-  return isCustomUid(line.uid) ? line.uid : `${CUSTOM_LINE_PREFIX}${line.uid}`;
+  if (isCustomUid(line.uid) || isCatalogUid(line.uid)) return line.uid;
+  return `${CUSTOM_LINE_PREFIX}${line.uid}`;
 }
 
 /**
  * Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`:
- * a `sale` or `rental` line's uid is a product's (never `custom-`), and a
- * `service` line's is `custom-`. A `replacement` may be either.
+ * a `sale` or `rental` line's uid is a product's (never `custom-`); a `service`
+ * or `replacement` line's names a catalog product or is `custom-`.
  *
  * Attached to every stored purchase line arm and, through `documentItemsIssues`
  * (`schemas/purchase-bill.ts`), to every bill and supplier-credit line.
  */
 export function payableLineUidIssue(line: PayableLineUidFields): string | null {
-  if ((line.type === "sale" || line.type === "rental") && isCustomUid(line.uid)) {
-    return `a ${line.type} line's uid is its product's, not ${line.uid}`;
+  if (line.type === "sale" || line.type === "rental") {
+    return isCustomUid(line.uid) ? `a ${line.type} line's uid is its product's, not ${line.uid}` : null;
   }
-  if (line.type === "service" && !isCustomUid(line.uid)) {
-    return `a service line carries a custom- uid, not ${line.uid}`;
-  }
-  return null;
+  return isCustomUid(line.uid) || isCatalogUid(line.uid)
+    ? null
+    : `a ${line.type} line's uid names a catalog product or is custom-, not ${line.uid}`;
 }
 
 /** {@link payableLineUidIssue} as a stored line arm's refine, at the line's `uid`. */
@@ -1074,8 +1074,9 @@ function storedUidIssue(line: PayableLineUidFields, ctx: z.RefinementCtx): void 
 /**
  * Why a line INPUT carries a uid that cannot be its product, or `null`: a
  * `sale` or `rental` input names its product BY its uid, so a `custom-` one is
- * refused. A `service` (or product-less `replacement`) input's `custom-` uid is
- * the writer's to mint.
+ * refused. Any `service` or `replacement` input uid is accepted: the writer
+ * keeps a catalog one (after checking the product's type) and mints `custom-`
+ * for the rest.
  */
 export function payableInputUidIssue(line: { type: string; uid: string }): string | null {
   if ((line.type === "sale" || line.type === "rental") && isCustomUid(line.uid)) {
@@ -1554,7 +1555,6 @@ export interface PurchaseServiceItemInputType extends PurchaseItemInputBase {
   ledger_account: COACodeType;
   /** See {@link PurchaseRentalItemInputType.uid_units}. */
   uid_units?: string[];
-  uid_product?: string;
 }
 
 /**
@@ -1562,7 +1562,7 @@ export interface PurchaseServiceItemInputType extends PurchaseItemInputBase {
  * naming its record(s) in `out_of_service`. Its uid names the lost rental's twin
  * when the writer derives one (ruling 15), else the writer mints `custom-`.
  */
-export interface PurchaseReplacementItemInputType extends Omit<PurchaseServiceItemInputType, "type" | "uid_product"> {
+export interface PurchaseReplacementItemInputType extends Omit<PurchaseServiceItemInputType, "type"> {
   type: "replacement";
   /** Shares sum to `quantity` when it is stated. */
   out_of_service: OutOfServiceEntryType[];
@@ -1662,7 +1662,7 @@ const rentalItemInputArm = z.object({
   inputUidIssue(item, ctx);
 });
 
-const serviceItemInputArm = z.object({ type: z.literal("service"), ...noCustodyInput, uid_product: FirestoreId.optional() })
+const serviceItemInputArm = z.object({ type: z.literal("service"), ...noCustodyInput })
   .superRefine((item, ctx) => noCustodyInputIssues(item, ctx));
 
 const replacementItemInputArm = z.object({

@@ -11147,7 +11147,6 @@ interface PurchaseBillLineInputType {
   quantity?: number;
   amount_cents?: number;
   ledger_account?: COACodeType | null;
-  uid_product?: string;
   zero_priced?: boolean | null;
   quantity_per_parent?: number | null;
   out_of_service?: OutOfServiceEntryType[];
@@ -11486,7 +11485,7 @@ interface PurchaseDocumentChargeItemInputType {
   description?: string;
   ledger_account: COACodeType;
   amount_cents: number;
-  uid_product?: string;
+  uid?: string;
   out_of_service?: OutOfServiceEntryType[];
   uid_tracking_category?: string | null;
 }
@@ -11662,15 +11661,13 @@ outside any purchase divider) is the document's own row, like an invoice's
 loss-and-damage line: freight nobody expected. One that projects a purchase
 `service` item sits at its path.
 
-`uid_product` is attribution (api-cloudrun#1360, #1364): the writer emits the
-product's Xero `ItemCode` beside the stated account when it has one; rental
-items are untracked in Xero, so the code moves no Xero quantity or value.
-Permanent `.optional()`: freight and fees name nothing.
+Its uid is its catalog service product's, else `custom-`, as on the purchase
+({@link payableLineUid}). No attribution key (owner, 2026-11-11): a carrier
+line's device is read through its units (api-cloudrun#1488).
 
 ```ts
 interface PurchaseDocumentServiceItem {
   type: "service";
-  uid_product?: string;
   path_purchase_item?: string[];
 }
 ```
@@ -12233,8 +12230,11 @@ A SERVICE (Charge) item — something CFS pays for with no custody: a carrier
 line on a device CFS owns (Verizon), freight, a fee, Vision's standing history
 line. Flat (freight: one amount) or time (a carrier line).
 
-`uid_product` is attribution only (api-cloudrun#1360, #1364): the product the
-spend is for. Permanently optional — freight attributes nothing.
+Its uid is its catalog SERVICE product's when it has one, as an order or
+invoice service line's is, else `custom-` ({@link payableLineUid}). There is
+no attribution key (owner, 2026-11-11): a carrier line names its device
+through `uid_units`, and attributing a cost to the product it costs is an
+open modelling question (api-cloudrun#1488).
 
 ```ts
 interface PurchaseServiceItem {
@@ -12243,7 +12243,6 @@ interface PurchaseServiceItem {
   price: PurchaseLinePrice;
   quantity_billed: number | null;
   uid_units: string[];
-  uid_product?: string;
 }
 ```
 
@@ -12259,7 +12258,6 @@ interface PurchaseServiceItemInputType {
   amount_cents?: number | null;
   ledger_account: COACodeType;
   uid_units?: string[];
-  uid_product?: string;
 }
 ```
 
@@ -18606,29 +18604,31 @@ no availability answer moves; the rule just stops having two answers.
 
 Why a line INPUT carries a uid that cannot be its product, or `null`: a
 `sale` or `rental` input names its product BY its uid, so a `custom-` one is
-refused. A `service` (or product-less `replacement`) input's `custom-` uid is
-the writer's to mint.
+refused. Any `service` or `replacement` input uid is accepted: the writer
+keeps a catalog one (after checking the product's type) and mints `custom-`
+for the rest.
 
 ### `payableLineUid(line: PayableLineUidFields): string`
 
-The `uid` a payable line takes: its product's, as an order or invoice
-catalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).
-Since 7a the uid is the ONLY place a line names its product — the separate
-`uid_product` key retired on every arm but a service line's attribution
-(owner, 2026-11-11), so the payable line has the order line's shape.
+The `uid` a payable line takes: its product's, as an order or invoice line's
+is (one-document-model W4K, owner ruling 12). Since 7a the uid is the ONLY
+place a line names its product: no line carries `uid_product` (owner,
+2026-11-11), so the payable line has the order line's shape exactly.
 
 - `sale` / `rental` → its own uid, which names the product.
-- `replacement` → its own uid when that names a product (the lost rental's
-  money-only TWIN, `uid_linked_replacement`, ruling 15), as an invoice's
-  replacement line takes its replacement product's uid.
-- `service`, and a `replacement` naming no product → a `custom-` uid. A line
-  already carrying one keeps it; any other becomes `custom-` + its old uid.
+- `service` / `replacement` → its own uid when it names a catalog product (a
+  `service` product; a replacement's lost-rental TWIN, ruling 15), else a
+  `custom-` uid. A line already carrying one keeps it; any other becomes
+  `custom-` + its old uid, so a re-key is deterministic and repeatable.
+
+Which catalog product a service line may name (a `service` product, never
+the rental it costs) is the WRITER's check: it needs the product's type.
 
 ### `payableLineUidIssue(line: PayableLineUidFields): string | null`
 
 Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`:
-a `sale` or `rental` line's uid is a product's (never `custom-`), and a
-`service` line's is `custom-`. A `replacement` may be either.
+a `sale` or `rental` line's uid is a product's (never `custom-`); a `service`
+or `replacement` line's names a catalog product or is `custom-`.
 
 Attached to every stored purchase line arm and, through `documentItemsIssues`
 (`schemas/purchase-bill.ts`), to every bill and supplier-credit line.
@@ -29697,8 +29697,11 @@ A SERVICE (Charge) item — something CFS pays for with no custody: a carrier
 line on a device CFS owns (Verizon), freight, a fee, Vision's standing history
 line. Flat (freight: one amount) or time (a carrier line).
 
-`uid_product` is attribution only (api-cloudrun#1360, #1364): the product the
-spend is for. Permanently optional — freight attributes nothing.
+Its uid is its catalog SERVICE product's when it has one, as an order or
+invoice service line's is, else `custom-` ({@link payableLineUid}). There is
+no attribution key (owner, 2026-11-11): a carrier line names its device
+through `uid_units`, and attributing a cost to the product it costs is an
+open modelling question (api-cloudrun#1488).
 
 ```ts
 interface PurchaseServiceItem {
@@ -29707,7 +29710,6 @@ interface PurchaseServiceItem {
   price: PurchaseLinePrice;
   quantity_billed: number | null;
   uid_units: string[];
-  uid_product?: string;
 }
 ```
 
@@ -29723,7 +29725,6 @@ interface PurchaseServiceItemInputType {
   amount_cents?: number | null;
   ledger_account: COACodeType;
   uid_units?: string[];
-  uid_product?: string;
 }
 ```
 
@@ -29996,29 +29997,31 @@ A kit header holds no money: a `null` account requires a flat line stating $0.
 
 Why a line INPUT carries a uid that cannot be its product, or `null`: a
 `sale` or `rental` input names its product BY its uid, so a `custom-` one is
-refused. A `service` (or product-less `replacement`) input's `custom-` uid is
-the writer's to mint.
+refused. Any `service` or `replacement` input uid is accepted: the writer
+keeps a catalog one (after checking the product's type) and mints `custom-`
+for the rest.
 
 ### `payableLineUid(line: PayableLineUidFields): string`
 
-The `uid` a payable line takes: its product's, as an order or invoice
-catalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).
-Since 7a the uid is the ONLY place a line names its product — the separate
-`uid_product` key retired on every arm but a service line's attribution
-(owner, 2026-11-11), so the payable line has the order line's shape.
+The `uid` a payable line takes: its product's, as an order or invoice line's
+is (one-document-model W4K, owner ruling 12). Since 7a the uid is the ONLY
+place a line names its product: no line carries `uid_product` (owner,
+2026-11-11), so the payable line has the order line's shape exactly.
 
 - `sale` / `rental` → its own uid, which names the product.
-- `replacement` → its own uid when that names a product (the lost rental's
-  money-only TWIN, `uid_linked_replacement`, ruling 15), as an invoice's
-  replacement line takes its replacement product's uid.
-- `service`, and a `replacement` naming no product → a `custom-` uid. A line
-  already carrying one keeps it; any other becomes `custom-` + its old uid.
+- `service` / `replacement` → its own uid when it names a catalog product (a
+  `service` product; a replacement's lost-rental TWIN, ruling 15), else a
+  `custom-` uid. A line already carrying one keeps it; any other becomes
+  `custom-` + its old uid, so a re-key is deterministic and repeatable.
+
+Which catalog product a service line may name (a `service` product, never
+the rental it costs) is the WRITER's check: it needs the product's type.
 
 ### `payableLineUidIssue(line: PayableLineUidFields): string | null`
 
 Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`:
-a `sale` or `rental` line's uid is a product's (never `custom-`), and a
-`service` line's is `custom-`. A `replacement` may be either.
+a `sale` or `rental` line's uid is a product's (never `custom-`); a `service`
+or `replacement` line's names a catalog product or is `custom-`.
 
 Attached to every stored purchase line arm and, through `documentItemsIssues`
 (`schemas/purchase-bill.ts`), to every bill and supplier-credit line.
@@ -30397,7 +30400,6 @@ interface PurchaseBillLineInputType {
   quantity?: number;
   amount_cents?: number;
   ledger_account?: COACodeType | null;
-  uid_product?: string;
   zero_priced?: boolean | null;
   quantity_per_parent?: number | null;
   out_of_service?: OutOfServiceEntryType[];
@@ -30645,7 +30647,7 @@ interface PurchaseDocumentChargeItemInputType {
   description?: string;
   ledger_account: COACodeType;
   amount_cents: number;
-  uid_product?: string;
+  uid?: string;
   out_of_service?: OutOfServiceEntryType[];
   uid_tracking_category?: string | null;
 }
@@ -30821,15 +30823,13 @@ outside any purchase divider) is the document's own row, like an invoice's
 loss-and-damage line: freight nobody expected. One that projects a purchase
 `service` item sits at its path.
 
-`uid_product` is attribution (api-cloudrun#1360, #1364): the writer emits the
-product's Xero `ItemCode` beside the stated account when it has one; rental
-items are untracked in Xero, so the code moves no Xero quantity or value.
-Permanent `.optional()`: freight and fees name nothing.
+Its uid is its catalog service product's, else `custom-`, as on the purchase
+({@link payableLineUid}). No attribution key (owner, 2026-11-11): a carrier
+line's device is read through its units (api-cloudrun#1488).
 
 ```ts
 interface PurchaseDocumentServiceItem {
   type: "service";
-  uid_product?: string;
   path_purchase_item?: string[];
 }
 ```
@@ -53367,29 +53367,31 @@ One row's custody from a {@link custodyBySourceItem} map — none when no moveme
 
 Why a line INPUT carries a uid that cannot be its product, or `null`: a
 `sale` or `rental` input names its product BY its uid, so a `custom-` one is
-refused. A `service` (or product-less `replacement`) input's `custom-` uid is
-the writer's to mint.
+refused. Any `service` or `replacement` input uid is accepted: the writer
+keeps a catalog one (after checking the product's type) and mints `custom-`
+for the rest.
 
 ### `payableLineUid(line: PayableLineUidFields): string`
 
-The `uid` a payable line takes: its product's, as an order or invoice
-catalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).
-Since 7a the uid is the ONLY place a line names its product — the separate
-`uid_product` key retired on every arm but a service line's attribution
-(owner, 2026-11-11), so the payable line has the order line's shape.
+The `uid` a payable line takes: its product's, as an order or invoice line's
+is (one-document-model W4K, owner ruling 12). Since 7a the uid is the ONLY
+place a line names its product: no line carries `uid_product` (owner,
+2026-11-11), so the payable line has the order line's shape exactly.
 
 - `sale` / `rental` → its own uid, which names the product.
-- `replacement` → its own uid when that names a product (the lost rental's
-  money-only TWIN, `uid_linked_replacement`, ruling 15), as an invoice's
-  replacement line takes its replacement product's uid.
-- `service`, and a `replacement` naming no product → a `custom-` uid. A line
-  already carrying one keeps it; any other becomes `custom-` + its old uid.
+- `service` / `replacement` → its own uid when it names a catalog product (a
+  `service` product; a replacement's lost-rental TWIN, ruling 15), else a
+  `custom-` uid. A line already carrying one keeps it; any other becomes
+  `custom-` + its old uid, so a re-key is deterministic and repeatable.
+
+Which catalog product a service line may name (a `service` product, never
+the rental it costs) is the WRITER's check: it needs the product's type.
 
 ### `payableLineUidIssue(line: PayableLineUidFields): string | null`
 
 Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`:
-a `sale` or `rental` line's uid is a product's (never `custom-`), and a
-`service` line's is `custom-`. A `replacement` may be either.
+a `sale` or `rental` line's uid is a product's (never `custom-`); a `service`
+or `replacement` line's names a catalog product or is `custom-`.
 
 Attached to every stored purchase line arm and, through `documentItemsIssues`
 (`schemas/purchase-bill.ts`), to every bill and supplier-credit line.

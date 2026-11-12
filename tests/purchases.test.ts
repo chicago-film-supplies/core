@@ -590,9 +590,10 @@ Deno.test("uid_units: each unit once per line; query_by_units mirrors the subren
   assertEquals(issuePaths(PurchaseSchema, withItems(items, { query_by_units: ["unit-3"] })), ["query_by_units"]);
 });
 
-Deno.test("deriveQueryByProducts leaves a charge's attribution out; deriveQueryByOrders reads subrent items only", () => {
-  assertEquals(deriveQueryByProducts([freight({ uid_product: "testprod900000000000" })]), []);
-  assertEquals(deriveQueryByProducts([carrierLine()]), [], "a carrier line attributes, it does not order");
+Deno.test("deriveQueryByProducts leaves a charge out, catalog-keyed or not; deriveQueryByOrders reads subrent items only", () => {
+  // A catalog SERVICE product names the charge; a charge orders nothing.
+  assertEquals(deriveQueryByProducts([freight({ uid: "testprod900000000000", path: [D, "testprod900000000000"] })]), []);
+  assertEquals(deriveQueryByProducts([carrierLine()]), [], "a carrier line orders nothing");
   assertEquals(
     deriveQueryByOrders([hireLine({ uid_orders: ["a", "b"] }), hireLine({ uid: lid(7), uid_orders: ["b", "c"] }), line()]),
     ["a", "b", "c"],
@@ -665,7 +666,7 @@ Deno.test("CreatePurchaseInput: rows of every arm, the same product in two group
       quantity: 2,
       price: { uid_price_formula: WEEKLY.uid, rates: weeklyPrice.rates },
     },
-    { type: "service", ...lineHead(5), name: "Hotspot line", uid_product: PRODUCT, ledger_account: 5150, price: { uid_price_formula: MONTHLY.uid } },
+    { type: "service", ...lineHead(5), name: "Hotspot line", ledger_account: 5150, price: { uid_price_formula: MONTHLY.uid } },
     { type: "service", ...lineHead(6), name: "Freight", amount_cents: 1_500, ledger_account: 5300, price: { discount: { rate: 10, type: "percent" } } },
     // The same product again, in its own group: one product per group (W4K).
     { type: "group", uid: GROUP, path: [PAIR_A, GROUP], name: "Second" },
@@ -1132,9 +1133,9 @@ Deno.test("a charge item input stays STRICT inside the push input — an unknown
       uuid_session: SESSION,
       version: 0,
     });
-  const charge = { name: "Loss charge", ledger_account: 5100, amount_cents: 1500, uid_product: PRODUCT };
+  const charge = { name: "Loss charge", ledger_account: 5100, amount_cents: 1500, uid: PRODUCT };
   assertEquals(push(charge).success, true, "the otherwise-valid payload parses, so the refusal below is the key alone");
-  const r = push({ ...charge, uid_product_typo: "x" });
+  const r = push({ ...charge, uid_typo: "x" });
   assertEquals(
     r.success ? [] : r.error.issues.map((i) => `${i.code}:${i.path.join(".")}`),
     ["unrecognized_keys:charge_items.0"],

@@ -4941,7 +4941,7 @@
         {
           "kind": "interface",
           "name": "PurchaseBillLineInputType",
-          "declaration": "interface PurchaseBillLineInputType {\n  type: SharedLineType;\n  uid: string;\n  path: string[];\n  name?: string;\n  description?: string;\n  quantity?: number;\n  amount_cents?: number;\n  ledger_account?: COACodeType | null;\n  uid_product?: string;\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_purchase_item?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  uid_tax_class_override?: string | null;\n  uid_tracking_category?: string | null;\n  price?: typeLiteral;\n}",
+          "declaration": "interface PurchaseBillLineInputType {\n  type: SharedLineType;\n  uid: string;\n  path: string[];\n  name?: string;\n  description?: string;\n  quantity?: number;\n  amount_cents?: number;\n  ledger_account?: COACodeType | null;\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_purchase_item?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  uid_tax_class_override?: string | null;\n  uid_tracking_category?: string | null;\n  price?: typeLiteral;\n}",
           "doc": "A line row of a bill's whole-array input.\n\nThe writer pairs each row to a stored one (exact path, then the row's uid and\nancestry), and the paired row is the base for every key this row omits, so a\nrow that moved keeps them. A row no stored row pairs with is, in order: a\nsplit's clone if it states {@link path_purchase_item}; a line of the purchase\nnamed by its path; or a line the bill itself authors, which states its name,\naccount, quantity and money; a sale or rental names its product by its uid.\n\nOn a TIME line `price.rates` restates each unit rate; a flat line's\n`amount_cents` is stated directly (gross when a discount is set).\n\n`path_purchase_item` absent keeps the stored pointer, and there is no `null`\nform: the writer stamps every moved row's pointer and clears one a move back\nmade pointless, so a stale client's identity-only rows cannot clear one.\nThe writer assigns the tax class and a bill-authored line's flat formula."
         },
         {
@@ -5097,7 +5097,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocumentChargeItemInputType",
-          "declaration": "interface PurchaseDocumentChargeItemInputType {\n  name: string;\n  description?: string;\n  ledger_account: COACodeType;\n  amount_cents: number;\n  uid_product?: string;\n  out_of_service?: OutOfServiceEntryType[];\n  uid_tracking_category?: string | null;\n}",
+          "declaration": "interface PurchaseDocumentChargeItemInputType {\n  name: string;\n  description?: string;\n  ledger_account: COACodeType;\n  amount_cents: number;\n  uid?: string;\n  out_of_service?: OutOfServiceEntryType[];\n  uid_tracking_category?: string | null;\n}",
           "doc": "A document-only charge item as an operator states it on a PUSHED bill or\ncredit (freight nobody expected, a fee). The writer mints its `uid`/`path`,\nstamps a Fixed formula snapshot and `quantity: 1`.\n`uid_tracking_category` follows the order/invoice line rule: absent or `null`\ntakes the attributed product's category (none when it names no product); a\nuid sets it and must name a live category.\n\n⚠️ **The node stays STRICT, though both push inputs embed it.** Stripping\nwould let an api that predates a field silently drop it rather than 400, and\nan attribution would vanish with nothing failing (api-cloudrun#1360)."
         },
         {
@@ -5193,8 +5193,8 @@
         {
           "kind": "interface",
           "name": "PurchaseDocumentServiceItem",
-          "declaration": "interface PurchaseDocumentServiceItem {\n  type: \"service\";\n  uid_product?: string;\n  path_purchase_item?: string[];\n}",
-          "doc": "A bill or credit SERVICE (Charge) line — freight, a fee, a carrier line.\nPosts to its own account and never touches basis.\n\nA **document-only** service line (at a path its purchase does not carry, or\noutside any purchase divider) is the document's own row, like an invoice's\nloss-and-damage line: freight nobody expected. One that projects a purchase\n`service` item sits at its path.\n\n`uid_product` is attribution (api-cloudrun#1360, #1364): the writer emits the\nproduct's Xero `ItemCode` beside the stated account when it has one; rental\nitems are untracked in Xero, so the code moves no Xero quantity or value.\nPermanent `.optional()`: freight and fees name nothing."
+          "declaration": "interface PurchaseDocumentServiceItem {\n  type: \"service\";\n  path_purchase_item?: string[];\n}",
+          "doc": "A bill or credit SERVICE (Charge) line — freight, a fee, a carrier line.\nPosts to its own account and never touches basis.\n\nA **document-only** service line (at a path its purchase does not carry, or\noutside any purchase divider) is the document's own row, like an invoice's\nloss-and-damage line: freight nobody expected. One that projects a purchase\n`service` item sits at its path.\n\nIts uid is its catalog service product's, else `custom-`, as on the purchase\n({@link payableLineUid}). No attribution key (owner, 2026-11-11): a carrier\nline's device is read through its units (api-cloudrun#1488)."
         },
         {
           "kind": "variable",
@@ -5457,13 +5457,13 @@
         {
           "kind": "interface",
           "name": "PurchaseServiceItem",
-          "declaration": "interface PurchaseServiceItem {\n  type: \"service\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  quantity_billed: number | null;\n  uid_units: string[];\n  uid_product?: string;\n}",
-          "doc": "A SERVICE (Charge) item — something CFS pays for with no custody: a carrier\nline on a device CFS owns (Verizon), freight, a fee, Vision's standing history\nline. Flat (freight: one amount) or time (a carrier line).\n\n`uid_product` is attribution only (api-cloudrun#1360, #1364): the product the\nspend is for. Permanently optional — freight attributes nothing."
+          "declaration": "interface PurchaseServiceItem {\n  type: \"service\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  quantity_billed: number | null;\n  uid_units: string[];\n}",
+          "doc": "A SERVICE (Charge) item — something CFS pays for with no custody: a carrier\nline on a device CFS owns (Verizon), freight, a fee, Vision's standing history\nline. Flat (freight: one amount) or time (a carrier line).\n\nIts uid is its catalog SERVICE product's when it has one, as an order or\ninvoice service line's is, else `custom-` ({@link payableLineUid}). There is\nno attribution key (owner, 2026-11-11): a carrier line names its device\nthrough `uid_units`, and attributing a cost to the product it costs is an\nopen modelling question (api-cloudrun#1488)."
         },
         {
           "kind": "interface",
           "name": "PurchaseServiceItemInputType",
-          "declaration": "interface PurchaseServiceItemInputType {\n  type: \"service\";\n  name: string;\n  quantity?: number;\n  amount_cents?: number | null;\n  ledger_account: COACodeType;\n  uid_units?: string[];\n  uid_product?: string;\n}",
+          "declaration": "interface PurchaseServiceItemInputType {\n  type: \"service\";\n  name: string;\n  quantity?: number;\n  amount_cents?: number | null;\n  ledger_account: COACodeType;\n  uid_units?: string[];\n}",
           "doc": "A service (Charge) item as an operator raises it. Its account is the operator's — there is no default."
         },
         {
@@ -8643,7 +8643,7 @@
           "kind": "function",
           "name": "payableInputUidIssue",
           "signature": "payableInputUidIssue(line: typeLiteral): string | null",
-          "doc": "Why a line INPUT carries a uid that cannot be its product, or `null`: a\n`sale` or `rental` input names its product BY its uid, so a `custom-` one is\nrefused. A `service` (or product-less `replacement`) input's `custom-` uid is\nthe writer's to mint.",
+          "doc": "Why a line INPUT carries a uid that cannot be its product, or `null`: a\n`sale` or `rental` input names its product BY its uid, so a `custom-` one is\nrefused. Any `service` or `replacement` input uid is accepted: the writer\nkeeps a catalog one (after checking the product's type) and mints `custom-`\nfor the rest.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -8651,7 +8651,7 @@
           "kind": "function",
           "name": "payableLineUid",
           "signature": "payableLineUid(line: PayableLineUidFields): string",
-          "doc": "The `uid` a payable line takes: its product's, as an order or invoice\ncatalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).\nSince 7a the uid is the ONLY place a line names its product — the separate\n`uid_product` key retired on every arm but a service line's attribution\n(owner, 2026-11-11), so the payable line has the order line's shape.\n\n- `sale` / `rental` → its own uid, which names the product.\n- `replacement` → its own uid when that names a product (the lost rental's\n  money-only TWIN, `uid_linked_replacement`, ruling 15), as an invoice's\n  replacement line takes its replacement product's uid.\n- `service`, and a `replacement` naming no product → a `custom-` uid. A line\n  already carrying one keeps it; any other becomes `custom-` + its old uid.",
+          "doc": "The `uid` a payable line takes: its product's, as an order or invoice line's\nis (one-document-model W4K, owner ruling 12). Since 7a the uid is the ONLY\nplace a line names its product: no line carries `uid_product` (owner,\n2026-11-11), so the payable line has the order line's shape exactly.\n\n- `sale` / `rental` → its own uid, which names the product.\n- `service` / `replacement` → its own uid when it names a catalog product (a\n  `service` product; a replacement's lost-rental TWIN, ruling 15), else a\n  `custom-` uid. A line already carrying one keeps it; any other becomes\n  `custom-` + its old uid, so a re-key is deterministic and repeatable.\n\nWhich catalog product a service line may name (a `service` product, never\nthe rental it costs) is the WRITER's check: it needs the product's type.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -8659,7 +8659,7 @@
           "kind": "function",
           "name": "payableLineUidIssue",
           "signature": "payableLineUidIssue(line: PayableLineUidFields): string | null",
-          "doc": "Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`:\na `sale` or `rental` line's uid is a product's (never `custom-`), and a\n`service` line's is `custom-`. A `replacement` may be either.\n\nAttached to every stored purchase line arm and, through `documentItemsIssues`\n(`schemas/purchase-bill.ts`), to every bill and supplier-credit line.",
+          "doc": "Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`:\na `sale` or `rental` line's uid is a product's (never `custom-`); a `service`\nor `replacement` line's names a catalog product or is `custom-`.\n\nAttached to every stored purchase line arm and, through `documentItemsIssues`\n(`schemas/purchase-bill.ts`), to every bill and supplier-credit line.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -13928,13 +13928,13 @@
         {
           "kind": "interface",
           "name": "PurchaseServiceItem",
-          "declaration": "interface PurchaseServiceItem {\n  type: \"service\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  quantity_billed: number | null;\n  uid_units: string[];\n  uid_product?: string;\n}",
-          "doc": "A SERVICE (Charge) item — something CFS pays for with no custody: a carrier\nline on a device CFS owns (Verizon), freight, a fee, Vision's standing history\nline. Flat (freight: one amount) or time (a carrier line).\n\n`uid_product` is attribution only (api-cloudrun#1360, #1364): the product the\nspend is for. Permanently optional — freight attributes nothing."
+          "declaration": "interface PurchaseServiceItem {\n  type: \"service\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  quantity_billed: number | null;\n  uid_units: string[];\n}",
+          "doc": "A SERVICE (Charge) item — something CFS pays for with no custody: a carrier\nline on a device CFS owns (Verizon), freight, a fee, Vision's standing history\nline. Flat (freight: one amount) or time (a carrier line).\n\nIts uid is its catalog SERVICE product's when it has one, as an order or\ninvoice service line's is, else `custom-` ({@link payableLineUid}). There is\nno attribution key (owner, 2026-11-11): a carrier line names its device\nthrough `uid_units`, and attributing a cost to the product it costs is an\nopen modelling question (api-cloudrun#1488)."
         },
         {
           "kind": "interface",
           "name": "PurchaseServiceItemInputType",
-          "declaration": "interface PurchaseServiceItemInputType {\n  type: \"service\";\n  name: string;\n  quantity?: number;\n  amount_cents?: number | null;\n  ledger_account: COACodeType;\n  uid_units?: string[];\n  uid_product?: string;\n}",
+          "declaration": "interface PurchaseServiceItemInputType {\n  type: \"service\";\n  name: string;\n  quantity?: number;\n  amount_cents?: number | null;\n  ledger_account: COACodeType;\n  uid_units?: string[];\n}",
           "doc": "A service (Charge) item as an operator raises it. Its account is the operator's — there is no default."
         },
         {
@@ -14105,7 +14105,7 @@
           "kind": "function",
           "name": "payableInputUidIssue",
           "signature": "payableInputUidIssue(line: typeLiteral): string | null",
-          "doc": "Why a line INPUT carries a uid that cannot be its product, or `null`: a\n`sale` or `rental` input names its product BY its uid, so a `custom-` one is\nrefused. A `service` (or product-less `replacement`) input's `custom-` uid is\nthe writer's to mint.",
+          "doc": "Why a line INPUT carries a uid that cannot be its product, or `null`: a\n`sale` or `rental` input names its product BY its uid, so a `custom-` one is\nrefused. Any `service` or `replacement` input uid is accepted: the writer\nkeeps a catalog one (after checking the product's type) and mints `custom-`\nfor the rest.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -14113,7 +14113,7 @@
           "kind": "function",
           "name": "payableLineUid",
           "signature": "payableLineUid(line: PayableLineUidFields): string",
-          "doc": "The `uid` a payable line takes: its product's, as an order or invoice\ncatalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).\nSince 7a the uid is the ONLY place a line names its product — the separate\n`uid_product` key retired on every arm but a service line's attribution\n(owner, 2026-11-11), so the payable line has the order line's shape.\n\n- `sale` / `rental` → its own uid, which names the product.\n- `replacement` → its own uid when that names a product (the lost rental's\n  money-only TWIN, `uid_linked_replacement`, ruling 15), as an invoice's\n  replacement line takes its replacement product's uid.\n- `service`, and a `replacement` naming no product → a `custom-` uid. A line\n  already carrying one keeps it; any other becomes `custom-` + its old uid.",
+          "doc": "The `uid` a payable line takes: its product's, as an order or invoice line's\nis (one-document-model W4K, owner ruling 12). Since 7a the uid is the ONLY\nplace a line names its product: no line carries `uid_product` (owner,\n2026-11-11), so the payable line has the order line's shape exactly.\n\n- `sale` / `rental` → its own uid, which names the product.\n- `service` / `replacement` → its own uid when it names a catalog product (a\n  `service` product; a replacement's lost-rental TWIN, ruling 15), else a\n  `custom-` uid. A line already carrying one keeps it; any other becomes\n  `custom-` + its old uid, so a re-key is deterministic and repeatable.\n\nWhich catalog product a service line may name (a `service` product, never\nthe rental it costs) is the WRITER's check: it needs the product's type.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -14121,7 +14121,7 @@
           "kind": "function",
           "name": "payableLineUidIssue",
           "signature": "payableLineUidIssue(line: PayableLineUidFields): string | null",
-          "doc": "Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`:\na `sale` or `rental` line's uid is a product's (never `custom-`), and a\n`service` line's is `custom-`. A `replacement` may be either.\n\nAttached to every stored purchase line arm and, through `documentItemsIssues`\n(`schemas/purchase-bill.ts`), to every bill and supplier-credit line.",
+          "doc": "Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`:\na `sale` or `rental` line's uid is a product's (never `custom-`); a `service`\nor `replacement` line's names a catalog product or is `custom-`.\n\nAttached to every stored purchase line arm and, through `documentItemsIssues`\n(`schemas/purchase-bill.ts`), to every bill and supplier-credit line.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -14310,7 +14310,7 @@
         {
           "kind": "interface",
           "name": "PurchaseBillLineInputType",
-          "declaration": "interface PurchaseBillLineInputType {\n  type: SharedLineType;\n  uid: string;\n  path: string[];\n  name?: string;\n  description?: string;\n  quantity?: number;\n  amount_cents?: number;\n  ledger_account?: COACodeType | null;\n  uid_product?: string;\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_purchase_item?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  uid_tax_class_override?: string | null;\n  uid_tracking_category?: string | null;\n  price?: typeLiteral;\n}",
+          "declaration": "interface PurchaseBillLineInputType {\n  type: SharedLineType;\n  uid: string;\n  path: string[];\n  name?: string;\n  description?: string;\n  quantity?: number;\n  amount_cents?: number;\n  ledger_account?: COACodeType | null;\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_purchase_item?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  uid_tax_class_override?: string | null;\n  uid_tracking_category?: string | null;\n  price?: typeLiteral;\n}",
           "doc": "A line row of a bill's whole-array input.\n\nThe writer pairs each row to a stored one (exact path, then the row's uid and\nancestry), and the paired row is the base for every key this row omits, so a\nrow that moved keeps them. A row no stored row pairs with is, in order: a\nsplit's clone if it states {@link path_purchase_item}; a line of the purchase\nnamed by its path; or a line the bill itself authors, which states its name,\naccount, quantity and money; a sale or rental names its product by its uid.\n\nOn a TIME line `price.rates` restates each unit rate; a flat line's\n`amount_cents` is stated directly (gross when a discount is set).\n\n`path_purchase_item` absent keeps the stored pointer, and there is no `null`\nform: the writer stamps every moved row's pointer and clears one a move back\nmade pointless, so a stale client's identity-only rows cannot clear one.\nThe writer assigns the tax class and a bill-authored line's flat formula."
         },
         {
@@ -14430,7 +14430,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocumentChargeItemInputType",
-          "declaration": "interface PurchaseDocumentChargeItemInputType {\n  name: string;\n  description?: string;\n  ledger_account: COACodeType;\n  amount_cents: number;\n  uid_product?: string;\n  out_of_service?: OutOfServiceEntryType[];\n  uid_tracking_category?: string | null;\n}",
+          "declaration": "interface PurchaseDocumentChargeItemInputType {\n  name: string;\n  description?: string;\n  ledger_account: COACodeType;\n  amount_cents: number;\n  uid?: string;\n  out_of_service?: OutOfServiceEntryType[];\n  uid_tracking_category?: string | null;\n}",
           "doc": "A document-only charge item as an operator states it on a PUSHED bill or\ncredit (freight nobody expected, a fee). The writer mints its `uid`/`path`,\nstamps a Fixed formula snapshot and `quantity: 1`.\n`uid_tracking_category` follows the order/invoice line rule: absent or `null`\ntakes the attributed product's category (none when it names no product); a\nuid sets it and must name a live category.\n\n⚠️ **The node stays STRICT, though both push inputs embed it.** Stripping\nwould let an api that predates a field silently drop it rather than 400, and\nan attribution would vanish with nothing failing (api-cloudrun#1360)."
         },
         {
@@ -14526,8 +14526,8 @@
         {
           "kind": "interface",
           "name": "PurchaseDocumentServiceItem",
-          "declaration": "interface PurchaseDocumentServiceItem {\n  type: \"service\";\n  uid_product?: string;\n  path_purchase_item?: string[];\n}",
-          "doc": "A bill or credit SERVICE (Charge) line — freight, a fee, a carrier line.\nPosts to its own account and never touches basis.\n\nA **document-only** service line (at a path its purchase does not carry, or\noutside any purchase divider) is the document's own row, like an invoice's\nloss-and-damage line: freight nobody expected. One that projects a purchase\n`service` item sits at its path.\n\n`uid_product` is attribution (api-cloudrun#1360, #1364): the writer emits the\nproduct's Xero `ItemCode` beside the stated account when it has one; rental\nitems are untracked in Xero, so the code moves no Xero quantity or value.\nPermanent `.optional()`: freight and fees name nothing."
+          "declaration": "interface PurchaseDocumentServiceItem {\n  type: \"service\";\n  path_purchase_item?: string[];\n}",
+          "doc": "A bill or credit SERVICE (Charge) line — freight, a fee, a carrier line.\nPosts to its own account and never touches basis.\n\nA **document-only** service line (at a path its purchase does not carry, or\noutside any purchase divider) is the document's own row, like an invoice's\nloss-and-damage line: freight nobody expected. One that projects a purchase\n`service` item sits at its path.\n\nIts uid is its catalog service product's, else `custom-`, as on the purchase\n({@link payableLineUid}). No attribution key (owner, 2026-11-11): a carrier\nline's device is read through its units (api-cloudrun#1488)."
         },
         {
           "kind": "variable",
@@ -25732,7 +25732,7 @@
           "kind": "function",
           "name": "payableInputUidIssue",
           "signature": "payableInputUidIssue(line: typeLiteral): string | null",
-          "doc": "Why a line INPUT carries a uid that cannot be its product, or `null`: a\n`sale` or `rental` input names its product BY its uid, so a `custom-` one is\nrefused. A `service` (or product-less `replacement`) input's `custom-` uid is\nthe writer's to mint.",
+          "doc": "Why a line INPUT carries a uid that cannot be its product, or `null`: a\n`sale` or `rental` input names its product BY its uid, so a `custom-` one is\nrefused. Any `service` or `replacement` input uid is accepted: the writer\nkeeps a catalog one (after checking the product's type) and mints `custom-`\nfor the rest.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25740,7 +25740,7 @@
           "kind": "function",
           "name": "payableLineUid",
           "signature": "payableLineUid(line: PayableLineUidFields): string",
-          "doc": "The `uid` a payable line takes: its product's, as an order or invoice\ncatalog line's is (one-document-model W4K, owner ruling 12, 2026-11-10).\nSince 7a the uid is the ONLY place a line names its product — the separate\n`uid_product` key retired on every arm but a service line's attribution\n(owner, 2026-11-11), so the payable line has the order line's shape.\n\n- `sale` / `rental` → its own uid, which names the product.\n- `replacement` → its own uid when that names a product (the lost rental's\n  money-only TWIN, `uid_linked_replacement`, ruling 15), as an invoice's\n  replacement line takes its replacement product's uid.\n- `service`, and a `replacement` naming no product → a `custom-` uid. A line\n  already carrying one keeps it; any other becomes `custom-` + its old uid.",
+          "doc": "The `uid` a payable line takes: its product's, as an order or invoice line's\nis (one-document-model W4K, owner ruling 12). Since 7a the uid is the ONLY\nplace a line names its product: no line carries `uid_product` (owner,\n2026-11-11), so the payable line has the order line's shape exactly.\n\n- `sale` / `rental` → its own uid, which names the product.\n- `service` / `replacement` → its own uid when it names a catalog product (a\n  `service` product; a replacement's lost-rental TWIN, ruling 15), else a\n  `custom-` uid. A line already carrying one keeps it; any other becomes\n  `custom-` + its old uid, so a re-key is deterministic and repeatable.\n\nWhich catalog product a service line may name (a `service` product, never\nthe rental it costs) is the WRITER's check: it needs the product's type.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25748,7 +25748,7 @@
           "kind": "function",
           "name": "payableLineUidIssue",
           "signature": "payableLineUidIssue(line: PayableLineUidFields): string | null",
-          "doc": "Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`:\na `sale` or `rental` line's uid is a product's (never `custom-`), and a\n`service` line's is `custom-`. A `replacement` may be either.\n\nAttached to every stored purchase line arm and, through `documentItemsIssues`\n(`schemas/purchase-bill.ts`), to every bill and supplier-credit line.",
+          "doc": "Why a stored payable line's `uid` is not {@link payableLineUid}'s, or `null`:\na `sale` or `rental` line's uid is a product's (never `custom-`); a `service`\nor `replacement` line's names a catalog product or is `custom-`.\n\nAttached to every stored purchase line arm and, through `documentItemsIssues`\n(`schemas/purchase-bill.ts`), to every bill and supplier-credit line.",
           "paramTags": [],
           "returnsTag": null
         },

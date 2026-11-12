@@ -2,7 +2,7 @@
  * W4K (one-document-model, owner ruling 12, 2026-11-10): a payable catalog
  * line's `uid` is its product's, as an order or invoice line's is. Since 7a
  * (owner, 2026-11-11) the uid is the ONLY place it names the product: the
- * separate `uid_product` key survives on a service line's attribution alone. The key
+ * separate `uid_product` key is gone from every line, a service's included. The key
  * rule, its refines, and the re-key author the migration and the writers call.
  */
 import { assert, assertEquals, assertThrows } from "@std/assert";
@@ -20,13 +20,15 @@ const old = (n: number) => `0b9e2f4a-0000-4000-8000-${String(n).padStart(12, "0"
 
 // ── the key rule ───────────────────────────────────────────────────
 
-Deno.test("payableLineUid: a sale, rental or replacement keeps its uid; a service takes custom-", () => {
+Deno.test("payableLineUid: a line keeps a uid naming a product; a service or replacement naming none takes custom-", () => {
   // 7a (owner, 2026-11-11): the uid is the only place a line names its product.
   assertEquals(payableLineUid({ type: "sale", uid: VEST }), VEST);
   assertEquals(payableLineUid({ type: "rental", uid: VEST }), VEST);
   assertEquals(payableLineUid({ type: "replacement", uid: VEST }), VEST);
   assertEquals(payableLineUid({ type: "replacement", uid: `custom-${old(1)}` }), `custom-${old(1)}`);
-  // A service's uid is never a product; the old uid is kept behind the prefix.
+  // A service names its catalog SERVICE product by its uid, as an invoice line does.
+  assertEquals(payableLineUid({ type: "service", uid: VEST }), VEST);
+  // A service naming no product: the old uid is kept behind the prefix.
   assertEquals(payableLineUid({ type: "service", uid: old(1) }), `custom-${old(1)}`);
   // Already keyed: unchanged, so a re-key is repeatable.
   assertEquals(payableLineUid({ type: "service", uid: `custom-${old(1)}` }), `custom-${old(1)}`);
@@ -40,7 +42,10 @@ Deno.test("payableLineUidIssue: the stored rule, both directions", () => {
   assertEquals(payableLineUidIssue({ type: "replacement", uid: VEST }), null);
   assert(payableLineUidIssue({ type: "sale", uid: `custom-${old(1)}` })?.includes("product"));
   assert(payableLineUidIssue({ type: "rental", uid: `custom-${old(1)}` })?.includes("product"));
-  assert(payableLineUidIssue({ type: "service", uid: VEST })?.includes("custom-"));
+  assertEquals(payableLineUidIssue({ type: "service", uid: VEST }), null, "a catalog service line");
+  // A bare uuid names no catalog product and is not custom-: refused on both no-custody arms.
+  assert(payableLineUidIssue({ type: "service", uid: old(1) })?.includes("custom-"));
+  assert(payableLineUidIssue({ type: "replacement", uid: old(1) })?.includes("custom-"));
 });
 
 Deno.test("payableInputUidIssue: a sale or rental names its product by its uid; a service's uid is the writer's", () => {
@@ -64,9 +69,9 @@ Deno.test("PurchaseItemInput: a catalog line names its product by its uid, and a
   assert(echoed.success && !("uid_product" in echoed.data), "a sale input carries no uid_product");
   const replacement = { type: "replacement", uid: old(2), path: [PAIR_A, old(2)], name: "Lost unit", ledger_account: 5300, out_of_service: [{ uid: "testoos0000000000001", quantity: 1 }] };
   assert(PurchaseItemInput.safeParse(replacement).success, "the writer derives the twin or mints its custom- uid");
-  // A service keeps its attribution key; its uid is the writer's to mint.
-  const service = PurchaseItemInput.safeParse({ type: "service", uid: old(3), path: [PAIR_A, old(3)], name: "Freight", ledger_account: 5300, uid_product: VEST });
-  assert(service.success && (service.data as { uid_product?: string }).uid_product === VEST);
+  // A service names its catalog product by its uid too; an attribution key is stripped.
+  const service = PurchaseItemInput.safeParse({ type: "service", uid: VEST, path: [PAIR_A, VEST], name: "Freight", ledger_account: 5300, uid_product: VEST });
+  assert(service.success && !("uid_product" in service.data), "no line input carries uid_product");
 });
 
 Deno.test("PurchaseBillRowInput: a sale or rental row names its product by its uid", () => {
@@ -75,9 +80,9 @@ Deno.test("PurchaseBillRowInput: a sale or rental row names its product by its u
   const custom = PurchaseBillRowInput.safeParse({ ...row, uid: `custom-${old(1)}`, path: [PURCHASE, PAIR_A, `custom-${old(1)}`] });
   assertEquals(custom.error?.issues.map((i) => i.path.join(".")), ["uid"]);
   const stripped = PurchaseBillRowInput.safeParse({ ...row, uid_product: VEST });
-  assert(stripped.success && !("uid_product" in stripped.data), "only a service row carries uid_product");
+  assert(stripped.success && !("uid_product" in stripped.data), "no bill row carries uid_product");
   const service = PurchaseBillRowInput.safeParse({ type: "service", uid: `custom-${old(2)}`, path: [PURCHASE, PAIR_A, `custom-${old(2)}`], uid_product: VEST });
-  assert(service.success && (service.data as { uid_product?: string }).uid_product === VEST);
+  assert(service.success && !("uid_product" in service.data), "a service row's included");
 });
 
 // ── the re-key author ──────────────────────────────────────────────

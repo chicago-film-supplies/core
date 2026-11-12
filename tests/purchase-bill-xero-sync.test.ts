@@ -3,7 +3,8 @@ import type { PurchaseBill } from "../src/schemas/mod.ts";
 import { purchaseBillXeroProjectionHash, purchaseBillXeroSyncStatus } from "../src/utils/purchase-bill-xero-sync.ts";
 
 const item = {
-  uid: "line-1", path: ["line-1"], type: "service", name: "Dolly", quantity: 3, amount_cents: 12345,
+  // A stored service line names a catalog product or is `custom-` (7a).
+  uid: "custom-line-1", path: ["custom-line-1"], type: "service", name: "Dolly", quantity: 3, amount_cents: 12345,
   ledger_account: 5100, uid_tracking_category: "cat",
 };
 const bill = (over: Record<string, unknown> = {}) => ({
@@ -36,13 +37,14 @@ Deno.test("purchaseBillXeroProjectionHash: every field the body reads moves it",
     { items: [{ ...item, amount_cents: 12346 }] },
     { items: [{ ...item, ledger_account: 5200 }] },
     { items: [{ ...item, uid_tracking_category: null }] },
-    { items: [{ ...item, uid_product: "p" }] },
+    // The product the line names: its uid, since 7a (the projection still spells it `uid_product`).
+    { items: [{ ...item, uid: "testprod000000000001" }] },
   ];
   for (const edit of edits) assertNotEquals(purchaseBillXeroProjectionHash(bill(edit)), base, JSON.stringify(edit));
 });
 
 Deno.test("purchaseBillXeroProjectionHash: line order is part of it", () => {
-  const other = { ...item, uid: "line-2", name: "Cart" };
+  const other = { ...item, uid: "custom-line-2", name: "Cart" };
   assertNotEquals(
     purchaseBillXeroProjectionHash(bill({ items: [item, other] })),
     purchaseBillXeroProjectionHash(bill({ items: [other, item] })),
@@ -52,7 +54,7 @@ Deno.test("purchaseBillXeroProjectionHash: line order is part of it", () => {
 Deno.test("purchaseBillXeroProjectionHash: what Xero does not carry does not move it", () => {
   const base = purchaseBillXeroProjectionHash(bill());
   const moved = bill({
-    version: 9, xero_id: "x-2", items: [{ ...item, uid: "line-9" }],
+    version: 9, xero_id: "x-2", items: [{ ...item, uid: "custom-line-9" }],
     totals: { total_cents: 12345, amount_paid_cents: 100, amount_credited_cents: 0, amount_void_cents: 0, amount_due_cents: 12245 },
   });
   assertEquals(purchaseBillXeroProjectionHash(moved), base);

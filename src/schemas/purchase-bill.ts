@@ -305,14 +305,12 @@ export interface PurchaseDocumentProductItem extends Omit<PurchaseDocumentLineBa
  * loss-and-damage line: freight nobody expected. One that projects a purchase
  * `service` item sits at its path.
  *
- * `uid_product` is attribution (api-cloudrun#1360, #1364): the writer emits the
- * product's Xero `ItemCode` beside the stated account when it has one; rental
- * items are untracked in Xero, so the code moves no Xero quantity or value.
- * Permanent `.optional()`: freight and fees name nothing.
+ * Its uid is its catalog service product's, else `custom-`, as on the purchase
+ * ({@link payableLineUid}). No attribution key (owner, 2026-11-11): a carrier
+ * line's device is read through its units (api-cloudrun#1488).
  */
 export interface PurchaseDocumentServiceItem extends PurchaseDocumentLineBase {
   type: "service";
-  uid_product?: string;
   /** A move pointer, as on {@link PurchaseDocumentProductItem}. */
   path_purchase_item?: string[];
 }
@@ -326,7 +324,7 @@ export interface PurchaseDocumentServiceItem extends PurchaseDocumentLineBase {
  * Its uid names the lost rental's money-only twin when it names a product, never
  * the rental (owner ruling 15; see `PurchaseReplacementItem`).
  */
-export interface PurchaseDocumentReplacementItem extends Omit<PurchaseDocumentServiceItem, "type" | "uid_product"> {
+export interface PurchaseDocumentReplacementItem extends Omit<PurchaseDocumentServiceItem, "type"> {
   type: "replacement";
   /**
    * The records this line bills, each with its share of `quantity` (ruling 16).
@@ -499,9 +497,6 @@ const noCustodyLine = {
 const PurchaseDocumentServiceItemInner = z.strictObject({
   type: z.literal("service").meta({ column: true, label: "Type" }),
   ...noCustodyLine,
-  // Attribution, never identity (the uid is `custom-`). Permanent `.optional()`:
-  // freight and fees attribute nothing (api-cloudrun#1360).
-  uid_product: FirestoreId.optional(),
 });
 
 const PurchaseDocumentReplacementItemInner = z.strictObject({
@@ -1108,11 +1103,12 @@ export interface PurchaseDocumentChargeItemInputType {
   ledger_account: COACodeType;
   amount_cents: number;
   /**
-   * The product the charge attributes. On a replacement charge it is the lost
-   * rental's money-only twin (`uid_linked_replacement`), which the writer
-   * derives from the record — never the rental itself (owner ruling 15).
+   * The catalog product the charge IS, named by its uid as every line input
+   * names its product (7a, owner 2026-11-11): a `service` product on a service
+   * charge. Absent mints a `custom-` uid. A replacement charge's twin is the
+   * writer's, derived from the record (ruling 15).
    */
-  uid_product?: string;
+  uid?: string;
   /** The records a replacement charge bills; its shares sum to 1. */
   out_of_service?: OutOfServiceEntryType[];
   uid_tracking_category?: string | null;
@@ -1125,7 +1121,7 @@ const PurchaseDocumentChargeItemInput: z.ZodType<PurchaseDocumentChargeItemInput
   description: LineItemCore.description.optional(),
   ledger_account: COACode,
   amount_cents: z.int().min(0),
-  uid_product: FirestoreId.optional(),
+  uid: ItemUid.optional(),
   // The stripping twin, as `tests/input-strictness.test.ts` requires of a new
   // node: the charge node itself stays strict (see the docblock above).
   out_of_service: OutOfServiceListInput.optional(),
@@ -1346,8 +1342,6 @@ export interface PurchaseBillLineInputType {
   amount_cents?: number;
   /** `null` is a stored kit header echoed back; the writer decides what a `none` product holds. */
   ledger_account?: COACodeType | null;
-  /** A SERVICE row's attribution only. A sale, rental or replacement names its product by its uid. */
-  uid_product?: string;
   /** A kit component's flag, as on an order line's input. */
   zero_priced?: boolean | null;
   /** A kit component's ratio to its direct parent. */
@@ -1444,10 +1438,6 @@ function billLineIssues(row: { type: string; uid: string } & OutOfServiceLinkCar
 
 const billLineInput = (type: SharedLineType) => z.object(billLineShape(type)).superRefine(billLineIssues);
 
-// The one arm carrying `uid_product`: a service row's attribution, never its identity.
-const billServiceLineInput = z.object({ ...billLineShape("service"), uid_product: FirestoreId.optional() })
-  .superRefine(billLineIssues);
-
 /** Zod schema for one {@link PurchaseBillRowInputType}. */
 export const PurchaseBillRowInput: z.ZodType<PurchaseBillRowInputType> = z.discriminatedUnion("type", [
   billDividerInput("purchase"),
@@ -1455,7 +1445,7 @@ export const PurchaseBillRowInput: z.ZodType<PurchaseBillRowInputType> = z.discr
   billDividerInput("group"),
   billLineInput("sale"),
   billLineInput("rental"),
-  billServiceLineInput,
+  billLineInput("service"),
   billLineInput("replacement"),
 ]);
 
