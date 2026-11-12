@@ -785,10 +785,10 @@ interface BaseLogFields {
 
 ### `BaseMovementContract`
 
-A contract before its `undoes` and `booking_ladder` are filled in.
+A contract before its `undoes`, `booking_ladder` and `source_item` are filled in.
 
 ```ts
-type BaseMovementContract = Omit<MovementContract, "undoes" | "booking_ladder">;
+type BaseMovementContract = Omit<MovementContract, "undoes" | "booking_ladder" | "source_item">;
 ```
 
 ### `BillingSettings`
@@ -7601,7 +7601,7 @@ interface Movement {
   query_by_unit_number: number[];
   xero_id?: string | null;
   supplier?: UidNameRefType | null;
-  path_purchase_item?: string[];
+  path_source_item?: string[];
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -7645,6 +7645,7 @@ interface MovementContract {
   service: "required" | "forbidden" | "nullable";
   units: "forbidden" | "allowed";
   uncounted: "lineless" | "refused";
+  source_item: "required" | "forbidden";
 }
 ```
 
@@ -32079,10 +32080,10 @@ const BOOKING_LADDERS: "outbound" | "inbound"[];
 
 ### `BaseMovementContract`
 
-A contract before its `undoes` and `booking_ladder` are filled in.
+A contract before its `undoes`, `booking_ladder` and `source_item` are filled in.
 
 ```ts
-type BaseMovementContract = Omit<MovementContract, "undoes" | "booking_ladder">;
+type BaseMovementContract = Omit<MovementContract, "undoes" | "booking_ladder" | "source_item">;
 ```
 
 ### `BookingLadderType`
@@ -32238,6 +32239,26 @@ here at compile time.
 const INBOUND_LADDER_MOVEMENT_TYPES: readonly ForwardMovementTypeType[];
 ```
 
+### `MOVEMENT_ANNOTATION_KEYS`
+
+The top-level `Movement` keys a writer may PATCH after the movement is
+created (one-document-model ruling 65a): the keys tagged
+`.meta({ journal: "annotation" })`, read off the declarations so the tag is
+the only list. Every other key is a FACT and append-only: what moved, where,
+at what cost, under which custody step and booking, and why (`sources`).
+
+⚠️ **Three more writes after create are NOT in this set, by kind rather than
+by omission**: the bookkeeping stamps (`version`, `updated_by`,
+`updated_at`) that accompany every patch, and a `DocSource.label` — a
+display denormalization inside `lines[].location` and `sources[]` that a
+rename cascade relabels (`api-cloudrun/src/services/afterLocationWrite.ts`).
+A label lives inside a shared node whose `uid` is a fact, so it cannot carry
+the tag. A patch ratchet allows all three explicitly.
+
+```ts
+const MOVEMENT_ANNOTATION_KEYS: readonly string[];
+```
+
 ### `MOVEMENT_CONTRACTS`
 
 The per-kind line contract, one entry per {@link MOVEMENT_TYPES} member: every
@@ -32357,7 +32378,7 @@ interface Movement {
   query_by_unit_number: number[];
   xero_id?: string | null;
   supplier?: UidNameRefType | null;
-  path_purchase_item?: string[];
+  path_source_item?: string[];
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -32401,6 +32422,7 @@ interface MovementContract {
   service: "required" | "forbidden" | "nullable";
   units: "forbidden" | "allowed";
   uncounted: "lineless" | "refused";
+  source_item: "required" | "forbidden";
 }
 ```
 
@@ -52449,7 +52471,7 @@ identity map. Every other key of a row is carried as it is.
 ### `rekeyPayablePointer(map: PathForwardMap, path: readonly string[]): typeLiteral`
 
 Rewrite a stored pointer (`path_purchase_item`, a `substituted_for` entry's
-`path`, a movement's `path_purchase_item`, a credit's `path_bill_item`)
+`path`, a movement's `path_source_item`, a credit's `path_bill_item`)
 through a re-key's `map`.
 
 A pointer at a row the document still holds maps exactly. One that names a
@@ -52460,7 +52482,7 @@ it, as `repointExchangedFor` keeps a dangling `exchanged_for`.
 
 ⚠️ Pass the map of the document the pointer's path space belongs to: a bill
 line's `path_purchase_item` and `substituted_for`, and a movement's
-`path_purchase_item`, take the PURCHASE's; a credit's `path_bill_item` takes
+`path_source_item` (one-document-model ruling 65a), take the PURCHASE's; a credit's `path_bill_item` takes
 the BILL's.
 
 ### `remainingTimeCounts(args: RemainingTimeCountsArgs): TierCount[] | null`

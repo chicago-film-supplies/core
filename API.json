@@ -333,8 +333,8 @@
         {
           "kind": "typeAlias",
           "name": "BaseMovementContract",
-          "declaration": "type BaseMovementContract = Omit<MovementContract, \"undoes\" | \"booking_ladder\">;",
-          "doc": "A contract before its `undoes` and `booking_ladder` are filled in."
+          "declaration": "type BaseMovementContract = Omit<MovementContract, \"undoes\" | \"booking_ladder\" | \"source_item\">;",
+          "doc": "A contract before its `undoes`, `booking_ladder` and `source_item` are filled in."
         },
         {
           "kind": "interface",
@@ -3411,7 +3411,7 @@
         {
           "kind": "interface",
           "name": "Movement",
-          "declaration": "interface Movement {\n  uid: string;\n  number: number;\n  uid_product: string;\n  uid_booking: string | null;\n  type: MovementTypeType;\n  quantity: number;\n  custody: MovementCustodyType | null;\n  service: MovementServiceType | null;\n  cost: MovementCostType | null;\n  lines: MovementLineType[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  uuid_session: string;\n  reverses: string | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  units: MovementUnitType[];\n  query_by_unit_number: number[];\n  xero_id?: string | null;\n  supplier?: UidNameRefType | null;\n  path_purchase_item?: string[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Movement {\n  uid: string;\n  number: number;\n  uid_product: string;\n  uid_booking: string | null;\n  type: MovementTypeType;\n  quantity: number;\n  custody: MovementCustodyType | null;\n  service: MovementServiceType | null;\n  cost: MovementCostType | null;\n  lines: MovementLineType[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  uuid_session: string;\n  reverses: string | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  units: MovementUnitType[];\n  query_by_unit_number: number[];\n  xero_id?: string | null;\n  supplier?: UidNameRefType | null;\n  path_source_item?: string[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A movement-journal event."
         },
         {
@@ -3429,7 +3429,7 @@
         {
           "kind": "interface",
           "name": "MovementContract",
-          "declaration": "interface MovementContract {\n  undoes: MovementTypeType | null;\n  booking_ladder: BookingLadderType | null;\n  custody: \"required\" | \"forbidden\" | \"with_booking\" | \"optional\";\n  cost: \"required\" | \"forbidden\";\n  places: typeLiteral | null;\n  booking: \"required\" | \"forbidden\" | \"optional\";\n  service: \"required\" | \"forbidden\" | \"nullable\";\n  units: \"forbidden\" | \"allowed\";\n  uncounted: \"lineless\" | \"refused\";\n}",
+          "declaration": "interface MovementContract {\n  undoes: MovementTypeType | null;\n  booking_ladder: BookingLadderType | null;\n  custody: \"required\" | \"forbidden\" | \"with_booking\" | \"optional\";\n  cost: \"required\" | \"forbidden\";\n  places: typeLiteral | null;\n  booking: \"required\" | \"forbidden\" | \"optional\";\n  service: \"required\" | \"forbidden\" | \"nullable\";\n  units: \"forbidden\" | \"allowed\";\n  uncounted: \"lineless\" | \"refused\";\n  source_item: \"required\" | \"forbidden\";\n}",
           "doc": ""
         },
         {
@@ -15150,8 +15150,8 @@
         {
           "kind": "typeAlias",
           "name": "BaseMovementContract",
-          "declaration": "type BaseMovementContract = Omit<MovementContract, \"undoes\" | \"booking_ladder\">;",
-          "doc": "A contract before its `undoes` and `booking_ladder` are filled in."
+          "declaration": "type BaseMovementContract = Omit<MovementContract, \"undoes\" | \"booking_ladder\" | \"source_item\">;",
+          "doc": "A contract before its `undoes`, `booking_ladder` and `source_item` are filled in."
         },
         {
           "kind": "typeAlias",
@@ -15221,6 +15221,12 @@
         },
         {
           "kind": "variable",
+          "name": "MOVEMENT_ANNOTATION_KEYS",
+          "declaration": "const MOVEMENT_ANNOTATION_KEYS: readonly string[];",
+          "doc": "The top-level `Movement` keys a writer may PATCH after the movement is\ncreated (one-document-model ruling 65a): the keys tagged\n`.meta({ journal: \"annotation\" })`, read off the declarations so the tag is\nthe only list. Every other key is a FACT and append-only: what moved, where,\nat what cost, under which custody step and booking, and why (`sources`).\n\n⚠️ **Three more writes after create are NOT in this set, by kind rather than\nby omission**: the bookkeeping stamps (`version`, `updated_by`,\n`updated_at`) that accompany every patch, and a `DocSource.label` — a\ndisplay denormalization inside `lines[].location` and `sources[]` that a\nrename cascade relabels (`api-cloudrun/src/services/afterLocationWrite.ts`).\nA label lives inside a shared node whose `uid` is a fact, so it cannot carry\nthe tag. A patch ratchet allows all three explicitly."
+        },
+        {
+          "kind": "variable",
           "name": "MOVEMENT_CONTRACTS",
           "declaration": "const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContract>>;",
           "doc": "The per-kind line contract, one entry per {@link MOVEMENT_TYPES} member: every\nforward contract as written, and every undo derived by {@link mirrorContract}.\nMirroring rather than exempting the undos keeps the check real: an undo must\nstill name places of the RIGHT KIND, in the opposite order — the same\nreasoning `checkMovementContract` applies to a `reverses` reversal."
@@ -15240,7 +15246,7 @@
         {
           "kind": "interface",
           "name": "Movement",
-          "declaration": "interface Movement {\n  uid: string;\n  number: number;\n  uid_product: string;\n  uid_booking: string | null;\n  type: MovementTypeType;\n  quantity: number;\n  custody: MovementCustodyType | null;\n  service: MovementServiceType | null;\n  cost: MovementCostType | null;\n  lines: MovementLineType[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  uuid_session: string;\n  reverses: string | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  units: MovementUnitType[];\n  query_by_unit_number: number[];\n  xero_id?: string | null;\n  supplier?: UidNameRefType | null;\n  path_purchase_item?: string[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Movement {\n  uid: string;\n  number: number;\n  uid_product: string;\n  uid_booking: string | null;\n  type: MovementTypeType;\n  quantity: number;\n  custody: MovementCustodyType | null;\n  service: MovementServiceType | null;\n  cost: MovementCostType | null;\n  lines: MovementLineType[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  uuid_session: string;\n  reverses: string | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  units: MovementUnitType[];\n  query_by_unit_number: number[];\n  xero_id?: string | null;\n  supplier?: UidNameRefType | null;\n  path_source_item?: string[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A movement-journal event."
         },
         {
@@ -15258,7 +15264,7 @@
         {
           "kind": "interface",
           "name": "MovementContract",
-          "declaration": "interface MovementContract {\n  undoes: MovementTypeType | null;\n  booking_ladder: BookingLadderType | null;\n  custody: \"required\" | \"forbidden\" | \"with_booking\" | \"optional\";\n  cost: \"required\" | \"forbidden\";\n  places: typeLiteral | null;\n  booking: \"required\" | \"forbidden\" | \"optional\";\n  service: \"required\" | \"forbidden\" | \"nullable\";\n  units: \"forbidden\" | \"allowed\";\n  uncounted: \"lineless\" | \"refused\";\n}",
+          "declaration": "interface MovementContract {\n  undoes: MovementTypeType | null;\n  booking_ladder: BookingLadderType | null;\n  custody: \"required\" | \"forbidden\" | \"with_booking\" | \"optional\";\n  cost: \"required\" | \"forbidden\";\n  places: typeLiteral | null;\n  booking: \"required\" | \"forbidden\" | \"optional\";\n  service: \"required\" | \"forbidden\" | \"nullable\";\n  units: \"forbidden\" | \"allowed\";\n  uncounted: \"lineless\" | \"refused\";\n  source_item: \"required\" | \"forbidden\";\n}",
           "doc": ""
         },
         {
@@ -25253,7 +25259,7 @@
           "kind": "function",
           "name": "rekeyPayablePointer",
           "signature": "rekeyPayablePointer(map: PathForwardMap, path: readonly string[]): typeLiteral",
-          "doc": "Rewrite a stored pointer (`path_purchase_item`, a `substituted_for` entry's\n`path`, a movement's `path_purchase_item`, a credit's `path_bill_item`)\nthrough a re-key's `map`.\n\nA pointer at a row the document still holds maps exactly. One that names a\nrow it no longer holds is legal stored state (a spent `substituted_for`, a\nmove pointer at a removed line), so it is never refused: its longest mapped\nprefix is rewritten and the rest kept verbatim, and `exact: false` reports\nit, as `repointExchangedFor` keeps a dangling `exchanged_for`.\n\n⚠️ Pass the map of the document the pointer's path space belongs to: a bill\nline's `path_purchase_item` and `substituted_for`, and a movement's\n`path_purchase_item`, take the PURCHASE's; a credit's `path_bill_item` takes\nthe BILL's.",
+          "doc": "Rewrite a stored pointer (`path_purchase_item`, a `substituted_for` entry's\n`path`, a movement's `path_source_item`, a credit's `path_bill_item`)\nthrough a re-key's `map`.\n\nA pointer at a row the document still holds maps exactly. One that names a\nrow it no longer holds is legal stored state (a spent `substituted_for`, a\nmove pointer at a removed line), so it is never refused: its longest mapped\nprefix is rewritten and the rest kept verbatim, and `exact: false` reports\nit, as `repointExchangedFor` keeps a dangling `exchanged_for`.\n\n⚠️ Pass the map of the document the pointer's path space belongs to: a bill\nline's `path_purchase_item` and `substituted_for`, and a movement's\n`path_source_item` (one-document-model ruling 65a), take the PURCHASE's; a credit's `path_bill_item` takes\nthe BILL's.",
           "paramTags": [],
           "returnsTag": null
         },

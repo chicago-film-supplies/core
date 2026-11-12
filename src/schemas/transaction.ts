@@ -53,6 +53,7 @@ import { z } from "zod";
 import { BookingId, FirestoreId, ItemUid, MovementId, OutOfServiceId, UnitId } from "./_uid.ts";
 import { SerialNumber, UnitNumber, UnitSet } from "./unit.ts";
 import { chicagoInstant } from "./_datetime.ts";
+import { getNodeMeta } from "./zod-walk.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -722,6 +723,19 @@ export interface MovementContract {
    * also the true cost.
    */
   uncounted: "lineless" | "refused";
+  /**
+   * Whether `path_source_item` — the row of the booking's source document the
+   * movement acts for — must or must not appear (one-document-model rulings 65
+   * and 65a). DERIVED from {@link booking_ladder} when the table is built:
+   * `required` on the inbound ladder, `forbidden` on the outbound ladder and
+   * where no booking is allowed.
+   *
+   * ⚠️ **Outbound reads `forbidden` until Phase 9**, which requires it there
+   * too, in the window that already rewrites every outbound booking and
+   * movement. It is a named column rather than an optional key so the two
+   * ladders' difference is stated in one place, with its reason.
+   */
+  source_item: "required" | "forbidden";
 }
 
 /**
@@ -1302,11 +1316,19 @@ function bookingLadderOf(type: ForwardMovementTypeType, contract: BaseMovementCo
   return INBOUND_LADDER_MOVEMENT_TYPES.includes(type) ? "inbound" : "outbound";
 }
 
-/** A contract before its `undoes` and `booking_ladder` are filled in. */
-export type BaseMovementContract = Omit<MovementContract, "undoes" | "booking_ladder">;
+/** A contract before its `undoes`, `booking_ladder` and `source_item` are filled in. */
+export type BaseMovementContract = Omit<MovementContract, "undoes" | "booking_ladder" | "source_item">;
+
+/** {@link MovementContract.source_item} for a ladder: required on the inbound ladder only, until Phase 9. */
+function sourceItemOf(ladder: BookingLadderType | null): MovementContract["source_item"] {
+  return ladder === "inbound" ? "required" : "forbidden";
+}
 
 /** The forward contract mirrored: `places` swapped end for end, every other axis identical. */
-function mirrorContract(forward: BaseMovementContract, undoes: MovementTypeType): Omit<MovementContract, "booking_ladder"> {
+function mirrorContract(
+  forward: BaseMovementContract,
+  undoes: MovementTypeType,
+): Omit<MovementContract, "booking_ladder" | "source_item"> {
   return {
     ...forward,
     undoes,
@@ -1328,9 +1350,10 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     const forward = isUndo ? MOVEMENT_UNDOES[type as UndoMovementTypeType] : type as ForwardMovementTypeType;
     const base = FORWARD_CONTRACTS[forward];
     const booking_ladder = bookingLadderOf(forward, base);
+    const source_item = sourceItemOf(booking_ladder);
     table[type] = isUndo
-      ? { ...mirrorContract(base, forward), booking_ladder }
-      : { ...base, undoes: null, booking_ladder };
+      ? { ...mirrorContract(base, forward), booking_ladder, source_item }
+      : { ...base, undoes: null, booking_ladder, source_item };
   }
   return table;
 })();
@@ -1757,26 +1780,33 @@ export interface Movement {
    */
   supplier?: UidNameRefType | null;
   /**
-   * The purchase ITEM this movement moves, by its `path` — present exactly when
-   * `sources[]` names a purchase (api-cloudrun#1407): a receipt, a subrent's
-   * `subrent_in` / `subrent_out`, an out-of-service `return_to_supplier`
-   * settle, and the reversal of each.
+   * The ROW of the booking's source document this movement acts for, by its
+   * `path` (one-document-model rulings 65 and 65a). The document is the
+   * booking id's first segment — a purchase today, an order from Phase 9 — and
+   * the row is read on that source's custody projection (the receipt or the
+   * fulfillment, which share its uid and path space and keep a row while
+   * custody lives), so the pointer never dangles when a line is removed.
    *
-   * It exists because one product may now sit on two items of one purchase (a
-   * buy plus a re-order, two hire windows), so `(purchase, uid_product)` no
-   * longer names a line. Every journal reader that attributes a movement to an
-   * item — the receipt's cost, a reversal's bucket, a return's bucket — keys on
-   * this, never on `uid_product`. The spelling is the bill item's
-   * `path_purchase_item`, the same pointer from another document.
+   * It exists because a booking is coarser than a row: one booking
+   * (`{source}:{product}:{leg}[:{sig}]`) spans every row of one product on one
+   * leg, so two rows in two groups share it. A receipt posts the price of the
+   * ROW it received for, and a row's received and returned counts are the net
+   * of the movements naming it. Every journal reader that attributes a movement
+   * to a row keys on this, never on `uid_product`.
    *
-   * **Optional, never required-nullable**: it is meaningless on the ~22k
-   * movements that name no purchase, and a required-nullable key would reject
-   * every one of them on its next write. The refine below makes absence exact:
-   * absent ⟺ no purchase in `sources[]`. The movements that name a purchase
-   * were backfilled in the api-cloudrun#1407 window, exact because every
-   * purchase then held one item per product.
+   * **Required where {@link MovementContract.source_item} says so, absent
+   * everywhere else** — required on the inbound ladder since 7a, outbound
+   * pending Phase 9. The refine below checks it against the booking id: the
+   * path's leg (`path[0]`) is the booking's leg and its row uid is the
+   * booking's product. Renamed from `path_purchase_item` (api-cloudrun#1407),
+   * which every purchase-family movement already carried (prod 434, dev 632 on
+   * 2026-11-11); a bill line keeps that name, because its target is fixed.
+   *
+   * **A POINTER, not a fact** (`journal: "annotation"`): a row's path moves when
+   * its document is reordered, and the document's writer re-points the
+   * movements naming it. Custody and ledger replays never read it.
    */
-  path_purchase_item?: string[];
+  path_source_item?: string[];
 
   // ── standard ──────────────────────────────────────────────────────
   version: number;
@@ -2351,8 +2381,8 @@ function checkMovementService(
   });
 }
 
-/** Zod schema for a Movement. */
-export const MovementSchema: z.ZodType<Movement> = z.strictObject({
+// The object, before its refines: `MOVEMENT_ANNOTATION_KEYS` reads its tags.
+const MovementObject = z.strictObject({
   uid: MovementId,
   number: z.int().min(0).meta({ serverSortVia: "number", column: true, label: "#" }),
   uid_product: FirestoreId,
@@ -2370,7 +2400,7 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
   lines: z.array(MovementLine).meta({ label: "Line" }),
   date: chicagoInstant().meta({ serverSortVia: "date_fs", column: true, label: "Date" }),
   date_fs: FirestoreTimestamp,
-  reference: z.string().meta({ column: true, label: "Reference" }),
+  reference: z.string().meta({ column: true, label: "Reference", journal: "annotation" }),
   uuid_session: z.uuid(),
   // Required-but-nullable; all 932 prod movements carry the KEY as `null`
   // (2026-08-23) because no movement has been reversed yet. Not dead — the
@@ -2389,7 +2419,7 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
   query_by_unit_number: z.array(UnitNumber),
   // Optional, never required-nullable: 0 of 1,153 prod / 0 of 1,405 dev
   // movements carry the key (2026-08-30). See the interface docblock.
-  xero_id: z.uuid().nullable().optional(),
+  xero_id: z.uuid().nullable().optional().meta({ journal: "annotation" }),
   // Optional for the same reason as `xero_id` above: 1,159 prod / 1,414 dev
   // movements predate it (2026-08-30). ⚠️ The `.meta({ label })` is REQUIRED,
   // not decoration — `UidNameRef.name` is annotated `column: true` with no label
@@ -2397,15 +2427,37 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
   // `display-columns.test.ts` T9 fails on "every declared column composes a
   // non-empty label".
   supplier: UidNameRef.nullable().optional().meta({ label: "Supplier" }),
-  // Present ⟺ `sources[]` names a purchase — the refine below. See the interface.
+  // Required ⟺ `MovementContract.source_item` — the refine below. See the interface.
   // `seed: false`: `[]` fails `.min(1)`, so a form seed omits the key — the bill
   // item's `path_purchase_item` precedent.
-  path_purchase_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
+  path_source_item: z.array(ItemUid).min(1).optional().meta({ seed: false, journal: "annotation" }),
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
-}).superRefine(checkMovementContract).superRefine((doc, ctx) => {
+});
+
+/**
+ * The top-level `Movement` keys a writer may PATCH after the movement is
+ * created (one-document-model ruling 65a): the keys tagged
+ * `.meta({ journal: "annotation" })`, read off the declarations so the tag is
+ * the only list. Every other key is a FACT and append-only: what moved, where,
+ * at what cost, under which custody step and booking, and why (`sources`).
+ *
+ * ⚠️ **Three more writes after create are NOT in this set, by kind rather than
+ * by omission**: the bookkeeping stamps (`version`, `updated_by`,
+ * `updated_at`) that accompany every patch, and a `DocSource.label` — a
+ * display denormalization inside `lines[].location` and `sources[]` that a
+ * rename cascade relabels (`api-cloudrun/src/services/afterLocationWrite.ts`).
+ * A label lives inside a shared node whose `uid` is a fact, so it cannot carry
+ * the tag. A patch ratchet allows all three explicitly.
+ */
+export const MOVEMENT_ANNOTATION_KEYS: readonly string[] = Object.entries(MovementObject.shape)
+  .filter(([, node]) => getNodeMeta(node as z.ZodType)?.journal === "annotation")
+  .map(([key]) => key);
+
+/** Zod schema for a Movement. */
+export const MovementSchema: z.ZodType<Movement> = MovementObject.superRefine(checkMovementContract).superRefine((doc, ctx) => {
   // 🔴 **A stored `purchase` must name its supplier — but the rule is keyed on
   // the KEY BEING PRESENT, not on the value, and that is a measurement rather
   // than a softening.**
@@ -2457,59 +2509,71 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
     });
   }
 
-  // A receipt names the purchase it receives against (api-cloudrun#1210), and
-  // the purchase finds its receipts — and their reversals, which carry the same
-  // `sources[]` — only through `query_by_sources`, the out-of-service shape.
-  // ONE purchase: its item is `(purchase, path_purchase_item)`, so a second would
-  // make the bucket the receipt moves ambiguous. Only the types that cross the
-  // boundary WITH the supplier may name one — a `purchase` receipt, and every
-  // {@link SUBRENT_MOVEMENT_TYPES} member. Every other type moves stock that is
-  // already in CFS's custody, or leaves it for somebody who is not a supplier.
-  //
-  // ⚠️ For a `purchase`, "at most one", not "exactly one". The 406 historic
-  // purchases name none until the backfill links them, and an unlinked
-  // purchase stays writable until P6 retires that path — refusing it is a
-  // separate, ordered step. The subrent types have no history, so for them the
-  // rule is exactly one: a hire that names no purchase moves no bucket, and a
-  // settle that names none lowers no `quantity_returned`.
-  const purchases = doc.sources.filter((s) => s.collection === "purchases").length;
-  if (doc.type === "purchase" && purchases > 1) {
+  // An inbound-ladder movement names the purchase its booking belongs to
+  // (api-cloudrun#1210; one-document-model 7a, ruling 65), and the purchase finds
+  // its movements — and their reversals, which carry the same `sources[]` — only
+  // through `query_by_sources`, the out-of-service shape. EXACTLY one, and the
+  // one the booking id names: the row it acts for is `(purchase,
+  // path_source_item)`, so a second would make that row ambiguous. A movement on
+  // the outbound ladder, or with no booking, names none: it moves stock already
+  // in CFS's custody, or leaves it for somebody who is not a supplier.
+  const contract = MOVEMENT_CONTRACTS[doc.type];
+  const purchaseUids = doc.sources.filter((s) => s.collection === "purchases").map((s) => s.uid);
+  const bookingSegments = doc.uid_booking === null ? null : doc.uid_booking.split(":");
+  if (contract.booking_ladder === "inbound") {
+    if (purchaseUids.length !== 1) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["sources"],
+        message: `a ${doc.type} names exactly ONE purchase in sources[] — the one its inbound booking belongs to`,
+      });
+    } else if (bookingSegments !== null && bookingSegments[0] !== purchaseUids[0]) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["sources"],
+        message: `the purchase in sources[] (${purchaseUids[0]}) is not the one booking ${doc.uid_booking} belongs to`,
+      });
+    }
+  } else if (purchaseUids.length > 0) {
     ctx.addIssue({
       code: "custom",
       path: ["sources"],
-      message: "a purchase receipt names exactly ONE purchase in sources[]",
+      message: `a "${doc.type}" is not on the inbound ladder and cannot name a purchase in sources[]`,
     });
   }
-  if (subrent && purchases !== 1) {
+  // The ROW it acts for (rulings 65, 65a): required or forbidden by the
+  // contract, and checked against the booking id without reading the booking —
+  // the path's leg is the id's leg and its row uid is the id's product.
+  const path = doc.path_source_item;
+  if (contract.source_item === "required" && path === undefined) {
     ctx.addIssue({
       code: "custom",
-      path: ["sources"],
-      message: `a ${doc.type} names exactly ONE purchase in sources[] — the subrent it is part of`,
+      path: ["path_source_item"],
+      message: `a ${doc.type} names the row of its booking's source it acts for (path_source_item)`,
     });
   }
-  // The item the movement moves (api-cloudrun#1407): present exactly when a
-  // purchase is named, because `(purchase, uid_product)` no longer names a line
-  // once one product may sit on two items.
-  if (purchases === 1 && doc.path_purchase_item === undefined) {
+  if (contract.source_item === "forbidden" && path !== undefined) {
     ctx.addIssue({
       code: "custom",
-      path: ["path_purchase_item"],
-      message: "a movement naming a purchase names the purchase item it moves (path_purchase_item)",
+      path: ["path_source_item"],
+      message: `a ${doc.type} does not name a source row: path_source_item is required on the inbound ladder only`,
     });
   }
-  if (purchases === 0 && doc.path_purchase_item !== undefined) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["path_purchase_item"],
-      message: "path_purchase_item names an item of the purchase in sources[], and this movement names none",
-    });
-  }
-  if (doc.type !== "purchase" && !subrent && purchases > 0) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["sources"],
-      message: `a "${doc.type}" is not a receipt and cannot name a purchase in sources[]`,
-    });
+  if (path !== undefined) {
+    if (bookingSegments === null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["path_source_item"],
+        message: "path_source_item names a row of the booking's source, and this movement names no booking",
+      });
+    } else if (path[0] !== bookingSegments[2] || path[path.length - 1] !== bookingSegments[1]) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["path_source_item"],
+        message: `row ${path.join("/")} is not on booking ${doc.uid_booking}: ` +
+          `its leg must be the booking's leg and its row uid the booking's product`,
+      });
+    }
   }
 }).meta({
   title: "Movement",

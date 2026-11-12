@@ -1438,7 +1438,7 @@ export function rekeyPayableLines<T extends RekeyablePayableRow>(items: readonly
 
 /**
  * Rewrite a stored pointer (`path_purchase_item`, a `substituted_for` entry's
- * `path`, a movement's `path_purchase_item`, a credit's `path_bill_item`)
+ * `path`, a movement's `path_source_item`, a credit's `path_bill_item`)
  * through a re-key's `map`.
  *
  * A pointer at a row the document still holds maps exactly. One that names a
@@ -1449,7 +1449,7 @@ export function rekeyPayableLines<T extends RekeyablePayableRow>(items: readonly
  *
  * ⚠️ Pass the map of the document the pointer's path space belongs to: a bill
  * line's `path_purchase_item` and `substituted_for`, and a movement's
- * `path_purchase_item`, take the PURCHASE's; a credit's `path_bill_item` takes
+ * `path_source_item` (one-document-model ruling 65a), take the PURCHASE's; a credit's `path_bill_item` takes
  * the BILL's.
  */
 export function rekeyPayablePointer(map: PathForwardMap, path: readonly string[]): { path: string[]; exact: boolean } {

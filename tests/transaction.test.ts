@@ -17,6 +17,7 @@ import {
   hasCosts,
   MOVEMENT_CONTRACTS,
   MOVEMENT_TYPES,
+  MOVEMENT_ANNOTATION_KEYS,
   MovementSchema,
   MovementTypeEnum,
   StoreTransferLineInput,
@@ -43,19 +44,34 @@ const atOos = { collection: "out-of-service" as const, uid: OOS };
 const SUPPLIER = "testsupp100000000000";
 const base = getInitialValues(MovementSchema) as Record<string, unknown>;
 
-/** A schema-valid movement of `type`, with every axis filled per its contract. */
-/** The purchase item a fixture naming a purchase moves (api-cloudrun#1407). */
-const PURCHASE_ITEM = "0199a1f2-3b4c-7d8e-9f01-2345678900ab";
+/** The purchase an inbound-ladder fixture belongs to (api-cloudrun#1210). */
+const PURCHASE = "testpurch10000000000";
+const atPurchase = { collection: "purchases" as const, uid: PURCHASE };
+/** The leg the fixture's booking is on: the outbound BOOKING's third segment. */
+const LEG = BOOKING.split(":")[2];
+/** An inbound booking: `{purchase}:{product}:{leg}`, the grammar the row is checked against. */
+const INBOUND_BOOKING = `${PURCHASE}:${PRODUCT}:${LEG}`;
+/** The row of the purchase that booking's units sit on: `[leg, product]` (rulings 65, 65a). */
+const SOURCE_ROW = [LEG, PRODUCT];
 
 /**
- * A well-formed movement. One naming a purchase also names the item it moves
- * (`path_purchase_item`) unless `over` states that key — a test of the presence
- * rule states it, every other fixture gets the item for free.
+ * A well-formed movement. One on the INBOUND ladder is built consistent with
+ * the row rule: an inbound booking, its purchase in `sources[]` and the row it
+ * acts for (`path_source_item`) — unless `over` states that key, so a test of
+ * one rule can break exactly that rule and nothing else.
  */
 function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
   const doc = movementBase(type, over);
-  const namesPurchase = (doc.sources as { collection: string }[]).some((s) => s.collection === "purchases");
-  return namesPurchase && !("path_purchase_item" in over) ? { ...doc, path_purchase_item: [PURCHASE_ITEM] } : doc;
+  if (MOVEMENT_CONTRACTS[type].booking_ladder !== "inbound") return doc;
+  const sources = doc.sources as { collection: string }[];
+  return {
+    ...doc,
+    ...("uid_booking" in over ? {} : { uid_booking: INBOUND_BOOKING }),
+    ...("sources" in over || sources.some((src) => src.collection === "purchases")
+      ? {}
+      : { sources: [...sources, atPurchase] }),
+    ...("path_source_item" in over ? {} : { path_source_item: SOURCE_ROW }),
+  };
 }
 
 function movementBase(type: MovementTypeType, over: Record<string, unknown> = {}) {
@@ -280,45 +296,69 @@ Deno.test("MovementSchema accepts a well-formed event of every type", () => {
   }
 });
 
-// ── a receipt names its purchase (api-cloudrun#1210) ──────────────────
+// ── an inbound movement names its purchase and its row (rulings 65, 65a) ──
 
-const PURCHASE = "testpurch10000000000";
-const atPurchase = { collection: "purchases" as const, uid: PURCHASE };
+const INBOUND_TYPES = MOVEMENT_TYPES.filter((t) => MOVEMENT_CONTRACTS[t].booking_ladder === "inbound");
 
-Deno.test("a purchase may name ONE purchase in sources[], and an unlinked purchase still parses", () => {
-  // Both arms matter: the linked receipt is the new path, and the unlinked one is
-  // every historic purchase until the backfill and every new one until P6.
-  assertEquals(MovementSchema.safeParse(movement("purchase", { sources: [atPurchase] })).success, true);
-  assertEquals(MovementSchema.safeParse(movement("purchase")).success, true);
-});
-
-Deno.test("a purchase naming TWO purchases is refused — its bucket would be ambiguous", () => {
-  const two = movement("purchase", {
-    sources: [atPurchase, { collection: "purchases", uid: "testpurch20000000000" }],
-  });
-  assertEquals(issuePaths(two), ["sources"]);
-});
-
-Deno.test("a movement naming a purchase names the item it moves — and only then (api-cloudrun#1407)", () => {
-  // One product may sit on two items, so the item is what a reader attributes
-  // by. Both directions, on a receipt and a subrent type.
-  for (const type of ["purchase", "subrent_in"] as const) {
-    const missing = movement(type, { sources: [atPurchase], path_purchase_item: undefined });
-    assertEquals(issuePaths({ ...missing, path_purchase_item: undefined }), ["path_purchase_item"], type);
+Deno.test("an inbound-ladder movement names exactly ONE purchase: the one its booking belongs to", () => {
+  for (const type of INBOUND_TYPES) {
+    assertEquals(MovementSchema.safeParse(movement(type)).success, true, type);
+    const own = (movement(type).sources as { collection: string }[]).filter((src) => src.collection !== "purchases");
+    assertEquals(issuePaths(movement(type, { sources: own })), ["sources"], `${type}: none`);
+    assertEquals(
+      issuePaths(movement(type, { sources: [...own, atPurchase, { collection: "purchases", uid: "testpurch20000000000" }] })),
+      ["sources"],
+      `${type}: two`,
+    );
+    assertEquals(
+      issuePaths(movement(type, { sources: [...own, { collection: "purchases", uid: "testpurch20000000000" }] })),
+      ["sources"],
+      `${type}: not its booking's purchase`,
+    );
   }
-  assertEquals(issuePaths(movement("purchase", { path_purchase_item: [PURCHASE_ITEM] })), ["path_purchase_item"]);
-  assertEquals(MovementSchema.safeParse(movement("purchase", { sources: [atPurchase] })).success, true);
 });
 
-Deno.test("only a purchase or a subrent type may name a purchase: every other type is refused", () => {
+Deno.test("an inbound-ladder movement names the row it acts for, checked against its booking id", () => {
+  for (const type of INBOUND_TYPES) {
+    assertEquals(MOVEMENT_CONTRACTS[type].source_item, "required", type);
+    assertEquals(issuePaths(movement(type, { path_source_item: undefined })), ["path_source_item"], `${type}: absent`);
+    // Another leg, and another product: each is a row the booking does not span.
+    assertEquals(
+      issuePaths(movement(type, { path_source_item: ["9c2f4a10-6b3d-4e57-8a91-0d5e7c3b2f49", PRODUCT] })),
+      ["path_source_item"],
+      `${type}: wrong leg`,
+    );
+    assertEquals(
+      issuePaths(movement(type, { path_source_item: [LEG, "testprod200000000000"] })),
+      ["path_source_item"],
+      `${type}: wrong product`,
+    );
+    // A row under a group on that leg is still on the booking.
+    assertEquals(
+      MovementSchema.safeParse(movement(type, { path_source_item: [LEG, "0199a1f2-3b4c-7d8e-9f01-2345678900ab", PRODUCT] }))
+        .success,
+      true,
+      `${type}: grouped row`,
+    );
+  }
+});
+
+Deno.test("an outbound or booking-less movement names no purchase and no row (until Phase 9)", () => {
   // Swept over every type rather than one example, so a new type defaults to
-  // being checked. Each fixture is otherwise valid, so the ONE issue is this rule.
+  // being checked. Each fixture is otherwise valid, so the ONE issue is the rule.
   for (const type of MOVEMENT_TYPES) {
-    if (type === "purchase" || (SUBRENT_MOVEMENT_TYPES as readonly string[]).includes(type)) continue;
+    if (MOVEMENT_CONTRACTS[type].booking_ladder === "inbound") continue;
+    assertEquals(MOVEMENT_CONTRACTS[type].source_item, "forbidden", type);
     const base = movement(type);
-    const doc = { ...base, sources: [...(base.sources as unknown[]), atPurchase], path_purchase_item: [PURCHASE_ITEM] };
-    assertEquals(issuePaths(doc), ["sources"], type);
+    assertEquals(issuePaths({ ...base, sources: [...(base.sources as unknown[]), atPurchase] }), ["sources"], type);
+    assertEquals(issuePaths({ ...base, path_source_item: SOURCE_ROW }).includes("path_source_item"), true, type);
   }
+});
+
+Deno.test("MOVEMENT_ANNOTATION_KEYS is exactly the keys tagged as annotations", () => {
+  // Pinned so a new tag, or a lost one, is a reviewed change: every other key
+  // is an append-only fact (ruling 65a).
+  assertEquals([...MOVEMENT_ANNOTATION_KEYS].sort(), ["path_source_item", "reference", "xero_id"]);
 });
 
 Deno.test("a stored purchase with an explicit null supplier is REFUSED", () => {

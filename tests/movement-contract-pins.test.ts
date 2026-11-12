@@ -57,11 +57,12 @@ const RULED_CHANGES: Record<string, { fields: Record<string, unknown>; why: stri
 Deno.test("pins: every pre-campaign contract is unchanged, field for field, except the ruled changes", () => {
   for (const [t, pinned] of Object.entries(pins.contracts)) {
     const type = t as (typeof MOVEMENT_TYPES)[number];
-    // `booking_ladder` postdates the fixture and is DERIVED from `booking` (null
-    // exactly when it is forbidden), so it carries no answer the fixture could
-    // pin; `tests/inbound-breakdown.test.ts` asserts it. A change to `booking`
-    // itself still fails here.
-    const { undoes: _undoes, booking_ladder: _ladder, ...rest } = MOVEMENT_CONTRACTS[type];
+    // `booking_ladder` and `source_item` postdate the fixture and are DERIVED
+    // (the ladder from `booking`, null exactly when it is forbidden; the row
+    // column from the ladder), so they carry no answer the fixture could pin;
+    // `tests/inbound-breakdown.test.ts` and `tests/transaction.test.ts` assert
+    // them. A change to `booking` itself still fails here.
+    const { undoes: _undoes, booking_ladder: _ladder, source_item: _row, ...rest } = MOVEMENT_CONTRACTS[type];
     const ruled = RULED_CHANGES[t];
     assertEquals(
       strip({ ...rest, multiplier: getTransactionMultiplier(type), hasCosts: hasCosts(type) }),

@@ -505,6 +505,7 @@ Deno.test("no contract pairs `places: null` with a required cost — the fold co
     costOnly({
       undoes: null,
       booking_ladder: null,
+      source_item: "forbidden",
       custody: "forbidden",
       cost: "required",
       places: null,
