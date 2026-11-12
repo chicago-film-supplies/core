@@ -355,6 +355,38 @@ const purchaseCustodyRules: CollectionRule[] = [
   },
 ];
 
+/** The inbound lever, asserted at its one implementation. */
+const INBOUND_LEVER: EnforcementRef = {
+  kind: "assertion",
+  ref: "api-cloudrun/src/services/inboundBookings.ts::applyInboundBookingUpdates",
+  clause:
+    "each action row moves its inbound booking by `applyInboundCustodyActions` and writes ONE movement per transition naming the booking (uid_booking), its custody pair and its row (path_source_item), under the row's sub-session, through the ledger writer's ownership stager; the booking write and every movement land in one batch conditioned on the booking's read time; a stale version is a 409, a short bucket a 400",
+  gates: true,
+};
+
+/**
+ * The inbound lever's own edge (one-document-model W3): a custody step on an
+ * inbound booking writes its movement. The movement's fold onto the ledger and
+ * the shelves is `create-transaction`'s, which the lever's transaction lists.
+ */
+const updateInboundBookingRules: CollectionRule[] = [
+  {
+    id: "update-inbound-booking:booking-to-transactions",
+    source: "bookings-inbound",
+    target: "transactions",
+    mode: "co-write",
+    invariant:
+      "Every inbound custody step is ONE movement written in the commit that moves the booking: its type is the rule's arm for the booking's line type (`INBOUND_CUSTODY_RULES`), it names the booking in uid_booking, the step's custody pair, the purchase row in path_source_item and the purchase in sources[], and its id is `{row sub-session}|{type}|{booking}`, so a retried request lands on the same movement. A Buy's receipt costs the row's cumulative target less what the journal holds for the row; a `purchase_undo` relieves the basis newest first. The booking's breakdown is the net of its movements (`net[k] === breakdown[k]` over INBOUND_HISTORY_KEYS).",
+    enforced_by: [INBOUND_LEVER],
+    transaction: "update-inbound-booking",
+    fields: [
+      { source: ["breakdown"], target: ["custody"], transform: "the action's rule pair, `from → to`" },
+      { source: ["uid"], target: ["uid_booking"] },
+      { source: ["source"], target: ["sources"], transform: "the purchase the booking's source names" },
+    ],
+  },
+];
+
 /** The custody projection's steps, as its firing transactions name them. */
 const PURCHASE_CUSTODY_STEPS = [
   "purchase-custody:purchase-to-receipt",
@@ -1444,6 +1476,32 @@ const reversePurchaseReturnTransaction: TransactionDefinition = {
   ],
 };
 
+const updateInboundBookingTransaction: TransactionDefinition = {
+  id: "update-inbound-booking",
+  description:
+    "The inbound lever (`PUT /purchase-receipts/{uid}/bookings`, ruling 75): operator custody steps on a purchase's inbound bookings — receive, put away, send back, a flag on arrival, and each one's undo — plus the out-of-service record's internal settle row. Each step writes its movement and folds it onto the ledger and the shelves through the one ledger writer, claiming `stock-locks/{P}`; then the purchase is finalized from its committed bookings. A receipt posts nothing to Xero. Fires on: every custody step on an inbound booking. The unit roster steps fire when a step names units.",
+  steps: [
+    "update-inbound-booking:booking-to-transactions",
+    "create-transaction:transaction-to-ledger",
+    "create-transaction:transaction-to-locations",
+    ...STOCK_STEPS,
+    "units:transactions-to-roster",
+    "units:transactions-to-units",
+    ...PURCHASE_CUSTODY_STEPS,
+    "purchase-card:purchases-to-card",
+  ],
+};
+
+const finalizePurchaseTransaction: TransactionDefinition = {
+  id: "finalize-purchase",
+  description:
+    "Recompute a purchase from its committed inbound bookings — the twin of `finalize-order`: `bookings_breakdown` and the custody-only status, the receipt projection, and the return card. Idempotent: re-running against unchanged bookings writes nothing. Runs in-request after an inbound lever write.",
+  steps: [
+    ...PURCHASE_CUSTODY_STEPS,
+    "purchase-card:purchases-to-card",
+  ],
+};
+
 /** Everything `propagation/purchases.ts` contributes to the catalog. */
 export const purchases: PropagationModule = {
   rules: [
@@ -1455,6 +1513,7 @@ export const purchases: PropagationModule = {
     ...settleToPurchaseRules,
     ...purchaseCardRules,
     ...purchaseCustodyRules,
+    ...updateInboundBookingRules,
     ...updatePurchaseBillRules,
     ...createPurchaseBillRules,
     ...settlePurchaseBillRules,
@@ -1477,6 +1536,8 @@ export const purchases: PropagationModule = {
     closePurchaseTransaction,
     receivePurchaseTransaction,
     reversePurchaseReceiptTransaction,
+    updateInboundBookingTransaction,
+    finalizePurchaseTransaction,
     returnPurchaseTransaction,
     reversePurchaseReturnTransaction,
     createPurchaseBillTransaction,

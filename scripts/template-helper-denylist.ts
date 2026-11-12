@@ -591,6 +591,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "classifyReplay",
     "custodyByBooking",
     "custodyByGrain",
+    // The backdated-step bound (ruling 76): a writer's refusal, never a render.
+    "firstNegativePrefix",
     "foldJournal",
     "journalOrder",
     "ladderHistoryKeys",
@@ -715,6 +717,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // a purchase writer's projection, its finalize's status and the cancel
   // refusal. A template renders a purchase or receipt that already carries them.
   "bookings-inbound": [
+    // The inbound lever's pure half (W3): a write applies custody steps; a render never does.
+    "applyInboundCustodyActions",
     "calculateInboundBreakdown",
     // A line's received and returned counts (C8) need the purchase's MOVEMENTS or
     // its inbound bookings, neither of which a purchase render is handed.

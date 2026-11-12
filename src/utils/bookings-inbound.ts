@@ -13,6 +13,15 @@
  */
 import {
   emptyInboundBreakdown,
+  type InboundBookingActionType,
+  inboundCustodyRule,
+  type InboundCustodyRuleId,
+  type InboundServiceSide,
+  INBOUND_UNIT_BUCKETS,
+  type InboundUnitBucketType,
+  type InboundUnitSetsType,
+  type MovementTypeType,
+  type OOSReasonType,
   INBOUND_BREAKDOWN_KEYS,
   INBOUND_HISTORY_KEYS,
   INBOUND_RECEIVED_KEYS,
@@ -28,6 +37,7 @@ import {
   PURCHASE_STATUS_TRAITS,
   type PurchaseStatusType,
 } from "../schemas/mod.ts";
+import { CustodyRefusal } from "./custody.ts";
 
 /** Σ of an inbound breakdown, over every key — never spelled key by key. */
 export function sumInboundBreakdown(b: InboundBreakdown): number {
@@ -269,4 +279,168 @@ export function inboundCancelRefusal(
       `send them back or undo the receipt before canceling (${blockers.map((b) => b.uid).join(", ")})`,
     bookings: blockers,
   };
+}
+
+// ── apply: the inbound lever's pure half (W3) ───────────────────────
+
+/** An inbound booking as {@link applyInboundCustodyActions} reads it. */
+export type InboundCustodyBooking =
+  & Pick<InboundBooking, "type" | "breakdown">
+  & Partial<Pick<InboundBooking, "units">>;
+
+/** One movement's worth of inbound custody change — the twin of `CustodyTransition`. */
+export interface InboundCustodyTransition {
+  rule: InboundCustodyRuleId;
+  type: MovementTypeType;
+  from: InboundBreakdownKeyType;
+  to: InboundBreakdownKeyType;
+  quantity: number;
+  /** The flag or settle's service axis; `null` off those rows. */
+  service: { from: OOSReasonType | null; to: OOSReasonType | null } | null;
+  /** The units the action named, ascending by number; `[]` when it named none. */
+  units: number[];
+  /** The purchase row the step acts for (ruling 65). */
+  path_source_item: string[];
+}
+
+/** What a list of inbound actions does to a booking — the twin of `CustodyApplication`. */
+export interface InboundCustodyApplication {
+  breakdown: InboundBreakdown;
+  status: InboundBookingStatusType;
+  /** One per action that writes a movement, in action order (every inbound arm does today). */
+  transitions: InboundCustodyTransition[];
+  /** The unit sets after the actions, or `null` for a booking that is not unit-tracked. */
+  units: InboundUnitSetsType | null;
+}
+
+const INBOUND_UNIT_BUCKET_SET: ReadonlySet<InboundBreakdownKeyType> = new Set(INBOUND_UNIT_BUCKETS);
+
+function isInboundUnitBucket(key: InboundBreakdownKeyType): key is InboundUnitBucketType {
+  return INBOUND_UNIT_BUCKET_SET.has(key);
+}
+
+function inboundService(side: InboundServiceSide): OOSReasonType | null {
+  return side === "none" ? null : side;
+}
+
+/**
+ * Apply `actions`, in order, to an inbound booking's CURRENT state — the twin of
+ * `applyCustodyActions` over `INBOUND_CUSTODY_RULES`, and the pure half of the
+ * inbound lever (`PUT /purchase-receipts/{uid}/bookings`, ruling 75).
+ *
+ * Throws {@link CustodyRefusal} on a rule the booking type may not take (a Buy
+ * is never sent back or settled), a non-positive quantity, a short source
+ * bucket, or two actions that would write one movement id: an id is
+ * `{row sub-session}|{type}|{booking}`, so the slot is (movement type, row) —
+ * which is wider than the wire's (rule, row) check, because `receive_damaged`
+ * and its undo are both a `receive_flag`. Never clamps.
+ *
+ * ⚠️ **A settle row is legal HERE.** The wire refuses it (`InboundBookingAction`);
+ * the out-of-service record's `return_to_supplier` reaches the lever as an
+ * internal row, and this function serves both.
+ *
+ * On a unit-tracked booking (`units` non-null) every action names its units:
+ * a `receive` draws units the booking holds nowhere (it leaves the `ordered`
+ * PLAN key, which has no set, as a `prep` leaves `reserved`); every other step
+ * takes units from its source bucket's set, plus — up to that bucket's
+ * UNTRACKED count — units the booking holds nowhere. An untracked booking may
+ * name no units.
+ */
+export function applyInboundCustodyActions(
+  booking: InboundCustodyBooking,
+  actions: readonly InboundBookingActionType[],
+): InboundCustodyApplication {
+  const breakdown: InboundBreakdown = { ...emptyInboundBreakdown(), ...booking.breakdown };
+  const units: InboundUnitSetsType | null = booking.units == null
+    ? null
+    : Object.fromEntries(INBOUND_UNIT_BUCKETS.map((k) => [k, [...booking.units![k]]])) as InboundUnitSetsType;
+  const slots = new Set<string>();
+  const transitions: InboundCustodyTransition[] = [];
+
+  for (const action of actions) {
+    const rule = inboundCustodyRule(action.rule);
+    const arm = booking.type === "rental" ? rule.rental : rule.sale;
+    const what = booking.type === "rental" ? "Subrent" : "Buy";
+    if (arm === null) throw new CustodyRefusal(`a ${what} line cannot take "${rule.id}"`);
+    if (!Number.isInteger(action.quantity) || action.quantity <= 0) {
+      throw new CustodyRefusal(`"${rule.id}" needs a positive whole quantity`);
+    }
+    const row = action.path_source_item.join("/");
+    const slot = `${arm.movement}|${row}`;
+    if (arm.movement !== null && slots.has(slot)) {
+      throw new CustodyRefusal(
+        `two actions would write the same "${arm.movement}" movement for row ${row}; make them two separate saves`,
+      );
+    }
+    slots.add(slot);
+    if (breakdown[rule.from] < action.quantity) {
+      throw new CustodyRefusal(
+        `"${rule.id}" moves ${action.quantity} from ${rule.from}, which holds ${breakdown[rule.from]}`,
+      );
+    }
+    const named = (action.units ?? []).map((u) => u.number);
+    if (units === null) {
+      if (named.length > 0) throw new CustodyRefusal(`"${rule.id}" names units, but this booking is not unit-tracked`);
+    } else {
+      moveInboundUnits(units, breakdown, rule.id, rule.from, rule.to, action.quantity, action.units === undefined ? null : named);
+    }
+    breakdown[rule.from] -= action.quantity;
+    breakdown[rule.to] += action.quantity;
+    if (arm.movement === null) continue;
+    transitions.push({
+      rule: rule.id,
+      type: arm.movement,
+      from: rule.from,
+      to: rule.to,
+      quantity: action.quantity,
+      service: rule.service === null
+        ? null
+        : { from: inboundService(rule.service.from), to: inboundService(rule.service.to) },
+      units: named,
+      path_source_item: [...action.path_source_item],
+    });
+  }
+  return {
+    breakdown,
+    status: deriveInboundBookingStatus({ type: booking.type, breakdown }),
+    transitions,
+    units,
+  };
+}
+
+/** Fold one action's named units into a tracked inbound booking's sets, BEFORE the breakdown moves. */
+function moveInboundUnits(
+  units: InboundUnitSetsType,
+  breakdown: InboundBreakdown,
+  rule: InboundCustodyRuleId,
+  from: InboundBreakdownKeyType,
+  to: InboundBreakdownKeyType,
+  quantity: number,
+  named: number[] | null,
+): void {
+  if (named === null) throw new CustodyRefusal(`"${rule}" must name the units it moves on a unit-tracked booking`);
+  for (let i = 1; i < named.length; i++) {
+    if (named[i] <= named[i - 1]) throw new CustodyRefusal(`"${rule}" names its units out of order or twice`);
+  }
+  if (named.length !== quantity) throw new CustodyRefusal(`"${rule}" moves ${quantity} but names ${named.length} units`);
+  const holder = new Map<number, InboundUnitBucketType>();
+  for (const key of INBOUND_UNIT_BUCKETS) for (const n of units[key]) holder.set(n, key);
+  const untracked = isInboundUnitBucket(from) ? breakdown[from] - units[from].length : 0;
+  let drawn = 0;
+  for (const n of named) {
+    const at = holder.get(n);
+    if (isInboundUnitBucket(from) && at === from) continue;
+    if (at !== undefined) throw new CustodyRefusal(`"${rule}" moves unit ${n} from ${from}, but this booking holds it in ${at}`);
+    if (isInboundUnitBucket(from)) drawn++;
+  }
+  if (drawn > untracked) {
+    throw new CustodyRefusal(
+      `"${rule}" names ${drawn} unit(s) this booking does not hold in ${from}, and ${from} has ${untracked} untracked`,
+    );
+  }
+  if (isInboundUnitBucket(from)) {
+    const leaving = new Set(named);
+    units[from] = units[from].filter((n) => !leaving.has(n));
+  }
+  if (isInboundUnitBucket(to)) units[to] = [...units[to], ...named].sort((a, b) => a - b);
 }

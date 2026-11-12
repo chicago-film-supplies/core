@@ -539,8 +539,14 @@ export function replayCustody<L extends BookingLadderType>(
  * Whether some prefix of the log, in time order, drives a key negative — a log
  * missing events from its front. Events sharing one instant fold as ONE step
  * first, so no within-instant order can fake a negative.
+ *
+ * ⭐ **Exported as the lower bound on a BACKDATED custody step** (ruling 76):
+ * the replay identity is a sum and order-free, so this is its one
+ * order-dependent check, and the api refuses a step whose `date` makes the
+ * booking's journal plus the new step fail it — a step dated before the step
+ * that filled its source bucket. Pass the booking's events WITH the new one.
  */
-function firstNegativePrefix(events: readonly CustodyEvent[], ladder: BookingLadderType): boolean {
+export function firstNegativePrefix(events: readonly CustodyEvent[], ladder: BookingLadderType): boolean {
   const byInstant = new Map<number, CustodyEvent[]>();
   for (const e of events) {
     const t = Date.parse(e.date);

@@ -4,7 +4,7 @@
  * custody-only purchase status, the cancel refusal, and the received / returned
  * counts that replaced the purchase line buckets.
  */
-import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
 import {
   emptyInboundBreakdown,
   INBOUND_BOOKING_TYPES,
@@ -15,6 +15,7 @@ import {
   PURCHASE_STATUS_TRAITS,
 } from "../src/schemas/mod.ts";
 import {
+  applyInboundCustodyActions,
   calculateInboundBreakdown,
   custodyBySourceItem,
   deriveInboundBookingStatus,
@@ -31,6 +32,8 @@ import {
   sumInboundBreakdown,
 } from "../src/utils/bookings-inbound.ts";
 import { derivePurchaseStatus as viaPurchases } from "../src/utils/purchases.ts";
+import { CustodyRefusal } from "../src/utils/custody.ts";
+import { firstNegativePrefix } from "../src/utils/journal.ts";
 
 const bd = (over: Partial<InboundBreakdown>): InboundBreakdown => ({ ...emptyInboundBreakdown(), ...over });
 const bk = (type: InboundBookingTypeType, over: Partial<InboundBreakdown>, uid = "b1") => ({
@@ -186,4 +189,91 @@ Deno.test("custodyBySourceItem agrees with the booking it replays, for a row tha
   const booking = bd({ ordered: 0, received: 1, stocked: 2, sent_back: 2 });
   assertEquals(lineCustodyAt(custodyBySourceItem(journal), ROW), inboundCustodyCounts(booking));
   assert(inboundReturned(booking) <= inboundReceived(booking));
+});
+
+// ── applyInboundCustodyActions (W3, the inbound lever's pure half) ──
+
+const act = (rule: Parameters<typeof applyInboundCustodyActions>[1][number]["rule"], quantity: number, units?: number[]) => ({
+  rule,
+  quantity,
+  path_source_item: [...ROW],
+  ...(units ? { units: units.map((number) => ({ number })) } : {}),
+});
+
+Deno.test("applyInboundCustodyActions: receive, put away and send back walk a Subrent up its ladder, one movement each", () => {
+  const app = applyInboundCustodyActions(
+    { type: "rental", breakdown: bd({ ordered: 5 }) },
+    [act("receive", 5), act("put_away", 4), act("send_back", 2)],
+  );
+  assertEquals(app.breakdown, bd({ received: 1, stocked: 2, sent_back: 2 }));
+  assertEquals(app.transitions.map((t) => [t.type, t.from, t.to, t.quantity]), [
+    ["subrent_in", "ordered", "received", 5],
+    ["put_away", "received", "stocked", 4],
+    ["subrent_out", "stocked", "sent_back", 2],
+  ]);
+  assertEquals(app.transitions[0].path_source_item, [...ROW]);
+  assertEquals(app.status, "active");
+  assertEquals(app.units, null);
+});
+
+Deno.test("applyInboundCustodyActions: a Buy receives as a purchase and closes once stocked", () => {
+  const app = applyInboundCustodyActions({ type: "sale", breakdown: bd({ ordered: 3 }) }, [act("receive", 3), act("put_away", 3)]);
+  assertEquals(app.transitions.map((t) => t.type), ["purchase", "put_away"]);
+  assertEquals(app.status, "complete");
+});
+
+Deno.test("applyInboundCustodyActions refuses a step its line type may not take, a short bucket, and one movement written twice", () => {
+  assertThrows(() => applyInboundCustodyActions({ type: "sale", breakdown: bd({ stocked: 2 }) }, [act("send_back", 1)]), CustodyRefusal, "cannot take");
+  assertThrows(() => applyInboundCustodyActions({ type: "rental", breakdown: bd({ ordered: 1 }) }, [act("receive", 2)]), CustodyRefusal, "holds 1");
+  // Both are a receive_flag on one row, so they would share a movement id.
+  assertThrows(
+    () => applyInboundCustodyActions({ type: "rental", breakdown: bd({ received: 2 }) }, [act("receive_damaged", 1), act("receive_damaged_undo", 1)]),
+    CustodyRefusal,
+    "same \"receive_flag\" movement",
+  );
+});
+
+Deno.test("applyInboundCustodyActions: a settle is legal here (the record's internal row), with its service axis", () => {
+  const app = applyInboundCustodyActions({ type: "rental", breakdown: bd({ stocked: 2 }) }, [act("settle_lost", 1)]);
+  assertEquals(app.breakdown, bd({ stocked: 1, lost: 1 }));
+  assertEquals(app.transitions[0].type, "return_to_supplier");
+  assertEquals(app.transitions[0].service, { from: "lost", to: null });
+});
+
+Deno.test("applyInboundCustodyActions on a tracked booking: units are named, follow their bucket, and a held unit is not drawn twice", () => {
+  const tracked = { damaged: [], lost: [], received: [], sent_back: [], stocked: [], transit_inbound: [], transit_outbound: [] };
+  const app = applyInboundCustodyActions(
+    { type: "rental", breakdown: bd({ ordered: 2 }), units: tracked },
+    [act("receive", 2, [1001, 1002]), act("put_away", 1, [1002])],
+  );
+  assertEquals(app.units?.received, [1001]);
+  assertEquals(app.units?.stocked, [1002]);
+  assertEquals(app.transitions[1].units, [1002]);
+  assertThrows(
+    () => applyInboundCustodyActions({ type: "rental", breakdown: bd({ ordered: 1 }), units: tracked }, [act("receive", 1)]),
+    CustodyRefusal,
+    "must name the units",
+  );
+  assertThrows(
+    () => applyInboundCustodyActions({ type: "rental", breakdown: bd({ ordered: 1 }) }, [act("receive", 1, [7])]),
+    CustodyRefusal,
+    "not unit-tracked",
+  );
+  assertThrows(
+    () => applyInboundCustodyActions(
+      { type: "rental", breakdown: bd({ ordered: 1, stocked: 1 }), units: { ...tracked, stocked: [1001] } },
+      [act("receive", 1, [1001])],
+    ),
+    CustodyRefusal,
+    "holds it in stocked",
+  );
+});
+
+Deno.test("firstNegativePrefix: a step dated before the step that filled its source bucket reads negative (ruling 76)", () => {
+  const receive = { custody: { from: "ordered" as const, to: "received" as const }, quantity: 2, date: "2026-11-10T10:00:00.000-06:00" };
+  const putAway = (date: string) => ({ custody: { from: "received" as const, to: "stocked" as const }, quantity: 2, date });
+  assertEquals(firstNegativePrefix([receive, putAway("2026-11-11T09:00:00.000-06:00")], "inbound"), false);
+  assertEquals(firstNegativePrefix([receive, putAway("2026-11-09T09:00:00.000-06:00")], "inbound"), true);
+  // One instant folds as one step, so the same timestamp is never negative.
+  assertEquals(firstNegativePrefix([receive, putAway(receive.date)], "inbound"), false);
 });
