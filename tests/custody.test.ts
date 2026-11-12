@@ -915,6 +915,20 @@ Deno.test("custody P4 - the booking inputs are actions-only, and REFUSE the reti
   assert(!BulkBookingUpdateInput.safeParse({ version: 1, uuid_session, updates: [{ uid, version: 1, actions, breakdown: retired.breakdown }] }).success);
 });
 
+Deno.test("custody - both outbound lever inputs take an optional offset-form date, as the inbound one does (ruling 76)", () => {
+  const uuid_session = crypto.randomUUID();
+  const uid = `aaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbb:${crypto.randomUUID()}`;
+  const actions = [{ rule: "check_in", quantity: 1 }];
+  const single = { version: 1, uuid_session, actions };
+  const bulk = { version: 1, uuid_session, updates: [{ uid, version: 1, actions }] };
+  for (const [name, schema, body] of [["UpdateBookingInput", UpdateBookingInput, single], ["BulkBookingUpdateInput", BulkBookingUpdateInput, bulk]] as const) {
+    assert((schema as z.ZodType).safeParse(body).success, `${name}: absent is now`);
+    const dated = (schema as z.ZodType).safeParse({ ...body, date: "2026-11-11T09:30:00.000-06:00" });
+    assert(dated.success && (dated.data as { date?: string }).date !== undefined, `${name}: an offset instant is kept, not stripped`);
+    assert(!(schema as z.ZodType).safeParse({ ...body, date: "2026-11-11" }).success, `${name}: a bare date is refused`);
+  }
+});
+
 Deno.test("custody P4 - every retired key states an OpenAPI `type`, or a consumer's generator throws for the whole document", () => {
   // zod-to-openapi has no mapping for `never` and raises UnknownZodTypeError on
   // any schema without a stated `type` — which took down api-cloudrun's whole

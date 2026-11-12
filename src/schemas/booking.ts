@@ -369,6 +369,25 @@ export interface UpdateBookingInputType {
    * keystroke) and reuse it across retries of that action.
    */
   uuid_session: string;
+  /**
+   * The physical instant the step happened, for a step recorded after the fact
+   * (a check-in typed the next morning). Absent is now. Every movement the
+   * request writes takes it as its `date`. The same field on both levers
+   * (ruling 76; the inbound twin is `BulkInboundBookingUpdateInputType.date`).
+   *
+   * 🔴 **The api bounds it, because the custody replay orders a booking's
+   * movements by `date`** (`journalOrder`). It refuses a date LATER than now (a
+   * custody movement records what happened, and the write moves custody and
+   * stock at once whatever it says; an expected arrival is a pair's dates) and
+   * one EARLIER than the booking's latest movement (it would replay before a
+   * step that was taken first). Only the api's clock decides "now"; a client
+   * check is a courtesy.
+   *
+   * ⚠️ **Release order:** a stripping `z.object`, so an api older than this
+   * field drops it silently and records the step at now. The api release that
+   * reads it must be live in prod before the manager sends it.
+   */
+  date?: string;
 }
 
 /** Zod schema for UpdateBookingInput. */
@@ -379,6 +398,7 @@ export const UpdateBookingInput: z.ZodType<UpdateBookingInputType> = z.object({
   return_flags: retiredKey("return_flags"),
   version: z.int().min(0),
   uuid_session: z.uuid(),
+  date: chicagoInstant().optional(),
 });
 
 // ── Bulk update input (PUT /fulfillments/{uid}/bookings) ───────
@@ -434,12 +454,15 @@ export interface BulkBookingUpdateInputType {
    * {@link UpdateBookingInputType.uuid_session}.
    */
   uuid_session: string;
+  /** The physical instant of every step in the request; see {@link UpdateBookingInputType.date}. */
+  date?: string;
 }
 
 export const BulkBookingUpdateInput: z.ZodType<BulkBookingUpdateInputType> = z.object({
   version: z.int().min(0),
   updates: z.array(BookingUpdate).min(1),
   uuid_session: z.uuid(),
+  date: chicagoInstant().optional(),
 });
 
 /**

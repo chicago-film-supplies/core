@@ -1204,6 +1204,7 @@ interface BulkBookingUpdateInputType {
   version: number;
   updates: BookingUpdateType[];
   uuid_session: string;
+  date?: string;
 }
 ```
 
@@ -1262,10 +1263,10 @@ of `BulkBookingUpdateInput` (`PUT /fulfillments/{uid}/bookings`).
 - `uuid_session` — ONE session for the operator action, reused across retries
   (see `UpdateBookingInputType.uuid_session`); each row's movements take the
   row's sub-session under it.
-- `date` — the physical instant the step happened. ⚠️ **A divergence from the
-  outbound wire, kept on purpose:** a delivery is routinely recorded after it
-  arrived, and the receipt route this replaces took the arrival instant. Absent
-  is now.
+- `date` — the physical instant the steps happened; absent is now. The same
+  field as the outbound lever's (ruling 76), with the same api bounds: never
+  later than now, never earlier than the booking's latest movement
+  (`UpdateBookingInputType.date`).
 - `reference` — the supplier's delivery note, stamped on every movement.
 
 ```ts
@@ -16049,6 +16050,7 @@ interface UpdateBookingInputType {
   return_flags?: never;
   version: number;
   uuid_session: string;
+  date?: string;
 }
 ```
 
@@ -22208,6 +22210,7 @@ interface BulkBookingUpdateInputType {
   version: number;
   updates: BookingUpdateType[];
   uuid_session: string;
+  date?: string;
 }
 ```
 
@@ -22571,6 +22574,7 @@ interface UpdateBookingInputType {
   return_flags?: never;
   version: number;
   uuid_session: string;
+  date?: string;
 }
 ```
 
@@ -22681,10 +22685,10 @@ of `BulkBookingUpdateInput` (`PUT /fulfillments/{uid}/bookings`).
 - `uuid_session` — ONE session for the operator action, reused across retries
   (see `UpdateBookingInputType.uuid_session`); each row's movements take the
   row's sub-session under it.
-- `date` — the physical instant the step happened. ⚠️ **A divergence from the
-  outbound wire, kept on purpose:** a delivery is routinely recorded after it
-  arrived, and the receipt route this replaces took the arrival instant. Absent
-  is now.
+- `date` — the physical instant the steps happened; absent is now. The same
+  field as the outbound lever's (ruling 76), with the same api bounds: never
+  later than now, never earlier than the booking's latest movement
+  (`UpdateBookingInputType.date`).
 - `reference` — the supplier's delivery note, stamped on every movement.
 
 ```ts

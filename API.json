@@ -531,7 +531,7 @@
         {
           "kind": "interface",
           "name": "BulkBookingUpdateInputType",
-          "declaration": "interface BulkBookingUpdateInputType {\n  version: number;\n  updates: BookingUpdateType[];\n  uuid_session: string;\n}",
+          "declaration": "interface BulkBookingUpdateInputType {\n  version: number;\n  updates: BookingUpdateType[];\n  uuid_session: string;\n  date?: string;\n}",
           "doc": "Body of `PUT /fulfillments/{uid}/bookings` — applies N booking transitions\nfor one order in a single Firestore transaction.\n\nTop-level `version` is the fulfillment doc version at read time. Currently\nadvisory: a stale value 409s. Per-row `version` carries each booking's\ncurrent version for optimistic concurrency.\n\nNo fixed cap on `updates.length`. Bound only by the real Firestore limits\n(270s tx duration, 10 MiB request size). The bulk service rejects empty\narrays with 400."
         },
         {
@@ -556,7 +556,7 @@
           "kind": "interface",
           "name": "BulkInboundBookingUpdateInputType",
           "declaration": "interface BulkInboundBookingUpdateInputType {\n  version: number;\n  updates: InboundBookingUpdateType[];\n  uuid_session: string;\n  date?: string;\n  reference?: string;\n}",
-          "doc": "Body of `PUT /purchase-receipts/{uid}/bookings` — the inbound lever, the twin\nof `BulkBookingUpdateInput` (`PUT /fulfillments/{uid}/bookings`).\n\n- `version` — the receipt document's version at read time.\n- `uuid_session` — ONE session for the operator action, reused across retries\n  (see `UpdateBookingInputType.uuid_session`); each row's movements take the\n  row's sub-session under it.\n- `date` — the physical instant the step happened. ⚠️ **A divergence from the\n  outbound wire, kept on purpose:** a delivery is routinely recorded after it\n  arrived, and the receipt route this replaces took the arrival instant. Absent\n  is now.\n- `reference` — the supplier's delivery note, stamped on every movement."
+          "doc": "Body of `PUT /purchase-receipts/{uid}/bookings` — the inbound lever, the twin\nof `BulkBookingUpdateInput` (`PUT /fulfillments/{uid}/bookings`).\n\n- `version` — the receipt document's version at read time.\n- `uuid_session` — ONE session for the operator action, reused across retries\n  (see `UpdateBookingInputType.uuid_session`); each row's movements take the\n  row's sub-session under it.\n- `date` — the physical instant the steps happened; absent is now. The same\n  field as the outbound lever's (ruling 76), with the same api bounds: never\n  later than now, never earlier than the booking's latest movement\n  (`UpdateBookingInputType.date`).\n- `reference` — the supplier's delivery note, stamped on every movement."
         },
         {
           "kind": "variable",
@@ -7203,7 +7203,7 @@
         {
           "kind": "interface",
           "name": "UpdateBookingInputType",
-          "declaration": "interface UpdateBookingInputType {\n  actions: BookingActionType[];\n  status?: never;\n  breakdown?: never;\n  return_flags?: never;\n  version: number;\n  uuid_session: string;\n}",
+          "declaration": "interface UpdateBookingInputType {\n  actions: BookingActionType[];\n  status?: never;\n  breakdown?: never;\n  return_flags?: never;\n  version: number;\n  uuid_session: string;\n  date?: string;\n}",
           "doc": "Input for updating a single booking via `PUT /bookings/{uid}`.\n\nA save is the ordered list of custody steps the operator took\n({@link BookingActionType}, `schemas/custody.ts`), applied to the booking's\nCURRENT state rather than a state the client computed — so a short source\nbucket after a concurrent write is a refusal, not an overwrite. `status` is\nderived by the server. Version is required for optimistic concurrency.\n\n⚠️ The absolute-`breakdown` delta wire is retired from every operator route\n(custody-actions P4). The api keeps a server-actor-only delta path for repair\nscripts, typed on its own side; it is not this input.\n\n{@link UpdateBookingInputType.uuid_session} is what makes this endpoint safe to\nretry — see the field's own note."
         },
         {
@@ -10414,7 +10414,7 @@
         {
           "kind": "interface",
           "name": "BulkBookingUpdateInputType",
-          "declaration": "interface BulkBookingUpdateInputType {\n  version: number;\n  updates: BookingUpdateType[];\n  uuid_session: string;\n}",
+          "declaration": "interface BulkBookingUpdateInputType {\n  version: number;\n  updates: BookingUpdateType[];\n  uuid_session: string;\n  date?: string;\n}",
           "doc": "Body of `PUT /fulfillments/{uid}/bookings` — applies N booking transitions\nfor one order in a single Firestore transaction.\n\nTop-level `version` is the fulfillment doc version at read time. Currently\nadvisory: a stale value 409s. Per-row `version` carries each booking's\ncurrent version for optimistic concurrency.\n\nNo fixed cap on `updates.length`. Bound only by the real Firestore limits\n(270s tx duration, 10 MiB request size). The bulk service rejects empty\narrays with 400."
         },
         {
@@ -10594,7 +10594,7 @@
         {
           "kind": "interface",
           "name": "UpdateBookingInputType",
-          "declaration": "interface UpdateBookingInputType {\n  actions: BookingActionType[];\n  status?: never;\n  breakdown?: never;\n  return_flags?: never;\n  version: number;\n  uuid_session: string;\n}",
+          "declaration": "interface UpdateBookingInputType {\n  actions: BookingActionType[];\n  status?: never;\n  breakdown?: never;\n  return_flags?: never;\n  version: number;\n  uuid_session: string;\n  date?: string;\n}",
           "doc": "Input for updating a single booking via `PUT /bookings/{uid}`.\n\nA save is the ordered list of custody steps the operator took\n({@link BookingActionType}, `schemas/custody.ts`), applied to the booking's\nCURRENT state rather than a state the client computed — so a short source\nbucket after a concurrent write is a refusal, not an overwrite. `status` is\nderived by the server. Version is required for optimistic concurrency.\n\n⚠️ The absolute-`breakdown` delta wire is retired from every operator route\n(custody-actions P4). The api keeps a server-actor-only delta path for repair\nscripts, typed on its own side; it is not this input.\n\n{@link UpdateBookingInputType.uuid_session} is what makes this endpoint safe to\nretry — see the field's own note."
         },
         {
@@ -10673,7 +10673,7 @@
           "kind": "interface",
           "name": "BulkInboundBookingUpdateInputType",
           "declaration": "interface BulkInboundBookingUpdateInputType {\n  version: number;\n  updates: InboundBookingUpdateType[];\n  uuid_session: string;\n  date?: string;\n  reference?: string;\n}",
-          "doc": "Body of `PUT /purchase-receipts/{uid}/bookings` — the inbound lever, the twin\nof `BulkBookingUpdateInput` (`PUT /fulfillments/{uid}/bookings`).\n\n- `version` — the receipt document's version at read time.\n- `uuid_session` — ONE session for the operator action, reused across retries\n  (see `UpdateBookingInputType.uuid_session`); each row's movements take the\n  row's sub-session under it.\n- `date` — the physical instant the step happened. ⚠️ **A divergence from the\n  outbound wire, kept on purpose:** a delivery is routinely recorded after it\n  arrived, and the receipt route this replaces took the arrival instant. Absent\n  is now.\n- `reference` — the supplier's delivery note, stamped on every movement."
+          "doc": "Body of `PUT /purchase-receipts/{uid}/bookings` — the inbound lever, the twin\nof `BulkBookingUpdateInput` (`PUT /fulfillments/{uid}/bookings`).\n\n- `version` — the receipt document's version at read time.\n- `uuid_session` — ONE session for the operator action, reused across retries\n  (see `UpdateBookingInputType.uuid_session`); each row's movements take the\n  row's sub-session under it.\n- `date` — the physical instant the steps happened; absent is now. The same\n  field as the outbound lever's (ruling 76), with the same api bounds: never\n  later than now, never earlier than the booking's latest movement\n  (`UpdateBookingInputType.date`).\n- `reference` — the supplier's delivery note, stamped on every movement."
         },
         {
           "kind": "variable",
