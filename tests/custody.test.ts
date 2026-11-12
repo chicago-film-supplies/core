@@ -384,9 +384,22 @@ Deno.test("custody - the type ↔ custody-pair binding the contracts lack (tests
 });
 
 Deno.test("custody - the rung table names every rule", () => {
-  const md = getCustodyRulesMarkdown();
+  const md = getCustodyRulesMarkdown("outbound");
   for (const r of CUSTODY_RULES) assert(md.includes(`\`${r.id}\``), r.id);
   assertEquals(md.trim().split("\n").length, CUSTODY_RULES.length + 2);
+});
+
+Deno.test("custody - each ladder's rung table names its own rules and none of the other's", () => {
+  const out = getCustodyRulesMarkdown("outbound");
+  const inb = getCustodyRulesMarkdown("inbound");
+  assertEquals(inb.trim().split("\n").length, INBOUND_CUSTODY_RULES.length + 2);
+  for (const r of INBOUND_CUSTODY_RULES) assert(inb.includes(`| \`${r.id}\` |`), r.id);
+  // A shared spelling would hide a crossed table: check row ids, not substrings.
+  const rowIds = (md: string) => new Set(md.trim().split("\n").slice(2).map((l) => l.split("|")[1].trim()));
+  const outIds = rowIds(out);
+  for (const id of rowIds(inb)) assert(!outIds.has(id), `${id} is on both tables`);
+  // The arms of a Buy-refused row render as refused, never as a movement.
+  assert(inb.includes("| `send_back` | stocked → sent_back | `subrent_out` | refused | send_back |"));
 });
 
 // ── 2. parity with the api's decomposer ─────────────────────────────

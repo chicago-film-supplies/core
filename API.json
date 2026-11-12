@@ -18451,8 +18451,8 @@
         {
           "kind": "function",
           "name": "getCustodyRulesMarkdown",
-          "signature": "getCustodyRulesMarkdown(): string",
-          "doc": "The rule table as a markdown rung table — the source for the api's\n`fulfillment-ladder` skill and the booking-action input's `/openapi.json`\ndescription, so neither restates the table by hand.",
+          "signature": "getCustodyRulesMarkdown(ladder: BookingLadderType): string",
+          "doc": "One ladder's rule table as a markdown rung table — the source for the api's\n`fulfillment-ladder` skill (one generated block per ladder) and each custody\nlever's `/openapi.json` description, so none restates a table by hand.\n\nThe ladder is a parameter, never both at once: the outbound table is the\nbooking routes' wire (`BookingAction.rule`), and an inbound row on those\nroutes' docs would describe a rule they refuse — the reason the two tables\nare twins rather than one table with a column (`INBOUND_CUSTODY_RULE_IDS`).",
           "paramTags": [],
           "returnsTag": null
         },

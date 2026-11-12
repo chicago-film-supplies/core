@@ -30,6 +30,7 @@ import {
   type BookingActionType,
   type BookingBreakdown,
   type BookingBreakdownKeyType,
+  type BookingLadderType,
   type BookingUnitBucketType,
   type BookingUnitSetsType,
   CUSTODY_RULES,
@@ -37,6 +38,8 @@ import {
   type CustodyRuleId,
   type CustodyServiceSide,
   custodyRule,
+  INBOUND_CUSTODY_RULES,
+  type InboundCustodyRule,
   duplicateCustodySlots,
   isLossUndo,
   type Movement,
@@ -1224,21 +1227,52 @@ export function serviceBreakdownViolation(record: BoundsRecord, next: OOSBreakdo
 // ── generated docs ───────────────────────────────────────────────────
 
 /**
- * The rule table as a markdown rung table — the source for the api's
- * `fulfillment-ladder` skill and the booking-action input's `/openapi.json`
- * description, so neither restates the table by hand.
+ * One ladder's rule table as a markdown rung table — the source for the api's
+ * `fulfillment-ladder` skill (one generated block per ladder) and each custody
+ * lever's `/openapi.json` description, so none restates a table by hand.
+ *
+ * The ladder is a parameter, never both at once: the outbound table is the
+ * booking routes' wire (`BookingAction.rule`), and an inbound row on those
+ * routes' docs would describe a rule they refuse — the reason the two tables
+ * are twins rather than one table with a column (`INBOUND_CUSTODY_RULE_IDS`).
  */
-export function getCustodyRulesMarkdown(): string {
-  const arm = (a: CustodyRule["rental"]) => (a === null ? "refused" : a.movement === null ? "no movement" : `\`${a.movement}\``);
+export function getCustodyRulesMarkdown(ladder: BookingLadderType): string {
+  return ladder === "outbound" ? outboundRulesMarkdown() : inboundRulesMarkdown();
+}
+
+function armCell(a: CustodyRule["rental"] | InboundCustodyRule["rental"]): string {
+  return a === null ? "refused" : a.movement === null ? "no movement" : `\`${a.movement}\``;
+}
+
+function outboundRulesMarkdown(): string {
   const svc = (r: CustodyRule) =>
     r.service === null ? "" : ` \`{${r.service.from} → ${r.service.to}}\``;
   const lines = [
     "| rule | custody | rental | sale | billable | what it means |",
     "|---|---|---|---|---|---|",
     ...CUSTODY_RULES.map((r) =>
-      `| \`${r.id}\` | ${r.from === r.to ? `${r.from} (no custody)` : `${r.from} → ${r.to}`} | ${arm(r.rental)}${svc(r)} | ${arm(r.sale)} | ${
+      `| \`${r.id}\` | ${r.from === r.to ? `${r.from} (no custody)` : `${r.from} → ${r.to}`} | ${armCell(r.rental)}${svc(r)} | ${armCell(r.sale)} | ${
         r.billable ? "yes" : "no"
       } | ${r.description} |`
+    ),
+  ];
+  return lines.join("\n") + "\n";
+}
+
+/**
+ * The inbound table. The arm columns carry the line labels (a `rental` line is
+ * a Subrent, a `sale` line a Buy); the service axis is shown on every arm that
+ * writes one, since a receive_damaged flag is the same on both.
+ */
+function inboundRulesMarkdown(): string {
+  const svc = (r: InboundCustodyRule) =>
+    r.service === null ? "" : ` \`{${r.service.from} → ${r.service.to}}\``;
+  const cell = (r: InboundCustodyRule, a: InboundCustodyRule["rental"]) => armCell(a) + (a === null ? "" : svc(r));
+  const lines = [
+    "| rule | custody | rental (Subrent) | sale (Buy) | stage | what it means |",
+    "|---|---|---|---|---|---|",
+    ...INBOUND_CUSTODY_RULES.map((r) =>
+      `| \`${r.id}\` | ${r.from} → ${r.to} | ${cell(r, r.rental)} | ${cell(r, r.sale)} | ${r.stage} | ${r.description} |`
     ),
   ];
   return lines.join("\n") + "\n";

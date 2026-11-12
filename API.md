@@ -39588,11 +39588,16 @@ Refused unless:
 A live invoice billing leg B is the api's refusal alone: it needs invoices.
 The api must evaluate this on bookings read INSIDE its transaction.
 
-### `getCustodyRulesMarkdown(): string`
+### `getCustodyRulesMarkdown(ladder: BookingLadderType): string`
 
-The rule table as a markdown rung table — the source for the api's
-`fulfillment-ladder` skill and the booking-action input's `/openapi.json`
-description, so neither restates the table by hand.
+One ladder's rule table as a markdown rung table — the source for the api's
+`fulfillment-ladder` skill (one generated block per ladder) and each custody
+lever's `/openapi.json` description, so none restates a table by hand.
+
+The ladder is a parameter, never both at once: the outbound table is the
+booking routes' wire (`BookingAction.rule`), and an inbound row on those
+routes' docs would describe a rule they refuse — the reason the two tables
+are twins rather than one table with a column (`INBOUND_CUSTODY_RULE_IDS`).
 
 ### `isReleasingRewind(t: Pick<CustodyTransition, "rule" | "type" | "from" | "to" | "quantity">): boolean`
 
