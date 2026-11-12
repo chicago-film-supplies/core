@@ -1557,7 +1557,6 @@ function lossLine(over: Record<string, unknown> = {}): PurchaseItem {
     ledger_account: 5300,
     uid_tax_class: TAX_CLASS,
     quantity_billed: 0,
-    uid_units: [],
     out_of_service: [{ uid: OOS_A, quantity: 2 }, { uid: OOS_B, quantity: 2 }],
     ...over,
   }, DIV) as PurchaseItem;

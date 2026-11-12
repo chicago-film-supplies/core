@@ -629,7 +629,8 @@ export interface PurchaseRentalItem extends Omit<PurchaseItemBase, "ledger_accou
    * The units this line covers (`units/{uid}`), each named once. The LINE names
    * the unit and the unit names nothing back — the invoice ↔ out-of-service
    * direction (`uid_out_of_service`). Mirrored on `Purchase.query_by_units`.
-   * Not shared with a bill line, which states its own `units` (D5).
+   * Not shared with a bill line, which states its own `units` (D5). The only
+   * payable line that names units: a charge states none (ruling 73).
    */
   uid_units: string[];
 }
@@ -641,9 +642,13 @@ export interface PurchaseRentalItem extends Omit<PurchaseItemBase, "ledger_accou
  *
  * Its uid is its catalog SERVICE product's when it has one, as an order or
  * invoice service line's is, else `custom-` ({@link payableLineUid}). There is
- * no attribution key (owner, 2026-11-11): a carrier line names its device
- * through `uid_units`, and attributing a cost to the product it costs is an
- * open modelling question (api-cloudrun#1488).
+ * no attribution key and no unit list (rulings 70–73, 2026-11-11): a charge that
+ * costs a product sits as a ROW beneath that product's row, as a kit component
+ * does, and a top-level charge costs its own product
+ * (`costedProductUid`, `utils/purchases.ts`). Which units a charge covers is not
+ * a fact this line states: a service product is never serialized, and a carrier
+ * line follows the device it is placed under (api-cloudrun#1489 tracks a
+ * unit-level installed-component link).
  */
 export interface PurchaseServiceItem extends PurchaseItemBase {
   type: "service";
@@ -652,8 +657,6 @@ export interface PurchaseServiceItem extends PurchaseItemBase {
   price: PurchaseLinePrice;
   /** Units billed on a flat line; `null` on a time line. */
   quantity_billed: number | null;
-  /** See {@link PurchaseRentalItem.uid_units} — a Verizon line names its device. `[]` for freight. */
-  uid_units: string[];
 }
 
 /**
@@ -899,7 +902,6 @@ const noCustodyShape = {
   amount_cents: amountKey.nullable(),
   price: PurchaseLinePriceSchema,
   quantity_billed: billedKey.nullable(),
-  uid_units: unitsKey,
 } as const;
 
 function noCustodyIssues(
@@ -907,7 +909,6 @@ function noCustodyIssues(
   ctx: z.RefinementCtx,
 ): void {
   storedUidIssue(item, ctx);
-  uniqueUnitsIssue(item.uid_units, ctx);
   addIssues(purchaseLineMoneyIssues(item), ctx);
   addIssues(payablePostingIssues(item.type, item.ledger_account), ctx);
   addIssues(replacementIssues(item), ctx);
@@ -1099,9 +1100,13 @@ export function deriveQueryByOrders(rows: readonly PurchaseRow[]): string[] {
   return [...new Set(purchaseLines(rows).flatMap((i) => (i.type === "rental" ? i.uid_orders : [])))];
 }
 
-/** Derive `query_by_units` — the distinct units the rental, service and replacement lines cover, sorted. */
+/**
+ * Derive `query_by_units` — the distinct units the RENTAL lines cover, sorted.
+ * Only a subrent names units: a charge states none (ruling 73), and a buy's units
+ * are minted at receipt.
+ */
 export function deriveQueryByUnits(rows: readonly PurchaseRow[]): string[] {
-  return [...new Set(purchaseLines(rows).flatMap((i) => (i.type === "sale" ? [] : i.uid_units)))].sort();
+  return [...new Set(purchaseLines(rows).flatMap((i) => (i.type === "rental" ? i.uid_units : [])))].sort();
 }
 
 /** Derive `query_by_item_types` — the distinct LINE types, in first-seen order (dividers are not a type of purchase). */
@@ -1292,7 +1297,7 @@ export interface Purchase {
    */
   bookings_breakdown: InboundBreakdown;
   /**
-   * Mirror of the units the lines cover ({@link deriveQueryByUnits}) — "which
+   * Mirror of the units the subrent lines cover ({@link deriveQueryByUnits}) — "which
    * purchases cover this unit" as one `array-contains`, the read behind every
    * coverage question (`coversForUnit`, the uncovered-window offer).
    * The `Invoice.query_by_out_of_service` twin. Optional only until the Phase 5
@@ -1553,8 +1558,8 @@ export interface PurchaseServiceItemInputType extends PurchaseItemInputBase {
   quantity?: number;
   amount_cents?: number | null;
   ledger_account: COACodeType;
-  /** See {@link PurchaseRentalItemInputType.uid_units}. */
-  uid_units?: string[];
+  /** Retired — see `retiredUnitsKey`. Present is a 400. */
+  uid_units?: never;
 }
 
 /**
@@ -1602,13 +1607,27 @@ function inputPostingIssue(
   }
 }
 
+/**
+ * `uid_units` on a charge input, declared only so a payload still carrying it is
+ * REFUSED rather than stripped (ruling 73, 2026-11-11). The input is a stripping
+ * `z.object`, so without this a client naming a carrier line's device would get
+ * a 200 and a line that names nothing. Same shape as `retiredKey` in
+ * `schemas/booking.ts`, including the OpenAPI meta its comment explains.
+ */
+function retiredUnitsKey() {
+  const why = "a charge names no units; place it under the product row it costs";
+  return z.never({ error: `"uid_units" is retired on a charge: ${why}` })
+    .meta({ type: "null", not: {}, description: `Retired: ${why}. Present is a 400.` })
+    .optional();
+}
+
 const noCustodyInput = {
   ...inputHead,
   name: LineItemCore.name,
   quantity: z.int().min(1).optional(),
   amount_cents: z.int().min(0).nullable().optional(),
   ledger_account: COACode,
-  uid_units: unitsKey.optional(),
+  uid_units: retiredUnitsKey(),
 };
 
 /** A line input names its product by its uid ({@link payableInputUidIssue}). */
@@ -1621,7 +1640,6 @@ function noCustodyInputIssues(
   item: PurchaseServiceItemInputType | PurchaseReplacementItemInputType,
   ctx: z.RefinementCtx,
 ): void {
-  if (item.uid_units) uniqueUnitsIssue(item.uid_units, ctx);
   inputPostingIssue(item, ctx);
   inputUidIssue(item, ctx);
 }

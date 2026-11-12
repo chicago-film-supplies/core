@@ -5457,13 +5457,13 @@
         {
           "kind": "interface",
           "name": "PurchaseServiceItem",
-          "declaration": "interface PurchaseServiceItem {\n  type: \"service\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  quantity_billed: number | null;\n  uid_units: string[];\n}",
-          "doc": "A SERVICE (Charge) item — something CFS pays for with no custody: a carrier\nline on a device CFS owns (Verizon), freight, a fee, Vision's standing history\nline. Flat (freight: one amount) or time (a carrier line).\n\nIts uid is its catalog SERVICE product's when it has one, as an order or\ninvoice service line's is, else `custom-` ({@link payableLineUid}). There is\nno attribution key (owner, 2026-11-11): a carrier line names its device\nthrough `uid_units`, and attributing a cost to the product it costs is an\nopen modelling question (api-cloudrun#1488)."
+          "declaration": "interface PurchaseServiceItem {\n  type: \"service\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  quantity_billed: number | null;\n}",
+          "doc": "A SERVICE (Charge) item — something CFS pays for with no custody: a carrier\nline on a device CFS owns (Verizon), freight, a fee, Vision's standing history\nline. Flat (freight: one amount) or time (a carrier line).\n\nIts uid is its catalog SERVICE product's when it has one, as an order or\ninvoice service line's is, else `custom-` ({@link payableLineUid}). There is\nno attribution key and no unit list (rulings 70–73, 2026-11-11): a charge that\ncosts a product sits as a ROW beneath that product's row, as a kit component\ndoes, and a top-level charge costs its own product\n(`costedProductUid`, `utils/purchases.ts`). Which units a charge covers is not\na fact this line states: a service product is never serialized, and a carrier\nline follows the device it is placed under (api-cloudrun#1489 tracks a\nunit-level installed-component link)."
         },
         {
           "kind": "interface",
           "name": "PurchaseServiceItemInputType",
-          "declaration": "interface PurchaseServiceItemInputType {\n  type: \"service\";\n  name: string;\n  quantity?: number;\n  amount_cents?: number | null;\n  ledger_account: COACodeType;\n  uid_units?: string[];\n}",
+          "declaration": "interface PurchaseServiceItemInputType {\n  type: \"service\";\n  name: string;\n  quantity?: number;\n  amount_cents?: number | null;\n  ledger_account: COACodeType;\n  uid_units?: never;\n}",
           "doc": "A service (Charge) item as an operator raises it. Its account is the operator's — there is no default."
         },
         {
@@ -8080,7 +8080,7 @@
           "kind": "function",
           "name": "deriveQueryByUnits",
           "signature": "deriveQueryByUnits(rows: readonly PurchaseRow[]): string[]",
-          "doc": "Derive `query_by_units` — the distinct units the rental, service and replacement lines cover, sorted.",
+          "doc": "Derive `query_by_units` — the distinct units the RENTAL lines cover, sorted.\nOnly a subrent names units: a charge states none (ruling 73), and a buy's units\nare minted at receipt.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -13928,13 +13928,13 @@
         {
           "kind": "interface",
           "name": "PurchaseServiceItem",
-          "declaration": "interface PurchaseServiceItem {\n  type: \"service\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  quantity_billed: number | null;\n  uid_units: string[];\n}",
-          "doc": "A SERVICE (Charge) item — something CFS pays for with no custody: a carrier\nline on a device CFS owns (Verizon), freight, a fee, Vision's standing history\nline. Flat (freight: one amount) or time (a carrier line).\n\nIts uid is its catalog SERVICE product's when it has one, as an order or\ninvoice service line's is, else `custom-` ({@link payableLineUid}). There is\nno attribution key (owner, 2026-11-11): a carrier line names its device\nthrough `uid_units`, and attributing a cost to the product it costs is an\nopen modelling question (api-cloudrun#1488)."
+          "declaration": "interface PurchaseServiceItem {\n  type: \"service\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  quantity_billed: number | null;\n}",
+          "doc": "A SERVICE (Charge) item — something CFS pays for with no custody: a carrier\nline on a device CFS owns (Verizon), freight, a fee, Vision's standing history\nline. Flat (freight: one amount) or time (a carrier line).\n\nIts uid is its catalog SERVICE product's when it has one, as an order or\ninvoice service line's is, else `custom-` ({@link payableLineUid}). There is\nno attribution key and no unit list (rulings 70–73, 2026-11-11): a charge that\ncosts a product sits as a ROW beneath that product's row, as a kit component\ndoes, and a top-level charge costs its own product\n(`costedProductUid`, `utils/purchases.ts`). Which units a charge covers is not\na fact this line states: a service product is never serialized, and a carrier\nline follows the device it is placed under (api-cloudrun#1489 tracks a\nunit-level installed-component link)."
         },
         {
           "kind": "interface",
           "name": "PurchaseServiceItemInputType",
-          "declaration": "interface PurchaseServiceItemInputType {\n  type: \"service\";\n  name: string;\n  quantity?: number;\n  amount_cents?: number | null;\n  ledger_account: COACodeType;\n  uid_units?: string[];\n}",
+          "declaration": "interface PurchaseServiceItemInputType {\n  type: \"service\";\n  name: string;\n  quantity?: number;\n  amount_cents?: number | null;\n  ledger_account: COACodeType;\n  uid_units?: never;\n}",
           "doc": "A service (Charge) item as an operator raises it. Its account is the operator's — there is no default."
         },
         {
@@ -14073,7 +14073,7 @@
           "kind": "function",
           "name": "deriveQueryByUnits",
           "signature": "deriveQueryByUnits(rows: readonly PurchaseRow[]): string[]",
-          "doc": "Derive `query_by_units` — the distinct units the rental, service and replacement lines cover, sorted.",
+          "doc": "Derive `query_by_units` — the distinct units the RENTAL lines cover, sorted.\nOnly a subrent names units: a charge states none (ruling 73), and a buy's units\nare minted at receipt.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25668,7 +25668,7 @@
           "kind": "function",
           "name": "deriveQueryByUnits",
           "signature": "deriveQueryByUnits(rows: readonly PurchaseRow[]): string[]",
-          "doc": "Derive `query_by_units` — the distinct units the rental, service and replacement lines cover, sorted.",
+          "doc": "Derive `query_by_units` — the distinct units the RENTAL lines cover, sorted.\nOnly a subrent names units: a charge states none (ruling 73), and a buy's units\nare minted at receipt.",
           "paramTags": [],
           "returnsTag": null
         },

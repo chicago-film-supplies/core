@@ -12232,9 +12232,13 @@ line. Flat (freight: one amount) or time (a carrier line).
 
 Its uid is its catalog SERVICE product's when it has one, as an order or
 invoice service line's is, else `custom-` ({@link payableLineUid}). There is
-no attribution key (owner, 2026-11-11): a carrier line names its device
-through `uid_units`, and attributing a cost to the product it costs is an
-open modelling question (api-cloudrun#1488).
+no attribution key and no unit list (rulings 70–73, 2026-11-11): a charge that
+costs a product sits as a ROW beneath that product's row, as a kit component
+does, and a top-level charge costs its own product
+(`costedProductUid`, `utils/purchases.ts`). Which units a charge covers is not
+a fact this line states: a service product is never serialized, and a carrier
+line follows the device it is placed under (api-cloudrun#1489 tracks a
+unit-level installed-component link).
 
 ```ts
 interface PurchaseServiceItem {
@@ -12242,7 +12246,6 @@ interface PurchaseServiceItem {
   amount_cents: number | null;
   price: PurchaseLinePrice;
   quantity_billed: number | null;
-  uid_units: string[];
 }
 ```
 
@@ -12257,7 +12260,7 @@ interface PurchaseServiceItemInputType {
   quantity?: number;
   amount_cents?: number | null;
   ledger_account: COACodeType;
-  uid_units?: string[];
+  uid_units?: never;
 }
 ```
 
@@ -17843,7 +17846,9 @@ one author of `PurchaseBill.query_by_purchases`.
 
 ### `deriveQueryByUnits(rows: readonly PurchaseRow[]): string[]`
 
-Derive `query_by_units` — the distinct units the rental, service and replacement lines cover, sorted.
+Derive `query_by_units` — the distinct units the RENTAL lines cover, sorted.
+Only a subrent names units: a charge states none (ruling 73), and a buy's units
+are minted at receipt.
 
 ### `destinationJoinViolations(items: ReadonlyArray<unknown>, destinations: ReadonlyArray<unknown>): DestinationJoinViolation[]`
 
@@ -29699,9 +29704,13 @@ line. Flat (freight: one amount) or time (a carrier line).
 
 Its uid is its catalog SERVICE product's when it has one, as an order or
 invoice service line's is, else `custom-` ({@link payableLineUid}). There is
-no attribution key (owner, 2026-11-11): a carrier line names its device
-through `uid_units`, and attributing a cost to the product it costs is an
-open modelling question (api-cloudrun#1488).
+no attribution key and no unit list (rulings 70–73, 2026-11-11): a charge that
+costs a product sits as a ROW beneath that product's row, as a kit component
+does, and a top-level charge costs its own product
+(`costedProductUid`, `utils/purchases.ts`). Which units a charge covers is not
+a fact this line states: a service product is never serialized, and a carrier
+line follows the device it is placed under (api-cloudrun#1489 tracks a
+unit-level installed-component link).
 
 ```ts
 interface PurchaseServiceItem {
@@ -29709,7 +29718,6 @@ interface PurchaseServiceItem {
   amount_cents: number | null;
   price: PurchaseLinePrice;
   quantity_billed: number | null;
-  uid_units: string[];
 }
 ```
 
@@ -29724,7 +29732,7 @@ interface PurchaseServiceItemInputType {
   quantity?: number;
   amount_cents?: number | null;
   ledger_account: COACodeType;
-  uid_units?: string[];
+  uid_units?: never;
 }
 ```
 
@@ -29974,7 +29982,9 @@ of the mirror, called by every writer.
 
 ### `deriveQueryByUnits(rows: readonly PurchaseRow[]): string[]`
 
-Derive `query_by_units` — the distinct units the rental, service and replacement lines cover, sorted.
+Derive `query_by_units` — the distinct units the RENTAL lines cover, sorted.
+Only a subrent names units: a charge states none (ruling 73), and a buy's units
+are minted at receipt.
 
 ### `isKitHeaderLine(row: object): boolean`
 
@@ -53273,7 +53283,9 @@ of the mirror, called by every writer.
 
 ### `deriveQueryByUnits(rows: readonly PurchaseRow[]): string[]`
 
-Derive `query_by_units` — the distinct units the rental, service and replacement lines cover, sorted.
+Derive `query_by_units` — the distinct units the RENTAL lines cover, sorted.
+Only a subrent names units: a charge states none (ruling 73), and a buy's units
+are minted at receipt.
 
 ### `expandPurchaseItems(items: readonly PurchaseRowInputType[], products: ReadonlyMap<string, PurchaseExpansionProduct>): PurchaseExpansionResult`
 
