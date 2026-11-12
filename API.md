@@ -5979,6 +5979,11 @@ a rewind is a `*_undo` rule row, never a movement reversal (C3).
   check-out does). The api refuses a location the step cannot use.
 - `units` — on a serialized product, exactly `quantity`, ascending. Only a
   `receive` captures a serial; every other step names units by number.
+- `uid_out_of_service` — names the record a `receive_damaged_undo` consumes,
+  as `BookingAction.uid_out_of_service` names an outbound loss undo's
+  (api-cloudrun#1218; ruling 80 keeps the two sides aligned). Optional: without
+  it the undo consumes the row's received-damaged records newest first. Any
+  other rule naming one is refused.
 
 ⚠️ **A settle is not an operator row.** `settle_lost` / `settle_damaged` and
 their undos move only in the out-of-service record's `return_to_supplier`
@@ -5992,6 +5997,7 @@ interface InboundBookingActionType {
   path_source_item: string[];
   allocations?: MovementAllocationInputType[];
   units?: MovementUnitInputType[];
+  uid_out_of_service?: string;
 }
 ```
 
@@ -22628,6 +22634,11 @@ a rewind is a `*_undo` rule row, never a movement reversal (C3).
   check-out does). The api refuses a location the step cannot use.
 - `units` — on a serialized product, exactly `quantity`, ascending. Only a
   `receive` captures a serial; every other step names units by number.
+- `uid_out_of_service` — names the record a `receive_damaged_undo` consumes,
+  as `BookingAction.uid_out_of_service` names an outbound loss undo's
+  (api-cloudrun#1218; ruling 80 keeps the two sides aligned). Optional: without
+  it the undo consumes the row's received-damaged records newest first. Any
+  other rule naming one is refused.
 
 ⚠️ **A settle is not an operator row.** `settle_lost` / `settle_damaged` and
 their undos move only in the out-of-service record's `return_to_supplier`
@@ -22641,6 +22652,7 @@ interface InboundBookingActionType {
   path_source_item: string[];
   allocations?: MovementAllocationInputType[];
   units?: MovementUnitInputType[];
+  uid_out_of_service?: string;
 }
 ```
 

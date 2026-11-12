@@ -140,6 +140,13 @@ Deno.test("inbound lever: allocations sum to the quantity, units are exactly `qu
   assertEquals(actionIssues({ rule: "receive", quantity: 2, path_source_item: ROW, units: [{ number: 3002 }, { number: 3001 }] }), "units.1");
 });
 
+Deno.test("inbound lever: only a receive_damaged_undo names the record it consumes (the outbound loss undo's twin)", () => {
+  const record = "RRRRRRRRRRRRRRRRRRRR";
+  assertEquals(actionIssues({ rule: "receive_damaged_undo", quantity: 1, path_source_item: ROW, uid_out_of_service: record }), "");
+  assertEquals(actionIssues({ rule: "receive_damaged", quantity: 1, path_source_item: ROW, uid_out_of_service: record }), "uid_out_of_service");
+  assertEquals(actionIssues({ rule: "receive_damaged_undo", quantity: 1, path_source_item: ROW, uid_out_of_service: "not an id" }), "uid_out_of_service");
+});
+
 Deno.test("inbound lever: only a receive captures a serial", () => {
   assertEquals(actionIssues({ rule: "receive", quantity: 1, path_source_item: ROW, units: [{ number: 3001, serial_number: "SN1" }] }), "");
   assertEquals(
