@@ -791,12 +791,6 @@ export {
   CreatePurchaseInput,
   UpdatePurchaseInput,
   ClosePurchaseInput,
-  ReceivePurchaseLineInput,
-  ReceivePurchaseInput,
-  ReversePurchaseReceiptInput,
-  ReturnPurchaseLineInput,
-  ReturnPurchaseInput,
-  ReversePurchaseReturnInput,
   type PurchaseStatusType,
   type PurchaseItemTypeType,
   type PurchaseProductItemTypeType,
@@ -824,12 +818,6 @@ export {
   type CreatePurchaseInputType,
   type UpdatePurchaseInputType,
   type ClosePurchaseInputType,
-  type ReceivePurchaseLineInputType,
-  type ReceivePurchaseInputType,
-  type ReversePurchaseReceiptInputType,
-  type ReturnPurchaseLineInputType,
-  type ReturnPurchaseInputType,
-  type ReversePurchaseReturnInputType,
 } from "./purchase.ts";
 
 export {

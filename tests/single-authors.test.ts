@@ -247,25 +247,15 @@ Deno.test("row 8: the seven older classes, and a shelf write-off stays reversibl
     }),
     { code: "out_of_service", uid: "R" },
   );
+  // ...and so does its typed undo (7a, C3): the record PUT lowering the bucket writes it.
   assertEquals(
-    standaloneReversalRefusal({ type: "purchase", sources: [{ collection: "purchases", uid: "PO" }] as never }),
-    { code: "purchase_receipt", uid: "PO" },
+    standaloneReversalRefusal({
+      type: "return_to_supplier_undo",
+      uid_booking: "IB",
+      sources: [{ collection: "purchases", uid: "PO" }, { collection: "out-of-service", uid: "R" }] as never,
+    }),
+    { code: "out_of_service", uid: "R" },
   );
-  // A subrent's receipt is a receipt; its return has its own lever.
-  for (const type of ["subrent_in"] as const) {
-    assertEquals(
-      standaloneReversalRefusal({ type, sources: [{ collection: "purchases", uid: "PO" }] as never }),
-      { code: "purchase_receipt", uid: "PO" },
-      type,
-    );
-  }
-  for (const type of ["subrent_out"] as const) {
-    assertEquals(
-      standaloneReversalRefusal({ type, sources: [{ collection: "purchases", uid: "PO" }] as never }),
-      { code: "purchase_return", uid: "PO" },
-      type,
-    );
-  }
   // A settle names a purchase too, but its lever is the RECORD PUT — so the
   // record answers, checked before the purchase branch, from either source:
   // off a flagged shelf the record is in `sources[]` only.

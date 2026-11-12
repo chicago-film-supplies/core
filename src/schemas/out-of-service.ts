@@ -69,7 +69,7 @@
  * booking-detail lookups without sub-object equality issues.
  */
 import { z } from "zod";
-import { FirestoreId, OutOfServiceId, ThreadId } from "./_uid.ts";
+import { FirestoreId, ItemUid, OutOfServiceId, ThreadId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import {
   Address,
@@ -664,6 +664,16 @@ export interface UpdateOutOfServiceInputType {
    * the REPAIR vendor and is not reused. Sent with the breakdown it settles.
    */
   uid_purchase?: string;
+  /**
+   * INPUT-ONLY, never stored: the ROW of that purchase the units go back on —
+   * a Subrent row's path (one-document-model ruling 65). Sent exactly when
+   * `uid_purchase` is. A purchase may hire one product on several rows and
+   * legs, each its own inbound booking, and a record holds units, not a row, so
+   * the operator names it; the writer no longer picks "the first row with
+   * room". It names the inbound booking the settle moves (`stocked → lost` or
+   * `stocked → damaged`).
+   */
+  path_source_item?: string[];
   /** Client-minted per operator action; names the movements this save writes. */
   uuid_session: string;
   version: number;
@@ -683,6 +693,7 @@ export const UpdateOutOfServiceInput: z.ZodType<UpdateOutOfServiceInputType> = z
   supplier: z.object({ uid: FirestoreId }).nullable().optional(),
   // Optional: only a save that raises `returned_to_supplier` names a purchase.
   uid_purchase: FirestoreId.optional(),
+  path_source_item: z.array(ItemUid).min(1).optional(),
   uuid_session: z.uuid(),
   version: z.int().min(0),
 }).superRefine((u, ctx) => {
@@ -691,6 +702,13 @@ export const UpdateOutOfServiceInput: z.ZodType<UpdateOutOfServiceInputType> = z
       code: "custom",
       path: ["uid_purchase"],
       message: "uid_purchase names the subrent a returned_to_supplier increase settles against, so it is sent with the breakdown",
+    });
+  }
+  if ((u.uid_purchase === undefined) !== (u.path_source_item === undefined)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["path_source_item"],
+      message: "uid_purchase and path_source_item name the subrent row a settle goes back on, and travel together",
     });
   }
   if (u.units === undefined) return;

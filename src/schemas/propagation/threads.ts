@@ -215,7 +215,7 @@ const threadCreditNoteRules: CollectionRule[] = cowriteRulesFor({
  * ⚠️ **A supplier credit has TWO creating transactions.** An operator raises
  * one through `create-purchase-credit`; a short close raises one inside
  * `close-purchase`. The rules are owned by the first, and `close-purchase`
- * lists them as steps — the same borrowing `receive-purchase` does with the
+ * lists them as steps — the same borrowing `update-inbound-booking` does with the
  * ledger rules — so the close's credit is not the one credit with no thread.
  */
 const threadPurchaseRules: CollectionRule[] = cowriteRulesFor({

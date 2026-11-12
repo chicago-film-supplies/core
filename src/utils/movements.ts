@@ -149,15 +149,6 @@ export type StandaloneReversalRefusalCode =
    * undone by the inbound lever's undo rule on that booking, from its purchase.
    */
   | "inbound_booking"
-  /**
-   * A purchase receipt — `purchase` or a subrent's `subrent_in` — that names no
-   * booking. Reachable only by a movement stored before 7a's backfill stamps
-   * every purchase-family movement with its inbound booking; retired with the
-   * receipt routes when C8 converges them on the inbound lever.
-   */
-  | "purchase_receipt"
-  /** A subrent's `subrent_out` that names no booking — as `purchase_receipt`. */
-  | "purchase_return"
   /** A line with an `out-of-service` endpoint — the record's buckets are the other half. */
   | "out_of_service"
   /** A reason edit's flag SPLIT, naming two records. */
@@ -198,14 +189,17 @@ export interface StandaloneReversalRefusal {
  *   an outbound booking's is `PUT /bookings` (`booking`), an inbound booking's
  *   the purchase's inbound lever (`inbound_booking`) — a receipt, put-away,
  *   send-back or received-damaged flag.
- * - **A purchase receipt or return naming no booking** — only a movement stored
- *   before 7a's backfill; the purchase line answers.
  * - **An `out-of-service` endpoint, or a flag** (`service` set) — the record's
  *   buckets and `stores[]` are. A reason edit's SPLIT names two records.
- * - **A `return_to_supplier`** — it names a purchase AND (since 7a) its inbound
- *   booking, but its lever is the RECORD PUT lowering `returned_to_supplier`,
- *   which moves the inbound booking back in the same write. So it answers
- *   `out_of_service` with the record, checked before the booking branch.
+ * - **A `return_to_supplier` or its undo** — it names a purchase AND (since 7a)
+ *   its inbound booking, but its lever is the RECORD PUT moving
+ *   `returned_to_supplier`, which moves the inbound booking in the same write.
+ *   So it answers `out_of_service` with the record, checked before the booking
+ *   branch.
+ *
+ * Every purchase-family movement names its inbound booking since 7a's backfill
+ * (C12), so a purchase source alone answers nothing: the `purchase_receipt` and
+ * `purchase_return` codes retired with the receipt and return routes (ruling 75).
  *
  * Keyed on endpoints, sources and type — a shelf `write_off`
  * (`locations → outside`) touches none of these and stays reversible.
@@ -220,18 +214,13 @@ export function standaloneReversalRefusal(
     return partner === null ? { code: "reclass_pair" } : { code: "reclass_pair", uid: partner };
   }
   const sources = m.sources ?? [];
-  if (m.type === "return_to_supplier") {
+  if (m.type === "return_to_supplier" || m.type === "return_to_supplier_undo") {
     const owner = sources.find((s) => s.collection === "out-of-service");
     return owner ? { code: "out_of_service", uid: owner.uid } : { code: "out_of_service" };
   }
   if (m.uid_booking) {
     const inbound = m.type !== undefined && MOVEMENT_CONTRACTS[m.type].booking_ladder === "inbound";
     return { code: inbound ? "inbound_booking" : "booking", uid: m.uid_booking };
-  }
-  const purchase = sources.find((s) => s.collection === "purchases");
-  if (purchase) {
-    const returned = m.type === "subrent_out";
-    return { code: returned ? "purchase_return" : "purchase_receipt", uid: purchase.uid };
   }
   const record = (m.lines ?? [])
     .flatMap((line) => [line.location.from, line.location.to])

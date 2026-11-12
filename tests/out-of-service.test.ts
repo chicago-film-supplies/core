@@ -316,12 +316,20 @@ Deno.test("OOS destination input: { kind: uid } or { kind: address }, or null to
   );
 });
 
-Deno.test("UpdateOutOfServiceInput: uid_purchase is optional, input-only, and sent with the breakdown it settles", () => {
+Deno.test("UpdateOutOfServiceInput: uid_purchase and path_source_item name the Subrent row a settle goes back on, together, with the breakdown", () => {
   const base = { uuid_session: "0199a1f2-3b4c-7d8e-9f01-234567890abc", version: 0 };
   const breakdown = { flagged: 1, away: 0, written_off: 0, returned_to_service: 0, returned_to_supplier: 1 };
-  assertEquals(UpdateOutOfServiceInput.safeParse({ ...base, breakdown, uid_purchase: "testpurch10000000000" }).success, true);
-  assertEquals(UpdateOutOfServiceInput.safeParse({ ...base, breakdown }).success, true, "the writer, not the schema, requires it");
-  const alone = UpdateOutOfServiceInput.safeParse({ ...base, uid_purchase: "testpurch10000000000" });
-  assertEquals(alone.success ? [] : alone.error.issues.map((i) => i.path.join(".")), ["uid_purchase"]);
-  assertEquals(UpdateOutOfServiceInput.safeParse({ ...base, breakdown, uid_purchase: "not an id" }).success, false);
+  const row = { uid_purchase: "testpurch10000000000", path_source_item: ["testpair10000000000a", "testprod10000000000a"] };
+  const paths = (input: Record<string, unknown>) => {
+    const r = UpdateOutOfServiceInput.safeParse({ ...base, ...input });
+    return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
+  };
+  assertEquals(paths({ breakdown, ...row }), []);
+  assertEquals(paths({ breakdown }), [], "the writer, not the schema, requires a row on a settle");
+  // Ruling 65: a record holds units, not a row, so the purchase alone is not enough.
+  assertEquals(paths({ breakdown, uid_purchase: row.uid_purchase }), ["path_source_item"]);
+  assertEquals(paths({ breakdown, path_source_item: row.path_source_item }), ["path_source_item"]);
+  assertEquals(paths(row), ["uid_purchase"]);
+  assertEquals(paths({ breakdown, ...row, uid_purchase: "not an id" }), ["uid_purchase"]);
+  assertEquals(paths({ breakdown, ...row, path_source_item: [] }), ["path_source_item"]);
 });

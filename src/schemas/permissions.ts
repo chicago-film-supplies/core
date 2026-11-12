@@ -226,6 +226,14 @@ export const PERMISSIONS = [
   "purchases.update",
   "purchases.receive",
   "purchases.bill",
+  // A purchase's CUSTODY documents — its receipt (`purchase-receipts`) and its
+  // inbound bookings (`bookings-inbound`), one-document-model 7a (C13). A read
+  // of its own, as `fulfillment.read` is beside `orders.read`: the receipt
+  // carries no price, so the warehouse reads what arrived without
+  // `purchases.read`. The permission keeps the ROLE's name; the collection is
+  // `purchase-receipts` (ruling 58). Moving custody stays `purchases.receive`
+  // until 6e-0d's role-namespace migration (ruling 48).
+  "receipts.read",
   "stockSummaries.read",
   "typesenseSync.read",
 

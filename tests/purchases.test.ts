@@ -34,8 +34,6 @@ import {
   PurchaseDocumentProductItemSchema,
   PurchaseSchema,
   purchaseHireWindow,
-  ReceivePurchaseInput,
-  ReturnPurchaseInput,
   type PurchaseRentalItem,
   PurchaseRentalItemSchema,
   UpdatePurchaseInput,
@@ -802,78 +800,9 @@ Deno.test("PurchaseItemInput: each arm's own requirements, one field at a time",
   assertEquals("quantity_received" in parsed.data, false);
 });
 
-Deno.test("ClosePurchaseInput / ReceivePurchaseInput / ReturnPurchaseInput name ITEMS, each once", () => {
+Deno.test("ClosePurchaseInput names ITEMS by path", () => {
   assertEquals(issuePaths(ClosePurchaseInput, { path_purchase_items: [[iuid(1)]], uuid_session: SESSION, version: 0 }), []);
-  const r = { path_purchase_item: [iuid(1)], quantity: 1 };
-  const receive = { date: "2026-10-05T10:00:00.000-05:00", lines: [r, r], uuid_session: SESSION, version: 0 };
-  assertEquals(issuePaths(ReceivePurchaseInput, receive), ["lines.1.path_purchase_item"]);
-  assertEquals(issuePaths(ReceivePurchaseInput, { ...receive, lines: [r, { ...r, path_purchase_item: [iuid(2)] }] }), []);
-  assertEquals(issuePaths(ReturnPurchaseInput, { ...receive, lines: [r, r] }), ["lines.1.path_purchase_item"]);
-  // W4K: a line's uid is its product's, so one uid under two pairs is two items, named by path.
-  const twoPairs = [{ path_purchase_item: [iuid(1), PRODUCT_UID_W4K], quantity: 1 }, { path_purchase_item: [iuid(2), PRODUCT_UID_W4K], quantity: 1 }];
-  assertEquals(issuePaths(ReceivePurchaseInput, { ...receive, lines: twoPairs }), []);
   assertEquals(issuePaths(ClosePurchaseInput, { path_purchase_items: [[]], version: 0 }), ["path_purchase_items.0"]);
-  // A body naming only the retired key is stripped, then refused for the missing path.
-  assertEquals(issuePaths(ReceivePurchaseInput, { ...receive, lines: [{ uid_item: iuid(1), quantity: 1 }] }), ["lines.0.path_purchase_item"]);
-});
-
-const PRODUCT_UID_W4K = "ePJgrlQYm5AEoKUpVcYz";
-
-Deno.test("ReceivePurchaseInput: allocations sum to the quantity, and named units are exactly `quantity`, ascending", () => {
-  const receive = (l: Record<string, unknown>) => ({
-    date: "2026-10-05T10:00:00.000-05:00",
-    lines: [{ path_purchase_item: [iuid(1)], quantity: 2, ...l }],
-    uuid_session: SESSION,
-    version: 0,
-  });
-  assertEquals(issuePaths(ReceivePurchaseInput, receive({ allocations: [{ uid_location: "testloc1000000000000", quantity: 1 }] })), [
-    "lines.0.quantity",
-  ]);
-  assertEquals(issuePaths(ReceivePurchaseInput, receive({ units: [{ number: 1 }] })), ["lines.0.units"]);
-  assertEquals(issuePaths(ReceivePurchaseInput, receive({ units: [{ number: 2 }, { number: 1 }] })), ["lines.0.units.1"]);
-  assertEquals(issuePaths(ReceivePurchaseInput, receive({ units: [{ number: 1, serial_number: "SN1" }, { number: 2 }] })), []);
-});
-
-Deno.test("ReturnPurchaseInput: allocations sum to the quantity; units only with the line's own units", () => {
-  const ret = (lineOver: Record<string, unknown>) => ({
-    date: "2026-10-25T10:00:00.000-05:00",
-    lines: [{ path_purchase_item: [iuid(2)], quantity: 10, ...lineOver }],
-    uuid_session: SESSION,
-    version: 3,
-  });
-  assertEquals(issuePaths(ReturnPurchaseInput, ret({})), []);
-  assertEquals(issuePaths(ReturnPurchaseInput, ret({ allocations: [{ uid_location: "testloc1000000000000", quantity: 9 }] })), [
-    "lines.0.quantity",
-  ]);
-  assertEquals(
-    issuePaths(ReturnPurchaseInput, ret({ quantity: 1, allocations: [{ uid_location: "testloc1000000000000", quantity: 1, units: [4] }] })),
-    ["lines.0.allocations"],
-    "an allocation naming units the line does not name",
-  );
-});
-
-Deno.test("ReturnPurchaseInput: a serialized subrent return names its units by number (serialized-subrent § 5)", () => {
-  const ret = (lineOver: Record<string, unknown>) => ({
-    date: "2026-10-25T10:00:00.000-05:00",
-    lines: [{ path_purchase_item: [iuid(2)], quantity: 2, ...lineOver }],
-    uuid_session: SESSION,
-    version: 3,
-  });
-  const units = [{ number: 3004 }, { number: 3007 }];
-  assertEquals(issuePaths(ReturnPurchaseInput, ret({ units })), []);
-  assertEquals(
-    issuePaths(ReturnPurchaseInput, ret({
-      units,
-      allocations: [{ uid_location: "testloc1000000000000", quantity: 2, units: [3004, 3007] }],
-    })),
-    [],
-  );
-  assertEquals(issuePaths(ReturnPurchaseInput, ret({ units: [{ number: 3004 }] })), ["lines.0.units"]);
-  assertEquals(issuePaths(ReturnPurchaseInput, ret({ units: [{ number: 3007 }, { number: 3004 }] })), ["lines.0.units.1"]);
-  assertEquals(
-    issuePaths(ReturnPurchaseInput, ret({ units: [{ number: 3004, serial_number: "IMEI" }, { number: 3007 }] })),
-    ["lines.0.units.0.serial_number"],
-  );
 });
 
 // ── bills ────────────────────────────────────────────────────────────

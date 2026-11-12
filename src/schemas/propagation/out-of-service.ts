@@ -226,7 +226,7 @@ const updateOutOfServiceRules: CollectionRule[] = [
     target: "transactions",
     mode: "co-write",
     invariant:
-      "Each bucket change is posted in the save that makes it, as the movement that makes it true, read against the record's journal so only the DIFFERENCE is written: into `flagged` a flag {null → reason}; flagged → `away` a send_away; `away` → `returned_to_service` a return_to_service; flagged → `returned_to_service` a clearing flag {reason → null}; into `written_off` a write_off (from the record for away units, from the shelf for flagged ones, clearing their flag); out of `written_off` a reversal; into `returned_to_supplier` a return_to_supplier (a RENTED unit settled to its supplier's account, from the record or the flagged shelf, clearing its flag, naming the subrent purchase — see `update-out-of-service-record:record-to-purchase`); out of `returned_to_supplier` a reversal of it. A `reason` edit among damaged/cleaning/maintenance is a flag {old → new} on the FLAGGED units only; when some units are away, written off or returned to service the record SPLITS (see `update-out-of-service-record:record-to-record`). Every movement names the record in sources[].",
+      "Each bucket change is posted in the save that makes it, as the movement that makes it true, read against the record's journal so only the DIFFERENCE is written: into `flagged` a flag {null → reason}; flagged → `away` a send_away; `away` → `returned_to_service` a return_to_service; flagged → `returned_to_service` a clearing flag {reason → null}; into `written_off` a write_off (from the record for away units, from the shelf for flagged ones, clearing their flag); out of `written_off` a reversal; into `returned_to_supplier` a return_to_supplier (a RENTED unit settled to its supplier's account, from the record or the flagged shelf, clearing its flag, naming the Subrent row and stepping its inbound booking — see `update-out-of-service-record:record-to-inbound-booking`); out of `returned_to_supplier` its typed undo, return_to_supplier_undo. A `reason` edit among damaged/cleaning/maintenance is a flag {old → new} on the FLAGGED units only; when some units are away, written off or returned to service the record SPLITS (see `update-out-of-service-record:record-to-record`). Every movement names the record in sources[].",
     enforced_by: [OOS_COWRITES_MOVEMENT],
     transaction: "update-out-of-service-record",
     fields: [
@@ -359,8 +359,7 @@ const updateOutOfServiceTransaction: TransactionDefinition = {
     "update-out-of-service-record:transactions-to-ledger",
     "units:transactions-to-roster",
     "units:transactions-to-units",
-    "update-out-of-service-record:record-to-purchase",
-    "purchase-card:purchases-to-card",
+    "update-out-of-service-record:record-to-inbound-booking",
   ],
 };
 
