@@ -1290,7 +1290,7 @@ the units physically are: a `locations` doc (on a shelf), a `bookings` doc
 `DocSource` shape is unchanged.
 
 ```ts
-const CFS_SOURCE_COLLECTIONS: "bookings" | "cards" | "contacts" | "credit-notes" | "fulfillments" | "invoices" | "locations" | "orders" | "organizations" | "out-of-service" | "products" | "purchase-bills" | "purchase-credits" | "purchases" | "roles" | "settlements" | "suppliers" | "template-components" | "templates" | "templates-versions" | "transactions"[];
+const CFS_SOURCE_COLLECTIONS: "bookings" | "bookings-inbound" | "cards" | "contacts" | "credit-notes" | "fulfillments" | "invoices" | "locations" | "orders" | "organizations" | "out-of-service" | "products" | "purchase-bills" | "purchase-credits" | "purchases" | "roles" | "settlements" | "suppliers" | "template-components" | "templates" | "templates-versions" | "transactions"[];
 ```
 
 ### `COAAssetEnum`
@@ -2456,6 +2456,7 @@ interface CollectionDocs {
   activities: Activity;
   booking: Booking;
   bookings: Booking;
+  bookings-inbound: InboundBooking;
   card: Card;
   cards: Card;
   counter: Counter;
@@ -5609,6 +5610,21 @@ interface HorizonMaterializedData {
 }
 ```
 
+### `INBOUND_BOOKING_STATUSES`
+
+An inbound booking's status, DERIVED from its breakdown and never sent:
+`ordered` while every unit is still plan, `complete` once every unit sits in
+a terminal key for its type (`isInboundTerminal`), else `active`.
+
+⚠️ **Not the outbound vocabulary.** `reserved` / `part-prepped` / `prepped`
+name preparation stages a supplier's units never pass through, and `draft` /
+`quoted` have no writer on this ladder (rulings 2, 56). The default the 7a
+spec took (D6).
+
+```ts
+const INBOUND_BOOKING_STATUSES: "ordered" | "active" | "complete"[];
+```
+
 ### `INBOUND_BOOKING_TYPES`
 
 An inbound booking's `type`: a Buy is a `sale` line, a Subrent a `rental`
@@ -5837,6 +5853,85 @@ table total over `ITEM_TYPES`, so a new item type fails to compile here.
 const ITEM_CONTRACTS: Readonly<Record<ItemTypeType, ItemContract>>;
 ```
 
+### `InboundBooking`
+
+Full Firestore document for an inbound booking — an AGGREGATE per
+`(purchase, product, LEG, component_signature_hash)`, exactly as an outbound
+booking aggregates per `(order, product, leg, signature)`. Not a line: two
+purchase lines of one product on one leg with the same ancestry share a row.
+
+```ts
+interface InboundBooking {
+  uid: string;
+  source: InboundBookingSource;
+  uid_product: string;
+  component_signature_hash: string | null;
+  name: string;
+  number: number;
+  type: InboundBookingTypeType;
+  status: InboundBookingStatusType;
+  quantity: number;
+  quantity_ordered: number;
+  breakdown: InboundBreakdown;
+  units: InboundUnitSetsType | null;
+  dates: indexedAccess;
+  destinations: indexedAccess;
+  stores: BookingStore[];
+  query_by_uid_store: string[];
+  query_by_uid_location: string[];
+  uid_destination_delivery: string;
+  uid_destination_collection: string | null;
+  version: number;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `InboundBookingSchema`
+
+Zod schema for {@link InboundBooking}. Key order is its own column order.
+
+```ts
+const InboundBookingSchema: z.ZodType<InboundBooking>;
+```
+
+### `InboundBookingSource`
+
+The purchase an inbound booking books — a `DocSource` narrowed to its one
+legal collection, so it is assignable wherever a `DocSourceType` is read
+(a movement's `sources[]`, a thread's) without a cast.
+
+```ts
+interface InboundBookingSource {
+  collection: "purchases";
+  uid: string;
+}
+```
+
+### `InboundBookingSourceSchema`
+
+Zod schema for {@link InboundBookingSource}.
+
+```ts
+const InboundBookingSourceSchema: z.ZodType<InboundBookingSource>;
+```
+
+### `InboundBookingStatusEnum`
+
+Zod enum over {@link INBOUND_BOOKING_STATUSES}.
+
+```ts
+const InboundBookingStatusEnum: z.ZodType<InboundBookingStatusType>;
+```
+
+### `InboundBookingStatusType`
+
+One inbound booking status.
+
+```ts
+type InboundBookingStatusType = indexedAccess;
+```
+
 ### `InboundBookingTypeEnum`
 
 Zod enum over {@link INBOUND_BOOKING_TYPES}.
@@ -5967,6 +6062,25 @@ One inbound bucket that holds named units.
 
 ```ts
 type InboundUnitBucketType = indexedAccess;
+```
+
+### `InboundUnitSetsSchema`
+
+Zod schema for {@link InboundUnitSetsType} — the outbound builder, over the inbound buckets.
+
+```ts
+const InboundUnitSetsSchema: z.ZodType<InboundUnitSetsType>;
+```
+
+### `InboundUnitSetsType`
+
+Which units sit in each bucket of an inbound booking — the twin of
+`BookingUnitSetsType`, with the same two rules: each set is a canonical
+`UnitSet`, the sets are pairwise disjoint, and `units[k].length ≤
+breakdown[k]` (refined on the booking, which holds both).
+
+```ts
+type InboundUnitSetsType = Record<InboundUnitBucketType, number[]>;
 ```
 
 ### `InclusionTypeEnum`
@@ -17639,6 +17753,10 @@ Empty sets in every unit bucket: a seeded booking that names no unit yet.
 
 A breakdown with every inbound key at zero.
 
+### `emptyInboundUnitSets(): InboundUnitSetsType`
+
+Empty sets in every inbound unit bucket.
+
 ### `enumValues(schema: z.ZodType<T>): T[]`
 
 Return the values of a `ZodEnum` in declaration order. Throws when passed a
@@ -19230,7 +19348,7 @@ the units physically are: a `locations` doc (on a shelf), a `bookings` doc
 `DocSource` shape is unchanged.
 
 ```ts
-const CFS_SOURCE_COLLECTIONS: "bookings" | "cards" | "contacts" | "credit-notes" | "fulfillments" | "invoices" | "locations" | "orders" | "organizations" | "out-of-service" | "products" | "purchase-bills" | "purchase-credits" | "purchases" | "roles" | "settlements" | "suppliers" | "template-components" | "templates" | "templates-versions" | "transactions"[];
+const CFS_SOURCE_COLLECTIONS: "bookings" | "bookings-inbound" | "cards" | "contacts" | "credit-notes" | "fulfillments" | "invoices" | "locations" | "orders" | "organizations" | "out-of-service" | "products" | "purchase-bills" | "purchase-credits" | "purchases" | "roles" | "settlements" | "suppliers" | "template-components" | "templates" | "templates-versions" | "transactions"[];
 ```
 
 ### `COAAssetEnum`
@@ -22067,6 +22185,25 @@ One inbound bucket that holds named units.
 type InboundUnitBucketType = indexedAccess;
 ```
 
+### `InboundUnitSetsSchema`
+
+Zod schema for {@link InboundUnitSetsType} — the outbound builder, over the inbound buckets.
+
+```ts
+const InboundUnitSetsSchema: z.ZodType<InboundUnitSetsType>;
+```
+
+### `InboundUnitSetsType`
+
+Which units sit in each bucket of an inbound booking — the twin of
+`BookingUnitSetsType`, with the same two rules: each set is a canonical
+`UnitSet`, the sets are pairwise disjoint, and `units[k].length ≤
+breakdown[k]` (refined on the booking, which holds both).
+
+```ts
+type InboundUnitSetsType = Record<InboundUnitBucketType, number[]>;
+```
+
 ### `OPEN_BOOKING_STATUSES`
 
 Every booking status but `complete` — the statuses whose booking may still
@@ -22218,6 +22355,10 @@ Empty sets in every unit bucket: a seeded booking that names no unit yet.
 
 A breakdown with every inbound key at zero.
 
+### `emptyInboundUnitSets(): InboundUnitSetsType`
+
+Empty sets in every inbound unit bucket.
+
 ### `inboundOwnsKey(type: InboundBookingTypeType, key: InboundBreakdownKeyType): boolean`
 
 Whether CFS OWNS an inbound booking's units in `key` — the inbound twin of
@@ -22239,6 +22380,131 @@ physically moving or in CFS's hands and not yet at an end. The twin of
 Whether `key` is TERMINAL for an inbound booking of `type`: a booking whose
 units all sit in terminal keys is closed. A Buy ends on a shelf (or damaged);
 a Subrent ends back with the supplier, or settled lost or damaged.
+
+## `@cfs/core/schemas/booking-inbound`
+
+Inbound booking document schema — Firestore collection: `bookings-inbound`.
+
+A purchase line's units on the SUPPLIER ladder, the twin of an order line's
+units on the customer ladder (`bookings`). Written by the purchase writers
+through the inbound booking lever; read by the receipt projection
+(`purchase-receipts`), the purchase status derivation and, from 7b, supply
+(`api-cloudrun/.claude/plans/one-document-model.md` § *7a core spec*, C5).
+
+## The two booking collections share declarations, not a schema
+
+Every field both grains mean identically is the SAME Zod instance, referenced
+key by key from `BOOKING_CORE` (`schemas/booking.ts`) and pinned by
+`tests/booking-core-parity.test.ts`. What differs is declared here:
+
+- `uid` — the same grammar (`{purchaseUid}:{productUid}:{legUid}[:{sig}]`); the
+  COLLECTION is what tells an inbound id from an outbound one;
+- `source` — the purchase, as a `DocSource` (`{ collection: "purchases", uid }`),
+  which is what a movement's `sources[]` holds. Phase 9 gives outbound
+  bookings the same field in place of `uid_order`;
+- `number` — the PURCHASE's number;
+- `type` — `sale | rental` only (`InboundBookingTypeEnum`);
+- `status` — `ordered | active | complete` ({@link INBOUND_BOOKING_STATUSES});
+- `breakdown` / `units` — the inbound ladder;
+- `quantity_ordered` — REQUIRED: there is no legacy population to forgive.
+
+Deliberately absent: an organization or supplier snapshot (the receipt and the
+purchase carry the supplier), `subject`, `shortage` (a purchase draws on no
+shelf), and the CRMS ids.
+
+### `INBOUND_BOOKING_STATUSES`
+
+An inbound booking's status, DERIVED from its breakdown and never sent:
+`ordered` while every unit is still plan, `complete` once every unit sits in
+a terminal key for its type (`isInboundTerminal`), else `active`.
+
+⚠️ **Not the outbound vocabulary.** `reserved` / `part-prepped` / `prepped`
+name preparation stages a supplier's units never pass through, and `draft` /
+`quoted` have no writer on this ladder (rulings 2, 56). The default the 7a
+spec took (D6).
+
+```ts
+const INBOUND_BOOKING_STATUSES: "ordered" | "active" | "complete"[];
+```
+
+### `InboundBooking`
+
+Full Firestore document for an inbound booking — an AGGREGATE per
+`(purchase, product, LEG, component_signature_hash)`, exactly as an outbound
+booking aggregates per `(order, product, leg, signature)`. Not a line: two
+purchase lines of one product on one leg with the same ancestry share a row.
+
+```ts
+interface InboundBooking {
+  uid: string;
+  source: InboundBookingSource;
+  uid_product: string;
+  component_signature_hash: string | null;
+  name: string;
+  number: number;
+  type: InboundBookingTypeType;
+  status: InboundBookingStatusType;
+  quantity: number;
+  quantity_ordered: number;
+  breakdown: InboundBreakdown;
+  units: InboundUnitSetsType | null;
+  dates: indexedAccess;
+  destinations: indexedAccess;
+  stores: BookingStore[];
+  query_by_uid_store: string[];
+  query_by_uid_location: string[];
+  uid_destination_delivery: string;
+  uid_destination_collection: string | null;
+  version: number;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `InboundBookingSchema`
+
+Zod schema for {@link InboundBooking}. Key order is its own column order.
+
+```ts
+const InboundBookingSchema: z.ZodType<InboundBooking>;
+```
+
+### `InboundBookingSource`
+
+The purchase an inbound booking books — a `DocSource` narrowed to its one
+legal collection, so it is assignable wherever a `DocSourceType` is read
+(a movement's `sources[]`, a thread's) without a cast.
+
+```ts
+interface InboundBookingSource {
+  collection: "purchases";
+  uid: string;
+}
+```
+
+### `InboundBookingSourceSchema`
+
+Zod schema for {@link InboundBookingSource}.
+
+```ts
+const InboundBookingSourceSchema: z.ZodType<InboundBookingSource>;
+```
+
+### `InboundBookingStatusEnum`
+
+Zod enum over {@link INBOUND_BOOKING_STATUSES}.
+
+```ts
+const InboundBookingStatusEnum: z.ZodType<InboundBookingStatusType>;
+```
+
+### `InboundBookingStatusType`
+
+One inbound booking status.
+
+```ts
+type InboundBookingStatusType = indexedAccess;
+```
 
 ## `@cfs/core/schemas/custody`
 

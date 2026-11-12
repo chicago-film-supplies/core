@@ -32,7 +32,7 @@
  * @module
  */
 import { z } from "zod";
-import type { BookingBreakdownKeyType } from "./_breakdown.ts";
+import { type BookingBreakdownKeyType, unitSetsSchema } from "./_breakdown.ts";
 
 /**
  * Per-stage quantity breakdown for an inbound booking (a purchase line's units).
@@ -131,6 +131,22 @@ export const INBOUND_UNIT_BUCKETS = [
 
 /** One inbound bucket that holds named units. */
 export type InboundUnitBucketType = typeof INBOUND_UNIT_BUCKETS[number];
+
+/**
+ * Which units sit in each bucket of an inbound booking — the twin of
+ * `BookingUnitSetsType`, with the same two rules: each set is a canonical
+ * `UnitSet`, the sets are pairwise disjoint, and `units[k].length ≤
+ * breakdown[k]` (refined on the booking, which holds both).
+ */
+export type InboundUnitSetsType = Record<InboundUnitBucketType, number[]>;
+
+/** Zod schema for {@link InboundUnitSetsType} — the outbound builder, over the inbound buckets. */
+export const InboundUnitSetsSchema: z.ZodType<InboundUnitSetsType> = unitSetsSchema(INBOUND_UNIT_BUCKETS);
+
+/** Empty sets in every inbound unit bucket. */
+export function emptyInboundUnitSets(): InboundUnitSetsType {
+  return { damaged: [], lost: [], received: [], sent_back: [], stocked: [], transit_inbound: [], transit_outbound: [] };
+}
 
 // Compile-time guards, both directions, on the shape and every partition.
 type _Both<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;

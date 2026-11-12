@@ -130,6 +130,15 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
     destinations: { delivery: { uid: "AAAAAAAAAAAAAAAAAAAA", address: null } },
     uid_destination_delivery: "AAAAAAAAAAAAAAAAAAAA",
   },
+  // ⚠️ **Eleventh entry, the inbound booking** (one-document-model 7a, C5): the
+  // booking's delivery mirror as above, plus `source.uid` naming the purchase the
+  // id's first segment names — the same cross-field class.
+  "bookings-inbound": {
+    uid: "AAAAAAAAAAAAAAAAAAAA:AAAAAAAAAAAAAAAAAAAA:00000000-0000-4000-8000-000000000000",
+    source: { collection: "purchases", uid: "AAAAAAAAAAAAAAAAAAAA" },
+    destinations: { delivery: { uid: "AAAAAAAAAAAAAAAAAAAA", address: null } },
+    uid_destination_delivery: "AAAAAAAAAAAAAAAAAAAA",
+  },
   // ⚠️ **Seventh entry, added when the purchase mirrors became required** (the
   // subrent plan's beta B). `query_by_products` and `query_by_item_types` are
   // cross-field equalities over the items; `query_by_orders` stays `[]`, which a
@@ -257,7 +266,7 @@ function isInputOptional(node: z.ZodType): boolean {
 
 Deno.test("corpus gate — every registry schema has a minimal fixture that parses", () => {
   const all = distinctSchemas();
-  assertEquals(all.size, 69, "registry size moved; re-measure the override list");
+  assertEquals(all.size, 70, "registry size moved; re-measure the override list");
 
   const failures: string[] = [];
   for (const [name, schema] of all) {
@@ -276,8 +285,9 @@ Deno.test("corpus gate — every registry schema has a minimal fixture that pars
   // 6 since core#103's booking delivery mirror, 7 since the purchase mirrors
   // became required, 8 since a bill item's `path` is `[uid]` (api-cloudrun#1407)
   // — each a new cross-field refinement — 9 with `price-formulas`' ladder, and 10
-  // with a supplier credit's `sources` (one-document-model Phase 4).
-  assertEquals(Object.keys(OVERRIDES).length, 10, "a schema now needs hand-written fixture knowledge");
+  // with a supplier credit's `sources` (one-document-model Phase 4), 11 with the
+  // inbound booking's `source` (7a, C5).
+  assertEquals(Object.keys(OVERRIDES).length, 11, "a schema now needs hand-written fixture knowledge");
 });
 
 Deno.test("corpus gate companion — an unsatisfiable invariant still throws, naming its path", () => {

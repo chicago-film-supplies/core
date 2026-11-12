@@ -77,6 +77,8 @@ import { schemas } from "../src/schemas/mod.ts";
  */
 const SENTINEL_DEFAULTS: ReadonlyMap<string, string> = new Map([
   ["bookings.version", "written as `FieldValue.increment(1)`"],
+  // The same `BOOKING_CORE.version` instance, so the same writer convention.
+  ["bookings-inbound.version", "written as `FieldValue.increment(1)`"],
   ["cards.recurrence_overrides", "written as `FieldValue.arrayUnion` — api-cloudrun/src/services/cardsRecurrence.ts:98"],
   ["cards.version", "written as `FieldValue.increment(1)`"],
   ["chart-of-accounts.version", "written as `FieldValue.increment(1)`"],

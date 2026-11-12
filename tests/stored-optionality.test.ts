@@ -99,6 +99,12 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["bookings.destinations.collection.address.user_coordinates", "pending-census"],
   ["bookings.destinations.delivery.address.address_coordinates", "pending-census"],
   ["bookings.destinations.delivery.address.user_coordinates", "pending-census"],
+  // `bookings-inbound` shares `BOOKING_CORE.destinations` with `bookings`, so it
+  //    inherits the same four Address paths, and tightens with them.
+  ["bookings-inbound.destinations.collection.address.address_coordinates", "pending-census"],
+  ["bookings-inbound.destinations.collection.address.user_coordinates", "pending-census"],
+  ["bookings-inbound.destinations.delivery.address.address_coordinates", "pending-census"],
+  ["bookings-inbound.destinations.delivery.address.user_coordinates", "pending-census"],
   // The same `Address` shape, reused by the out-of-service record's vendor
   // `destination` (2026-09-25) — inherited, not a new decision.
   ["out-of-service.destination.address.address_coordinates", "pending-census"],

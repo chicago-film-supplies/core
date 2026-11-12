@@ -259,13 +259,20 @@ void _unitBucketParity;
  */
 export type BookingUnitSetsType = Record<BookingUnitBucketType, number[]>;
 
-/** Zod schema for {@link BookingUnitSetsType}, built the way {@link breakdownObjectSchema} is. */
-export const BookingUnitSetsSchema: z.ZodType<BookingUnitSetsType> = (() => {
+/**
+ * A unit-sets schema over one ladder's unit buckets: a canonical `UnitSet` per
+ * bucket, and every unit in at most one bucket. The ONE implementation behind
+ * {@link BookingUnitSetsSchema} and the inbound ladder's `InboundUnitSetsSchema`
+ * (`_inbound-breakdown.ts`), so the disjointness rule cannot differ by ladder.
+ *
+ * INTERNAL — this module is not an entrypoint, and no barrel re-exports it.
+ */
+export function unitSetsSchema<B extends string>(buckets: readonly B[]): z.ZodType<Record<B, number[]>> {
   const shape: Record<string, z.ZodType> = {};
-  for (const key of BOOKING_UNIT_BUCKETS) shape[key] = UnitSet;
-  return (z.strictObject(shape) as unknown as z.ZodType<BookingUnitSetsType>).superRefine((sets, ctx) => {
-    const seen = new Map<number, BookingUnitBucketType>();
-    for (const key of BOOKING_UNIT_BUCKETS) {
+  for (const key of buckets) shape[key] = UnitSet;
+  return (z.strictObject(shape) as unknown as z.ZodType<Record<B, number[]>>).superRefine((sets, ctx) => {
+    const seen = new Map<number, B>();
+    for (const key of buckets) {
       for (const n of sets[key]) {
         const other = seen.get(n);
         if (other !== undefined) {
@@ -279,7 +286,10 @@ export const BookingUnitSetsSchema: z.ZodType<BookingUnitSetsType> = (() => {
       }
     }
   });
-})();
+}
+
+/** Zod schema for {@link BookingUnitSetsType}, built the way {@link breakdownObjectSchema} is. */
+export const BookingUnitSetsSchema: z.ZodType<BookingUnitSetsType> = unitSetsSchema(BOOKING_UNIT_BUCKETS);
 
 /** Empty sets in every unit bucket: a seeded booking that names no unit yet. */
 export function emptyBookingUnitSets(): BookingUnitSetsType {

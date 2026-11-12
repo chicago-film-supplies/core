@@ -739,6 +739,7 @@ export interface AddressType {
  */
 export const CFS_SOURCE_COLLECTIONS = [
   "bookings",
+  "bookings-inbound",
   "cards",
   "contacts",
   "credit-notes",

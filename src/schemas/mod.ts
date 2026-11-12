@@ -1050,6 +1050,9 @@ export {
   INBOUND_PLAN_KEYS,
   INBOUND_STAGE_TWINS,
   INBOUND_UNIT_BUCKETS,
+  emptyInboundUnitSets,
+  type InboundUnitSetsType,
+  InboundUnitSetsSchema,
   type InboundBookingTypeType,
   InboundBookingTypeEnum,
   type InboundBreakdown,
@@ -1061,6 +1064,16 @@ export {
   isInboundLive,
   isInboundTerminal,
 } from "./booking.ts";
+
+export {
+  InboundBookingSchema,
+  type InboundBooking,
+  INBOUND_BOOKING_STATUSES,
+  type InboundBookingStatusType,
+  InboundBookingStatusEnum,
+  type InboundBookingSource,
+  InboundBookingSourceSchema,
+} from "./booking-inbound.ts";
 export {
   BookingAction,
   type BookingActionType,
@@ -1737,6 +1750,7 @@ import type { Card } from "./card.ts";
 import type { Comment } from "./comment.ts";
 import type { Counter } from "./counter.ts";
 import type { Booking } from "./booking.ts";
+import type { InboundBooking } from "./booking-inbound.ts";
 import type { List } from "./list.ts";
 import type { Recurrence } from "./recurrence.ts";
 import type { CacheGeocodes } from "./cache-geocodes.ts";
@@ -1846,6 +1860,7 @@ export type SchemaDocType = CollectionDocs[CollectionName];
 import { z } from "zod";
 
 import { BookingSchema } from "./booking.ts";
+import { InboundBookingSchema } from "./booking-inbound.ts";
 import { CardSchema } from "./card.ts";
 import { CommentSchema } from "./comment.ts";
 import { ListSchema } from "./list.ts";
@@ -1961,6 +1976,9 @@ export interface CollectionDocs {
   activities: Activity;
   booking: Booking;
   bookings: Booking;
+  // One key, like `templates-versions`: the name carries its direction, and a
+  // singular `booking-inbound` would be a second spelling nothing writes.
+  "bookings-inbound": InboundBooking;
   card: Card;
   cards: Card;
   counter: Counter;
@@ -2097,6 +2115,7 @@ export type DocFor<C extends CollectionName> = CollectionDocs[C];
 const schemasTyped: { [C in CollectionName]: z.ZodType<CollectionDocs[C]> } = {
   "activity": ActivitySchema, "activities": ActivitySchema,
   "booking": BookingSchema, "bookings": BookingSchema,
+  "bookings-inbound": InboundBookingSchema,
   "card": CardSchema, "cards": CardSchema,
   "counter": CounterSchema_, "counters": CounterSchema_,
   "cache-geocodes": CacheGeocodesSchema,

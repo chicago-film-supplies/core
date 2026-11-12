@@ -561,7 +561,7 @@
         {
           "kind": "variable",
           "name": "CFS_SOURCE_COLLECTIONS",
-          "declaration": "const CFS_SOURCE_COLLECTIONS: \"bookings\" | \"cards\" | \"contacts\" | \"credit-notes\" | \"fulfillments\" | \"invoices\" | \"locations\" | \"orders\" | \"organizations\" | \"out-of-service\" | \"products\" | \"purchase-bills\" | \"purchase-credits\" | \"purchases\" | \"roles\" | \"settlements\" | \"suppliers\" | \"template-components\" | \"templates\" | \"templates-versions\" | \"transactions\"[];",
+          "declaration": "const CFS_SOURCE_COLLECTIONS: \"bookings\" | \"bookings-inbound\" | \"cards\" | \"contacts\" | \"credit-notes\" | \"fulfillments\" | \"invoices\" | \"locations\" | \"orders\" | \"organizations\" | \"out-of-service\" | \"products\" | \"purchase-bills\" | \"purchase-credits\" | \"purchases\" | \"roles\" | \"settlements\" | \"suppliers\" | \"template-components\" | \"templates\" | \"templates-versions\" | \"transactions\"[];",
           "doc": "Collections that may legitimately appear as a {@link DocSourceType} `collection`.\n\nThis was `z.string().min(1)` — free text that reached a Firestore collection\nname. `CreateCardInput.sources` comes straight off the POST body and\n`createCard` copies it into the THREAD's `sources`, so\n`POST /cards {sources:[{collection:\"cards\", uid:X}]}` wrote a thread claiming\na card as its own source, which `deleteCard` then unpicks by\n`s.collection === \"cards\"`. Every consumer was re-deriving the same implicit\n\"it's one of the known CFS collections\" contract; it is encoded once here.\n\nMembership is the union of a read-only survey of every stored `DocSource` in\nBOTH envs (threads, comments, cards, recurrences.prototype, out-of-service\n`sources[]` + `transactions[].source` — dev and prod agreed on the same 12\nvalues, no malformed entries) plus `template-components`, which has no stored\ninstance yet but is declared legitimate by `TEMPLATE_SOURCES` in `comment.ts`.\n\n`transactions` is now a live-written source: the movement journal links a\nreversal to the event it negates, and a component event to its parent, both\nthrough `sources[]`. (It was historical-only when this list was surveyed —\n898 instances, identical count in both envs.) Never narrow this past stored\ndata; survey first.\n\n`locations` carries no `sources[]` of its own — it is here because a movement\nline's `location.from` / `location.to` is a `DocSource` pointing at wherever\nthe units physically are: a `locations` doc (on a shelf), a `bookings` doc\n(out on a job), or an `out-of-service` record. Widening is safe; the\n`DocSource` shape is unchanged."
         },
         {
@@ -1113,7 +1113,7 @@
         {
           "kind": "interface",
           "name": "CollectionDocs",
-          "declaration": "interface CollectionDocs {\n  activity: Activity;\n  activities: Activity;\n  booking: Booking;\n  bookings: Booking;\n  card: Card;\n  cards: Card;\n  counter: Counter;\n  counters: Counter;\n  cache-geocodes: CacheGeocodes;\n  chart-of-accounts: ChartOfAccounts;\n  comment: Comment;\n  comments: Comment;\n  contact: Contact;\n  contacts: Contact;\n  destination: Destination;\n  destinations: Destination;\n  email-verification: EmailVerification;\n  email-verifications: EmailVerification;\n  holiday-dates: HolidayDates;\n  dates: HolidayDates;\n  holiday-definition: HolidayDefinition;\n  holiday-definitions: HolidayDefinition;\n  holiday-snapshot: HolidaySnapshot;\n  settings: SettingsDocument;\n  inventory-ledger: InventoryLedger;\n  inventory-ledgers: InventoryLedger;\n  invite: Invite;\n  invites: Invite;\n  invoice: Invoice;\n  invoices: Invoice;\n  list: List;\n  lists: List;\n  location: Location;\n  locations: Location;\n  location-type: LocationType;\n  location-types: LocationType;\n  department-type: DepartmentType;\n  department-types: DepartmentType;\n  order: Order;\n  orders: Order;\n  fulfillment: Fulfillment;\n  fulfillments: Fulfillment;\n  organization: Organization;\n  organizations: Organization;\n  out-of-service: OutOfService;\n  password-reset: PasswordReset;\n  password-resets: PasswordReset;\n  product: Product;\n  products: Product;\n  quote: Quote;\n  quotes: Quote;\n  statement-documents: StatementDocument;\n  template: Template;\n  templates: Template;\n  templates-versions: TemplateVersion;\n  template-components: TemplateComponent;\n  rate-limit: RateLimit;\n  rate-limits: RateLimit;\n  recurrence: Recurrence;\n  recurrences: Recurrence;\n  role: Role;\n  roles: Role;\n  session: Session;\n  sessions: Session;\n  credit-note: CreditNote;\n  credit-notes: CreditNote;\n  settlement: Settlement;\n  settlements: Settlement;\n  supplier: Supplier;\n  suppliers: Supplier;\n  purchase: Purchase;\n  purchases: Purchase;\n  purchase-bill: PurchaseBill;\n  purchase-bills: PurchaseBill;\n  purchase-credit: PurchaseCredit;\n  purchase-credits: PurchaseCredit;\n  stock: Stock;\n  stock-lock: StockLock;\n  stock-locks: StockLock;\n  store: Store;\n  stores: Store;\n  tag: Tag;\n  tags: Tag;\n  taxes-codes: TaxCode;\n  taxes-rates: TaxRate;\n  taxes-classes: TaxClass;\n  price-formula: PriceFormula;\n  price-formulas: PriceFormula;\n  thread: Thread;\n  threads: Thread;\n  tracking-category: TrackingCategory;\n  tracking-categories: TrackingCategory;\n  transaction: Movement;\n  transactions: Movement;\n  unit: UnitType;\n  units: UnitType;\n  unit-roster: UnitRoster;\n  unit-rosters: UnitRoster;\n  user: User;\n  users: User;\n  webhook-event: WebhookEvent;\n  webhook-events: WebhookEvent;\n  events: WebhookEvent;\n  webshop-product: WebshopProduct;\n  webshop-products: WebshopProduct;\n  typesense-config: TypesenseConfig;\n  typesense: TypesenseConfig;\n  uploadcare-sweep: UploadcareSweepRun;\n  uploadcare-worklist: UploadcareWorkListEntry;\n  xero-budget: XeroBudget;\n  xero-sync: XeroSyncState;\n  documents: OrderDocument;\n  template_previews: PreviewRecord;\n  mcp-oauth-clients: McpOAuthClient;\n  mcp-oauth-authorize-requests: McpOAuthAuthorizeRequest;\n  mcp-oauth-codes: McpOAuthCode;\n  mcp-oauth-tokens: McpOAuthToken;\n}",
+          "declaration": "interface CollectionDocs {\n  activity: Activity;\n  activities: Activity;\n  booking: Booking;\n  bookings: Booking;\n  bookings-inbound: InboundBooking;\n  card: Card;\n  cards: Card;\n  counter: Counter;\n  counters: Counter;\n  cache-geocodes: CacheGeocodes;\n  chart-of-accounts: ChartOfAccounts;\n  comment: Comment;\n  comments: Comment;\n  contact: Contact;\n  contacts: Contact;\n  destination: Destination;\n  destinations: Destination;\n  email-verification: EmailVerification;\n  email-verifications: EmailVerification;\n  holiday-dates: HolidayDates;\n  dates: HolidayDates;\n  holiday-definition: HolidayDefinition;\n  holiday-definitions: HolidayDefinition;\n  holiday-snapshot: HolidaySnapshot;\n  settings: SettingsDocument;\n  inventory-ledger: InventoryLedger;\n  inventory-ledgers: InventoryLedger;\n  invite: Invite;\n  invites: Invite;\n  invoice: Invoice;\n  invoices: Invoice;\n  list: List;\n  lists: List;\n  location: Location;\n  locations: Location;\n  location-type: LocationType;\n  location-types: LocationType;\n  department-type: DepartmentType;\n  department-types: DepartmentType;\n  order: Order;\n  orders: Order;\n  fulfillment: Fulfillment;\n  fulfillments: Fulfillment;\n  organization: Organization;\n  organizations: Organization;\n  out-of-service: OutOfService;\n  password-reset: PasswordReset;\n  password-resets: PasswordReset;\n  product: Product;\n  products: Product;\n  quote: Quote;\n  quotes: Quote;\n  statement-documents: StatementDocument;\n  template: Template;\n  templates: Template;\n  templates-versions: TemplateVersion;\n  template-components: TemplateComponent;\n  rate-limit: RateLimit;\n  rate-limits: RateLimit;\n  recurrence: Recurrence;\n  recurrences: Recurrence;\n  role: Role;\n  roles: Role;\n  session: Session;\n  sessions: Session;\n  credit-note: CreditNote;\n  credit-notes: CreditNote;\n  settlement: Settlement;\n  settlements: Settlement;\n  supplier: Supplier;\n  suppliers: Supplier;\n  purchase: Purchase;\n  purchases: Purchase;\n  purchase-bill: PurchaseBill;\n  purchase-bills: PurchaseBill;\n  purchase-credit: PurchaseCredit;\n  purchase-credits: PurchaseCredit;\n  stock: Stock;\n  stock-lock: StockLock;\n  stock-locks: StockLock;\n  store: Store;\n  stores: Store;\n  tag: Tag;\n  tags: Tag;\n  taxes-codes: TaxCode;\n  taxes-rates: TaxRate;\n  taxes-classes: TaxClass;\n  price-formula: PriceFormula;\n  price-formulas: PriceFormula;\n  thread: Thread;\n  threads: Thread;\n  tracking-category: TrackingCategory;\n  tracking-categories: TrackingCategory;\n  transaction: Movement;\n  transactions: Movement;\n  unit: UnitType;\n  units: UnitType;\n  unit-roster: UnitRoster;\n  unit-rosters: UnitRoster;\n  user: User;\n  users: User;\n  webhook-event: WebhookEvent;\n  webhook-events: WebhookEvent;\n  events: WebhookEvent;\n  webshop-product: WebshopProduct;\n  webshop-products: WebshopProduct;\n  typesense-config: TypesenseConfig;\n  typesense: TypesenseConfig;\n  uploadcare-sweep: UploadcareSweepRun;\n  uploadcare-worklist: UploadcareWorkListEntry;\n  xero-budget: XeroBudget;\n  xero-sync: XeroSyncState;\n  documents: OrderDocument;\n  template_previews: PreviewRecord;\n  mcp-oauth-clients: McpOAuthClient;\n  mcp-oauth-authorize-requests: McpOAuthAuthorizeRequest;\n  mcp-oauth-codes: McpOAuthCode;\n  mcp-oauth-tokens: McpOAuthToken;\n}",
           "doc": "The ONE place a collection name is bound to its document type.\n\n`schemas` below is annotated by a mapped type over this interface, so the two\ncannot drift: a key here with no entry there is an error at the object\nliteral, and an entry there with no key here is an excess property. That is\nthe compiler enforcing the parity — not a test that can go stale, and not the\n\"parity assertion between two hand-maintained lists\" the workspace rules warn\nabout. It fails at `deno task check`.\n\n⚠️ **Both halves are written out explicitly, and that is deliberate.** JSR's\nnpm declaration emit is SYNTACTIC — it writes declarations without running\ninference — so a type it has to COMPUTE from an initializer can publish\nwrongly to npm consumers while Deno consumers, this suite, `deno task check`\nand `deno publish --dry-run` all agree with the source. That is core#43: nine\n`as const` members emitted as one, and 57 phantom type errors on manager's\nnext pin bump. An interface and a written mapped-type annotation are text the\nemitter copies verbatim, so neither needs expanding.\n\n⚠️ Measured 2026-08-14, because the obvious reasoning is wrong: the\ninference-requiring form (`= {…} satisfies Record<string, z.ZodType>` plus\n`keyof typeof`) **also passes** `deno publish --dry-run`'s slow-types check.\nPassing that check is NOT evidence the emit is right. The explicit form is\nchosen because it needs no expansion at all, which is a reasoned preference\nrather than a measured one.\n\n⚠️ The line above used to add *\"core#44 closed as 'no post-publish declaration\ngate', so nothing here can see a wrong published declaration.\"* **That is no\nlonger true**: core#44 reopened on a second divergence and\n`deno task check:declarations` now runs `isolatedDeclarations` over all of\n`src/`. It is still not a check of JSR's *emitter* — it is a conservative\nover-approximation of it — so \"passing does not prove the emit is right\"\nsurvives; what does not survive is \"nothing can see it\".\n\nSingular and plural both appear because the registry has always carried both.\n⚠️ The singular half may be vestigial — there are zero literal `schemas[\"order\"]`\n-style lookups across api-cloudrun, manager and templates, and every call site\nfound passes a plural or the literal `\"events\"`. Removing them would halve this\nfile's hand-written surface, but it is a breaking change to a published API and\nwants the dynamic callers' domain established first. Not folded in here."
         },
         {
@@ -2516,6 +2516,12 @@
         },
         {
           "kind": "variable",
+          "name": "INBOUND_BOOKING_STATUSES",
+          "declaration": "const INBOUND_BOOKING_STATUSES: \"ordered\" | \"active\" | \"complete\"[];",
+          "doc": "An inbound booking's status, DERIVED from its breakdown and never sent:\n`ordered` while every unit is still plan, `complete` once every unit sits in\na terminal key for its type (`isInboundTerminal`), else `active`.\n\n⚠️ **Not the outbound vocabulary.** `reserved` / `part-prepped` / `prepped`\nname preparation stages a supplier's units never pass through, and `draft` /\n`quoted` have no writer on this ladder (rulings 2, 56). The default the 7a\nspec took (D6)."
+        },
+        {
+          "kind": "variable",
           "name": "INBOUND_BOOKING_TYPES",
           "declaration": "const INBOUND_BOOKING_TYPES: \"sale\" | \"rental\"[];",
           "doc": "An inbound booking's `type`: a Buy is a `sale` line, a Subrent a `rental`\nline. Narrower than `ComponentTypeEnum` on purpose, so every predicate below\nis total over it — a `service` (Charge) line moves no units and books nothing."
@@ -2617,6 +2623,42 @@
           "doc": "The per-type item contract table. @see {@link ItemContract}\n\nRejoins {@link ITEM_CONTRACTS_INNER}'s literals with each type's\n`parentable_by`. Safe to hold references: this const carries an explicit\nannotation, so the emitter copies that rather than inferring anything — the\nreason the split above works at all. `Record<ItemTypeType, …>` also keeps the\ntable total over `ITEM_TYPES`, so a new item type fails to compile here."
         },
         {
+          "kind": "interface",
+          "name": "InboundBooking",
+          "declaration": "interface InboundBooking {\n  uid: string;\n  source: InboundBookingSource;\n  uid_product: string;\n  component_signature_hash: string | null;\n  name: string;\n  number: number;\n  type: InboundBookingTypeType;\n  status: InboundBookingStatusType;\n  quantity: number;\n  quantity_ordered: number;\n  breakdown: InboundBreakdown;\n  units: InboundUnitSetsType | null;\n  dates: indexedAccess;\n  destinations: indexedAccess;\n  stores: BookingStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  uid_destination_delivery: string;\n  uid_destination_collection: string | null;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "Full Firestore document for an inbound booking — an AGGREGATE per\n`(purchase, product, LEG, component_signature_hash)`, exactly as an outbound\nbooking aggregates per `(order, product, leg, signature)`. Not a line: two\npurchase lines of one product on one leg with the same ancestry share a row."
+        },
+        {
+          "kind": "variable",
+          "name": "InboundBookingSchema",
+          "declaration": "const InboundBookingSchema: z.ZodType<InboundBooking>;",
+          "doc": "Zod schema for {@link InboundBooking}. Key order is its own column order."
+        },
+        {
+          "kind": "interface",
+          "name": "InboundBookingSource",
+          "declaration": "interface InboundBookingSource {\n  collection: \"purchases\";\n  uid: string;\n}",
+          "doc": "The purchase an inbound booking books — a `DocSource` narrowed to its one\nlegal collection, so it is assignable wherever a `DocSourceType` is read\n(a movement's `sources[]`, a thread's) without a cast."
+        },
+        {
+          "kind": "variable",
+          "name": "InboundBookingSourceSchema",
+          "declaration": "const InboundBookingSourceSchema: z.ZodType<InboundBookingSource>;",
+          "doc": "Zod schema for {@link InboundBookingSource}."
+        },
+        {
+          "kind": "variable",
+          "name": "InboundBookingStatusEnum",
+          "declaration": "const InboundBookingStatusEnum: z.ZodType<InboundBookingStatusType>;",
+          "doc": "Zod enum over {@link INBOUND_BOOKING_STATUSES}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InboundBookingStatusType",
+          "declaration": "type InboundBookingStatusType = indexedAccess;",
+          "doc": "One inbound booking status."
+        },
+        {
           "kind": "variable",
           "name": "InboundBookingTypeEnum",
           "declaration": "const InboundBookingTypeEnum: z.ZodType<InboundBookingTypeType>;",
@@ -2687,6 +2729,18 @@
           "name": "InboundUnitBucketType",
           "declaration": "type InboundUnitBucketType = indexedAccess;",
           "doc": "One inbound bucket that holds named units."
+        },
+        {
+          "kind": "variable",
+          "name": "InboundUnitSetsSchema",
+          "declaration": "const InboundUnitSetsSchema: z.ZodType<InboundUnitSetsType>;",
+          "doc": "Zod schema for {@link InboundUnitSetsType} — the outbound builder, over the inbound buckets."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InboundUnitSetsType",
+          "declaration": "type InboundUnitSetsType = Record<InboundUnitBucketType, number[]>;",
+          "doc": "Which units sit in each bucket of an inbound booking — the twin of\n`BookingUnitSetsType`, with the same two rules: each set is a canonical\n`UnitSet`, the sets are pairwise disjoint, and `units[k].length ≤\nbreakdown[k]` (refined on the booking, which holds both)."
         },
         {
           "kind": "variable",
@@ -8012,6 +8066,14 @@
         },
         {
           "kind": "function",
+          "name": "emptyInboundUnitSets",
+          "signature": "emptyInboundUnitSets(): InboundUnitSetsType",
+          "doc": "Empty sets in every inbound unit bucket.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "enumValues",
           "signature": "enumValues(schema: z.ZodType<T>): T[]",
           "doc": "Return the values of a `ZodEnum` in declaration order. Throws when passed a\nnon-enum schema — callers should pass the enum directly (e.g.\n`enumValues(CardStatusEnum)`), not a wrapped schema.",
@@ -9044,7 +9106,7 @@
         {
           "kind": "variable",
           "name": "CFS_SOURCE_COLLECTIONS",
-          "declaration": "const CFS_SOURCE_COLLECTIONS: \"bookings\" | \"cards\" | \"contacts\" | \"credit-notes\" | \"fulfillments\" | \"invoices\" | \"locations\" | \"orders\" | \"organizations\" | \"out-of-service\" | \"products\" | \"purchase-bills\" | \"purchase-credits\" | \"purchases\" | \"roles\" | \"settlements\" | \"suppliers\" | \"template-components\" | \"templates\" | \"templates-versions\" | \"transactions\"[];",
+          "declaration": "const CFS_SOURCE_COLLECTIONS: \"bookings\" | \"bookings-inbound\" | \"cards\" | \"contacts\" | \"credit-notes\" | \"fulfillments\" | \"invoices\" | \"locations\" | \"orders\" | \"organizations\" | \"out-of-service\" | \"products\" | \"purchase-bills\" | \"purchase-credits\" | \"purchases\" | \"roles\" | \"settlements\" | \"suppliers\" | \"template-components\" | \"templates\" | \"templates-versions\" | \"transactions\"[];",
           "doc": "Collections that may legitimately appear as a {@link DocSourceType} `collection`.\n\nThis was `z.string().min(1)` — free text that reached a Firestore collection\nname. `CreateCardInput.sources` comes straight off the POST body and\n`createCard` copies it into the THREAD's `sources`, so\n`POST /cards {sources:[{collection:\"cards\", uid:X}]}` wrote a thread claiming\na card as its own source, which `deleteCard` then unpicks by\n`s.collection === \"cards\"`. Every consumer was re-deriving the same implicit\n\"it's one of the known CFS collections\" contract; it is encoded once here.\n\nMembership is the union of a read-only survey of every stored `DocSource` in\nBOTH envs (threads, comments, cards, recurrences.prototype, out-of-service\n`sources[]` + `transactions[].source` — dev and prod agreed on the same 12\nvalues, no malformed entries) plus `template-components`, which has no stored\ninstance yet but is declared legitimate by `TEMPLATE_SOURCES` in `comment.ts`.\n\n`transactions` is now a live-written source: the movement journal links a\nreversal to the event it negates, and a component event to its parent, both\nthrough `sources[]`. (It was historical-only when this list was surveyed —\n898 instances, identical count in both envs.) Never narrow this past stored\ndata; survey first.\n\n`locations` carries no `sources[]` of its own — it is here because a movement\nline's `location.from` / `location.to` is a `DocSource` pointing at wherever\nthe units physically are: a `locations` doc (on a shelf), a `bookings` doc\n(out on a job), or an `out-of-service` record. Widening is safe; the\n`DocSource` shape is unchanged."
         },
         {
@@ -10373,6 +10435,18 @@
         },
         {
           "kind": "variable",
+          "name": "InboundUnitSetsSchema",
+          "declaration": "const InboundUnitSetsSchema: z.ZodType<InboundUnitSetsType>;",
+          "doc": "Zod schema for {@link InboundUnitSetsType} — the outbound builder, over the inbound buckets."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InboundUnitSetsType",
+          "declaration": "type InboundUnitSetsType = Record<InboundUnitBucketType, number[]>;",
+          "doc": "Which units sit in each bucket of an inbound booking — the twin of\n`BookingUnitSetsType`, with the same two rules: each set is a canonical\n`UnitSet`, the sets are pairwise disjoint, and `units[k].length ≤\nbreakdown[k]` (refined on the booking, which holds both)."
+        },
+        {
+          "kind": "variable",
           "name": "OPEN_BOOKING_STATUSES",
           "declaration": "const OPEN_BOOKING_STATUSES: readonly BookingStatusType[];",
           "doc": "Every booking status but `complete` — the statuses whose booking may still\nconsume stock (`unavailableFromBooking` drops a complete booking and nothing\nelse). An ARRAY, because its main readers are Firestore\n`where(\"status\", \"in\", …)` queries (core#110: the api's pick sheets and the\nmanager's stock store each derived it by hand). Derived as the complement, so\na new status is open until someone says otherwise."
@@ -10455,6 +10529,14 @@
         },
         {
           "kind": "function",
+          "name": "emptyInboundUnitSets",
+          "signature": "emptyInboundUnitSets(): InboundUnitSetsType",
+          "doc": "Empty sets in every inbound unit bucket.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "inboundOwnsKey",
           "signature": "inboundOwnsKey(type: InboundBookingTypeType, key: InboundBreakdownKeyType): boolean",
           "doc": "Whether CFS OWNS an inbound booking's units in `key` — the inbound twin of\n`ownsKey`. A Buy owns from `received` on; a Subrent owns nothing, ever.\n\n⭐ The movement-cost rule reads this: a receive must carry a cost exactly\nwhen it moves units into an owned key, so a Buy receive costs and a Subrent\nreceive does not.",
@@ -10476,6 +10558,54 @@
           "doc": "Whether `key` is TERMINAL for an inbound booking of `type`: a booking whose\nunits all sit in terminal keys is closed. A Buy ends on a shelf (or damaged);\na Subrent ends back with the supplier, or settled lost or damaged.",
           "paramTags": [],
           "returnsTag": null
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/schemas/booking-inbound",
+      "moduleDoc": "Inbound booking document schema — Firestore collection: `bookings-inbound`.\n\nA purchase line's units on the SUPPLIER ladder, the twin of an order line's\nunits on the customer ladder (`bookings`). Written by the purchase writers\nthrough the inbound booking lever; read by the receipt projection\n(`purchase-receipts`), the purchase status derivation and, from 7b, supply\n(`api-cloudrun/.claude/plans/one-document-model.md` § *7a core spec*, C5).\n\n## The two booking collections share declarations, not a schema\n\nEvery field both grains mean identically is the SAME Zod instance, referenced\nkey by key from `BOOKING_CORE` (`schemas/booking.ts`) and pinned by\n`tests/booking-core-parity.test.ts`. What differs is declared here:\n\n- `uid` — the same grammar (`{purchaseUid}:{productUid}:{legUid}[:{sig}]`); the\n  COLLECTION is what tells an inbound id from an outbound one;\n- `source` — the purchase, as a `DocSource` (`{ collection: \"purchases\", uid }`),\n  which is what a movement's `sources[]` holds. Phase 9 gives outbound\n  bookings the same field in place of `uid_order`;\n- `number` — the PURCHASE's number;\n- `type` — `sale | rental` only (`InboundBookingTypeEnum`);\n- `status` — `ordered | active | complete` ({@link INBOUND_BOOKING_STATUSES});\n- `breakdown` / `units` — the inbound ladder;\n- `quantity_ordered` — REQUIRED: there is no legacy population to forgive.\n\nDeliberately absent: an organization or supplier snapshot (the receipt and the\npurchase carry the supplier), `subject`, `shortage` (a purchase draws on no\nshelf), and the CRMS ids.",
+      "symbols": [
+        {
+          "kind": "variable",
+          "name": "INBOUND_BOOKING_STATUSES",
+          "declaration": "const INBOUND_BOOKING_STATUSES: \"ordered\" | \"active\" | \"complete\"[];",
+          "doc": "An inbound booking's status, DERIVED from its breakdown and never sent:\n`ordered` while every unit is still plan, `complete` once every unit sits in\na terminal key for its type (`isInboundTerminal`), else `active`.\n\n⚠️ **Not the outbound vocabulary.** `reserved` / `part-prepped` / `prepped`\nname preparation stages a supplier's units never pass through, and `draft` /\n`quoted` have no writer on this ladder (rulings 2, 56). The default the 7a\nspec took (D6)."
+        },
+        {
+          "kind": "interface",
+          "name": "InboundBooking",
+          "declaration": "interface InboundBooking {\n  uid: string;\n  source: InboundBookingSource;\n  uid_product: string;\n  component_signature_hash: string | null;\n  name: string;\n  number: number;\n  type: InboundBookingTypeType;\n  status: InboundBookingStatusType;\n  quantity: number;\n  quantity_ordered: number;\n  breakdown: InboundBreakdown;\n  units: InboundUnitSetsType | null;\n  dates: indexedAccess;\n  destinations: indexedAccess;\n  stores: BookingStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  uid_destination_delivery: string;\n  uid_destination_collection: string | null;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "Full Firestore document for an inbound booking — an AGGREGATE per\n`(purchase, product, LEG, component_signature_hash)`, exactly as an outbound\nbooking aggregates per `(order, product, leg, signature)`. Not a line: two\npurchase lines of one product on one leg with the same ancestry share a row."
+        },
+        {
+          "kind": "variable",
+          "name": "InboundBookingSchema",
+          "declaration": "const InboundBookingSchema: z.ZodType<InboundBooking>;",
+          "doc": "Zod schema for {@link InboundBooking}. Key order is its own column order."
+        },
+        {
+          "kind": "interface",
+          "name": "InboundBookingSource",
+          "declaration": "interface InboundBookingSource {\n  collection: \"purchases\";\n  uid: string;\n}",
+          "doc": "The purchase an inbound booking books — a `DocSource` narrowed to its one\nlegal collection, so it is assignable wherever a `DocSourceType` is read\n(a movement's `sources[]`, a thread's) without a cast."
+        },
+        {
+          "kind": "variable",
+          "name": "InboundBookingSourceSchema",
+          "declaration": "const InboundBookingSourceSchema: z.ZodType<InboundBookingSource>;",
+          "doc": "Zod schema for {@link InboundBookingSource}."
+        },
+        {
+          "kind": "variable",
+          "name": "InboundBookingStatusEnum",
+          "declaration": "const InboundBookingStatusEnum: z.ZodType<InboundBookingStatusType>;",
+          "doc": "Zod enum over {@link INBOUND_BOOKING_STATUSES}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InboundBookingStatusType",
+          "declaration": "type InboundBookingStatusType = indexedAccess;",
+          "doc": "One inbound booking status."
         }
       ]
     },

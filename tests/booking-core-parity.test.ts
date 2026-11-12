@@ -5,12 +5,12 @@
  * base's `.meta()` (the registry is keyed on the instance), so its headings
  * vanish while a structural comparison stays green.
  *
- * The outbound `BookingSchema` is the only grain until the 7a contract beta adds
- * `InboundBookingSchema`; add it to `GRAINS` then.
+ * Two grains: the outbound `BookingSchema` and the inbound `InboundBookingSchema`
+ * (the 7a contract beta).
  */
 import { assertEquals } from "@std/assert";
 import { BOOKING_CORE } from "../src/schemas/booking.ts";
-import { BookingSchema } from "../src/schemas/mod.ts";
+import { BookingSchema, InboundBookingSchema } from "../src/schemas/mod.ts";
 
 // deno-lint-ignore no-explicit-any
 function shapeOf(schema: unknown, label: string): Record<string, any> {
@@ -20,7 +20,7 @@ function shapeOf(schema: unknown, label: string): Record<string, any> {
   return def.shape;
 }
 
-const GRAINS = [["BookingSchema", BookingSchema]] as const;
+const GRAINS = [["BookingSchema", BookingSchema], ["InboundBookingSchema", InboundBookingSchema]] as const;
 
 Deno.test("booking core parity: every BOOKING_CORE field is the SAME INSTANCE on every grain", () => {
   const wrong: string[] = [];
