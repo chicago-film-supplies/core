@@ -29,22 +29,27 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  * `kind` is retired. The buy/subrent split is now the `items.type` facet — the
  * invoice's `items.type`, nested rather than a top-level mirror, so there is no
  * derived Typesense field to declare. Every `items.*` field is `optional: true`
- * because the arms disagree: a direct item names no product, and only a subrent
- * item carries `quantity_returned`.
+ * because the arms disagree: a direct item names no product (and, until v5,
+ * only a subrent item carried `quantity_returned`).
  *
  * v4 (one-document-model 6e-0a, ruling 32): the `bills[]` and `credits[]`
  * discovery mirrors, `{ uid, number, status }` each, status faceted. Every field
  * is `optional: true` through the expand, so a purchase stored before the
  * backfill still indexes.
+ *
+ * v5 (one-document-model 7a, C8): the `store` snapshot becomes `uid_store`, a
+ * facet the manager labels from its stores cache (the order's key), and
+ * `items.quantity_returned` goes: a line's custody lives on its inbound
+ * booking. `total_cents` stays until 6e-0b1 (ruling 62).
  */
 export const purchases: TypesenseCollectionConfig = {
   alias: "purchases",
-  version: 4,
+  version: 5,
   firestoreCollection: "purchases",
-  collectionName: "purchases_v4",
+  collectionName: "purchases_v5",
   enabled: true,
   schema: {
-    name: "purchases_v4",
+    name: "purchases_v5",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -54,15 +59,12 @@ export const purchases: TypesenseCollectionConfig = {
       { name: "supplier", type: "object" },
       { name: "supplier.uid", type: "string", facet: false, optional: true },
       { name: "supplier.name", type: "string", sort: true, stem: true, facet: false },
-      { name: "store", type: "object" },
-      { name: "store.uid", type: "string", facet: false, optional: true },
-      { name: "store.name", type: "string", facet: true },
+      { name: "uid_store", type: "string", facet: true },
       { name: "reference", type: "string", stem: true, sort: true, optional: true },
       { name: "items", type: "object[]", optional: true },
       { name: "items.type", type: "string[]", facet: true, optional: true },
       { name: "items.uid_product", type: "string[]", facet: false, optional: true },
       { name: "items.name", type: "string[]", stem: true, optional: true },
-      { name: "items.quantity_returned", type: "int32[]", facet: false, optional: true },
       // 6e-0a (ruling 32): the bill and supplier-credit mirrors, the twins of
       // `orders.invoices` / `orders.credit_notes`; optional through the expand.
       { name: "bills", type: "object[]", optional: true },

@@ -492,10 +492,7 @@ const pline = (over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem => {
     uid_tax_class: "TaxClassResale000000",
     amount_cents: 50_000,
     price: payablePrice(50_000),
-    quantity_received: 0,
     quantity_billed: 0,
-    status: "open",
-    quantity_returned: 0,
     uid_orders: [],
     uid_units: [],
     ...over,
@@ -517,32 +514,36 @@ const bline: PurchaseSaleItem = {
   ledger_account: 1400,
   uid_tracking_category: null,
   uid_tax_class: "TaxClassResale000000",
-  expected_date: null,
-  quantity_received: 0,
   quantity_billed: 0,
-  status: "open",
   landed_costs: [],
 };
 
+/** Row custody keyed by path (C8): the card reads it beside the purchase. */
+const custodyAt = (path: readonly string[], received: number, returned = 0) =>
+  new Map([[path.join("/"), { received, returned }]]);
+
 Deno.test("computeCardStatusFromPurchase / computeCardActionFromPurchase — the table", () => {
-  const cases: [string, "active" | "canceled" | "complete", Partial<PurchaseRentalItem>, string, string | null][] = [
-    ["nothing received", "active", {}, "planned", null],
-    ["received, none returned", "active", { quantity_received: 10 }, "active", "return_to_supplier"],
-    ["partly returned", "active", { quantity_received: 10, quantity_returned: 4 }, "active", "return_to_supplier"],
-    ["all received returned, more to come", "active", { quantity_received: 6, quantity_returned: 6 }, "planned", null],
-    ["all returned, rest canceled (unbilled)", "active", { quantity: 6, quantity_received: 6, quantity_returned: 6 }, "complete", null],
-    ["all returned and billed", "complete", { quantity_received: 10, quantity_returned: 10, quantity_billed: 10 }, "complete", null],
-    ["canceled outright", "canceled", { quantity: 0, status: "canceled" }, "canceled", null],
+  const cases: [string, "active" | "canceled" | "complete", Partial<PurchaseRentalItem>, [number, number], string, string | null][] = [
+    ["nothing received", "active", {}, [0, 0], "planned", null],
+    ["received, none returned", "active", {}, [10, 0], "active", "return_to_supplier"],
+    ["partly returned", "active", {}, [10, 4], "active", "return_to_supplier"],
+    ["all received returned, more to come", "active", {}, [6, 6], "planned", null],
+    ["all returned, the rest closed off the line", "active", { quantity: 6 }, [6, 6], "complete", null],
+    ["all returned and billed", "complete", { quantity_billed: 10 }, [10, 10], "complete", null],
+    ["canceled outright", "canceled", {}, [0, 0], "canceled", null],
   ];
-  for (const [name, status, over, want, action] of cases) {
-    const p = { status, items: [pline(over)] };
-    assertEquals(computeCardStatusFromPurchase(p, "planned"), want, name);
-    assertEquals(computeCardActionFromPurchase(p)?.value ?? null, action, name);
+  for (const [name, status, over, [received, returned], want, action] of cases) {
+    const line = pline(over);
+    const custody = custodyAt(line.path, received, returned);
+    const p = { status, items: [line] };
+    assertEquals(computeCardStatusFromPurchase(p, "planned", custody), want, name);
+    assertEquals(computeCardActionFromPurchase(p, custody)?.value ?? null, action, name);
     // A buy item beside it changes nothing: the card is about the subrent items.
-    assertEquals(computeCardStatusFromPurchase({ status, items: [bline, pline(over)] }, "planned"), want, `${name} + buy`);
+    assertEquals(computeCardStatusFromPurchase({ status, items: [bline, line] }, "planned", custody), want, `${name} + buy`);
   }
   // An operator's `blocked` is theirs.
-  assertEquals(computeCardStatusFromPurchase({ status: "active", items: [pline({ quantity_received: 10 })] }, "blocked"), "blocked");
+  const line = pline();
+  assertEquals(computeCardStatusFromPurchase({ status: "active", items: [line] }, "blocked", custodyAt(line.path, 10)), "blocked");
 });
 
 Deno.test("purchaseCardDue: the earliest due-back among OPEN subrent items, else among all; null when none is due", () => {
@@ -552,11 +553,13 @@ Deno.test("purchaseCardDue: the earliest due-back among OPEN subrent items, else
   const PA = "9a1b2c3d-0000-4000-8000-0000000000da";
   const PB = "9a1b2c3d-0000-4000-8000-0000000000db";
   const destinations = [purchasePair(PA, { start: early, end: early }), purchasePair(PB, { start: early, end: late })];
-  const a = pline({ uid: "9a1b2c3d-0000-4000-8000-00000000000a", path: [PA, "9a1b2c3d-0000-4000-8000-00000000000a"], quantity: 3, quantity_received: 3, quantity_returned: 3 });
-  const b = pline({ uid: "9a1b2c3d-0000-4000-8000-00000000000b", path: [PB, "9a1b2c3d-0000-4000-8000-00000000000b"], quantity_received: 10 });
-  assertEquals(purchaseCardDue({ items: [a, b], destinations }), late, "a is settled, so b's date leads");
-  assertEquals(purchaseCardDue({ items: [a, { ...b, quantity_returned: 10 }], destinations }), early, "nothing open: the earliest of all");
+  const a = pline({ uid: "9a1b2c3d-0000-4000-8000-00000000000a", path: [PA, "9a1b2c3d-0000-4000-8000-00000000000a"], quantity: 3 });
+  const b = pline({ uid: "9a1b2c3d-0000-4000-8000-00000000000b", path: [PB, "9a1b2c3d-0000-4000-8000-00000000000b"] });
+  const custody = (bReturned: number) =>
+    new Map([[a.path.join("/"), { received: 3, returned: 3 }], [b.path.join("/"), { received: 10, returned: bReturned }]]);
+  assertEquals(purchaseCardDue({ items: [a, b], destinations }, custody(0)), late, "a is settled, so b's date leads");
+  assertEquals(purchaseCardDue({ items: [a, b], destinations }, custody(10)), early, "nothing open: the earliest of all");
   // A standing subrent is due back on nothing; a buy item never enters.
-  assertEquals(purchaseCardDue({ items: [pline(), bline], destinations: [purchasePair(PAIR, { start: early, end: null })] }), null);
-  assertEquals(purchaseCardDue({ items: [bline], destinations: [purchasePair(PAIR)] }), null);
+  assertEquals(purchaseCardDue({ items: [pline(), bline], destinations: [purchasePair(PAIR, { start: early, end: null })] }, new Map()), null);
+  assertEquals(purchaseCardDue({ items: [bline], destinations: [purchasePair(PAIR)] }, new Map()), null);
 });

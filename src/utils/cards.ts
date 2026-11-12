@@ -26,6 +26,8 @@ import {
   isKitHeaderLine,
 } from "../schemas/mod.ts";
 import { sumBreakdownKeys, terminalQuantity } from "./bookings.ts";
+import { lineCustodyAt, type PurchaseLineCustody } from "./bookings-inbound.ts";
+import { remainingToReturn } from "./purchases.ts";
 
 /**
  * Which side of the order's lifecycle a card represents:
@@ -311,9 +313,16 @@ function subrentItems(purchase: Pick<Purchase, "items">): PurchaseRentalItem[] {
   return purchase.items.filter((i): i is PurchaseRentalItem => i.type === "rental" && !isKitHeaderLine(i));
 }
 
+/**
+ * Each row's received and returned counts, `custodyBySourceItem` over the
+ * purchase's movements (one-document-model C8): the card reads custody, which
+ * the purchase line no longer carries.
+ */
+export type PurchaseCardCustody = ReadonlyMap<string, PurchaseLineCustody>;
+
 /** Does any subrent item hold units received and not yet returned? */
-function unitsInCustody(purchase: Pick<Purchase, "items">): boolean {
-  return subrentItems(purchase).some((i) => i.quantity_received > i.quantity_returned);
+function unitsInCustody(purchase: Pick<Purchase, "items">, custody: PurchaseCardCustody): boolean {
+  return subrentItems(purchase).some((i) => remainingToReturn(lineCustodyAt(custody, i.path)) > 0);
 }
 
 /**
@@ -335,11 +344,12 @@ function unitsInCustody(purchase: Pick<Purchase, "items">): boolean {
 export function computeCardStatusFromPurchase(
   purchase: Pick<Purchase, "status" | "items">,
   current: CardStatus,
+  custody: PurchaseCardCustody,
 ): CardStatus {
   if (current === "blocked") return current;
   if (purchase.status === "canceled") return "canceled";
-  if (unitsInCustody(purchase)) return "active";
-  const settled = subrentItems(purchase).every((i) => i.quantity_received === i.quantity);
+  if (unitsInCustody(purchase, custody)) return "active";
+  const settled = subrentItems(purchase).every((i) => lineCustodyAt(custody, i.path).received >= i.quantity);
   return settled ? "complete" : "planned";
 }
 
@@ -349,8 +359,11 @@ export function computeCardStatusFromPurchase(
  * {@link computeCardStatusFromPurchase}, so the two cannot disagree about
  * whether there is a return to make.
  */
-export function computeCardActionFromPurchase(purchase: Pick<Purchase, "items">): CardAction | null {
-  return unitsInCustody(purchase) ? { source: "purchase", value: "return_to_supplier" } : null;
+export function computeCardActionFromPurchase(
+  purchase: Pick<Purchase, "items">,
+  custody: PurchaseCardCustody,
+): CardAction | null {
+  return unitsInCustody(purchase, custody) ? { source: "purchase", value: "return_to_supplier" } : null;
 }
 
 /**
@@ -363,11 +376,15 @@ export function computeCardActionFromPurchase(purchase: Pick<Purchase, "items">)
  * item, or one whose subrents are all STANDING (`dates.end: null`), which are
  * due back on nothing.
  */
-export function purchaseCardDue(purchase: Pick<Purchase, "items" | "destinations">): string | null {
+export function purchaseCardDue(
+  purchase: Pick<Purchase, "items" | "destinations">,
+  custody: PurchaseCardCustody,
+): string | null {
   const items = subrentItems(purchase);
-  const open = items.filter((i) =>
-    i.quantity_received > i.quantity_returned || i.quantity_received < i.quantity
-  );
+  const open = items.filter((i) => {
+    const c = lineCustodyAt(custody, i.path);
+    return remainingToReturn(c) > 0 || c.received < i.quantity;
+  });
   // The due-back is the hire window's end, on the line's PAIR (one-document-model Phase 3).
   const pool = (open.length > 0 ? open : items).map((i) => purchaseHireWindow(purchase, i)?.end ?? null)
     .filter((d): d is string => d !== null);

@@ -341,9 +341,9 @@ export const MOVEMENT_TYPES = [
   // net `subrent_in` to zero and `quantity_held` would never rise.
   //
   // Each names its purchase in `sources[]` and its supplier, like a receipt.
-  // Neither is manual (they are raised from the purchase, which co-writes
-  // `quantity_received` / `quantity_returned`). Since 7a each moves an inbound
-  // booking and its rewind is a typed undo (`subrent_in_undo`,
+  // Neither is manual (they are raised from the purchase). Since 7a each moves
+  // an inbound booking, which is what the line's received and returned counts
+  // are read from (C8), and its rewind is a typed undo (`subrent_in_undo`,
   // `subrent_out_undo`); a historic `reverses` reversal stays as stored. On a
   // serialized product they name their units, and a numbered subrent unit's
   // OWNERSHIP is its open history entry's `supplier`, not the movement type
@@ -2623,8 +2623,8 @@ export const MovementSchema: z.ZodType<Movement> = MovementObject.superRefine(ch
  * boundary, so there is none to get wrong across the Chicago offset.
  *
  * ⚠️ **No {@link SUBRENT_MOVEMENT_TYPES} member is either.** Each moves a
- * purchase's bucket in the same write — `quantity_received` /
- * `quantity_returned` — and `return_to_supplier` an out-of-service record's
+ * purchase line's inbound booking in the same write, and
+ * `return_to_supplier` an out-of-service record's
  * `returned_to_supplier` too, so a keyed one would move custody with neither
  * document knowing.
  */

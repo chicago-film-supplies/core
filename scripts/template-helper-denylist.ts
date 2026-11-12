@@ -712,11 +712,18 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // refusal. A template renders a purchase or receipt that already carries them.
   "bookings-inbound": [
     "calculateInboundBreakdown",
+    // A line's received and returned counts (C8) need the purchase's MOVEMENTS or
+    // its inbound bookings, neither of which a purchase render is handed.
+    "custodyBySourceItem",
     "deriveInboundBookingStatus",
     "derivePurchaseStatus",
     "inboundCancelRefusal",
+    "inboundCustodyCounts",
     "inboundLiveCustody",
+    "inboundReceived",
+    "inboundReturned",
     "isInboundBookingClosed",
+    "lineCustodyAt",
     "sumInboundBreakdown",
   ],
   "out-of-service": [
@@ -738,17 +745,18 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "deriveQueryByOrders",
     "deriveQueryByProducts",
     "deriveQueryByUnits",
+    "custodyBySourceItem",
     "derivePurchaseStatus",
     "expandPurchaseItems",
     // Writes a flat line's net and discount record (ruling 7) — a writer's step.
     "flatPurchaseLineMoney",
-    "purchaseItemCanceled",
     "purchaseItemCommittedCents",
     "purchaseItemProduct",
     // The payable line uid rule (W4K): what a writer keys a line by, and its refines.
     "payableInputUidIssue",
     "payableLineUid",
     "payableLineUidIssue",
+    "lineCustodyAt",
     "remainingToBill",
     "remainingToReceive",
     "remainingToReturn",

@@ -14,7 +14,6 @@ import {
   deriveQueryByProducts,
   deriveQueryByUnits,
   type ProductTypeType,
-  purchaseItemCanceled,
   purchaseItemCommittedCents,
   purchaseItemProduct,
   payableInputUidIssue,
@@ -24,11 +23,9 @@ import {
   type PurchaseRowInputType,
   type PurchaseLandedCost,
   type StockMethodType,
-  type PurchaseRentalItem,
   type PurchaseRentalItemInputType,
   purchaseItemBasis,
   type PurchaseItem,
-  type PurchaseLineStatusType,
   isPurchaseLine,
 } from "../schemas/mod.ts";
 import { apportionCents, roundDivHalfUp, toCentsBig } from "./money.ts";
@@ -36,28 +33,32 @@ import { type FormulaDiscount, priceFromFormula } from "../schemas/_line-money.t
 import { componentQuantities, type ComponentRowForWalk } from "./order-lines.ts";
 import { productCountsStock } from "./products.ts";
 import { derivePurchaseCreditStatus, recomputePurchaseBillTotals } from "./invoices.ts";
-import { derivePurchaseStatus } from "./bookings-inbound.ts";
+import {
+  custodyBySourceItem,
+  derivePurchaseStatus,
+  lineCustodyAt,
+  NO_LINE_CUSTODY,
+  type PurchaseLineCustody,
+} from "./bookings-inbound.ts";
 
 // The payable settlement folds live beside their receivable twins in
 // `utils/invoices.ts`, which owns the one fold, and the custody-only status
 // beside its order twin in `utils/bookings-inbound.ts`; re-exported here so a
 // purchase writer finds them in its own namespace.
 export { derivePurchaseCreditStatus, derivePurchaseStatus, recomputePurchaseBillTotals };
+// A line's received and returned counts are custody now (C8), folded beside the inbound ladder.
+export { custodyBySourceItem, lineCustodyAt, NO_LINE_CUSTODY, type PurchaseLineCustody };
 // The mirror authors and the per-arm rules live beside the refine that checks them.
 export {
   deriveQueryByItemTypes,
   deriveQueryByOrders,
   deriveQueryByProducts,
   deriveQueryByUnits,
-  purchaseItemCanceled,
   purchaseItemCommittedCents,
   purchaseItemProduct,
 };
 // The payable line uid rule (W4K) lives beside the refines that check it.
 export { payableInputUidIssue, payableLineUid, payableLineUidIssue, type PayableLineUidFields };
-
-/** The co-written receipt buckets — a buy or subrent item. */
-type ReceivableItem = Pick<PurchaseSaleItem, "quantity" | "quantity_received">;
 
 /**
  * The cents a line's units `(before, after]` cost — the k-th receipt or the
@@ -167,12 +168,16 @@ export function purchaseLineReceiptTargetCents(
   );
 }
 
-/** Is a landed cost frozen? A receipt has priced part of it once `received > received_at_entry`. */
+/**
+ * Is a landed cost frozen? A receipt has priced part of it once the line's
+ * `received` count (its row's custody, `custodyBySourceItem`) passes
+ * `received_at_entry`.
+ */
 export function isLandedCostFrozen(
   entry: Pick<PurchaseLandedCost, "received_at_entry">,
-  line: Pick<PurchaseSaleItem, "quantity_received">,
+  received: number,
 ): boolean {
-  return line.quantity_received > entry.received_at_entry;
+  return received > entry.received_at_entry;
 }
 
 /**
@@ -185,11 +190,12 @@ export function isLandedCostFrozen(
  * post-receipt re-base, which is designed with depreciation (api-cloudrun#1388).
  */
 export function strandedLandedCents(
-  line: Pick<PurchaseSaleItem, "quantity" | "quantity_received" | "landed_costs">,
+  line: Pick<PurchaseSaleItem, "quantity" | "landed_costs">,
+  received: number,
 ): number {
-  if (remainingToReceive(line) > 0) return 0;
+  if (remainingToReceive(line, { received }) > 0) return 0;
   return line.landed_costs.reduce(
-    (sum, entry) => sum + entry.amount_cents - landedPricedCents(entry, line.quantity_received),
+    (sum, entry) => sum + entry.amount_cents - landedPricedCents(entry, received),
     0,
   );
 }
@@ -201,10 +207,17 @@ export function strandedLandedCents(
  * entry only ever prices units received after it.
  */
 export function landedCostWeightCents(
-  line: Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "quantity_received">,
+  line: Pick<PurchaseSaleItem, "amount_cents" | "quantity">,
+  received: number,
 ): number {
-  if (line.quantity === 0) return 0; // Canceled: nothing still to arrive, and the share divides by quantity.
-  return cumulativeShareCents(line.amount_cents, line.quantity, line.quantity_received, line.quantity);
+  if (received >= line.quantity) return 0; // Nothing still to arrive; an over-receipt prices nothing either.
+  return cumulativeShareCents(line.amount_cents, line.quantity, received, line.quantity);
+}
+
+/** One buy line as {@link allocateLandedCostCents} weighs it: the line and its row's received count. */
+export interface LandedCostTarget {
+  line: Pick<PurchaseSaleItem, "amount_cents" | "quantity">;
+  received: number;
 }
 
 /**
@@ -221,32 +234,50 @@ export function landedCostWeightCents(
  */
 export function allocateLandedCostCents(
   amountCents: number,
-  lines: readonly Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "quantity_received">[],
+  lines: readonly LandedCostTarget[],
 ): number[] {
-  return apportionCents(BigInt(amountCents), lines.map((l) => BigInt(landedCostWeightCents(l)))).map(Number);
+  return apportionCents(BigInt(amountCents), lines.map((t) => BigInt(landedCostWeightCents(t.line, t.received))))
+    .map(Number);
 }
 
 /**
- * **What a close leaves a line holding** (one-document-model Phase 5). A close is
- * a quantity edit: a buy or subrent line drops to what was received, a flat
- * charge to what was billed (never above what was ordered), and a line left with
- * nothing is canceled at quantity 0. A TIME charge is canceled at its quantity,
- * because its bills metered that quantity and a carrier line simply stops.
+ * What a close does to one line ({@link purchaseLineCloseOutcome}):
  *
- * Only the two facts both sides need live here; restating the money is the
- * writer's, through the one payable pricer.
+ * - `lower` — its `quantity` drops to `quantity` (≥ 1), money restated;
+ * - `remove` — nothing is left, so the line goes, as an order line does
+ *   (ruling 47). Its inbound booking is KEPT while it holds custody, at
+ *   `quantity_ordered: 0`, and deleted while it is only a plan;
+ * - `end_window` — a TIME charge keeps its quantity and its pair's charge
+ *   window ends at the close (ruling 63): its bills metered the time, and a
+ *   carrier line simply stops, as an order ends a hire early by shortening
+ *   its pair.
  */
-export function purchaseLineCloseOutcome(item: PurchaseItem): { quantity: number; status: PurchaseLineStatusType } {
+export type PurchaseLineCloseOutcome =
+  | { kind: "lower"; quantity: number }
+  | { kind: "remove" }
+  | { kind: "end_window" };
+
+/**
+ * **What a close leaves a line holding** (one-document-model Phase 5, ruling 47).
+ * A close is a quantity edit: a buy or subrent line drops to what its row has
+ * received (`custody`, from `custodyBySourceItem`), a flat charge to what was
+ * billed (never above what was ordered), and a line left with nothing is
+ * removed. A TIME charge ends its pair's window instead (ruling 63).
+ *
+ * Only the facts both sides need live here; restating the money, keeping the
+ * booking and moving the window are the writer's.
+ */
+export function purchaseLineCloseOutcome(item: PurchaseItem, custody: PurchaseLineCustody): PurchaseLineCloseOutcome {
+  const to = (quantity: number): PurchaseLineCloseOutcome =>
+    quantity === 0 ? { kind: "remove" } : { kind: "lower", quantity };
   switch (item.type) {
     case "sale":
     case "rental":
-      return { quantity: item.quantity_received, status: item.quantity_received === 0 ? "canceled" : "open" };
+      return to(Math.min(item.quantity, custody.received));
     case "service":
-    case "replacement": {
-      if (purchaseItemBasis(item) === "time") return { quantity: item.quantity, status: "canceled" };
-      const quantity = Math.min(item.quantity, item.quantity_billed ?? 0);
-      return { quantity, status: quantity === 0 ? "canceled" : "open" };
-    }
+    case "replacement":
+      if (purchaseItemBasis(item) === "time") return { kind: "end_window" };
+      return to(Math.min(item.quantity, item.quantity_billed ?? 0));
     default: {
       const unreachable: never = item;
       throw new Error(`purchaseLineCloseOutcome: unknown item ${JSON.stringify(unreachable)}`);
@@ -254,9 +285,12 @@ export function purchaseLineCloseOutcome(item: PurchaseItem): { quantity: number
   }
 }
 
-/** Units of a buy or subrent item still to be received: `quantity − received`. */
-export function remainingToReceive(item: ReceivableItem): number {
-  return item.quantity - item.quantity_received;
+/** Units of a buy or subrent line still to be received: `quantity − received`, from its row's custody. */
+export function remainingToReceive(
+  item: Pick<PurchaseSaleItem, "quantity">,
+  custody: Pick<PurchaseLineCustody, "received">,
+): number {
+  return item.quantity - custody.received;
 }
 
 /**
@@ -311,12 +345,12 @@ export function remainingToBill(
 }
 
 /**
- * Units of a SUBRENT item still to go back to the supplier: `received − returned`.
- * Bounded by what came in, not by what was ordered — an unreceived unit owes no
- * return.
+ * Units of a SUBRENT line still to go back to the supplier: `received −
+ * returned`, from its row's custody. Bounded by what came in, not by what was
+ * ordered — an unreceived unit owes no return.
  */
-export function remainingToReturn(item: Pick<PurchaseRentalItem, "quantity_received" | "quantity_returned">): number {
-  return item.quantity_received - item.quantity_returned;
+export function remainingToReturn(custody: PurchaseLineCustody): number {
+  return custody.received - custody.returned;
 }
 
 // ── Pack expansion (api-cloudrun#1081) ───────────────────────────

@@ -1042,7 +1042,7 @@
           "kind": "interface",
           "name": "ClosePurchaseInputType",
           "declaration": "interface ClosePurchaseInputType {\n  path_purchase_items?: string[][];\n  version: number;\n}",
-          "doc": "Input for a short close or a cancel.\n\nLowers each named buy or subrent item's `quantity` to what was received and a\nflat charge's to what was billed, restating its money; a line with nothing\nleft is canceled (`purchaseLineCloseOutcome`). A time charge is canceled and\nkeeps its quantity. `path_purchase_items` absent closes every such item; a cancel is a\nclose of a purchase with nothing received. Billed beyond what was received is\na diff entry the operator credits by hand; a close raises no credit."
+          "doc": "Input for a short close or a cancel.\n\nLowers each named buy or subrent item's `quantity` to what was received and a\nflat charge's to what was billed, restating its money; a line with nothing\nleft is REMOVED, its inbound booking kept while it holds custody\n(`purchaseLineCloseOutcome`, ruling 47). A time charge keeps its quantity and\nits pair's charge window ends (ruling 63). `path_purchase_items` absent closes\nevery such item; a cancel is a close of a purchase with nothing received. Billed beyond what was received is\na diff entry the operator credits by hand; a close raises no credit."
         },
         {
           "kind": "interface",
@@ -1515,8 +1515,8 @@
         {
           "kind": "interface",
           "name": "CreatePurchaseInputType",
-          "declaration": "interface CreatePurchaseInputType {\n  supplier: typeLiteral;\n  store: typeLiteral;\n  date: string;\n  reference?: string | null;\n  notes?: string | null;\n  items: PurchaseRowInputType[];\n  destinations: PurchaseDestinationInputType[];\n  uuid_session: string;\n}",
-          "doc": "Input for creating a purchase.\n\n`supplier` and `store` are uids only — the server resolves the names, as\n`CreateTransactionInput.supplier` does, so a snapshot never disagrees with\nits document. Items of any arm may mix (D3)."
+          "declaration": "interface CreatePurchaseInputType {\n  supplier: typeLiteral;\n  uid_store: string;\n  date: string;\n  reference?: string | null;\n  notes?: string | null;\n  items: PurchaseRowInputType[];\n  destinations: PurchaseDestinationInputType[];\n  uuid_session: string;\n}",
+          "doc": "Input for creating a purchase.\n\n`supplier` is a uid only — the server resolves the name, as\n`CreateTransactionInput.supplier` does, so a snapshot never disagrees with\nits document. `uid_store` is stored as sent. Items of any arm may mix (D3).\n\n⚠️ **`store` → `uid_store` (C8) has no safe order between the API and the\nmanager**: a required key on a stripping input. It ships under the 7a\nwindow's manager freeze."
         },
         {
           "kind": "variable",
@@ -2573,6 +2573,18 @@
           "name": "INBOUND_PLAN_KEYS",
           "declaration": "const INBOUND_PLAN_KEYS: \"quoted\" | \"ordered\"[];",
           "doc": "The inbound PLAN keys: promised, nothing moved. Every other key is history."
+        },
+        {
+          "kind": "variable",
+          "name": "INBOUND_RECEIVED_KEYS",
+          "declaration": "const INBOUND_RECEIVED_KEYS: \"received\" | \"stocked\" | \"transit_outbound\" | \"sent_back\" | \"lost\" | \"damaged\"[];",
+          "doc": "The keys a unit sits in once it has been RECEIVED: every history key past\n`transit_inbound`. Their sum is what the retired purchase line bucket\n`quantity_received` counted (one-document-model C8, the C12 identity), read\noff a booking or off the net custody of the movements naming one row."
+        },
+        {
+          "kind": "variable",
+          "name": "INBOUND_RETURNED_KEYS",
+          "declaration": "const INBOUND_RETURNED_KEYS: \"sent_back\" | \"lost\" | \"damaged\"[];",
+          "doc": "The keys a unit sits in once it is NO LONGER OWED to the supplier: handed\nback, or settled lost or damaged. Their sum is what the retired subrent\nbucket `quantity_returned` counted (the C12 identity), a settled unit\nincluded (api-cloudrun#1360, D3). ⚠️ On a Buy `damaged` is a unit received\nbroken, which CFS owns; nothing reads this sum on a Buy."
         },
         {
           "kind": "variable",
@@ -4264,13 +4276,7 @@
           "kind": "variable",
           "name": "PURCHASE_ITEM_TYPES",
           "declaration": "const PURCHASE_ITEM_TYPES: readonly [\"sale\", \"rental\", \"service\", \"replacement\"];",
-          "doc": "The item arms — the SHARED line types (`SHARED_LINE_TYPES`,\n`schemas/side.ts`), labelled per side (owner, 2026-11-07): a payable `sale` is\na Buy, `rental` a Subrent, `service` a Charge, and `replacement` a supplier\nbilling CFS for a unit lost in CFS's hands. Until 2026-11 they were stored as\n`buy` / `subrent` / `charge`. `sale` is FIRST so `getInitialValues` seeds a buy.\n\n⚠️ **On this side a line's type is NOT its product's type** — a fleet buy is\na `sale` line naming a RENTAL product (posting to 1999). Never derive a\nproduct type, stock method or asset account from it.\n\n🔴 **Closed, and read through exhaustive switches.** Every reader that\nbranches on an item's arm switches over this union with a `never` default\n(`purchaseItemSupplies`, `purchaseItemCanceled`, …), so a new member is a\ncompile error at every one of them rather than a silent fall-through.\n\nExplicit tuple type rather than `as const` alone: core#43 is JSR's npm\n`.d.ts` emit truncating an inferred tuple."
-        },
-        {
-          "kind": "variable",
-          "name": "PURCHASE_LINE_STATUSES",
-          "declaration": "const PURCHASE_LINE_STATUSES: \"open\" | \"canceled\"[];",
-          "doc": "Whether a close has stopped a purchase line."
+          "doc": "The item arms — the SHARED line types (`SHARED_LINE_TYPES`,\n`schemas/side.ts`), labelled per side (owner, 2026-11-07): a payable `sale` is\na Buy, `rental` a Subrent, `service` a Charge, and `replacement` a supplier\nbilling CFS for a unit lost in CFS's hands. Until 2026-11 they were stored as\n`buy` / `subrent` / `charge`. `sale` is FIRST so `getInitialValues` seeds a buy.\n\n⚠️ **On this side a line's type is NOT its product's type** — a fleet buy is\na `sale` line naming a RENTAL product (posting to 1999). Never derive a\nproduct type, stock method or asset account from it.\n\n🔴 **Closed, and read through exhaustive switches.** Every reader that\nbranches on an item's arm switches over this union with a `never` default\n(`purchaseItemSupplies`, `purchaseItemCommittedCents`, …), so a new member is a\ncompile error at every one of them rather than a silent fall-through.\n\nExplicit tuple type rather than `as const` alone: core#43 is JSR's npm\n`.d.ts` emit truncating an inferred tuple."
         },
         {
           "kind": "variable",
@@ -4869,7 +4875,7 @@
         {
           "kind": "interface",
           "name": "Purchase",
-          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  store: UidNameRefType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseRow[];\n  destinations: PurchaseDestination[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  bills: Array<typeLiteral>;\n  credits: Array<typeLiteral>;\n  query_by_credits: string[];\n  query_by_units?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  uid_store: string;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseRow[];\n  destinations: PurchaseDestination[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  bills: Array<typeLiteral>;\n  credits: Array<typeLiteral>;\n  query_by_credits: string[];\n  query_by_units?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A purchase order placed with a supplier."
         },
         {
@@ -5038,7 +5044,7 @@
           "kind": "typeAlias",
           "name": "PurchaseDestination",
           "declaration": "type PurchaseDestination = PairCoreType;",
-          "doc": "A purchase's destination pair — the side-neutral {@link PairCoreType}, with\nno customer flags, jurisdiction or exchange leg (one-document-model Phase 3).\n\n- `delivery` — where the goods come INTO CFS's hands: the store by default; a\n  customer's address on a drop ship; the supplier's when CFS collects.\n- `collection` — on a subrent, where they go BACK: the store by default, or\n  the supplier's when CFS returns them there. `null` when nothing goes back.\n- `dates` — the ORDER's shape (api-cloudrun#1469): possession runs\n  `delivery_start` → `collection_start`, `delivery_end` and `collection_end`\n  follow their starts (a real window later, api-cloudrun#943), `days_active`\n  is counted, and `charge_windows` defaults to one window over possession.\n  Supply reads `delivery_start` → `collection_end`, as a booking's hold does.\n  A standing hire states neither collection bound (`+∞` in supply); a pair\n  with no hire states no dates at all."
+          "doc": "A purchase's destination pair — the side-neutral {@link PairCoreType}, with\nno customer flags, jurisdiction or exchange leg (one-document-model Phase 3).\n\n- `delivery` — where the goods come INTO CFS's hands: the store by default; a\n  customer's address on a drop ship; the supplier's when CFS collects.\n- `collection` — on a subrent, where they go BACK: the store by default, or\n  the supplier's when CFS returns them there. `null` when nothing goes back.\n- `dates` — the ORDER's shape (api-cloudrun#1469): possession runs\n  `delivery_start` → `collection_start`, `delivery_end` and `collection_end`\n  follow their starts (a real window later, api-cloudrun#943), `days_active`\n  is counted, and `charge_windows` defaults to one window over possession.\n  Supply reads `delivery_start` → `collection_end`, as a booking's hold does.\n  A Buy's expected arrival IS its pair's `delivery_start` (C8, which retired\n  the line `expected_date`): two buys expected on different days sit under\n  two pairs.\n  A standing hire states neither collection bound (`+∞` in supply); a pair\n  with no hire states no dates at all."
         },
         {
           "kind": "variable",
@@ -5212,7 +5218,7 @@
           "kind": "interface",
           "name": "PurchaseItemDates",
           "declaration": "interface PurchaseItemDates {\n  start: string;\n  end: string | null;\n}",
-          "doc": "A line's span. On a subrent, the hire window: `start` is when the units\ncome; `end` is when they are due back to the SUPPLIER, not when the customer\nreturns them. On a charge, the span a span-metered formula reads (Verizon:\nfrom the line's start to its end, less suspensions).\n\n`end: null` is open-ended — `+∞` in availability as on bookings and\nout-of-service records (api-cloudrun#1392). The hire window doubles as the\nexpected delivery: a subrent item has no separate `expected_date`.\n\nNamed `dates` after out-of-service, bookings and cards. The object carries no\nlabel of its own; its children are labelled."
+          "doc": "A line's span. On a subrent, the hire window: `start` is when the units\ncome; `end` is when they are due back to the SUPPLIER, not when the customer\nreturns them. On a charge, the span a span-metered formula reads (Verizon:\nfrom the line's start to its end, less suspensions).\n\n`end: null` is open-ended — `+∞` in availability as on bookings and\nout-of-service records (api-cloudrun#1392). The hire window doubles as the\nexpected delivery, as a Buy's pair's `delivery_start` does (C8).\n\nNamed `dates` after out-of-service, bookings and cards. The object carries no\nlabel of its own; its children are labelled."
         },
         {
           "kind": "variable",
@@ -5254,7 +5260,7 @@
           "kind": "interface",
           "name": "PurchaseLandedCost",
           "declaration": "interface PurchaseLandedCost {\n  uid: string;\n  description: string;\n  amount_cents: number;\n  quantity: number;\n  received_at_entry: number;\n  uid_purchase_bill: string | null;\n}",
-          "doc": "One landed cost on a BUY item: freight, duty or a fee the operator attributes\nto the units still to arrive (api-cloudrun#1227). It is cost basis, so it\nreaches the ledger only through the receipts that price it.\n\n⚠️ **It lives on the PURCHASE ITEM, not on the bill.** 276 of 299 historic\nbills are linked card-purchase bills with no charge items, and the receipt\ntransaction reads the purchase, never its bills. The Xero side is unchanged:\nthe freight still posts through a bill's charge item to its own account.\n`uid_purchase_bill` is traceability only.\n\n**What it spreads over is fixed at entry.** `quantity` is the item's\noutstanding count when the entry was made, and `received_at_entry` is\n`quantity_received` at that moment. The k-th receipt prices the units received\nsince the entry, `clamp(received − received_at_entry, 0, quantity)`, with\n`cumulativeShareCents`, so the shares telescope to `amount_cents` exactly when\nevery outstanding unit arrives (`purchaseLineReceiptTargetCents`,\n`@cfs/core/utils/purchases`).\n\n**Append-only, the way the item amount is.** An entry no receipt has priced\n(`quantity_received ≤ received_at_entry`) is editable and removable. One that\na receipt has priced any part of is frozen. A short close still proceeds:\nthe unpriced remainder is DERIVED (`strandedLandedCents`), never stored. The\npost-receipt re-base waits on depreciation (api-cloudrun#1388)."
+          "doc": "One landed cost on a BUY item: freight, duty or a fee the operator attributes\nto the units still to arrive (api-cloudrun#1227). It is cost basis, so it\nreaches the ledger only through the receipts that price it.\n\n⚠️ **It lives on the PURCHASE ITEM, not on the bill.** 276 of 299 historic\nbills are linked card-purchase bills with no charge items, and the receipt\ntransaction reads the purchase, never its bills. The Xero side is unchanged:\nthe freight still posts through a bill's charge item to its own account.\n`uid_purchase_bill` is traceability only.\n\n**What it spreads over is fixed at entry.** `quantity` is the item's\noutstanding count when the entry was made, and `received_at_entry` is\nwhat the line had received at that moment (its row's custody, C8). The k-th receipt prices the units received\nsince the entry, `clamp(received − received_at_entry, 0, quantity)`, with\n`cumulativeShareCents`, so the shares telescope to `amount_cents` exactly when\nevery outstanding unit arrives (`purchaseLineReceiptTargetCents`,\n`@cfs/core/utils/purchases`).\n\n**Append-only, the way the item amount is.** An entry no receipt has priced\n(received `≤ received_at_entry`) is editable and removable. One that\na receipt has priced any part of is frozen. A short close still proceeds:\nthe unpriced remainder is DERIVED (`strandedLandedCents`), never stored. The\npost-receipt re-base waits on depreciation (api-cloudrun#1388)."
         },
         {
           "kind": "variable",
@@ -5306,12 +5312,6 @@
         },
         {
           "kind": "typeAlias",
-          "name": "PurchaseLineStatusType",
-          "declaration": "type PurchaseLineStatusType = indexedAccess;",
-          "doc": "One {@link PURCHASE_LINE_STATUSES} member."
-        },
-        {
-          "kind": "typeAlias",
           "name": "PurchasePostedItem",
           "declaration": "type PurchasePostedItem = PurchaseItem & typeLiteral;",
           "doc": "A purchase line that can be received, billed and posted: never a kit header."
@@ -5325,7 +5325,7 @@
         {
           "kind": "interface",
           "name": "PurchaseRentalItem",
-          "declaration": "interface PurchaseRentalItem {\n  ledger_account: COACodeType | null;\n  type: \"rental\";\n  uid_product: string;\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  quantity_received: number;\n  quantity_billed: number | null;\n  quantity_returned: number;\n  uid_orders: string[];\n  uid_units: string[];\n}",
+          "declaration": "interface PurchaseRentalItem {\n  ledger_account: COACodeType | null;\n  type: \"rental\";\n  uid_product: string;\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  quantity_billed: number | null;\n  uid_orders: string[];\n  uid_units: string[];\n}",
           "doc": "A RENTAL (Subrent) item — `quantity` units borrowed for a hire window and given back. Flat or time."
         },
         {
@@ -5385,13 +5385,13 @@
         {
           "kind": "interface",
           "name": "PurchaseSaleItem",
-          "declaration": "interface PurchaseSaleItem {\n  type: \"sale\";\n  ledger_account: COACodeType | null;\n  uid_product: string;\n  amount_cents: number;\n  price: PurchaseLinePrice;\n  expected_date: string | null;\n  quantity_received: number;\n  quantity_billed: number;\n  landed_costs: PurchaseLandedCost[];\n}",
+          "declaration": "interface PurchaseSaleItem {\n  type: \"sale\";\n  ledger_account: COACodeType | null;\n  uid_product: string;\n  amount_cents: number;\n  price: PurchaseLinePrice;\n  quantity_billed: number;\n  landed_costs: PurchaseLandedCost[];\n}",
           "doc": "A SALE (Buy) item — ownership of `quantity` units of one product. Always flat."
         },
         {
           "kind": "interface",
           "name": "PurchaseSaleItemInputType",
-          "declaration": "interface PurchaseSaleItemInputType {\n  type: \"sale\";\n  uid_product: string;\n  quantity: number;\n  amount_cents: number;\n  ledger_account?: COACodeType | null;\n  expected_date?: string | null;\n  landed_costs?: PurchaseLandedCostInputType[];\n}",
+          "declaration": "interface PurchaseSaleItemInputType {\n  type: \"sale\";\n  uid_product: string;\n  quantity: number;\n  amount_cents: number;\n  ledger_account?: COACodeType | null;\n  landed_costs?: PurchaseLandedCostInputType[];\n}",
           "doc": "A sale (Buy) item as an operator orders it — the buckets are the server's."
         },
         {
@@ -5734,7 +5734,7 @@
           "kind": "interface",
           "name": "ReturnPurchaseInputType",
           "declaration": "interface ReturnPurchaseInputType {\n  date: string;\n  reference?: string;\n  lines: ReturnPurchaseLineInputType[];\n  uuid_session: string;\n  version: number;\n}",
-          "doc": "Input for returning subrented units to the supplier\n(`POST /purchases/{uid}/returns`) — the mirror of {@link ReceivePurchaseInput}.\n\nEach line becomes ONE `subrent_out` movement naming the purchase in\n`sources[]`, in one transaction with the `quantity_returned` co-write. There\nis no cost: a returned unit was never owned."
+          "doc": "Input for returning subrented units to the supplier\n(`POST /purchases/{uid}/returns`) — the mirror of {@link ReceivePurchaseInput}.\n\nEach line becomes ONE `subrent_out` movement naming the purchase in\n`sources[]`, in one transaction with the inbound booking's `stocked →\nsent_back` step. There is no cost: a returned unit was never owned."
         },
         {
           "kind": "variable",
@@ -5770,7 +5770,7 @@
           "kind": "interface",
           "name": "ReversePurchaseReceiptInputType",
           "declaration": "interface ReversePurchaseReceiptInputType {\n  uuid_session: string;\n  reference?: string;\n  version: number;\n}",
-          "doc": "Input for reversing one receipt (`POST /purchases/{uid}/receipts/{movementUid}/reverse`).\n\nA standalone reversal of a receipt is refused; this lever reverses it AND\ndecrements `quantity_received` in one transaction. It posts nothing to Xero —\na receipt never did."
+          "doc": "Input for reversing one receipt (`POST /purchases/{uid}/receipts/{movementUid}/reverse`).\n\nA standalone reversal of a receipt is refused; this lever reverses it AND\nmoves the line's inbound booking back in one transaction (C8: the received\ncount is derived from that custody, never stored on the line). It posts nothing to Xero —\na receipt never did."
         },
         {
           "kind": "variable",
@@ -5782,7 +5782,7 @@
           "kind": "interface",
           "name": "ReversePurchaseReturnInputType",
           "declaration": "interface ReversePurchaseReturnInputType {\n  uuid_session: string;\n  reference?: string;\n  version: number;\n}",
-          "doc": "Input for reversing one return (`POST /purchases/{uid}/returns/{movementUid}/reverse`)\n— the mirror of {@link ReversePurchaseReceiptInput}: it reverses the\n`subrent_out` AND decrements `quantity_returned` in one transaction."
+          "doc": "Input for reversing one return (`POST /purchases/{uid}/returns/{movementUid}/reverse`)\n— the mirror of {@link ReversePurchaseReceiptInput}: it reverses the\n`subrent_out` AND moves the inbound booking back in one transaction."
         },
         {
           "kind": "variable",
@@ -5914,7 +5914,7 @@
           "kind": "variable",
           "name": "STOCK_SUPPLY_KINDS",
           "declaration": "const STOCK_SUPPLY_KINDS: \"subrent\" | \"inbound\"[];",
-          "doc": "What added time-bounded SUPPLY. Each kind is drawn as its own row by the\noperator panel.\n\n- `subrent` — a live subrent line, over its hire window.\n- `inbound` — the unreceived remainder of a live BUY line, from its\n  `expected_date` on (api-cloudrun#1228). Open-ended: an overdue delivery\n  keeps counting until it is received or short-closed (owner, 2026-10-27),\n  and the operator panel marks it overdue. The public hard gate does not\n  count it, so a late delivery cannot oversell a web customer — see\n  `computeStockAvailability`'s `supplyKinds`."
+          "doc": "What added time-bounded SUPPLY. Each kind is drawn as its own row by the\noperator panel.\n\n- `subrent` — a live subrent line, over its hire window.\n- `inbound` — the unreceived remainder of a live BUY line, from its pair's\n  `delivery_start` (its expected arrival, C8) on (api-cloudrun#1228). Open-ended: an overdue delivery\n  keeps counting until it is received or short-closed (owner, 2026-10-27),\n  and the operator panel marks it overdue. The public hard gate does not\n  count it, so a late delivery cannot oversell a web customer — see\n  `computeStockAvailability`'s `supplyKinds`."
         },
         {
           "kind": "variable",
@@ -6202,7 +6202,7 @@
           "kind": "interface",
           "name": "StockSupplyEntry",
           "declaration": "interface StockSupplyEntry {\n  start: string;\n  end: string | null;\n  quantity: number;\n  kind: StockSupplyKindType;\n}",
-          "doc": "One pre-reduced, anonymous SUPPLY interval: units that will be in CFS's\nhands over `[start, end]` and are not in `quantity_held` yet, or not as\nowned stock. A live subrent's line counts from the moment the purchase exists\n(owner, 2026-10-24), not from receipt. A buy line's inbound counts its\nunreceived remainder: a receipt moves units out of this entry and into\n`quantity_held`, so `held + inbound` does not change.\n\nAnonymous for the reason {@link StockUnavailableEntry} is: no purchase uid,\nno supplier. A SEPARATE array, never a third `STOCK_UNAVAILABLE_KINDS`\nmember, because the fold SUMS every unavailable entry overlapping a window\nand must take the MINIMUM of supply over it — the two are opposite\nreductions.\n\n`quantity` is what the line still supplies: `quantity − canceled − returned`\non a subrent, `quantity − canceled − received` on a buy.\n\n⚠️ **`end` is per KIND.** An `inbound` entry is `[expected_date, +∞)`, so its\n`end` is always `null` and the schema refuses a bound. A `subrent` entry\ncarries its hire's due-back date — or `null` on a STANDING subrent (a hire\nwith no end, `PurchaseItemDates.end: null`, api-cloudrun#1392 folded into\napi-cloudrun#1407 D8), read as +∞ like a sale booking's. The engine adds no\n`end + 1ms` candidate for a null end."
+          "doc": "One pre-reduced, anonymous SUPPLY interval: units that will be in CFS's\nhands over `[start, end]` and are not in `quantity_held` yet, or not as\nowned stock. A live subrent's line counts from the moment the purchase exists\n(owner, 2026-10-24), not from receipt. A buy line's inbound counts its\nunreceived remainder: a receipt moves units out of this entry and into\n`quantity_held`, so `held + inbound` does not change.\n\nAnonymous for the reason {@link StockUnavailableEntry} is: no purchase uid,\nno supplier. A SEPARATE array, never a third `STOCK_UNAVAILABLE_KINDS`\nmember, because the fold SUMS every unavailable entry overlapping a window\nand must take the MINIMUM of supply over it — the two are opposite\nreductions.\n\n`quantity` is what the line still supplies: `quantity − returned` on a\nsubrent, `quantity − received` on a buy, each its row's custody (C8).\n\n⚠️ **`end` is per KIND.** An `inbound` entry is `[delivery_start, +∞)`, so its\n`end` is always `null` and the schema refuses a bound. A `subrent` entry\ncarries its hire's due-back date — or `null` on a STANDING subrent (a hire\nwith no end, `PurchaseItemDates.end: null`, api-cloudrun#1392 folded into\napi-cloudrun#1407 D8), read as +∞ like a sale booking's. The engine adds no\n`end + 1ms` candidate for a null end."
         },
         {
           "kind": "variable",
@@ -8705,14 +8705,6 @@
         },
         {
           "kind": "function",
-          "name": "purchaseItemCanceled",
-          "signature": "purchaseItemCanceled(item: PurchaseItem): boolean",
-          "doc": "Was this item canceled in full — nothing will come and nothing is billed?",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
           "name": "purchaseItemCommittedCents",
           "signature": "purchaseItemCommittedCents(item: PurchaseItem): number",
           "doc": "The amount an item COMMITS up front — the term of the purchase's\n`total_cents` (owner, 2026-10-30): a flat line's net amount, and 0 for a time\nline, whose cost is decided as it accrues.",
@@ -10374,6 +10366,18 @@
           "name": "INBOUND_PLAN_KEYS",
           "declaration": "const INBOUND_PLAN_KEYS: \"quoted\" | \"ordered\"[];",
           "doc": "The inbound PLAN keys: promised, nothing moved. Every other key is history."
+        },
+        {
+          "kind": "variable",
+          "name": "INBOUND_RECEIVED_KEYS",
+          "declaration": "const INBOUND_RECEIVED_KEYS: \"received\" | \"stocked\" | \"transit_outbound\" | \"sent_back\" | \"lost\" | \"damaged\"[];",
+          "doc": "The keys a unit sits in once it has been RECEIVED: every history key past\n`transit_inbound`. Their sum is what the retired purchase line bucket\n`quantity_received` counted (one-document-model C8, the C12 identity), read\noff a booking or off the net custody of the movements naming one row."
+        },
+        {
+          "kind": "variable",
+          "name": "INBOUND_RETURNED_KEYS",
+          "declaration": "const INBOUND_RETURNED_KEYS: \"sent_back\" | \"lost\" | \"damaged\"[];",
+          "doc": "The keys a unit sits in once it is NO LONGER OWED to the supplier: handed\nback, or settled lost or damaged. Their sum is what the retired subrent\nbucket `quantity_returned` counted (the C12 identity), a settled unit\nincluded (api-cloudrun#1360, D3). ⚠️ On a Buy `damaged` is a unit received\nbroken, which CFS owns; nothing reads this sum on a Buy."
         },
         {
           "kind": "variable",
@@ -13557,7 +13561,7 @@
     },
     {
       "entrypoint": "@cfs/core/schemas/purchase",
-      "moduleDoc": "Purchase document schema — Firestore collection: `purchases`\n\nWhat CFS ORDERED from a supplier: one ITEM per thing ordered, each with the\nquantity and the amount agreed. It moves nothing. api-cloudrun#1210 split a\n`purchase` movement, which used to be the order, the delivery, the bill and\n(through Xero) the debt all at once, into four facts with four homes:\n\n| fact     | home                                                   | moves                         |\n|----------|--------------------------------------------------------|-------------------------------|\n| ordered  | this document                                          | nothing                       |\n| received | `purchase` movements naming it in `sources[]`          | `quantity_held`, basis, units |\n| billed   | `purchase-bills` / `purchase-credits` naming it        | the Xero document             |\n| paid     | `settlements` rows against a bill                      | the bill's `totals`           |\n\nThe owner's real sequence is order → bill → delivery (days or weeks later,\npossibly partial) → payment, and before this document nothing could hold\n\"billed, not received\" — movement #3882 recorded three radios that had not\narrived. Design: api-cloudrun#1210.\n\n## The shape is the out-of-service record's, on purpose\n\n`schemas/out-of-service.ts` is the package's parent-with-movements shape and this\ncopies every part of it:\n\n- **Its receipts name it in `sources[]`** and it finds them through\n  `query_by_sources`. There is no `Movement.purchase` field and no back-list\n  of movement ids here — the HISTORY of a purchase is the journal.\n- **Co-written buckets** per item (`quantity_received`, `quantity_billed`,\n  the line `status`), each written in the same transaction as the receipt,\n  bill or close that moves it — the analogue of the record's `breakdown`.\n- **A derived status** in the record's vocabulary (`active | complete |\n  canceled`), custody-only (rulings 55, 56): read off the purchase's INBOUND\n  bookings by `derivePurchaseStatus` (`@cfs/core/utils/bookings-inbound`), and\n  written by the writer that finalizes them. It reads another collection, so\n  no document refine can check it, as none checks an order's.\n\n## Items take the invoice's shape (api-cloudrun#1407)\n\n`items[]` is discriminated on `type`, the house key for a stored line union\n(`OrderDocItem`, `InvoiceDocItem`), and the ARM is per item — there is no\ndocument-level `kind`, so one purchase may mix arms:\n\n| `type` (label) | what CFS gets | custody | supply | priced |\n|---|---|---|---|---|\n| `sale` (Buy) | ownership | receipts raise `quantity_held` and basis | `inbound` until received | flat |\n| `rental` (Subrent) | units for a hire window | `subrent_in` / `subrent_out`, never owned | `subrent` over `dates` | flat or time |\n| `service` (Charge) | a service with no custody — a carrier line on an owned device, freight, a fee | none | none | flat or time |\n| `replacement` | the supplier billing CFS for its unit lost in CFS's hands | none | none | flat or time |\n\nThe types are the receivable side's, labelled per side (`SIDE_CONTRACTS`,\n`schemas/side.ts`; stored as `buy` / `subrent` / `charge` until the\none-document-model Phase 1 migration). (`usage` and `direct` retired into\n`charge`, and the nested `SubrentBilling` union into the price rule below —\npurchases-as-documents Phase 2.)\n\nEach item carries its own **row identity** (`uid`, and `path` = `[uid]`\nuntil a divider type exists — the writer is its one author), so one product\nmay sit on two items: a buy plus a re-order, or two hire windows. Bills and\ncredits name an item by `path` (`path_purchase_item`), the way an invoice line\nnames its order line.\n\nEach item also carries its own **posting** — `ledger_account` and\n`uid_tracking_category` (`LedgerPostingCore`), stamped at write rather than\nworked out at push. The account is constrained per type by\n{@link payablePostingIssues}: a sale posts to an inventory asset account\n(`COA_ASSET_CODES`, or a temporary de minimis expense account), a rental to a\nDirect Costs account (`COA_COST_CODES`), a service or replacement to any\naccount. Both are `propagate: true`, so a bill item follows its purchase\nitem's posting until an operator changes it there.\n\n## Money — flat lines state a total, time lines carry rates\n\nEvery item snapshots the formula it is priced by\n(`price.price_formula = { uid, name, basis }`, see {@link PurchaseLinePrice}):\n\n- **flat** — `amount_cents` is what the whole item costs, NET of any supplier\n  discount, integer cents, and `price.rates` is empty. The k-th receipt or\n  bill against an item is priced by `cumulativeShareCents`\n  (`@cfs/core/utils/purchases`), which rounds the CUMULATIVE share once, so the\n  partials sum to `amount_cents` exactly with no remainder rule. There is no\n  stored per-unit rate: measured on prod, most buys cost a total that does\n  not divide by their quantity, and no reader needs one (`perUnitCostAt4dp`\n  derives the display rate).\n- **time** — commits nothing on the purchase (`amount_cents` and\n  `quantity_billed` null, money zero); each bill meters it from its\n  destination pair's charge windows as an order line is metered, and bills in\n  parts by COUNTS (`remainingTimeCounts`, one-document-model Phase 3).\n\nEither way the line's `price` carries the money `priceDocument` computes —\nsee {@link PurchaseLinePrice}.\n\nA per-line REFINE ({@link purchaseLineMoneyIssues}) rather than union arms,\nbecause `basis` cuts across all three types; arms would split each in two.\nIt also makes `quantity_billed` null exactly on time lines: billed is a\nco-written bucket only on flat lines, and a time line resolves on custody\n(Q7). Over-billing is never refused (D5) — the purchase↔bill diff flags it.\n\n`total_cents` is the COMMITTED amount (owner, 2026-10-30): Σ of the flat\nlines' amounts. A time line adds 0; what was billed against it is its bills'\ntotals.\n\nNo tax is CHARGED on a purchase (owner, 2026-10-05): stock bought for sale or\nrent is bought resale-exempt and the tax is collected from the end user. The\nline still carries a tax class and `taxes: []` — exemption, not absence (see\n{@link PurchaseLinePrice}).\n\nThe document stays one `z.strictObject` with a `superRefine` rather than a\nroot `discriminatedUnion`: no registered document schema has one, and the\ncolumn walker, `getInitialValues`, `getTestDoc` and the stored-defaults walk\nall assume a root object.",
+      "moduleDoc": "Purchase document schema — Firestore collection: `purchases`\n\nWhat CFS ORDERED from a supplier: one ITEM per thing ordered, each with the\nquantity and the amount agreed. It moves nothing. api-cloudrun#1210 split a\n`purchase` movement, which used to be the order, the delivery, the bill and\n(through Xero) the debt all at once, into four facts with four homes:\n\n| fact     | home                                                   | moves                         |\n|----------|--------------------------------------------------------|-------------------------------|\n| ordered  | this document                                          | nothing                       |\n| received | `purchase` movements naming it in `sources[]`          | `quantity_held`, basis, units |\n| billed   | `purchase-bills` / `purchase-credits` naming it        | the Xero document             |\n| paid     | `settlements` rows against a bill                      | the bill's `totals`           |\n\nThe owner's real sequence is order → bill → delivery (days or weeks later,\npossibly partial) → payment, and before this document nothing could hold\n\"billed, not received\" — movement #3882 recorded three radios that had not\narrived. Design: api-cloudrun#1210.\n\n## The shape is the out-of-service record's, on purpose\n\n`schemas/out-of-service.ts` is the package's parent-with-movements shape and this\ncopies every part of it:\n\n- **Its receipts name it in `sources[]`** and it finds them through\n  `query_by_sources`. There is no `Movement.purchase` field and no back-list\n  of movement ids here — the HISTORY of a purchase is the journal.\n- **Custody lives on the inbound bookings, not here** (one-document-model\n  C8): what a line has received and returned is DERIVED, per grain from its\n  inbound booking and per row from the movements naming it\n  (`custodyBySourceItem`, `@cfs/core/utils/bookings-inbound`). The one\n  co-written bucket left is `quantity_billed`, until 6e-0b2 (ruling 42).\n- **A line closed to 0 is removed**, as an order line is (ruling 47); there\n  is no line status.\n- **A derived status** in the record's vocabulary (`active | complete |\n  canceled`), custody-only (rulings 55, 56): read off the purchase's INBOUND\n  bookings by `derivePurchaseStatus` (`@cfs/core/utils/bookings-inbound`), and\n  written by the writer that finalizes them. It reads another collection, so\n  no document refine can check it, as none checks an order's.\n\n## Items take the invoice's shape (api-cloudrun#1407)\n\n`items[]` is discriminated on `type`, the house key for a stored line union\n(`OrderDocItem`, `InvoiceDocItem`), and the ARM is per item — there is no\ndocument-level `kind`, so one purchase may mix arms:\n\n| `type` (label) | what CFS gets | custody | supply | priced |\n|---|---|---|---|---|\n| `sale` (Buy) | ownership | receipts raise `quantity_held` and basis | `inbound` until received | flat |\n| `rental` (Subrent) | units for a hire window | `subrent_in` / `subrent_out`, never owned | `subrent` over `dates` | flat or time |\n| `service` (Charge) | a service with no custody — a carrier line on an owned device, freight, a fee | none | none | flat or time |\n| `replacement` | the supplier billing CFS for its unit lost in CFS's hands | none | none | flat or time |\n\nThe types are the receivable side's, labelled per side (`SIDE_CONTRACTS`,\n`schemas/side.ts`; stored as `buy` / `subrent` / `charge` until the\none-document-model Phase 1 migration). (`usage` and `direct` retired into\n`charge`, and the nested `SubrentBilling` union into the price rule below —\npurchases-as-documents Phase 2.)\n\nEach item carries its own **row identity** (`uid`, and `path` = `[uid]`\nuntil a divider type exists — the writer is its one author), so one product\nmay sit on two items: a buy plus a re-order, or two hire windows. Bills and\ncredits name an item by `path` (`path_purchase_item`), the way an invoice line\nnames its order line.\n\nEach item also carries its own **posting** — `ledger_account` and\n`uid_tracking_category` (`LedgerPostingCore`), stamped at write rather than\nworked out at push. The account is constrained per type by\n{@link payablePostingIssues}: a sale posts to an inventory asset account\n(`COA_ASSET_CODES`, or a temporary de minimis expense account), a rental to a\nDirect Costs account (`COA_COST_CODES`), a service or replacement to any\naccount. Both are `propagate: true`, so a bill item follows its purchase\nitem's posting until an operator changes it there.\n\n## Money — flat lines state a total, time lines carry rates\n\nEvery item snapshots the formula it is priced by\n(`price.price_formula = { uid, name, basis }`, see {@link PurchaseLinePrice}):\n\n- **flat** — `amount_cents` is what the whole item costs, NET of any supplier\n  discount, integer cents, and `price.rates` is empty. The k-th receipt or\n  bill against an item is priced by `cumulativeShareCents`\n  (`@cfs/core/utils/purchases`), which rounds the CUMULATIVE share once, so the\n  partials sum to `amount_cents` exactly with no remainder rule. There is no\n  stored per-unit rate: measured on prod, most buys cost a total that does\n  not divide by their quantity, and no reader needs one (`perUnitCostAt4dp`\n  derives the display rate).\n- **time** — commits nothing on the purchase (`amount_cents` and\n  `quantity_billed` null, money zero); each bill meters it from its\n  destination pair's charge windows as an order line is metered, and bills in\n  parts by COUNTS (`remainingTimeCounts`, one-document-model Phase 3).\n\nEither way the line's `price` carries the money `priceDocument` computes —\nsee {@link PurchaseLinePrice}.\n\nA per-line REFINE ({@link purchaseLineMoneyIssues}) rather than union arms,\nbecause `basis` cuts across all three types; arms would split each in two.\nIt also makes `quantity_billed` null exactly on time lines: billed is a\nco-written bucket only on flat lines, and a time line resolves on custody\n(Q7). Over-billing is never refused (D5) — the purchase↔bill diff flags it.\n\n`total_cents` is the COMMITTED amount (owner, 2026-10-30): Σ of the flat\nlines' amounts. A time line adds 0; what was billed against it is its bills'\ntotals.\n\nNo tax is CHARGED on a purchase (owner, 2026-10-05): stock bought for sale or\nrent is bought resale-exempt and the tax is collected from the end user. The\nline still carries a tax class and `taxes: []` — exemption, not absence (see\n{@link PurchaseLinePrice}).\n\nThe document stays one `z.strictObject` with a `superRefine` rather than a\nroot `discriminatedUnion`: no registered document schema has one, and the\ncolumn walker, `getInitialValues`, `getTestDoc` and the stored-defaults walk\nall assume a root object.",
       "symbols": [
         {
           "kind": "variable",
@@ -13569,7 +13573,7 @@
           "kind": "interface",
           "name": "ClosePurchaseInputType",
           "declaration": "interface ClosePurchaseInputType {\n  path_purchase_items?: string[][];\n  version: number;\n}",
-          "doc": "Input for a short close or a cancel.\n\nLowers each named buy or subrent item's `quantity` to what was received and a\nflat charge's to what was billed, restating its money; a line with nothing\nleft is canceled (`purchaseLineCloseOutcome`). A time charge is canceled and\nkeeps its quantity. `path_purchase_items` absent closes every such item; a cancel is a\nclose of a purchase with nothing received. Billed beyond what was received is\na diff entry the operator credits by hand; a close raises no credit."
+          "doc": "Input for a short close or a cancel.\n\nLowers each named buy or subrent item's `quantity` to what was received and a\nflat charge's to what was billed, restating its money; a line with nothing\nleft is REMOVED, its inbound booking kept while it holds custody\n(`purchaseLineCloseOutcome`, ruling 47). A time charge keeps its quantity and\nits pair's charge window ends (ruling 63). `path_purchase_items` absent closes\nevery such item; a cancel is a close of a purchase with nothing received. Billed beyond what was received is\na diff entry the operator credits by hand; a close raises no credit."
         },
         {
           "kind": "variable",
@@ -13580,20 +13584,14 @@
         {
           "kind": "interface",
           "name": "CreatePurchaseInputType",
-          "declaration": "interface CreatePurchaseInputType {\n  supplier: typeLiteral;\n  store: typeLiteral;\n  date: string;\n  reference?: string | null;\n  notes?: string | null;\n  items: PurchaseRowInputType[];\n  destinations: PurchaseDestinationInputType[];\n  uuid_session: string;\n}",
-          "doc": "Input for creating a purchase.\n\n`supplier` and `store` are uids only — the server resolves the names, as\n`CreateTransactionInput.supplier` does, so a snapshot never disagrees with\nits document. Items of any arm may mix (D3)."
+          "declaration": "interface CreatePurchaseInputType {\n  supplier: typeLiteral;\n  uid_store: string;\n  date: string;\n  reference?: string | null;\n  notes?: string | null;\n  items: PurchaseRowInputType[];\n  destinations: PurchaseDestinationInputType[];\n  uuid_session: string;\n}",
+          "doc": "Input for creating a purchase.\n\n`supplier` is a uid only — the server resolves the name, as\n`CreateTransactionInput.supplier` does, so a snapshot never disagrees with\nits document. `uid_store` is stored as sent. Items of any arm may mix (D3).\n\n⚠️ **`store` → `uid_store` (C8) has no safe order between the API and the\nmanager**: a required key on a stripping input. It ships under the 7a\nwindow's manager freeze."
         },
         {
           "kind": "variable",
           "name": "PURCHASE_ITEM_TYPES",
           "declaration": "const PURCHASE_ITEM_TYPES: readonly [\"sale\", \"rental\", \"service\", \"replacement\"];",
-          "doc": "The item arms — the SHARED line types (`SHARED_LINE_TYPES`,\n`schemas/side.ts`), labelled per side (owner, 2026-11-07): a payable `sale` is\na Buy, `rental` a Subrent, `service` a Charge, and `replacement` a supplier\nbilling CFS for a unit lost in CFS's hands. Until 2026-11 they were stored as\n`buy` / `subrent` / `charge`. `sale` is FIRST so `getInitialValues` seeds a buy.\n\n⚠️ **On this side a line's type is NOT its product's type** — a fleet buy is\na `sale` line naming a RENTAL product (posting to 1999). Never derive a\nproduct type, stock method or asset account from it.\n\n🔴 **Closed, and read through exhaustive switches.** Every reader that\nbranches on an item's arm switches over this union with a `never` default\n(`purchaseItemSupplies`, `purchaseItemCanceled`, …), so a new member is a\ncompile error at every one of them rather than a silent fall-through.\n\nExplicit tuple type rather than `as const` alone: core#43 is JSR's npm\n`.d.ts` emit truncating an inferred tuple."
-        },
-        {
-          "kind": "variable",
-          "name": "PURCHASE_LINE_STATUSES",
-          "declaration": "const PURCHASE_LINE_STATUSES: \"open\" | \"canceled\"[];",
-          "doc": "Whether a close has stopped a purchase line."
+          "doc": "The item arms — the SHARED line types (`SHARED_LINE_TYPES`,\n`schemas/side.ts`), labelled per side (owner, 2026-11-07): a payable `sale` is\na Buy, `rental` a Subrent, `service` a Charge, and `replacement` a supplier\nbilling CFS for a unit lost in CFS's hands. Until 2026-11 they were stored as\n`buy` / `subrent` / `charge`. `sale` is FIRST so `getInitialValues` seeds a buy.\n\n⚠️ **On this side a line's type is NOT its product's type** — a fleet buy is\na `sale` line naming a RENTAL product (posting to 1999). Never derive a\nproduct type, stock method or asset account from it.\n\n🔴 **Closed, and read through exhaustive switches.** Every reader that\nbranches on an item's arm switches over this union with a `never` default\n(`purchaseItemSupplies`, `purchaseItemCommittedCents`, …), so a new member is a\ncompile error at every one of them rather than a silent fall-through.\n\nExplicit tuple type rather than `as const` alone: core#43 is JSR's npm\n`.d.ts` emit truncating an inferred tuple."
         },
         {
           "kind": "variable",
@@ -13634,14 +13632,14 @@
         {
           "kind": "interface",
           "name": "Purchase",
-          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  store: UidNameRefType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseRow[];\n  destinations: PurchaseDestination[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  bills: Array<typeLiteral>;\n  credits: Array<typeLiteral>;\n  query_by_credits: string[];\n  query_by_units?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  uid_store: string;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseRow[];\n  destinations: PurchaseDestination[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  bills: Array<typeLiteral>;\n  credits: Array<typeLiteral>;\n  query_by_credits: string[];\n  query_by_units?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A purchase order placed with a supplier."
         },
         {
           "kind": "typeAlias",
           "name": "PurchaseDestination",
           "declaration": "type PurchaseDestination = PairCoreType;",
-          "doc": "A purchase's destination pair — the side-neutral {@link PairCoreType}, with\nno customer flags, jurisdiction or exchange leg (one-document-model Phase 3).\n\n- `delivery` — where the goods come INTO CFS's hands: the store by default; a\n  customer's address on a drop ship; the supplier's when CFS collects.\n- `collection` — on a subrent, where they go BACK: the store by default, or\n  the supplier's when CFS returns them there. `null` when nothing goes back.\n- `dates` — the ORDER's shape (api-cloudrun#1469): possession runs\n  `delivery_start` → `collection_start`, `delivery_end` and `collection_end`\n  follow their starts (a real window later, api-cloudrun#943), `days_active`\n  is counted, and `charge_windows` defaults to one window over possession.\n  Supply reads `delivery_start` → `collection_end`, as a booking's hold does.\n  A standing hire states neither collection bound (`+∞` in supply); a pair\n  with no hire states no dates at all."
+          "doc": "A purchase's destination pair — the side-neutral {@link PairCoreType}, with\nno customer flags, jurisdiction or exchange leg (one-document-model Phase 3).\n\n- `delivery` — where the goods come INTO CFS's hands: the store by default; a\n  customer's address on a drop ship; the supplier's when CFS collects.\n- `collection` — on a subrent, where they go BACK: the store by default, or\n  the supplier's when CFS returns them there. `null` when nothing goes back.\n- `dates` — the ORDER's shape (api-cloudrun#1469): possession runs\n  `delivery_start` → `collection_start`, `delivery_end` and `collection_end`\n  follow their starts (a real window later, api-cloudrun#943), `days_active`\n  is counted, and `charge_windows` defaults to one window over possession.\n  Supply reads `delivery_start` → `collection_end`, as a booking's hold does.\n  A Buy's expected arrival IS its pair's `delivery_start` (C8, which retired\n  the line `expected_date`): two buys expected on different days sit under\n  two pairs.\n  A standing hire states neither collection bound (`+∞` in supply); a pair\n  with no hire states no dates at all."
         },
         {
           "kind": "variable",
@@ -13683,7 +13681,7 @@
           "kind": "interface",
           "name": "PurchaseItemDates",
           "declaration": "interface PurchaseItemDates {\n  start: string;\n  end: string | null;\n}",
-          "doc": "A line's span. On a subrent, the hire window: `start` is when the units\ncome; `end` is when they are due back to the SUPPLIER, not when the customer\nreturns them. On a charge, the span a span-metered formula reads (Verizon:\nfrom the line's start to its end, less suspensions).\n\n`end: null` is open-ended — `+∞` in availability as on bookings and\nout-of-service records (api-cloudrun#1392). The hire window doubles as the\nexpected delivery: a subrent item has no separate `expected_date`.\n\nNamed `dates` after out-of-service, bookings and cards. The object carries no\nlabel of its own; its children are labelled."
+          "doc": "A line's span. On a subrent, the hire window: `start` is when the units\ncome; `end` is when they are due back to the SUPPLIER, not when the customer\nreturns them. On a charge, the span a span-metered formula reads (Verizon:\nfrom the line's start to its end, less suspensions).\n\n`end: null` is open-ended — `+∞` in availability as on bookings and\nout-of-service records (api-cloudrun#1392). The hire window doubles as the\nexpected delivery, as a Buy's pair's `delivery_start` does (C8).\n\nNamed `dates` after out-of-service, bookings and cards. The object carries no\nlabel of its own; its children are labelled."
         },
         {
           "kind": "variable",
@@ -13725,7 +13723,7 @@
           "kind": "interface",
           "name": "PurchaseLandedCost",
           "declaration": "interface PurchaseLandedCost {\n  uid: string;\n  description: string;\n  amount_cents: number;\n  quantity: number;\n  received_at_entry: number;\n  uid_purchase_bill: string | null;\n}",
-          "doc": "One landed cost on a BUY item: freight, duty or a fee the operator attributes\nto the units still to arrive (api-cloudrun#1227). It is cost basis, so it\nreaches the ledger only through the receipts that price it.\n\n⚠️ **It lives on the PURCHASE ITEM, not on the bill.** 276 of 299 historic\nbills are linked card-purchase bills with no charge items, and the receipt\ntransaction reads the purchase, never its bills. The Xero side is unchanged:\nthe freight still posts through a bill's charge item to its own account.\n`uid_purchase_bill` is traceability only.\n\n**What it spreads over is fixed at entry.** `quantity` is the item's\noutstanding count when the entry was made, and `received_at_entry` is\n`quantity_received` at that moment. The k-th receipt prices the units received\nsince the entry, `clamp(received − received_at_entry, 0, quantity)`, with\n`cumulativeShareCents`, so the shares telescope to `amount_cents` exactly when\nevery outstanding unit arrives (`purchaseLineReceiptTargetCents`,\n`@cfs/core/utils/purchases`).\n\n**Append-only, the way the item amount is.** An entry no receipt has priced\n(`quantity_received ≤ received_at_entry`) is editable and removable. One that\na receipt has priced any part of is frozen. A short close still proceeds:\nthe unpriced remainder is DERIVED (`strandedLandedCents`), never stored. The\npost-receipt re-base waits on depreciation (api-cloudrun#1388)."
+          "doc": "One landed cost on a BUY item: freight, duty or a fee the operator attributes\nto the units still to arrive (api-cloudrun#1227). It is cost basis, so it\nreaches the ledger only through the receipts that price it.\n\n⚠️ **It lives on the PURCHASE ITEM, not on the bill.** 276 of 299 historic\nbills are linked card-purchase bills with no charge items, and the receipt\ntransaction reads the purchase, never its bills. The Xero side is unchanged:\nthe freight still posts through a bill's charge item to its own account.\n`uid_purchase_bill` is traceability only.\n\n**What it spreads over is fixed at entry.** `quantity` is the item's\noutstanding count when the entry was made, and `received_at_entry` is\nwhat the line had received at that moment (its row's custody, C8). The k-th receipt prices the units received\nsince the entry, `clamp(received − received_at_entry, 0, quantity)`, with\n`cumulativeShareCents`, so the shares telescope to `amount_cents` exactly when\nevery outstanding unit arrives (`purchaseLineReceiptTargetCents`,\n`@cfs/core/utils/purchases`).\n\n**Append-only, the way the item amount is.** An entry no receipt has priced\n(received `≤ received_at_entry`) is editable and removable. One that\na receipt has priced any part of is frozen. A short close still proceeds:\nthe unpriced remainder is DERIVED (`strandedLandedCents`), never stored. The\npost-receipt re-base waits on depreciation (api-cloudrun#1388)."
         },
         {
           "kind": "variable",
@@ -13777,12 +13775,6 @@
         },
         {
           "kind": "typeAlias",
-          "name": "PurchaseLineStatusType",
-          "declaration": "type PurchaseLineStatusType = indexedAccess;",
-          "doc": "One {@link PURCHASE_LINE_STATUSES} member."
-        },
-        {
-          "kind": "typeAlias",
           "name": "PurchasePostedItem",
           "declaration": "type PurchasePostedItem = PurchaseItem & typeLiteral;",
           "doc": "A purchase line that can be received, billed and posted: never a kit header."
@@ -13796,7 +13788,7 @@
         {
           "kind": "interface",
           "name": "PurchaseRentalItem",
-          "declaration": "interface PurchaseRentalItem {\n  ledger_account: COACodeType | null;\n  type: \"rental\";\n  uid_product: string;\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  quantity_received: number;\n  quantity_billed: number | null;\n  quantity_returned: number;\n  uid_orders: string[];\n  uid_units: string[];\n}",
+          "declaration": "interface PurchaseRentalItem {\n  ledger_account: COACodeType | null;\n  type: \"rental\";\n  uid_product: string;\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  quantity_billed: number | null;\n  uid_orders: string[];\n  uid_units: string[];\n}",
           "doc": "A RENTAL (Subrent) item — `quantity` units borrowed for a hire window and given back. Flat or time."
         },
         {
@@ -13856,13 +13848,13 @@
         {
           "kind": "interface",
           "name": "PurchaseSaleItem",
-          "declaration": "interface PurchaseSaleItem {\n  type: \"sale\";\n  ledger_account: COACodeType | null;\n  uid_product: string;\n  amount_cents: number;\n  price: PurchaseLinePrice;\n  expected_date: string | null;\n  quantity_received: number;\n  quantity_billed: number;\n  landed_costs: PurchaseLandedCost[];\n}",
+          "declaration": "interface PurchaseSaleItem {\n  type: \"sale\";\n  ledger_account: COACodeType | null;\n  uid_product: string;\n  amount_cents: number;\n  price: PurchaseLinePrice;\n  quantity_billed: number;\n  landed_costs: PurchaseLandedCost[];\n}",
           "doc": "A SALE (Buy) item — ownership of `quantity` units of one product. Always flat."
         },
         {
           "kind": "interface",
           "name": "PurchaseSaleItemInputType",
-          "declaration": "interface PurchaseSaleItemInputType {\n  type: \"sale\";\n  uid_product: string;\n  quantity: number;\n  amount_cents: number;\n  ledger_account?: COACodeType | null;\n  expected_date?: string | null;\n  landed_costs?: PurchaseLandedCostInputType[];\n}",
+          "declaration": "interface PurchaseSaleItemInputType {\n  type: \"sale\";\n  uid_product: string;\n  quantity: number;\n  amount_cents: number;\n  ledger_account?: COACodeType | null;\n  landed_costs?: PurchaseLandedCostInputType[];\n}",
           "doc": "A sale (Buy) item as an operator orders it — the buckets are the server's."
         },
         {
@@ -13947,7 +13939,7 @@
           "kind": "interface",
           "name": "ReturnPurchaseInputType",
           "declaration": "interface ReturnPurchaseInputType {\n  date: string;\n  reference?: string;\n  lines: ReturnPurchaseLineInputType[];\n  uuid_session: string;\n  version: number;\n}",
-          "doc": "Input for returning subrented units to the supplier\n(`POST /purchases/{uid}/returns`) — the mirror of {@link ReceivePurchaseInput}.\n\nEach line becomes ONE `subrent_out` movement naming the purchase in\n`sources[]`, in one transaction with the `quantity_returned` co-write. There\nis no cost: a returned unit was never owned."
+          "doc": "Input for returning subrented units to the supplier\n(`POST /purchases/{uid}/returns`) — the mirror of {@link ReceivePurchaseInput}.\n\nEach line becomes ONE `subrent_out` movement naming the purchase in\n`sources[]`, in one transaction with the inbound booking's `stocked →\nsent_back` step. There is no cost: a returned unit was never owned."
         },
         {
           "kind": "variable",
@@ -13971,7 +13963,7 @@
           "kind": "interface",
           "name": "ReversePurchaseReceiptInputType",
           "declaration": "interface ReversePurchaseReceiptInputType {\n  uuid_session: string;\n  reference?: string;\n  version: number;\n}",
-          "doc": "Input for reversing one receipt (`POST /purchases/{uid}/receipts/{movementUid}/reverse`).\n\nA standalone reversal of a receipt is refused; this lever reverses it AND\ndecrements `quantity_received` in one transaction. It posts nothing to Xero —\na receipt never did."
+          "doc": "Input for reversing one receipt (`POST /purchases/{uid}/receipts/{movementUid}/reverse`).\n\nA standalone reversal of a receipt is refused; this lever reverses it AND\nmoves the line's inbound booking back in one transaction (C8: the received\ncount is derived from that custody, never stored on the line). It posts nothing to Xero —\na receipt never did."
         },
         {
           "kind": "variable",
@@ -13983,7 +13975,7 @@
           "kind": "interface",
           "name": "ReversePurchaseReturnInputType",
           "declaration": "interface ReversePurchaseReturnInputType {\n  uuid_session: string;\n  reference?: string;\n  version: number;\n}",
-          "doc": "Input for reversing one return (`POST /purchases/{uid}/returns/{movementUid}/reverse`)\n— the mirror of {@link ReversePurchaseReceiptInput}: it reverses the\n`subrent_out` AND decrements `quantity_returned` in one transaction."
+          "doc": "Input for reversing one return (`POST /purchases/{uid}/returns/{movementUid}/reverse`)\n— the mirror of {@link ReversePurchaseReceiptInput}: it reverses the\n`subrent_out` AND moves the inbound booking back in one transaction."
         },
         {
           "kind": "variable",
@@ -14106,14 +14098,6 @@
           "name": "purchaseItemBasis",
           "signature": "purchaseItemBasis(item: typeLiteral): PriceFormulaBasis",
           "doc": "The basis of an item's formula. Every STORED item carries `price` (beta B);\nthe parameter stays loose for a client's draft line, which reads as flat\nuntil it names a formula.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
-          "name": "purchaseItemCanceled",
-          "signature": "purchaseItemCanceled(item: PurchaseItem): boolean",
-          "doc": "Was this item canceled in full — nothing will come and nothing is billed?",
           "paramTags": [],
           "returnsTag": null
         },
@@ -14887,7 +14871,7 @@
           "kind": "variable",
           "name": "STOCK_SUPPLY_KINDS",
           "declaration": "const STOCK_SUPPLY_KINDS: \"subrent\" | \"inbound\"[];",
-          "doc": "What added time-bounded SUPPLY. Each kind is drawn as its own row by the\noperator panel.\n\n- `subrent` — a live subrent line, over its hire window.\n- `inbound` — the unreceived remainder of a live BUY line, from its\n  `expected_date` on (api-cloudrun#1228). Open-ended: an overdue delivery\n  keeps counting until it is received or short-closed (owner, 2026-10-27),\n  and the operator panel marks it overdue. The public hard gate does not\n  count it, so a late delivery cannot oversell a web customer — see\n  `computeStockAvailability`'s `supplyKinds`."
+          "doc": "What added time-bounded SUPPLY. Each kind is drawn as its own row by the\noperator panel.\n\n- `subrent` — a live subrent line, over its hire window.\n- `inbound` — the unreceived remainder of a live BUY line, from its pair's\n  `delivery_start` (its expected arrival, C8) on (api-cloudrun#1228). Open-ended: an overdue delivery\n  keeps counting until it is received or short-closed (owner, 2026-10-27),\n  and the operator panel marks it overdue. The public hard gate does not\n  count it, so a late delivery cannot oversell a web customer — see\n  `computeStockAvailability`'s `supplyKinds`."
         },
         {
           "kind": "variable",
@@ -14923,7 +14907,7 @@
           "kind": "interface",
           "name": "StockSupplyEntry",
           "declaration": "interface StockSupplyEntry {\n  start: string;\n  end: string | null;\n  quantity: number;\n  kind: StockSupplyKindType;\n}",
-          "doc": "One pre-reduced, anonymous SUPPLY interval: units that will be in CFS's\nhands over `[start, end]` and are not in `quantity_held` yet, or not as\nowned stock. A live subrent's line counts from the moment the purchase exists\n(owner, 2026-10-24), not from receipt. A buy line's inbound counts its\nunreceived remainder: a receipt moves units out of this entry and into\n`quantity_held`, so `held + inbound` does not change.\n\nAnonymous for the reason {@link StockUnavailableEntry} is: no purchase uid,\nno supplier. A SEPARATE array, never a third `STOCK_UNAVAILABLE_KINDS`\nmember, because the fold SUMS every unavailable entry overlapping a window\nand must take the MINIMUM of supply over it — the two are opposite\nreductions.\n\n`quantity` is what the line still supplies: `quantity − canceled − returned`\non a subrent, `quantity − canceled − received` on a buy.\n\n⚠️ **`end` is per KIND.** An `inbound` entry is `[expected_date, +∞)`, so its\n`end` is always `null` and the schema refuses a bound. A `subrent` entry\ncarries its hire's due-back date — or `null` on a STANDING subrent (a hire\nwith no end, `PurchaseItemDates.end: null`, api-cloudrun#1392 folded into\napi-cloudrun#1407 D8), read as +∞ like a sale booking's. The engine adds no\n`end + 1ms` candidate for a null end."
+          "doc": "One pre-reduced, anonymous SUPPLY interval: units that will be in CFS's\nhands over `[start, end]` and are not in `quantity_held` yet, or not as\nowned stock. A live subrent's line counts from the moment the purchase exists\n(owner, 2026-10-24), not from receipt. A buy line's inbound counts its\nunreceived remainder: a receipt moves units out of this entry and into\n`quantity_held`, so `held + inbound` does not change.\n\nAnonymous for the reason {@link StockUnavailableEntry} is: no purchase uid,\nno supplier. A SEPARATE array, never a third `STOCK_UNAVAILABLE_KINDS`\nmember, because the fold SUMS every unavailable entry overlapping a window\nand must take the MINIMUM of supply over it — the two are opposite\nreductions.\n\n`quantity` is what the line still supplies: `quantity − returned` on a\nsubrent, `quantity − received` on a buy, each its row's custody (C8).\n\n⚠️ **`end` is per KIND.** An `inbound` entry is `[delivery_start, +∞)`, so its\n`end` is always `null` and the schema refuses a bound. A `subrent` entry\ncarries its hire's due-back date — or `null` on a STANDING subrent (a hire\nwith no end, `PurchaseItemDates.end: null`, api-cloudrun#1392 folded into\napi-cloudrun#1407 D8), read as +∞ like a sale booking's. The engine adds no\n`end + 1ms` candidate for a null end."
         },
         {
           "kind": "variable",
@@ -15930,7 +15914,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocument",
-          "declaration": "interface PurchaseDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  status: string;\n  supplier: typeLiteral;\n  store: typeLiteral;\n  reference?: string;\n  items?: Array<typeLiteral>;\n  bills?: Array<typeLiteral>;\n  credits?: Array<typeLiteral>;\n  total_cents?: number;\n  total_cents_str?: string;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  created_at?: number;\n  updated_at?: number;\n}",
+          "declaration": "interface PurchaseDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  status: string;\n  supplier: typeLiteral;\n  uid_store: string;\n  reference?: string;\n  items?: Array<typeLiteral>;\n  bills?: Array<typeLiteral>;\n  credits?: Array<typeLiteral>;\n  total_cents?: number;\n  total_cents_str?: string;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  created_at?: number;\n  updated_at?: number;\n}",
           "doc": "A purchase as indexed in Typesense (api-cloudrun#1220). `reference` is\noptional here and `string | null` on the stored document: the translate path\nomits a null rather than sending one."
         },
         {
@@ -16299,7 +16283,7 @@
           "kind": "variable",
           "name": "purchases",
           "declaration": "const purchases: TypesenseCollectionConfig;",
-          "doc": "Typesense collection config for purchases (api-cloudrun#1220).\n\nThe index behind manager's `/purchases` list: what CFS ORDERED from a\nsupplier. `number` is the `default_sorting_field` and is stored bare, as on\n`credit-notes` — a prefixed display label would turn the sort field into a\nstring.\n\n🔴 **`supplier.name` MUST stay `facet: false`.** manager's\n`getQueryByStringFields` builds `query_by` from string fields that are\n`!f.facet` and covered by a declared display column, so a faceted name drops\nout of `query_by` and every search returns zero rows with no error. The same\nline in `typesense/suppliers.ts` carries the full argument.\n\n`items.name` is indexed so \"which PO has product X\" is one query. `notes` is\ndeliberately NOT declared — free text no list column needs; add it when\nsomeone wants to search on it.\n\n⚠️ `reference` is `optional: true` because its Zod leaf is `.nullable()`:\nthe translate path omits a null rather than sending one, and a non-optional\ndeclaration over a nullable leaf is a permanent, invisible sync 400.\n\nv2 (subrent purchase orders) added a `kind` facet and\n`lines.quantity_returned`.\n\nv3 (api-cloudrun#1407, the invoice shape): `lines` → `items` and the document\n`kind` is retired. The buy/subrent split is now the `items.type` facet — the\ninvoice's `items.type`, nested rather than a top-level mirror, so there is no\nderived Typesense field to declare. Every `items.*` field is `optional: true`\nbecause the arms disagree: a direct item names no product, and only a subrent\nitem carries `quantity_returned`.\n\nv4 (one-document-model 6e-0a, ruling 32): the `bills[]` and `credits[]`\ndiscovery mirrors, `{ uid, number, status }` each, status faceted. Every field\nis `optional: true` through the expand, so a purchase stored before the\nbackfill still indexes."
+          "doc": "Typesense collection config for purchases (api-cloudrun#1220).\n\nThe index behind manager's `/purchases` list: what CFS ORDERED from a\nsupplier. `number` is the `default_sorting_field` and is stored bare, as on\n`credit-notes` — a prefixed display label would turn the sort field into a\nstring.\n\n🔴 **`supplier.name` MUST stay `facet: false`.** manager's\n`getQueryByStringFields` builds `query_by` from string fields that are\n`!f.facet` and covered by a declared display column, so a faceted name drops\nout of `query_by` and every search returns zero rows with no error. The same\nline in `typesense/suppliers.ts` carries the full argument.\n\n`items.name` is indexed so \"which PO has product X\" is one query. `notes` is\ndeliberately NOT declared — free text no list column needs; add it when\nsomeone wants to search on it.\n\n⚠️ `reference` is `optional: true` because its Zod leaf is `.nullable()`:\nthe translate path omits a null rather than sending one, and a non-optional\ndeclaration over a nullable leaf is a permanent, invisible sync 400.\n\nv2 (subrent purchase orders) added a `kind` facet and\n`lines.quantity_returned`.\n\nv3 (api-cloudrun#1407, the invoice shape): `lines` → `items` and the document\n`kind` is retired. The buy/subrent split is now the `items.type` facet — the\ninvoice's `items.type`, nested rather than a top-level mirror, so there is no\nderived Typesense field to declare. Every `items.*` field is `optional: true`\nbecause the arms disagree: a direct item names no product (and, until v5,\nonly a subrent item carried `quantity_returned`).\n\nv4 (one-document-model 6e-0a, ruling 32): the `bills[]` and `credits[]`\ndiscovery mirrors, `{ uid, number, status }` each, status faceted. Every field\nis `optional: true` through the expand, so a purchase stored before the\nbackfill still indexes.\n\nv5 (one-document-model 7a, C8): the `store` snapshot becomes `uid_store`, a\nfacet the manager labels from its stores cache (the order's key), and\n`items.quantity_returned` goes: a line's custody lives on its inbound\nbooking. `total_cents` stays until 6e-0b1 (ruling 62)."
         },
         {
           "kind": "variable",
@@ -17945,10 +17929,36 @@
           "doc": "One inbound booking that blocks a purchase cancel, and what it still holds."
         },
         {
+          "kind": "variable",
+          "name": "NO_LINE_CUSTODY",
+          "declaration": "const NO_LINE_CUSTODY: PurchaseLineCustody;",
+          "doc": "No custody at all: a line nothing has been received for."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseLineCustody",
+          "declaration": "interface PurchaseLineCustody {\n  received: number;\n  returned: number;\n}",
+          "doc": "What a purchase line has received and returned — the two co-written buckets\n`quantity_received` / `quantity_returned` retired by one-document-model C8,\nnow DERIVED from custody. Per GRAIN they are an inbound booking's\n({@link inboundCustodyCounts}); per LINE they are the net custody of the\nmovements naming that row ({@link custodyBySourceItem}, ruling 65), because\ntwo lines may share one booking."
+        },
+        {
+          "kind": "interface",
+          "name": "SourceItemMovement",
+          "declaration": "interface SourceItemMovement {\n  path_source_item?: readonly string[] | null;\n  custody: MovementCustodyType | null;\n  quantity: number;\n}",
+          "doc": "A movement as {@link custodyBySourceItem} reads it."
+        },
+        {
           "kind": "function",
           "name": "calculateInboundBreakdown",
           "signature": "calculateInboundBreakdown(status: PurchaseStatusType, _type: InboundBookingTypeType, quantity: number, existing?: InboundBreakdown): InboundBreakdown",
           "doc": "Project an inbound booking's breakdown for a PURCHASE status, line type and\nquantity — the twin of `calculateBookingBreakdown`, over\n{@link PURCHASE_STATUS_TRAITS} as that one reads `ORDER_STATUS_TRAITS`.\n\nONE rule: carry every history key as it stands and put the rest of the\nquantity in the status's plan bucket.\n\n| purchase status | breakdown |\n|---|---|\n| `active` / `complete` | `ordered` = quantity − carried, floored at 0 |\n| `canceled` | custody kept, no plan (the outbound `keepCustodyOnly` arm) |\n\nThere is no `draft` (ruling 56: a purchase being written exists only in the\nclient). A `complete` purchase raised past what came books the raise as\n`ordered`, and the purchase re-derives `active` ({@link derivePurchaseStatus}).\n\nThe open bucket is floored at zero, so the result sums to `max(quantity,\ncarried)`: an over-receipt keeps its units, and `quantity` (the PHYSICAL\nnumber) follows the breakdown rather than the paperwork.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "custodyBySourceItem",
+          "signature": "custodyBySourceItem(movements: readonly SourceItemMovement[]): Map<string, PurchaseLineCustody>",
+          "doc": "**Each purchase row's custody, from the journal** (ruling 65): the net of\nevery movement naming the row in `path_source_item`, keyed by the path\njoined with `/`, then read as {@link PurchaseLineCustody}.\n\nA movement adds its quantity to its custody `to` key and takes it from its\n`from` key, plan keys contributing nothing — the per-booking replay's rule\n(`custodyByBooking`), applied per row. A `reverses` reversal carries its\noriginal's pair swapped, and a typed undo the mirrored pair, so both net out\nwith no sign of their own. A movement with no row or no custody (a lineless\nannotation, an outbound step) is skipped.\n\n⚠️ **Pass ONE purchase's movements.** A path is a row identity within one\ndocument only (`cfs-items`); the caller scopes the read, as every writer\nalready does by `sources array-contains {purchases, uid}`.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -17978,6 +17988,14 @@
         },
         {
           "kind": "function",
+          "name": "inboundCustodyCounts",
+          "signature": "inboundCustodyCounts(b: InboundBreakdown): PurchaseLineCustody",
+          "doc": "Both counts of one breakdown — a booking's, or a row's net custody.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "inboundLiveCustody",
           "signature": "inboundLiveCustody(b: Pick<InboundBooking, \"type\" | \"breakdown\">): number",
           "doc": "Units physically moving or in CFS's hands and not at an end: the\n`isInboundLive` keys for the booking's type. The twin of `liveCustody`.",
@@ -17986,9 +18004,33 @@
         },
         {
           "kind": "function",
+          "name": "inboundReceived",
+          "signature": "inboundReceived(b: InboundBreakdown): number",
+          "doc": "Units an inbound breakdown holds as received: Σ {@link INBOUND_RECEIVED_KEYS}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "inboundReturned",
+          "signature": "inboundReturned(b: InboundBreakdown): number",
+          "doc": "Units an inbound breakdown holds as no longer owed: Σ {@link INBOUND_RETURNED_KEYS}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "isInboundBookingClosed",
           "signature": "isInboundBookingClosed(b: Pick<InboundBooking, \"type\" | \"breakdown\">): boolean",
           "doc": "Per-booking closure rule: every unit sits in a TERMINAL key for its type\n(`isInboundTerminal`). A Buy closes on a shelf or damaged; a Subrent once\nevery unit is back with its supplier or settled lost or damaged — a rented\nunit on a CFS shelf holds the booking open. A booking holding nothing is\nclosed.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "lineCustodyAt",
+          "signature": "lineCustodyAt(custody: ReadonlyMap<string, PurchaseLineCustody>, path: readonly string[]): PurchaseLineCustody",
+          "doc": "One row's custody from a {@link custodyBySourceItem} map — none when no movement names it.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -18470,6 +18512,12 @@
           "doc": "The three parts of an event card id."
         },
         {
+          "kind": "typeAlias",
+          "name": "PurchaseCardCustody",
+          "declaration": "type PurchaseCardCustody = ReadonlyMap<string, PurchaseLineCustody>;",
+          "doc": "Each row's received and returned counts, `custodyBySourceItem` over the\npurchase's movements (one-document-model C8): the card reads custody, which\nthe purchase line no longer carries."
+        },
+        {
           "kind": "function",
           "name": "cardNextStatus",
           "signature": "cardNextStatus(card: Pick<Card, \"locked\" | \"status\">): CardStatus | null",
@@ -18517,7 +18565,7 @@
         {
           "kind": "function",
           "name": "computeCardActionFromPurchase",
-          "signature": "computeCardActionFromPurchase(purchase: Pick<Purchase, \"items\">): CardAction | null",
+          "signature": "computeCardActionFromPurchase(purchase: Pick<Purchase, \"items\">, custody: PurchaseCardCustody): CardAction | null",
           "doc": "A subrent return card's next action: `return_to_supplier` while any unit is\nin custody, `null` otherwise. Derived from the same buckets as\n{@link computeCardStatusFromPurchase}, so the two cannot disagree about\nwhether there is a return to make.",
           "paramTags": [],
           "returnsTag": null
@@ -18546,7 +18594,7 @@
         {
           "kind": "function",
           "name": "computeCardStatusFromPurchase",
-          "signature": "computeCardStatusFromPurchase(purchase: Pick<Purchase, \"status\" | \"items\">, current: CardStatus): CardStatus",
+          "signature": "computeCardStatusFromPurchase(purchase: Pick<Purchase, \"status\" | \"items\">, current: CardStatus, custody: PurchaseCardCustody): CardStatus",
           "doc": "A subrent return card's status, from its purchase's SUBRENT items. A purchase\nholding a subrent item has one card (whatever else it holds, D3); its buy,\nusage and direct items have nothing to return and do not enter.\n\n- `canceled` — the purchase is canceled (closed with nothing received).\n- `active` — some subrent item holds units received and not yet returned:\n  there is a return to make.\n- `complete` — nothing is in custody and nothing more is coming: every unit\n  ordered was received or canceled, and every unit received went back.\n- `planned` otherwise — waiting on the supplier's delivery.\n\n`blocked` is an operator's statement and is preserved, as on event cards.\nBilling does not enter: the card is the RETURN, and an unbilled hire is the\npurchase's own `active`.",
           "paramTags": [],
           "returnsTag": null
@@ -18602,7 +18650,7 @@
         {
           "kind": "function",
           "name": "purchaseCardDue",
-          "signature": "purchaseCardDue(purchase: Pick<Purchase, \"items\" | \"destinations\">): string | null",
+          "signature": "purchaseCardDue(purchase: Pick<Purchase, \"items\" | \"destinations\">, custody: PurchaseCardCustody): string | null",
           "doc": "The instant a subrent return card is dated at: the EARLIEST due-back (its\npair's `dates.collection_end`) among subrent items still OPEN — units in custody, or units\nstill to arrive — or, once nothing is open, the earliest due-back of any\nsubrent item, so a completed card keeps a stable date.\n\n`null` when no subrent item states a due-back: a purchase with no subrent\nitem, or one whose subrents are all STANDING (`dates.end: null`), which are\ndue back on nothing.",
           "paramTags": [],
           "returnsTag": null
@@ -19164,7 +19212,7 @@
         {
           "kind": "interface",
           "name": "DocumentDiffSources",
-          "declaration": "interface DocumentDiffSources {\n  orders?: readonly Order[];\n  fulfillments?: readonly Fulfillment[];\n  invoices?: readonly Invoice[];\n  outOfService?: readonly DocumentDiffOutOfService[];\n  creditNotes?: readonly DocumentDiffCreditNote[];\n  purchases?: readonly Purchase[];\n  bills?: readonly PurchaseBill[];\n  purchaseCredits?: readonly PurchaseCredit[];\n}",
+          "declaration": "interface DocumentDiffSources {\n  orders?: readonly Order[];\n  fulfillments?: readonly Fulfillment[];\n  invoices?: readonly Invoice[];\n  outOfService?: readonly DocumentDiffOutOfService[];\n  creditNotes?: readonly DocumentDiffCreditNote[];\n  purchases?: readonly Purchase[];\n  bills?: readonly PurchaseBill[];\n  purchaseCredits?: readonly PurchaseCredit[];\n  purchaseCustody?: ReadonlyMap<string, ReadonlyMap<string, PurchaseLineCustody>>;\n}",
           "doc": "Documents the caller holds. Any may be absent or partial."
         },
         {
@@ -19789,8 +19837,8 @@
         {
           "kind": "interface",
           "name": "LineClaimSide",
-          "declaration": "interface LineClaimSide {\n  scopeType: \"order\" | \"purchase\";\n  pointerKey: keyof MovePointerCarrier;\n  lineClosed(line: L): boolean;\n}",
-          "doc": "What {@link orderLineClaimIssues} needs to know about a SIDE: the pair\n{@link ScopedSyncSide} already carries, and whether a claim on a line that\nexists may still be refused."
+          "declaration": "interface LineClaimSide {\n  scopeType: \"order\" | \"purchase\";\n  pointerKey: keyof MovePointerCarrier;\n}",
+          "doc": "What {@link orderLineClaimIssues} needs to know about a SIDE: the pair\n{@link ScopedSyncSide} already carries. `L` is the side's line shape, which\nfixes what the `orderLines` callback returns."
         },
         {
           "kind": "interface",
@@ -19837,7 +19885,7 @@
         {
           "kind": "interface",
           "name": "OrderLineClaimIssue",
-          "declaration": "interface OrderLineClaimIssue {\n  index: number;\n  path: string[];\n  claimed_path: string[];\n  reason: \"outside_order_block\" | \"not_a_line\" | \"order_unknown\" | \"line_closed\";\n}",
+          "declaration": "interface OrderLineClaimIssue {\n  index: number;\n  path: string[];\n  claimed_path: string[];\n  reason: \"outside_order_block\" | \"not_a_line\" | \"order_unknown\";\n}",
           "doc": "One move pointer a write must refuse — see {@link orderLineClaimIssues}."
         },
         {
@@ -19915,7 +19963,7 @@
         {
           "kind": "interface",
           "name": "ScopedSyncSide",
-          "declaration": "interface ScopedSyncSide {\n  scopeType: \"order\" | \"purchase\";\n  pointerKey: keyof MovePointerCarrier;\n  project(item: LineItem, scopeUid: string): R;\n  lineFields(item: LineItem): readonly SharedField[];\n  isStructural(item: LineItem): boolean;\n  stillStored(path: readonly string[]): boolean;\n  adopts(item: LineItem, row: R): boolean;\n  requantify(row: R, quantity: number, ctx: typeLiteral): R;\n}",
+          "declaration": "interface ScopedSyncSide {\n  scopeType: \"order\" | \"purchase\";\n  pointerKey: keyof MovePointerCarrier;\n  project(item: LineItem, scopeUid: string): R;\n  lineFields(item: LineItem): readonly SharedField[];\n  isStructural(item: LineItem): boolean;\n  adopts(item: LineItem, row: R): boolean;\n  requantify(row: R, quantity: number, ctx: typeLiteral): R;\n}",
           "doc": "**What the scoped initiator → billing sync needs to know about a SIDE**\n(one-document-model Phase 3). The order → invoice sync and the purchase →\nbill sync are one engine, {@link syncOrderToInvoiceSelective}'s body; this is\nthe whole of what differs between them, so neither side branches on a\ncollection.\n\nThe substitution arm (`substituted_for`) runs on both sides: a bill's\nsubstitute stands in for a purchase line exactly as an invoice's does for an\norder line, and {@link ScopedSyncSide.requantify} is how a side whose money\ndoes not follow quantity keeps a row's money with its units\n(one-document-model W5). The date-extension arm (`path_extension_for`) keys\non a field no payable row carries, so on a bill it finds nothing. The\nlost/damaged arm (`out_of_service`) applies to both sides as written: a\nline billing a record is the billing document's own row."
         },
         {
@@ -22204,8 +22252,8 @@
         {
           "kind": "typeAlias",
           "name": "StockPurchaseItemSource",
-          "declaration": "type StockPurchaseItemSource = typeLiteral | typeLiteral | typeLiteral;",
-          "doc": "Just enough of a purchase ITEM to reduce it to the supply it adds, per arm.\n\n`quantity_received` and `expected_date` are REQUIRED on the buy arm, as they\nare on a stored item, because a buy's inbound reads them: a caller that builds\nits own rows and leaves them out must fail to compile rather than count every\nreceived unit as still inbound. A stored `PurchaseRow` is assignable as is.\n\nA subrent's hire window is not on the line: it is the line's PAIR's\n`delivery_start` → `collection_end`, read through `path[0]`\n(one-document-model Phase 3)."
+          "declaration": "type StockPurchaseItemSource = typeLiteral | typeLiteral;",
+          "doc": "Just enough of a purchase ITEM to reduce it to the supply it adds, per arm.\nA stored `PurchaseRow` is assignable as is.\n\nNeither the dates nor the custody counts are on the line (one-document-model\nPhase 3 and C8): a line's window is its PAIR's, read through `path[0]` — a\nsubrent's hire `delivery_start` → `collection_end`, a buy's expected arrival\n`delivery_start` — and what it has received and returned is its row's\ncustody, handed in beside the purchase ({@link supplyFromPurchase})."
         },
         {
           "kind": "interface",
@@ -22307,8 +22355,8 @@
         {
           "kind": "function",
           "name": "supplyFromPurchase",
-          "signature": "supplyFromPurchase(p: StockPurchaseSource, uidProduct: string): StockSupplyEntry[]",
-          "doc": "Reduce a purchase to the supply intervals it adds for ONE product — one\nentry per live item naming it, and `[]` otherwise. One product may sit on two\nitems (a buy plus a re-order, two hire windows), so there may be several.\nThe item's ARM decides the interval:\n\n| item | entry | quantity |\n|---|---|---|\n| `rental` (Subrent) | its pair's `[delivery_start, collection_end]` (`end: null` is +∞), kind `subrent` | `quantity − canceled − returned` |\n| `sale` (Buy) | `[expected_date, +∞)`, kind `inbound` | `quantity − canceled − received` |\n| `service` / `replacement` | none — they bring no unit into custody | — |\n\nLiveness is the reducers' one filter, as for bookings and out-of-service:\nonly an `active` purchase supplies anything, and an item supplying nothing is\ndropped rather than stored as a zero.\n\nOn a SUBRENT, RECEIPT does not enter — supply counts from the moment the\npurchase exists (owner, 2026-10-24); receipt is custody only. Its price\nbasis does not enter either: a time-priced unit is supplied exactly as a\nflat-priced one is. ⚠️ A unit that has not gone back by `dates.end` stops\ncounting as supply at `end` while it is still in CFS's custody\n(`quantity_rented_in`). That is the conservative direction — late but valid;\nthe return card shows it overdue.\n\nOn a BUY, receipt is the whole point: a received unit leaves the inbound\nentry and enters `quantity_held` as owned stock, so a partial receipt leaves\n`held + inbound` unchanged. ⚠️ An OVERDUE delivery stays `[expected_date, +∞)`\nuntil it is received or short-closed (owner, 2026-10-27) — dropping it would\nneed a clock-driven rebuild and hide stock CFS knows is coming. An item with\nno `expected_date` contributes nothing: there is no date to promise from.\n\nAn exhaustive switch with a `never` default (D7): a fourth item type is a\ncompile error here, never a silent fall into the buy branch — which is how a\npurchase written before `kind` existed used to be read.",
+          "signature": "supplyFromPurchase(p: StockPurchaseSource, uidProduct: string, custody: ReadonlyMap<string, PurchaseLineCustody>): StockSupplyEntry[]",
+          "doc": "Reduce a purchase to the supply intervals it adds for ONE product — one\nentry per live item naming it, and `[]` otherwise. One product may sit on two\nitems (a buy plus a re-order, two hire windows), so there may be several.\nThe item's ARM decides the interval:\n\n| item | entry | quantity |\n|---|---|---|\n| `rental` (Subrent) | its pair's `[delivery_start, collection_end]` (`end: null` is +∞), kind `subrent` | `quantity − returned` |\n| `sale` (Buy) | its pair's `[delivery_start, +∞)`, kind `inbound` | `quantity − received` |\n\n`custody` is each row's received and returned counts, keyed by path joined\nwith `/` (`custodyBySourceItem`, `@cfs/core/utils/bookings-inbound`, or the\nsame numbers off the line's inbound booking when one line holds the grain).\nIt replaced the line buckets `quantity_received` / `quantity_returned` with\nthe arithmetic unchanged (C8, ruling 60), so `scripts/audit-stock.ts` reads\nidentical before and after. Required: an absent map would read every unit as\nstill to come.\n| `service` / `replacement` | none — they bring no unit into custody | — |\n\nLiveness is the reducers' one filter, as for bookings and out-of-service:\nonly an `active` purchase supplies anything, and an item supplying nothing is\ndropped rather than stored as a zero.\n\nOn a SUBRENT, RECEIPT does not enter — supply counts from the moment the\npurchase exists (owner, 2026-10-24); receipt is custody only. Its price\nbasis does not enter either: a time-priced unit is supplied exactly as a\nflat-priced one is. ⚠️ A unit that has not gone back by `dates.end` stops\ncounting as supply at `end` while it is still in CFS's custody\n(`quantity_rented_in`). That is the conservative direction — late but valid;\nthe return card shows it overdue.\n\nOn a BUY, receipt is the whole point: a received unit leaves the inbound\nentry and enters `quantity_held` as owned stock, so a partial receipt leaves\n`held + inbound` unchanged. ⚠️ An OVERDUE delivery stays `[delivery_start, +∞)`\nuntil it is received or short-closed (owner, 2026-10-27) — dropping it would\nneed a clock-driven rebuild and hide stock CFS knows is coming. A buy whose\npair states no `delivery_start` contributes nothing: there is no date to\npromise from.\n\nAn exhaustive switch with a `never` default (D7): a fourth item type is a\ncompile error here, never a silent fall into the buy branch — which is how a\npurchase written before `kind` existed used to be read.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -23079,7 +23127,7 @@
           "kind": "function",
           "name": "standaloneReversalRefusal",
           "signature": "standaloneReversalRefusal(m: Partial<Pick<Movement, \"type\" | \"uid_booking\" | \"sources\" | \"lines\" | \"service\">>): StandaloneReversalRefusal | null",
-          "doc": "**Why this movement may NOT be reversed on its own, or `null` when it may**\n— the one author of that rule, for the api's 400 and the manager's hidden\nReverse button alike (core#130 row 8).\n\nA standalone reversal swaps a movement's ledger and location lines and\ntouches nothing else. That is the whole of a manual movement, and only half\nof these:\n\n- **A count or roster boundary** — undone by the opposite stock-method\n  change; negating a `count_open` would subtract its units from a counted\n  ledger without making it uncounted.\n- 🔴 **Half of a twin reclass** (`reclass_out` / `reclass_in`, neither copy\n  refused it). Reversing one half double-counts: the units and their basis\n  return to one product while the other still holds them, and the Xero\n  mirror posts one side of a 2510 pair, unbalancing it. The pair reverses\n  together, at the original amounts.\n- **A booking's movement** — the booking's `breakdown` is the other half.\n- **A purchase receipt** — the purchase line's `quantity_received` is; and\n  a subrent's **return** (`subrent_out`), whose other half is\n  `quantity_returned`, so it earns its own code and lever.\n- **An `out-of-service` endpoint, or a flag** (`service` set) — the record's\n  buckets and `stores[]` are. A reason edit's SPLIT names two records.\n- **A `return_to_supplier`** — it names a purchase too, but its lever is the\n  RECORD PUT lowering `returned_to_supplier`, which moves the purchase's\n  `quantity_returned` back in the same write. So it answers `out_of_service`\n  with the record, checked before the purchase branch.\n\nKeyed on endpoints, sources and type — a shelf `write_off`\n(`locations → outside`) touches none of these and stays reversible.",
+          "doc": "**Why this movement may NOT be reversed on its own, or `null` when it may**\n— the one author of that rule, for the api's 400 and the manager's hidden\nReverse button alike (core#130 row 8).\n\nA standalone reversal swaps a movement's ledger and location lines and\ntouches nothing else. That is the whole of a manual movement, and only half\nof these:\n\n- **A count or roster boundary** — undone by the opposite stock-method\n  change; negating a `count_open` would subtract its units from a counted\n  ledger without making it uncounted.\n- 🔴 **Half of a twin reclass** (`reclass_out` / `reclass_in`, neither copy\n  refused it). Reversing one half double-counts: the units and their basis\n  return to one product while the other still holds them, and the Xero\n  mirror posts one side of a 2510 pair, unbalancing it. The pair reverses\n  together, at the original amounts.\n- **A booking's movement** — the booking's `breakdown` is the other half.\n- **A purchase receipt** — the line's INBOUND BOOKING is (`ordered →\n  received`, one-document-model C8); and a subrent's **return**\n  (`subrent_out`, `stocked → sent_back`), so it earns its own code and lever.\n- **An `out-of-service` endpoint, or a flag** (`service` set) — the record's\n  buckets and `stores[]` are. A reason edit's SPLIT names two records.\n- **A `return_to_supplier`** — it names a purchase too, but its lever is the\n  RECORD PUT lowering `returned_to_supplier`, which moves the inbound\n  booking back in the same write. So it answers `out_of_service`\n  with the record, checked before the purchase branch.\n\nKeyed on endpoints, sources and type — a shelf `write_off`\n(`locations → outside`) touches none of these and stays reversible.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -24778,7 +24826,7 @@
         {
           "kind": "typeAlias",
           "name": "PurchaseActionItem",
-          "declaration": "type PurchaseActionItem = Pick<PurchaseSaleItem, LineKeys | \"type\" | \"quantity_received\"> | Pick<PurchaseRentalItem, LineKeys | \"type\" | \"quantity_received\" | \"quantity_returned\"> | Pick<PurchaseServiceItem, LineKeys | \"type\"> | Pick<PurchaseReplacementItem, LineKeys | \"type\">;",
+          "declaration": "type PurchaseActionItem = Pick<PurchaseSaleItem, LineKeys | \"type\"> | Pick<PurchaseRentalItem, LineKeys | \"type\"> | Pick<PurchaseServiceItem, LineKeys | \"type\"> | Pick<PurchaseReplacementItem, LineKeys | \"type\">;",
           "doc": "A purchase line as the ruleset reads it."
         },
         {
@@ -24814,7 +24862,7 @@
         {
           "kind": "interface",
           "name": "PurchaseOfferContext",
-          "declaration": "interface PurchaseOfferContext {\n  billed_paths?: ReadonlySet<string>;\n}",
+          "declaration": "interface PurchaseOfferContext {\n  custody: ReadonlyMap<string, PurchaseLineCustody>;\n  now: string;\n  billed_paths?: ReadonlySet<string>;\n}",
           "doc": "What {@link purchaseActionsFor} needs that the purchase alone does not carry."
         },
         {
@@ -24852,7 +24900,7 @@
         {
           "kind": "function",
           "name": "purchaseActionsFor",
-          "signature": "purchaseActionsFor(purchase: Pick<Purchase, \"status\" | \"query_by_bills\"> & typeLiteral, _: unknown): PurchaseActionOffer[]",
+          "signature": "purchaseActionsFor(purchase: Pick<Purchase, \"status\" | \"query_by_bills\" | \"destinations\"> & typeLiteral, ctx: PurchaseOfferContext): PurchaseActionOffer[]",
           "doc": "**Everything an operator may do to a purchase and its lines.** Per-line offers\nfollow the purchase-level ones, in line order.\n\n`close` is refused whole while any subrent has units out, because the API\nrefuses a whole-purchase close on that line even when it has nothing left to\nclose.",
           "paramTags": [],
           "returnsTag": null
@@ -24916,15 +24964,15 @@
         {
           "kind": "function",
           "name": "purchaseItemClosable",
-          "signature": "purchaseItemClosable(item: PurchaseActionItem): boolean",
-          "doc": "**Would a close change this line?** Units still to arrive are dropped; a\nservice or replacement drops its unbilled quantity, and a time line is canceled. A rental\nwith units still out is NOT closable: the close zeroes its supply, so the API\nrefuses it until they have gone back.",
+          "signature": "purchaseItemClosable(item: PurchaseActionItem, custody: PurchaseLineCustody, pair: Pick<PurchaseDestination, \"dates\"> | undefined, now: string): boolean",
+          "doc": "**Would a close change this line?** Units still to arrive are dropped; a flat\nservice or replacement drops its unbilled quantity, and a TIME line ends its\npair's charge window, so it is closable while that window is open at `now`\n(ruling 63). A rental with units still out is NOT closable: the close zeroes\nits supply, so the API refuses it until they have gone back.",
           "paramTags": [],
           "returnsTag": null
         },
         {
           "kind": "function",
           "name": "purchaseItemTouched",
-          "signature": "purchaseItemTouched(item: PurchaseActionItem, billedPaths: ReadonlySet<string>): boolean",
+          "signature": "purchaseItemTouched(item: PurchaseActionItem, billedPaths: ReadonlySet<string>, custody: PurchaseLineCustody): boolean",
           "doc": "**Has anything happened to this line that makes it history as well as an\norder?** A touched line cannot be removed or moved across bases. A time line\ncounts no `quantity_billed`, so whether a bill names it comes from\n`billedPaths` ({@link purchaseBilledPaths}).",
           "paramTags": [],
           "returnsTag": null
@@ -24993,7 +25041,7 @@
           "kind": "variable",
           "name": "PAYABLE_LINE_CLAIMS",
           "declaration": "const PAYABLE_LINE_CLAIMS: LineClaimSide<PurchaseRow>;",
-          "doc": "The payable side of `orderLineClaimIssues`: a bill or credit's\n`path_purchase_item`. A canceled line cannot be billed."
+          "doc": "The payable side of `orderLineClaimIssues`: a bill or credit's\n`path_purchase_item`. A line closed to 0 is removed (ruling 47), so there is\nno closed line to refuse: a claim on it names a row that is not there, as on\nthe receivable side."
         },
         {
           "kind": "interface",
@@ -25090,8 +25138,8 @@
         {
           "kind": "function",
           "name": "payableScopedSync",
-          "signature": "payableScopedSync(prev: Purchase, next: Purchase, _: unknown): typeLiteral",
-          "doc": "**The payable side of the scoped initiator → billing sync**\n(`syncScopedDestinations`, `@cfs/core/utils/invoices`): the purchase → bill\nsync IS the order → invoice sync, with a `purchase` scope divider, the\n`path_purchase_item` move pointer, {@link projectPurchaseRowForBill} and the\npurchase ↔ bill field set (one-document-model Phase 3).\n\nBuilt per sync over the two purchase revisions it converts\n({@link asEngineSource}): the engine hands its projector the converted rows,\nand the side maps each back to the purchase row it came from. `stored` is the\npurchase's whole row set, which a pointer at a line closed out of the sync's\nrows is judged against; it defaults to the revision being synced.",
+          "signature": "payableScopedSync(prev: Purchase, next: Purchase): typeLiteral",
+          "doc": "**The payable side of the scoped initiator → billing sync**\n(`syncScopedDestinations`, `@cfs/core/utils/invoices`): the purchase → bill\nsync IS the order → invoice sync, with a `purchase` scope divider, the\n`path_purchase_item` move pointer, {@link projectPurchaseRowForBill} and the\npurchase ↔ bill field set (one-document-model Phase 3).\n\nBuilt per sync over the two purchase revisions it converts\n({@link asEngineSource}): the engine hands its projector the converted rows,\nand the side maps each back to the purchase row it came from. A line closed to\n0 is removed (ruling 47), so an overridden bill row that billed it keeps no\npointer, as an invoice row whose order line was removed keeps none.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25211,7 +25259,7 @@
           "kind": "function",
           "name": "purchaseLineCovers",
           "signature": "purchaseLineCovers(purchase: Pick<Purchase, \"status\">, item: PurchaseItem): boolean",
-          "doc": "Does this purchase line COUNT for coverage — a subrent, charge or replacement\nline whose purchase was not canceled and which was not canceled in full with\nnothing billed (`purchaseItemCanceled`: it never happened)? A closed or\ncompleted line still covered what it covered.",
+          "doc": "Does this purchase line COUNT for coverage — a subrent, charge or replacement\nline whose purchase was not canceled? A line closed to nothing is removed\n(ruling 47), so every line still present covered what it covered.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25243,7 +25291,7 @@
           "kind": "function",
           "name": "recomputePurchaseQuantityBilled",
           "signature": "recomputePurchaseQuantityBilled(purchase: Pick<Purchase, \"items\">, documents: PurchaseBilledDocuments): PurchaseRow[]",
-          "doc": "**A purchase's rows with each line's `quantity_billed` recounted** from its\ndocuments (api-cloudrun#1441). A flat line's count is\n{@link purchaseLineBilledNet} floored at 0, because the schema's bucket is\n`.min(0)`; the diff keeps the unfloored number. A time line and a divider\ncome back as they went in.\n\n⚠️ `quantity_billed` is unlike its sibling buckets. `quantity_received` and\n`quantity_returned` are kept by delta, because a receipt's quantity never\nchanges; a bill line's does, so a delta here releases the wrong number on a\nvoid. Pass EVERY bill and credit of the purchase, including the one the\ncaller is writing.",
+          "doc": "**A purchase's rows with each line's `quantity_billed` recounted** from its\ndocuments (api-cloudrun#1441). A flat line's count is\n{@link purchaseLineBilledNet} floored at 0, because the schema's bucket is\n`.min(0)`; the diff keeps the unfloored number. A time line and a divider\ncome back as they went in.\n\n⚠️ `quantity_billed` is recounted, never kept by delta: a bill line's\nquantity changes, so a delta here would release the wrong number on a void.\n(Its retired siblings `quantity_received` / `quantity_returned` are custody\nnow, read off the inbound bookings and the journal, C8.) Pass EVERY bill and credit of the purchase, including the one the\ncaller is writing.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25304,6 +25352,18 @@
       "symbols": [
         {
           "kind": "interface",
+          "name": "LandedCostTarget",
+          "declaration": "interface LandedCostTarget {\n  line: Pick<PurchaseSaleItem, \"amount_cents\" | \"quantity\">;\n  received: number;\n}",
+          "doc": "One buy line as {@link allocateLandedCostCents} weighs it: the line and its row's received count."
+        },
+        {
+          "kind": "variable",
+          "name": "NO_LINE_CUSTODY",
+          "declaration": "const NO_LINE_CUSTODY: PurchaseLineCustody;",
+          "doc": "No custody at all: a line nothing has been received for."
+        },
+        {
+          "kind": "interface",
           "name": "PayableLineUidFields",
           "declaration": "interface PayableLineUidFields {\n  type: string;\n  uid: string;\n  uid_product?: string;\n}",
           "doc": "The payable line fields {@link payableLineUid} reads."
@@ -25333,9 +25393,21 @@
           "doc": "The result of {@link expandPurchaseItems}."
         },
         {
+          "kind": "typeAlias",
+          "name": "PurchaseLineCloseOutcome",
+          "declaration": "type PurchaseLineCloseOutcome = typeLiteral | typeLiteral | typeLiteral;",
+          "doc": "What a close does to one line ({@link purchaseLineCloseOutcome}):\n\n- `lower` — its `quantity` drops to `quantity` (≥ 1), money restated;\n- `remove` — nothing is left, so the line goes, as an order line does\n  (ruling 47). Its inbound booking is KEPT while it holds custody, at\n  `quantity_ordered: 0`, and deleted while it is only a plan;\n- `end_window` — a TIME charge keeps its quantity and its pair's charge\n  window ends at the close (ruling 63): its bills metered the time, and a\n  carrier line simply stops, as an order ends a hire early by shortening\n  its pair."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseLineCustody",
+          "declaration": "interface PurchaseLineCustody {\n  received: number;\n  returned: number;\n}",
+          "doc": "What a purchase line has received and returned — the two co-written buckets\n`quantity_received` / `quantity_returned` retired by one-document-model C8,\nnow DERIVED from custody. Per GRAIN they are an inbound booking's\n({@link inboundCustodyCounts}); per LINE they are the net custody of the\nmovements naming that row ({@link custodyBySourceItem}, ruling 65), because\ntwo lines may share one booking."
+        },
+        {
           "kind": "function",
           "name": "allocateLandedCostCents",
-          "signature": "allocateLandedCostCents(amountCents: number, lines: readonly Pick<PurchaseSaleItem, \"amount_cents\" | \"quantity\" | \"quantity_received\">[]): number[]",
+          "signature": "allocateLandedCostCents(amountCents: number, lines: readonly LandedCostTarget[]): number[]",
           "doc": "Spread one landed amount over several buy lines, in proportion to each\nline's value still to arrive ({@link landedCostWeightCents}), with\n{@link apportionCents}. Σ is exactly `amountCents`.\n\nThe client runs it so the preview it shows is the split it sends; a line with\nweight 0 gets 0, and the caller drops it rather than send a 0-cent entry.",
           "paramTags": [],
           "returnsTag": null
@@ -25345,6 +25417,14 @@
           "name": "cumulativeShareCents",
           "signature": "cumulativeShareCents(amountCents: number, quantity: number, before: number, after: number): number",
           "doc": "The cents a line's units `(before, after]` cost — the k-th receipt or the\nk-th bill line against a purchase line, priced from where the cumulative\ncount stood before it to where it stands after.\n\n`round(amount × after ÷ quantity) − round(amount × before ÷ quantity)`, each\nrounded once, half-up, over integers.\n\n⭐ **The CUMULATIVE value is rounded, never the partial.** So the partials\nalong any path from 0 to `quantity` telescope to `amount_cents` exactly — no\nremainder rule, no \"last one absorbs the cent\" — and the price of reaching a\ncumulative count is the same whichever deliveries got there. Rounding each\npartial instead (`round(amount × k ÷ quantity)`) drifts: three receipts of 1\nagainst a $10.00 line of 3 cost 333 + 333 + 333 = 999.\n\nReceipts and bills run this SEPARATELY, each on its own cumulative count, so\na CFS-pushed bill and the receipts it covers carry the same money however the\ntwo were split (`cfs-money`: closure under the quantum, × n ÷ d in integer\ncents, round once).\n\nA REVERSAL is the same call with the bounds swapped in sign: the units\n`(after, before]` leave at exactly what they cost to arrive, because the\ncumulative value at a count does not depend on the path.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "custodyBySourceItem",
+          "signature": "custodyBySourceItem(movements: readonly SourceItemMovement[]): Map<string, PurchaseLineCustody>",
+          "doc": "**Each purchase row's custody, from the journal** (ruling 65): the net of\nevery movement naming the row in `path_source_item`, keyed by the path\njoined with `/`, then read as {@link PurchaseLineCustody}.\n\nA movement adds its quantity to its custody `to` key and takes it from its\n`from` key, plan keys contributing nothing — the per-booking replay's rule\n(`custodyByBooking`), applied per row. A `reverses` reversal carries its\noriginal's pair swapped, and a typed undo the mirrored pair, so both net out\nwith no sign of their own. A movement with no row or no custody (a lineless\nannotation, an outbound step) is skipped.\n\n⚠️ **Pass ONE purchase's movements.** A path is a row identity within one\ndocument only (`cfs-items`); the caller scopes the read, as every writer\nalready does by `sources array-contains {purchases, uid}`.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25424,15 +25504,15 @@
         {
           "kind": "function",
           "name": "isLandedCostFrozen",
-          "signature": "isLandedCostFrozen(entry: Pick<PurchaseLandedCost, \"received_at_entry\">, line: Pick<PurchaseSaleItem, \"quantity_received\">): boolean",
-          "doc": "Is a landed cost frozen? A receipt has priced part of it once `received > received_at_entry`.",
+          "signature": "isLandedCostFrozen(entry: Pick<PurchaseLandedCost, \"received_at_entry\">, received: number): boolean",
+          "doc": "Is a landed cost frozen? A receipt has priced part of it once the line's\n`received` count (its row's custody, `custodyBySourceItem`) passes\n`received_at_entry`.",
           "paramTags": [],
           "returnsTag": null
         },
         {
           "kind": "function",
           "name": "landedCostWeightCents",
-          "signature": "landedCostWeightCents(line: Pick<PurchaseSaleItem, \"amount_cents\" | \"quantity\" | \"quantity_received\">): number",
+          "signature": "landedCostWeightCents(line: Pick<PurchaseSaleItem, \"amount_cents\" | \"quantity\">, received: number): number",
           "doc": "A line's weight when one landed amount is spread over several lines: the\nvalue still to arrive, `cumulativeShareCents(amount, quantity, received,\nquantity)`. Units already received carry none of it, because the\nentry only ever prices units received after it.",
           "paramTags": [],
           "returnsTag": null
@@ -25450,6 +25530,14 @@
           "name": "landedUnitsPriced",
           "signature": "landedUnitsPriced(entry: Pick<PurchaseLandedCost, \"quantity\" | \"received_at_entry\">, quantityReceived: number): number",
           "doc": "How many of a landed cost's units a line's receipts have priced, at a\ncumulative received count: the units received since the entry was made,\n`clamp(received − received_at_entry, 0, quantity)`.\n\nThe clamp at 0 is what makes a REVERSAL that crosses the entry exact: units\nreceived before the entry never carried it, so taking them back returns none\nof it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "lineCustodyAt",
+          "signature": "lineCustodyAt(custody: ReadonlyMap<string, PurchaseLineCustody>, path: readonly string[]): PurchaseLineCustody",
+          "doc": "One row's custody from a {@link custodyBySourceItem} map — none when no movement names it.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25479,14 +25567,6 @@
         },
         {
           "kind": "function",
-          "name": "purchaseItemCanceled",
-          "signature": "purchaseItemCanceled(item: PurchaseItem): boolean",
-          "doc": "Was this item canceled in full — nothing will come and nothing is billed?",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
           "name": "purchaseItemCommittedCents",
           "signature": "purchaseItemCommittedCents(item: PurchaseItem): number",
           "doc": "The amount an item COMMITS up front — the term of the purchase's\n`total_cents` (owner, 2026-10-30): a flat line's net amount, and 0 for a time\nline, whose cost is decided as it accrues.",
@@ -25504,8 +25584,8 @@
         {
           "kind": "function",
           "name": "purchaseLineCloseOutcome",
-          "signature": "purchaseLineCloseOutcome(item: PurchaseItem): typeLiteral",
-          "doc": "**What a close leaves a line holding** (one-document-model Phase 5). A close is\na quantity edit: a buy or subrent line drops to what was received, a flat\ncharge to what was billed (never above what was ordered), and a line left with\nnothing is canceled at quantity 0. A TIME charge is canceled at its quantity,\nbecause its bills metered that quantity and a carrier line simply stops.\n\nOnly the two facts both sides need live here; restating the money is the\nwriter's, through the one payable pricer.",
+          "signature": "purchaseLineCloseOutcome(item: PurchaseItem, custody: PurchaseLineCustody): PurchaseLineCloseOutcome",
+          "doc": "**What a close leaves a line holding** (one-document-model Phase 5, ruling 47).\nA close is a quantity edit: a buy or subrent line drops to what its row has\nreceived (`custody`, from `custodyBySourceItem`), a flat charge to what was\nbilled (never above what was ordered), and a line left with nothing is\nremoved. A TIME charge ends its pair's window instead (ruling 63).\n\nOnly the facts both sides need live here; restating the money, keeping the\nbooking and moving the window are the writer's.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25545,23 +25625,23 @@
         {
           "kind": "function",
           "name": "remainingToReceive",
-          "signature": "remainingToReceive(item: ReceivableItem): number",
-          "doc": "Units of a buy or subrent item still to be received: `quantity − received`.",
+          "signature": "remainingToReceive(item: Pick<PurchaseSaleItem, \"quantity\">, custody: Pick<PurchaseLineCustody, \"received\">): number",
+          "doc": "Units of a buy or subrent line still to be received: `quantity − received`, from its row's custody.",
           "paramTags": [],
           "returnsTag": null
         },
         {
           "kind": "function",
           "name": "remainingToReturn",
-          "signature": "remainingToReturn(item: Pick<PurchaseRentalItem, \"quantity_received\" | \"quantity_returned\">): number",
-          "doc": "Units of a SUBRENT item still to go back to the supplier: `received − returned`.\nBounded by what came in, not by what was ordered — an unreceived unit owes no\nreturn.",
+          "signature": "remainingToReturn(custody: PurchaseLineCustody): number",
+          "doc": "Units of a SUBRENT line still to go back to the supplier: `received −\nreturned`, from its row's custody. Bounded by what came in, not by what was\nordered — an unreceived unit owes no return.",
           "paramTags": [],
           "returnsTag": null
         },
         {
           "kind": "function",
           "name": "strandedLandedCents",
-          "signature": "strandedLandedCents(line: Pick<PurchaseSaleItem, \"quantity\" | \"quantity_received\" | \"landed_costs\">): number",
+          "signature": "strandedLandedCents(line: Pick<PurchaseSaleItem, \"quantity\" | \"landed_costs\">, received: number): number",
           "doc": "Landed cents a line can no longer price, because no unit is left to arrive:\nΣ over its entries of `amount_cents − landedPricedCents(entry, received)`,\nand `0` while any unit is still to come (a receipt may yet price it).\n\nNonzero only after a short close cut units an entry was spread over. It is\nDERIVED, never stored (ruling 6): the cost basis it belongs to waits on the\npost-receipt re-base, which is designed with depreciation (api-cloudrun#1388).",
           "paramTags": [],
           "returnsTag": null

@@ -1,9 +1,10 @@
 /**
  * The inbound ladder's derivations (`utils/bookings-inbound.ts`,
- * one-document-model 7a C6–C7): the projection, the booking status, the
- * custody-only purchase status and the cancel refusal.
+ * one-document-model 7a C6–C8): the projection, the booking status, the
+ * custody-only purchase status, the cancel refusal, and the received / returned
+ * counts that replaced the purchase line buckets.
  */
-import { assertEquals, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import {
   emptyInboundBreakdown,
   INBOUND_BOOKING_TYPES,
@@ -15,11 +16,18 @@ import {
 } from "../src/schemas/mod.ts";
 import {
   calculateInboundBreakdown,
+  custodyBySourceItem,
   deriveInboundBookingStatus,
   derivePurchaseStatus,
   inboundCancelRefusal,
+  inboundCustodyCounts,
   inboundLiveCustody,
+  inboundReceived,
+  inboundReturned,
   isInboundBookingClosed,
+  lineCustodyAt,
+  NO_LINE_CUSTODY,
+  type SourceItemMovement,
   sumInboundBreakdown,
 } from "../src/utils/bookings-inbound.ts";
 import { derivePurchaseStatus as viaPurchases } from "../src/utils/purchases.ts";
@@ -116,4 +124,66 @@ Deno.test("the derivations are total over every inbound type and key", () => {
       assertEquals(status === "complete", isInboundBookingClosed(b), `${type}.${key}`);
     }
   }
+});
+
+// ── Received and returned, derived (C8) ─────────────────────────────
+
+Deno.test("inboundReceived / inboundReturned: the C12 identity, pinned key by key", () => {
+  // Each key alone, so a key moved between the sets — or a new key — is seen.
+  const received = ["received", "stocked", "transit_outbound", "sent_back", "lost", "damaged"];
+  const returned = ["sent_back", "lost", "damaged"];
+  for (const key of INBOUND_BREAKDOWN_KEYS) {
+    const one = bd({ [key]: 1 });
+    assertEquals(inboundReceived(one), received.includes(key) ? 1 : 0, `received counts ${key}?`);
+    assertEquals(inboundReturned(one), returned.includes(key) ? 1 : 0, `returned counts ${key}?`);
+  }
+  // Nothing promised or still on its way counts as received.
+  assertEquals(inboundReceived(bd({ quoted: 4, ordered: 3, transit_inbound: 2 })), 0);
+  assertEquals(inboundCustodyCounts(bd({ ordered: 1, stocked: 2, sent_back: 3, lost: 1 })), { received: 6, returned: 4 });
+});
+
+const LEG = "9a1b2c3d-0000-4000-8000-0000000000d1";
+const ROW = [LEG, "testprod100000000000"];
+const OTHER = [LEG, "testprod200000000000"];
+const step = (
+  from: string | null,
+  to: string | null,
+  quantity: number,
+  path: string[] | undefined = ROW,
+): SourceItemMovement => ({ path_source_item: path, custody: { from, to } as SourceItemMovement["custody"], quantity });
+
+Deno.test("custodyBySourceItem: each row's net custody, read as received and returned", () => {
+  const journal = [
+    step("ordered", "received", 3), // receive
+    step("received", "stocked", 3), // put away
+    step("stocked", "sent_back", 2), // send back
+    step("sent_back", "stocked", 1), // a reversed send-back: its pair swapped
+    step("stocked", "lost", 1), // settle
+    step("ordered", "received", 4, OTHER),
+    step("received", "ordered", 1, OTHER), // an undone receipt
+  ];
+  const custody = custodyBySourceItem(journal);
+  assertEquals(lineCustodyAt(custody, ROW), { received: 3, returned: 2 });
+  assertEquals(lineCustodyAt(custody, OTHER), { received: 3, returned: 0 });
+  // A row nothing names has nothing.
+  assertEquals(lineCustodyAt(custody, [LEG, "testprod300000000000"]), NO_LINE_CUSTODY);
+});
+
+Deno.test("custodyBySourceItem: a row-less or custody-less movement is skipped, and a damage flag on arrival counts once", () => {
+  const custody = custodyBySourceItem([
+    step("ordered", "received", 2),
+    step("received", "damaged", 1), // receive_flag {none → damaged}
+    { ...step("ordered", "received", 9), path_source_item: undefined },
+    { ...step("ordered", "received", 9), custody: null },
+  ]);
+  assertEquals(lineCustodyAt(custody, ROW), { received: 2, returned: 1 });
+});
+
+Deno.test("custodyBySourceItem agrees with the booking it replays, for a row that holds its grain alone", () => {
+  // The fold applies each movement to a net breakdown exactly as the booking's
+  // own replay does, so on a one-row grain the two answers are one number.
+  const journal = [step("ordered", "received", 5), step("received", "stocked", 4), step("stocked", "sent_back", 2)];
+  const booking = bd({ ordered: 0, received: 1, stocked: 2, sent_back: 2 });
+  assertEquals(lineCustodyAt(custodyBySourceItem(journal), ROW), inboundCustodyCounts(booking));
+  assert(inboundReturned(booking) <= inboundReceived(booking));
 });

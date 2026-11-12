@@ -99,6 +99,7 @@ import type {
   StockUnavailableEntry,
 } from "../schemas/mod.ts";
 import { remainingToReceive } from "./purchases.ts";
+import { lineCustodyAt, type PurchaseLineCustody } from "./bookings-inbound.ts";
 import { toChicagoEndOfDay, toChicagoInstant, toChicagoStartOfDay } from "./dates.ts";
 import { sumBreakdownKeys } from "./bookings.ts";
 
@@ -433,29 +434,19 @@ export function unavailableFromOOS(o: StockOOSSource): StockUnavailableEntry | n
 
 /**
  * Just enough of a purchase ITEM to reduce it to the supply it adds, per arm.
+ * A stored `PurchaseRow` is assignable as is.
  *
- * `quantity_received` and `expected_date` are REQUIRED on the buy arm, as they
- * are on a stored item, because a buy's inbound reads them: a caller that builds
- * its own rows and leaves them out must fail to compile rather than count every
- * received unit as still inbound. A stored `PurchaseRow` is assignable as is.
- *
- * A subrent's hire window is not on the line: it is the line's PAIR's
- * `delivery_start` → `collection_end`, read through `path[0]`
- * (one-document-model Phase 3).
+ * Neither the dates nor the custody counts are on the line (one-document-model
+ * Phase 3 and C8): a line's window is its PAIR's, read through `path[0]` — a
+ * subrent's hire `delivery_start` → `collection_end`, a buy's expected arrival
+ * `delivery_start` — and what it has received and returned is its row's
+ * custody, handed in beside the purchase ({@link supplyFromPurchase}).
  */
 export type StockPurchaseItemSource =
   | {
-    type: "sale";
+    type: "sale" | "rental";
     uid_product: string;
     quantity: number;
-    quantity_received: number;
-    expected_date: string | null;
-  }
-  | {
-    type: "rental";
-    uid_product: string;
-    quantity: number;
-    quantity_returned: number;
     path: readonly string[];
   }
   | { type: "service" | "replacement" | "destination" | "group" };
@@ -464,7 +455,7 @@ export type StockPurchaseItemSource =
 export interface StockPurchaseSource {
   status: PurchaseStatusType;
   items: readonly StockPurchaseItemSource[];
-  /** The pairs a subrent line's hire window is read off. */
+  /** The pairs a line's window is read off. */
   destinations: readonly { uid: string; dates: { delivery_start: string | null; collection_end: string | null } }[];
 }
 
@@ -476,8 +467,16 @@ export interface StockPurchaseSource {
  *
  * | item | entry | quantity |
  * |---|---|---|
- * | `rental` (Subrent) | its pair's `[delivery_start, collection_end]` (`end: null` is +∞), kind `subrent` | `quantity − canceled − returned` |
- * | `sale` (Buy) | `[expected_date, +∞)`, kind `inbound` | `quantity − canceled − received` |
+ * | `rental` (Subrent) | its pair's `[delivery_start, collection_end]` (`end: null` is +∞), kind `subrent` | `quantity − returned` |
+ * | `sale` (Buy) | its pair's `[delivery_start, +∞)`, kind `inbound` | `quantity − received` |
+ *
+ * `custody` is each row's received and returned counts, keyed by path joined
+ * with `/` (`custodyBySourceItem`, `@cfs/core/utils/bookings-inbound`, or the
+ * same numbers off the line's inbound booking when one line holds the grain).
+ * It replaced the line buckets `quantity_received` / `quantity_returned` with
+ * the arithmetic unchanged (C8, ruling 60), so `scripts/audit-stock.ts` reads
+ * identical before and after. Required: an absent map would read every unit as
+ * still to come.
  * | `service` / `replacement` | none — they bring no unit into custody | — |
  *
  * Liveness is the reducers' one filter, as for bookings and out-of-service:
@@ -494,16 +493,21 @@ export interface StockPurchaseSource {
  *
  * On a BUY, receipt is the whole point: a received unit leaves the inbound
  * entry and enters `quantity_held` as owned stock, so a partial receipt leaves
- * `held + inbound` unchanged. ⚠️ An OVERDUE delivery stays `[expected_date, +∞)`
+ * `held + inbound` unchanged. ⚠️ An OVERDUE delivery stays `[delivery_start, +∞)`
  * until it is received or short-closed (owner, 2026-10-27) — dropping it would
- * need a clock-driven rebuild and hide stock CFS knows is coming. An item with
- * no `expected_date` contributes nothing: there is no date to promise from.
+ * need a clock-driven rebuild and hide stock CFS knows is coming. A buy whose
+ * pair states no `delivery_start` contributes nothing: there is no date to
+ * promise from.
  *
  * An exhaustive switch with a `never` default (D7): a fourth item type is a
  * compile error here, never a silent fall into the buy branch — which is how a
  * purchase written before `kind` existed used to be read.
  */
-export function supplyFromPurchase(p: StockPurchaseSource, uidProduct: string): StockSupplyEntry[] {
+export function supplyFromPurchase(
+  p: StockPurchaseSource,
+  uidProduct: string,
+  custody: ReadonlyMap<string, PurchaseLineCustody>,
+): StockSupplyEntry[] {
   if (p.status !== "active") return [];
   const entries: StockSupplyEntry[] = [];
   for (const item of p.items) {
@@ -511,19 +515,21 @@ export function supplyFromPurchase(p: StockPurchaseSource, uidProduct: string): 
     switch (item.type) {
       case "rental": {
         if (item.uid_product !== uidProduct) break;
-        const quantity = item.quantity - item.quantity_returned;
+        const quantity = item.quantity - lineCustodyAt(custody, item.path).returned;
         if (quantity <= 0) break;
         const pair = p.destinations.find((d) => d.uid === item.path[0]);
         const start = pair?.dates.delivery_start ?? null;
         // A subrent pair always states its hire start; one that does not supplies
-        // nothing, as a buy with no expected date does, rather than inventing one.
+        // nothing, as a buy with no expected arrival does, rather than inventing one.
         if (start !== null) entries.push({ start, end: pair?.dates.collection_end ?? null, quantity, kind: "subrent" });
         break;
       }
       case "sale": {
-        if (item.uid_product !== uidProduct || item.expected_date === null) break;
-        const quantity = remainingToReceive(item);
-        if (quantity > 0) entries.push({ start: item.expected_date, end: null, quantity, kind: "inbound" });
+        if (item.uid_product !== uidProduct) break;
+        const start = p.destinations.find((d) => d.uid === item.path[0])?.dates.delivery_start ?? null;
+        if (start === null) break;
+        const quantity = remainingToReceive(item, lineCustodyAt(custody, item.path));
+        if (quantity > 0) entries.push({ start, end: null, quantity, kind: "inbound" });
         break;
       }
       case "service":

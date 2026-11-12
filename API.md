@@ -2281,9 +2281,10 @@ Input for a short close or a cancel.
 
 Lowers each named buy or subrent item's `quantity` to what was received and a
 flat charge's to what was billed, restating its money; a line with nothing
-left is canceled (`purchaseLineCloseOutcome`). A time charge is canceled and
-keeps its quantity. `path_purchase_items` absent closes every such item; a cancel is a
-close of a purchase with nothing received. Billed beyond what was received is
+left is REMOVED, its inbound booking kept while it holds custody
+(`purchaseLineCloseOutcome`, ruling 47). A time charge keeps its quantity and
+its pair's charge window ends (ruling 63). `path_purchase_items` absent closes
+every such item; a cancel is a close of a purchase with nothing received. Billed beyond what was received is
 a diff entry the operator credits by hand; a close raises no credit.
 
 ```ts
@@ -3348,14 +3349,18 @@ const CreatePurchaseInput: z.ZodType<CreatePurchaseInputType>;
 
 Input for creating a purchase.
 
-`supplier` and `store` are uids only — the server resolves the names, as
+`supplier` is a uid only — the server resolves the name, as
 `CreateTransactionInput.supplier` does, so a snapshot never disagrees with
-its document. Items of any arm may mix (D3).
+its document. `uid_store` is stored as sent. Items of any arm may mix (D3).
+
+⚠️ **`store` → `uid_store` (C8) has no safe order between the API and the
+manager**: a required key on a stripping input. It ships under the 7a
+window's manager freeze.
 
 ```ts
 interface CreatePurchaseInputType {
   supplier: typeLiteral;
-  store: typeLiteral;
+  uid_store: string;
   date: string;
   reference?: string | null;
   notes?: string | null;
@@ -5735,6 +5740,29 @@ The inbound PLAN keys: promised, nothing moved. Every other key is history.
 
 ```ts
 const INBOUND_PLAN_KEYS: "quoted" | "ordered"[];
+```
+
+### `INBOUND_RECEIVED_KEYS`
+
+The keys a unit sits in once it has been RECEIVED: every history key past
+`transit_inbound`. Their sum is what the retired purchase line bucket
+`quantity_received` counted (one-document-model C8, the C12 identity), read
+off a booking or off the net custody of the movements naming one row.
+
+```ts
+const INBOUND_RECEIVED_KEYS: "received" | "stocked" | "transit_outbound" | "sent_back" | "lost" | "damaged"[];
+```
+
+### `INBOUND_RETURNED_KEYS`
+
+The keys a unit sits in once it is NO LONGER OWED to the supplier: handed
+back, or settled lost or damaged. Their sum is what the retired subrent
+bucket `quantity_returned` counted (the C12 identity), a settled unit
+included (api-cloudrun#1360, D3). ⚠️ On a Buy `damaged` is a unit received
+broken, which CFS owns; nothing reads this sum on a Buy.
+
+```ts
+const INBOUND_RETURNED_KEYS: "sent_back" | "lost" | "damaged"[];
 ```
 
 ### `INBOUND_STAGE_TWINS`
@@ -9640,7 +9668,7 @@ product type, stock method or asset account from it.
 
 🔴 **Closed, and read through exhaustive switches.** Every reader that
 branches on an item's arm switches over this union with a `never` default
-(`purchaseItemSupplies`, `purchaseItemCanceled`, …), so a new member is a
+(`purchaseItemSupplies`, `purchaseItemCommittedCents`, …), so a new member is a
 compile error at every one of them rather than a silent fall-through.
 
 Explicit tuple type rather than `as const` alone: core#43 is JSR's npm
@@ -9648,14 +9676,6 @@ Explicit tuple type rather than `as const` alone: core#43 is JSR's npm
 
 ```ts
 const PURCHASE_ITEM_TYPES: readonly ["sale", "rental", "service", "replacement"];
-```
-
-### `PURCHASE_LINE_STATUSES`
-
-Whether a close has stopped a purchase line.
-
-```ts
-const PURCHASE_LINE_STATUSES: "open" | "canceled"[];
 ```
 
 ### `PURCHASE_PRODUCT_ITEM_TYPES`
@@ -10947,7 +10967,7 @@ interface Purchase {
   number: number;
   status: PurchaseStatusType;
   supplier: UidNameRefType;
-  store: UidNameRefType;
+  uid_store: string;
   date: string;
   date_fs: FirestoreTimestampType;
   reference: string | null;
@@ -11326,6 +11346,9 @@ no customer flags, jurisdiction or exchange leg (one-document-model Phase 3).
   follow their starts (a real window later, api-cloudrun#943), `days_active`
   is counted, and `charge_windows` defaults to one window over possession.
   Supply reads `delivery_start` → `collection_end`, as a booking's hold does.
+  A Buy's expected arrival IS its pair's `delivery_start` (C8, which retired
+  the line `expected_date`): two buys expected on different days sit under
+  two pairs.
   A standing hire states neither collection bound (`+∞` in supply); a pair
   with no hire states no dates at all.
 
@@ -11681,7 +11704,7 @@ from the line's start to its end, less suspensions).
 
 `end: null` is open-ended — `+∞` in availability as on bookings and
 out-of-service records (api-cloudrun#1392). The hire window doubles as the
-expected delivery: a subrent item has no separate `expected_date`.
+expected delivery, as a Buy's pair's `delivery_start` does (C8).
 
 Named `dates` after out-of-service, bookings and cards. The object carries no
 label of its own; its children are labelled.
@@ -11755,14 +11778,14 @@ the freight still posts through a bill's charge item to its own account.
 
 **What it spreads over is fixed at entry.** `quantity` is the item's
 outstanding count when the entry was made, and `received_at_entry` is
-`quantity_received` at that moment. The k-th receipt prices the units received
+what the line had received at that moment (its row's custody, C8). The k-th receipt prices the units received
 since the entry, `clamp(received − received_at_entry, 0, quantity)`, with
 `cumulativeShareCents`, so the shares telescope to `amount_cents` exactly when
 every outstanding unit arrives (`purchaseLineReceiptTargetCents`,
 `@cfs/core/utils/purchases`).
 
 **Append-only, the way the item amount is.** An entry no receipt has priced
-(`quantity_received ≤ received_at_entry`) is editable and removable. One that
+(received `≤ received_at_entry`) is editable and removable. One that
 a receipt has priced any part of is frozen. A short close still proceeds:
 the unpriced remainder is DERIVED (`strandedLandedCents`), never stored. The
 post-receipt re-base waits on depreciation (api-cloudrun#1388).
@@ -11915,14 +11938,6 @@ Zod schema for {@link PurchaseLineRef}.
 const PurchaseLineRefSchema: z.ZodType<PurchaseLineRef>;
 ```
 
-### `PurchaseLineStatusType`
-
-One {@link PURCHASE_LINE_STATUSES} member.
-
-```ts
-type PurchaseLineStatusType = indexedAccess;
-```
-
 ### `PurchasePostedItem`
 
 A purchase line that can be received, billed and posted: never a kit header.
@@ -11950,9 +11965,7 @@ interface PurchaseRentalItem {
   uid_product: string;
   amount_cents: number | null;
   price: PurchaseLinePrice;
-  quantity_received: number;
   quantity_billed: number | null;
-  quantity_returned: number;
   uid_orders: string[];
   uid_units: string[];
 }
@@ -12075,8 +12088,6 @@ interface PurchaseSaleItem {
   uid_product: string;
   amount_cents: number;
   price: PurchaseLinePrice;
-  expected_date: string | null;
-  quantity_received: number;
   quantity_billed: number;
   landed_costs: PurchaseLandedCost[];
 }
@@ -12093,7 +12104,6 @@ interface PurchaseSaleItemInputType {
   quantity: number;
   amount_cents: number;
   ledger_account?: COACodeType | null;
-  expected_date?: string | null;
   landed_costs?: PurchaseLandedCostInputType[];
 }
 ```
@@ -12727,8 +12737,8 @@ Input for returning subrented units to the supplier
 (`POST /purchases/{uid}/returns`) — the mirror of {@link ReceivePurchaseInput}.
 
 Each line becomes ONE `subrent_out` movement naming the purchase in
-`sources[]`, in one transaction with the `quantity_returned` co-write. There
-is no cost: a returned unit was never owned.
+`sources[]`, in one transaction with the inbound booking's `stocked →
+sent_back` step. There is no cost: a returned unit was never owned.
 
 ```ts
 interface ReturnPurchaseInputType {
@@ -12794,7 +12804,8 @@ const ReversePurchaseReceiptInput: z.ZodType<ReversePurchaseReceiptInputType>;
 Input for reversing one receipt (`POST /purchases/{uid}/receipts/{movementUid}/reverse`).
 
 A standalone reversal of a receipt is refused; this lever reverses it AND
-decrements `quantity_received` in one transaction. It posts nothing to Xero —
+moves the line's inbound booking back in one transaction (C8: the received
+count is derived from that custody, never stored on the line). It posts nothing to Xero —
 a receipt never did.
 
 ```ts
@@ -12817,7 +12828,7 @@ const ReversePurchaseReturnInput: z.ZodType<ReversePurchaseReturnInputType>;
 
 Input for reversing one return (`POST /purchases/{uid}/returns/{movementUid}/reverse`)
 — the mirror of {@link ReversePurchaseReceiptInput}: it reverses the
-`subrent_out` AND decrements `quantity_returned` in one transaction.
+`subrent_out` AND moves the inbound booking back in one transaction.
 
 ```ts
 interface ReversePurchaseReturnInputType {
@@ -13119,8 +13130,8 @@ What added time-bounded SUPPLY. Each kind is drawn as its own row by the
 operator panel.
 
 - `subrent` — a live subrent line, over its hire window.
-- `inbound` — the unreceived remainder of a live BUY line, from its
-  `expected_date` on (api-cloudrun#1228). Open-ended: an overdue delivery
+- `inbound` — the unreceived remainder of a live BUY line, from its pair's
+  `delivery_start` (its expected arrival, C8) on (api-cloudrun#1228). Open-ended: an overdue delivery
   keeps counting until it is received or short-closed (owner, 2026-10-27),
   and the operator panel marks it overdue. The public hard gate does not
   count it, so a late delivery cannot oversell a web customer — see
@@ -13770,10 +13781,10 @@ member, because the fold SUMS every unavailable entry overlapping a window
 and must take the MINIMUM of supply over it — the two are opposite
 reductions.
 
-`quantity` is what the line still supplies: `quantity − canceled − returned`
-on a subrent, `quantity − canceled − received` on a buy.
+`quantity` is what the line still supplies: `quantity − returned` on a
+subrent, `quantity − received` on a buy, each its row's custody (C8).
 
-⚠️ **`end` is per KIND.** An `inbound` entry is `[expected_date, +∞)`, so its
+⚠️ **`end` is per KIND.** An `inbound` entry is `[delivery_start, +∞)`, so its
 `end` is always `null` and the schema refuses a bound. A `subrent` entry
 carries its hire's due-back date — or `null` on a STANDING subrent (a hire
 with no end, `PurchaseItemDates.end: null`, api-cloudrun#1392 folded into
@@ -18624,10 +18635,6 @@ The basis of an item's formula. Every STORED item carries `price` (beta B);
 the parameter stays loose for a client's draft line, which reads as flat
 until it names a formula.
 
-### `purchaseItemCanceled(item: PurchaseItem): boolean`
-
-Was this item canceled in full — nothing will come and nothing is billed?
-
 ### `purchaseItemCommittedCents(item: PurchaseItem): number`
 
 The amount an item COMMITS up front — the term of the purchase's
@@ -22084,6 +22091,29 @@ The inbound PLAN keys: promised, nothing moved. Every other key is history.
 
 ```ts
 const INBOUND_PLAN_KEYS: "quoted" | "ordered"[];
+```
+
+### `INBOUND_RECEIVED_KEYS`
+
+The keys a unit sits in once it has been RECEIVED: every history key past
+`transit_inbound`. Their sum is what the retired purchase line bucket
+`quantity_received` counted (one-document-model C8, the C12 identity), read
+off a booking or off the net custody of the movements naming one row.
+
+```ts
+const INBOUND_RECEIVED_KEYS: "received" | "stocked" | "transit_outbound" | "sent_back" | "lost" | "damaged"[];
+```
+
+### `INBOUND_RETURNED_KEYS`
+
+The keys a unit sits in once it is NO LONGER OWED to the supplier: handed
+back, or settled lost or damaged. Their sum is what the retired subrent
+bucket `quantity_returned` counted (the C12 identity), a settled unit
+included (api-cloudrun#1360, D3). ⚠️ On a Buy `damaged` is a unit received
+broken, which CFS owns; nothing reads this sum on a Buy.
+
+```ts
+const INBOUND_RETURNED_KEYS: "sent_back" | "lost" | "damaged"[];
 ```
 
 ### `INBOUND_STAGE_TWINS`
@@ -28748,9 +28778,13 @@ copies every part of it:
 - **Its receipts name it in `sources[]`** and it finds them through
   `query_by_sources`. There is no `Movement.purchase` field and no back-list
   of movement ids here — the HISTORY of a purchase is the journal.
-- **Co-written buckets** per item (`quantity_received`, `quantity_billed`,
-  the line `status`), each written in the same transaction as the receipt,
-  bill or close that moves it — the analogue of the record's `breakdown`.
+- **Custody lives on the inbound bookings, not here** (one-document-model
+  C8): what a line has received and returned is DERIVED, per grain from its
+  inbound booking and per row from the movements naming it
+  (`custodyBySourceItem`, `@cfs/core/utils/bookings-inbound`). The one
+  co-written bucket left is `quantity_billed`, until 6e-0b2 (ruling 42).
+- **A line closed to 0 is removed**, as an order line is (ruling 47); there
+  is no line status.
 - **A derived status** in the record's vocabulary (`active | complete |
   canceled`), custody-only (rulings 55, 56): read off the purchase's INBOUND
   bookings by `derivePurchaseStatus` (`@cfs/core/utils/bookings-inbound`), and
@@ -28846,9 +28880,10 @@ Input for a short close or a cancel.
 
 Lowers each named buy or subrent item's `quantity` to what was received and a
 flat charge's to what was billed, restating its money; a line with nothing
-left is canceled (`purchaseLineCloseOutcome`). A time charge is canceled and
-keeps its quantity. `path_purchase_items` absent closes every such item; a cancel is a
-close of a purchase with nothing received. Billed beyond what was received is
+left is REMOVED, its inbound booking kept while it holds custody
+(`purchaseLineCloseOutcome`, ruling 47). A time charge keeps its quantity and
+its pair's charge window ends (ruling 63). `path_purchase_items` absent closes
+every such item; a cancel is a close of a purchase with nothing received. Billed beyond what was received is
 a diff entry the operator credits by hand; a close raises no credit.
 
 ```ts
@@ -28870,14 +28905,18 @@ const CreatePurchaseInput: z.ZodType<CreatePurchaseInputType>;
 
 Input for creating a purchase.
 
-`supplier` and `store` are uids only — the server resolves the names, as
+`supplier` is a uid only — the server resolves the name, as
 `CreateTransactionInput.supplier` does, so a snapshot never disagrees with
-its document. Items of any arm may mix (D3).
+its document. `uid_store` is stored as sent. Items of any arm may mix (D3).
+
+⚠️ **`store` → `uid_store` (C8) has no safe order between the API and the
+manager**: a required key on a stripping input. It ships under the 7a
+window's manager freeze.
 
 ```ts
 interface CreatePurchaseInputType {
   supplier: typeLiteral;
-  store: typeLiteral;
+  uid_store: string;
   date: string;
   reference?: string | null;
   notes?: string | null;
@@ -28901,7 +28940,7 @@ product type, stock method or asset account from it.
 
 🔴 **Closed, and read through exhaustive switches.** Every reader that
 branches on an item's arm switches over this union with a `never` default
-(`purchaseItemSupplies`, `purchaseItemCanceled`, …), so a new member is a
+(`purchaseItemSupplies`, `purchaseItemCommittedCents`, …), so a new member is a
 compile error at every one of them rather than a silent fall-through.
 
 Explicit tuple type rather than `as const` alone: core#43 is JSR's npm
@@ -28909,14 +28948,6 @@ Explicit tuple type rather than `as const` alone: core#43 is JSR's npm
 
 ```ts
 const PURCHASE_ITEM_TYPES: readonly ["sale", "rental", "service", "replacement"];
-```
-
-### `PURCHASE_LINE_STATUSES`
-
-Whether a close has stopped a purchase line.
-
-```ts
-const PURCHASE_LINE_STATUSES: "open" | "canceled"[];
 ```
 
 ### `PURCHASE_PRODUCT_ITEM_TYPES`
@@ -28998,7 +29029,7 @@ interface Purchase {
   number: number;
   status: PurchaseStatusType;
   supplier: UidNameRefType;
-  store: UidNameRefType;
+  uid_store: string;
   date: string;
   date_fs: FirestoreTimestampType;
   reference: string | null;
@@ -29037,6 +29068,9 @@ no customer flags, jurisdiction or exchange leg (one-document-model Phase 3).
   follow their starts (a real window later, api-cloudrun#943), `days_active`
   is counted, and `charge_windows` defaults to one window over possession.
   Supply reads `delivery_start` → `collection_end`, as a booking's hold does.
+  A Buy's expected arrival IS its pair's `delivery_start` (C8, which retired
+  the line `expected_date`): two buys expected on different days sit under
+  two pairs.
   A standing hire states neither collection bound (`+∞` in supply); a pair
   with no hire states no dates at all.
 
@@ -29130,7 +29164,7 @@ from the line's start to its end, less suspensions).
 
 `end: null` is open-ended — `+∞` in availability as on bookings and
 out-of-service records (api-cloudrun#1392). The hire window doubles as the
-expected delivery: a subrent item has no separate `expected_date`.
+expected delivery, as a Buy's pair's `delivery_start` does (C8).
 
 Named `dates` after out-of-service, bookings and cards. The object carries no
 label of its own; its children are labelled.
@@ -29204,14 +29238,14 @@ the freight still posts through a bill's charge item to its own account.
 
 **What it spreads over is fixed at entry.** `quantity` is the item's
 outstanding count when the entry was made, and `received_at_entry` is
-`quantity_received` at that moment. The k-th receipt prices the units received
+what the line had received at that moment (its row's custody, C8). The k-th receipt prices the units received
 since the entry, `clamp(received − received_at_entry, 0, quantity)`, with
 `cumulativeShareCents`, so the shares telescope to `amount_cents` exactly when
 every outstanding unit arrives (`purchaseLineReceiptTargetCents`,
 `@cfs/core/utils/purchases`).
 
 **Append-only, the way the item amount is.** An entry no receipt has priced
-(`quantity_received ≤ received_at_entry`) is editable and removable. One that
+(received `≤ received_at_entry`) is editable and removable. One that
 a receipt has priced any part of is frozen. A short close still proceeds:
 the unpriced remainder is DERIVED (`strandedLandedCents`), never stored. The
 post-receipt re-base waits on depreciation (api-cloudrun#1388).
@@ -29364,14 +29398,6 @@ Zod schema for {@link PurchaseLineRef}.
 const PurchaseLineRefSchema: z.ZodType<PurchaseLineRef>;
 ```
 
-### `PurchaseLineStatusType`
-
-One {@link PURCHASE_LINE_STATUSES} member.
-
-```ts
-type PurchaseLineStatusType = indexedAccess;
-```
-
 ### `PurchasePostedItem`
 
 A purchase line that can be received, billed and posted: never a kit header.
@@ -29399,9 +29425,7 @@ interface PurchaseRentalItem {
   uid_product: string;
   amount_cents: number | null;
   price: PurchaseLinePrice;
-  quantity_received: number;
   quantity_billed: number | null;
-  quantity_returned: number;
   uid_orders: string[];
   uid_units: string[];
 }
@@ -29524,8 +29548,6 @@ interface PurchaseSaleItem {
   uid_product: string;
   amount_cents: number;
   price: PurchaseLinePrice;
-  expected_date: string | null;
-  quantity_received: number;
   quantity_billed: number;
   landed_costs: PurchaseLandedCost[];
 }
@@ -29542,7 +29564,6 @@ interface PurchaseSaleItemInputType {
   quantity: number;
   amount_cents: number;
   ledger_account?: COACodeType | null;
-  expected_date?: string | null;
   landed_costs?: PurchaseLandedCostInputType[];
 }
 ```
@@ -29706,8 +29727,8 @@ Input for returning subrented units to the supplier
 (`POST /purchases/{uid}/returns`) — the mirror of {@link ReceivePurchaseInput}.
 
 Each line becomes ONE `subrent_out` movement naming the purchase in
-`sources[]`, in one transaction with the `quantity_returned` co-write. There
-is no cost: a returned unit was never owned.
+`sources[]`, in one transaction with the inbound booking's `stocked →
+sent_back` step. There is no cost: a returned unit was never owned.
 
 ```ts
 interface ReturnPurchaseInputType {
@@ -29753,7 +29774,8 @@ const ReversePurchaseReceiptInput: z.ZodType<ReversePurchaseReceiptInputType>;
 Input for reversing one receipt (`POST /purchases/{uid}/receipts/{movementUid}/reverse`).
 
 A standalone reversal of a receipt is refused; this lever reverses it AND
-decrements `quantity_received` in one transaction. It posts nothing to Xero —
+moves the line's inbound booking back in one transaction (C8: the received
+count is derived from that custody, never stored on the line). It posts nothing to Xero —
 a receipt never did.
 
 ```ts
@@ -29776,7 +29798,7 @@ const ReversePurchaseReturnInput: z.ZodType<ReversePurchaseReturnInputType>;
 
 Input for reversing one return (`POST /purchases/{uid}/returns/{movementUid}/reverse`)
 — the mirror of {@link ReversePurchaseReceiptInput}: it reverses the
-`subrent_out` AND decrements `quantity_returned` in one transaction.
+`subrent_out` AND moves the inbound booking back in one transaction.
 
 ```ts
 interface ReversePurchaseReturnInputType {
@@ -29930,10 +29952,6 @@ A subrent line's hire window, read off its pair — `{start, end}` with a null
 The basis of an item's formula. Every STORED item carries `price` (beta B);
 the parameter stays loose for a client's draft line, which reads as flat
 until it names a formula.
-
-### `purchaseItemCanceled(item: PurchaseItem): boolean`
-
-Was this item canceled in full — nothing will come and nothing is billed?
 
 ### `purchaseItemCommittedCents(item: PurchaseItem): number`
 
@@ -31521,8 +31539,8 @@ What added time-bounded SUPPLY. Each kind is drawn as its own row by the
 operator panel.
 
 - `subrent` — a live subrent line, over its hire window.
-- `inbound` — the unreceived remainder of a live BUY line, from its
-  `expected_date` on (api-cloudrun#1228). Open-ended: an overdue delivery
+- `inbound` — the unreceived remainder of a live BUY line, from its pair's
+  `delivery_start` (its expected arrival, C8) on (api-cloudrun#1228). Open-ended: an overdue delivery
   keeps counting until it is received or short-closed (owner, 2026-10-27),
   and the operator panel marks it overdue. The public hard gate does not
   count it, so a late delivery cannot oversell a web customer — see
@@ -31639,10 +31657,10 @@ member, because the fold SUMS every unavailable entry overlapping a window
 and must take the MINIMUM of supply over it — the two are opposite
 reductions.
 
-`quantity` is what the line still supplies: `quantity − canceled − returned`
-on a subrent, `quantity − canceled − received` on a buy.
+`quantity` is what the line still supplies: `quantity − returned` on a
+subrent, `quantity − received` on a buy, each its row's custody (C8).
 
-⚠️ **`end` is per KIND.** An `inbound` entry is `[expected_date, +∞)`, so its
+⚠️ **`end` is per KIND.** An `inbound` entry is `[delivery_start, +∞)`, so its
 `end` is always `null` and the schema refuses a bound. A `subrent` entry
 carries its hire's due-back date — or `null` on a STANDING subrent (a hire
 with no end, `PurchaseItemDates.end: null`, api-cloudrun#1392 folded into
@@ -34066,7 +34084,7 @@ interface PurchaseDocument {
   number_str?: string;
   status: string;
   supplier: typeLiteral;
-  store: typeLiteral;
+  uid_store: string;
   reference?: string;
   items?: Array<typeLiteral>;
   bills?: Array<typeLiteral>;
@@ -34881,13 +34899,18 @@ v3 (api-cloudrun#1407, the invoice shape): `lines` → `items` and the document
 `kind` is retired. The buy/subrent split is now the `items.type` facet — the
 invoice's `items.type`, nested rather than a top-level mirror, so there is no
 derived Typesense field to declare. Every `items.*` field is `optional: true`
-because the arms disagree: a direct item names no product, and only a subrent
-item carries `quantity_returned`.
+because the arms disagree: a direct item names no product (and, until v5,
+only a subrent item carried `quantity_returned`).
 
 v4 (one-document-model 6e-0a, ruling 32): the `bills[]` and `credits[]`
 discovery mirrors, `{ uid, number, status }` each, status faceted. Every field
 is `optional: true` through the expand, so a purchase stored before the
 backfill still indexes.
+
+v5 (one-document-model 7a, C8): the `store` snapshot becomes `uid_store`, a
+facet the manager labels from its stores cache (the order's key), and
+`items.quantity_returned` goes: a line's custody lives on its inbound
+booking. `total_cents` stays until 6e-0b1 (ruling 62).
 
 ```ts
 const purchases: TypesenseCollectionConfig;
@@ -38596,6 +38619,42 @@ interface InboundCancelBlocker {
 }
 ```
 
+### `NO_LINE_CUSTODY`
+
+No custody at all: a line nothing has been received for.
+
+```ts
+const NO_LINE_CUSTODY: PurchaseLineCustody;
+```
+
+### `PurchaseLineCustody`
+
+What a purchase line has received and returned — the two co-written buckets
+`quantity_received` / `quantity_returned` retired by one-document-model C8,
+now DERIVED from custody. Per GRAIN they are an inbound booking's
+({@link inboundCustodyCounts}); per LINE they are the net custody of the
+movements naming that row ({@link custodyBySourceItem}, ruling 65), because
+two lines may share one booking.
+
+```ts
+interface PurchaseLineCustody {
+  received: number;
+  returned: number;
+}
+```
+
+### `SourceItemMovement`
+
+A movement as {@link custodyBySourceItem} reads it.
+
+```ts
+interface SourceItemMovement {
+  path_source_item?: readonly string[] | null;
+  custody: MovementCustodyType | null;
+  quantity: number;
+}
+```
+
 ### `calculateInboundBreakdown(status: PurchaseStatusType, _type: InboundBookingTypeType, quantity: number, existing?: InboundBreakdown): InboundBreakdown`
 
 Project an inbound booking's breakdown for a PURCHASE status, line type and
@@ -38617,6 +38676,23 @@ client). A `complete` purchase raised past what came books the raise as
 The open bucket is floored at zero, so the result sums to `max(quantity,
 carried)`: an over-receipt keeps its units, and `quantity` (the PHYSICAL
 number) follows the breakdown rather than the paperwork.
+
+### `custodyBySourceItem(movements: readonly SourceItemMovement[]): Map<string, PurchaseLineCustody>`
+
+**Each purchase row's custody, from the journal** (ruling 65): the net of
+every movement naming the row in `path_source_item`, keyed by the path
+joined with `/`, then read as {@link PurchaseLineCustody}.
+
+A movement adds its quantity to its custody `to` key and takes it from its
+`from` key, plan keys contributing nothing — the per-booking replay's rule
+(`custodyByBooking`), applied per row. A `reverses` reversal carries its
+original's pair swapped, and a typed undo the mirrored pair, so both net out
+with no sign of their own. A movement with no row or no custody (a lineless
+annotation, an outbound step) is skipped.
+
+⚠️ **Pass ONE purchase's movements.** A path is a row identity within one
+document only (`cfs-items`); the caller scopes the read, as every writer
+already does by `sources array-contains {purchases, uid}`.
 
 ### `deriveInboundBookingStatus(b: Pick<InboundBooking, "type" | "breakdown">): InboundBookingStatusType`
 
@@ -38659,10 +38735,22 @@ Subrent's anywhere in CFS's hands, rented units on a shelf included. They go
 back to the supplier, or the receipt is undone, first, each an ordinary
 custody step with its movement.
 
+### `inboundCustodyCounts(b: InboundBreakdown): PurchaseLineCustody`
+
+Both counts of one breakdown — a booking's, or a row's net custody.
+
 ### `inboundLiveCustody(b: Pick<InboundBooking, "type" | "breakdown">): number`
 
 Units physically moving or in CFS's hands and not at an end: the
 `isInboundLive` keys for the booking's type. The twin of `liveCustody`.
+
+### `inboundReceived(b: InboundBreakdown): number`
+
+Units an inbound breakdown holds as received: Σ {@link INBOUND_RECEIVED_KEYS}.
+
+### `inboundReturned(b: InboundBreakdown): number`
+
+Units an inbound breakdown holds as no longer owed: Σ {@link INBOUND_RETURNED_KEYS}.
 
 ### `isInboundBookingClosed(b: Pick<InboundBooking, "type" | "breakdown">): boolean`
 
@@ -38671,6 +38759,10 @@ Per-booking closure rule: every unit sits in a TERMINAL key for its type
 every unit is back with its supplier or settled lost or damaged — a rented
 unit on a CFS shelf holds the booking open. A booking holding nothing is
 closed.
+
+### `lineCustodyAt(custody: ReadonlyMap<string, PurchaseLineCustody>, path: readonly string[]): PurchaseLineCustody`
+
+One row's custody from a {@link custodyBySourceItem} map — none when no movement names it.
 
 ### `sumInboundBreakdown(b: InboundBreakdown): number`
 
@@ -39520,6 +39612,16 @@ interface ParsedEventCardUid {
 }
 ```
 
+### `PurchaseCardCustody`
+
+Each row's received and returned counts, `custodyBySourceItem` over the
+purchase's movements (one-document-model C8): the card reads custody, which
+the purchase line no longer carries.
+
+```ts
+type PurchaseCardCustody = ReadonlyMap<string, PurchaseLineCustody>;
+```
+
 ### `cardNextStatus(card: Pick<Card, "locked" | "status">): CardStatus | null`
 
 The status one forward step takes this card to, or `null` when there is none
@@ -39603,7 +39705,7 @@ never reports `prep`/`checkout` — unlike the manager's destination-wide
 - `siblings` — Bookings filtered to the relevant destination side.
 - `current` — The card's current status — non-actionable statuses null out.
 
-### `computeCardActionFromPurchase(purchase: Pick<Purchase, "items">): CardAction | null`
+### `computeCardActionFromPurchase(purchase: Pick<Purchase, "items">, custody: PurchaseCardCustody): CardAction | null`
 
 A subrent return card's next action: `return_to_supplier` while any unit is
 in custody, `null` otherwise. Derived from the same buckets as
@@ -39670,7 +39772,7 @@ which sibling set the caller is expected to have prepared.
 - `current` — The card's current status — preserved if `blocked` or
 `canceled` so manual overrides aren't clobbered.
 
-### `computeCardStatusFromPurchase(purchase: Pick<Purchase, "status" | "items">, current: CardStatus): CardStatus`
+### `computeCardStatusFromPurchase(purchase: Pick<Purchase, "status" | "items">, current: CardStatus, custody: PurchaseCardCustody): CardStatus`
 
 A subrent return card's status, from its purchase's SUBRENT items. A purchase
 holding a subrent item has one card (whatever else it holds, D3); its buy,
@@ -39745,7 +39847,7 @@ is not one — a to-do or list card, or an id from before the pair re-key.
 returns `null` rather than a pair that names no leg: both corpora hold 0 of
 them, so one reaching here is a card nothing should treat as a leg.
 
-### `purchaseCardDue(purchase: Pick<Purchase, "items" | "destinations">): string | null`
+### `purchaseCardDue(purchase: Pick<Purchase, "items" | "destinations">, custody: PurchaseCardCustody): string | null`
 
 The instant a subrent return card is dated at: the EARLIEST due-back (its
 pair's `dates.collection_end`) among subrent items still OPEN — units in custody, or units
@@ -40681,6 +40783,7 @@ interface DocumentDiffSources {
   purchases?: readonly Purchase[];
   bills?: readonly PurchaseBill[];
   purchaseCredits?: readonly PurchaseCredit[];
+  purchaseCustody?: ReadonlyMap<string, ReadonlyMap<string, PurchaseLineCustody>>;
 }
 ```
 
@@ -41937,14 +42040,13 @@ interface ItemUniquenessIssue {
 ### `LineClaimSide`
 
 What {@link orderLineClaimIssues} needs to know about a SIDE: the pair
-{@link ScopedSyncSide} already carries, and whether a claim on a line that
-exists may still be refused.
+{@link ScopedSyncSide} already carries. `L` is the side's line shape, which
+fixes what the `orderLines` callback returns.
 
 ```ts
 interface LineClaimSide {
   scopeType: "order" | "purchase";
   pointerKey: keyof MovePointerCarrier;
-  lineClosed(line: L): boolean;
 }
 ```
 
@@ -42090,7 +42192,7 @@ interface OrderLineClaimIssue {
   index: number;
   path: string[];
   claimed_path: string[];
-  reason: "outside_order_block" | "not_a_line" | "order_unknown" | "line_closed";
+  reason: "outside_order_block" | "not_a_line" | "order_unknown";
 }
 ```
 
@@ -42260,7 +42362,6 @@ interface ScopedSyncSide {
   project(item: LineItem, scopeUid: string): R;
   lineFields(item: LineItem): readonly SharedField[];
   isStructural(item: LineItem): boolean;
-  stillStored(path: readonly string[]): boolean;
   adopts(item: LineItem, row: R): boolean;
   requantify(row: R, quantity: number, ctx: typeLiteral): R;
 }
@@ -46611,18 +46712,16 @@ interface StockOOSSource {
 ### `StockPurchaseItemSource`
 
 Just enough of a purchase ITEM to reduce it to the supply it adds, per arm.
+A stored `PurchaseRow` is assignable as is.
 
-`quantity_received` and `expected_date` are REQUIRED on the buy arm, as they
-are on a stored item, because a buy's inbound reads them: a caller that builds
-its own rows and leaves them out must fail to compile rather than count every
-received unit as still inbound. A stored `PurchaseRow` is assignable as is.
-
-A subrent's hire window is not on the line: it is the line's PAIR's
-`delivery_start` → `collection_end`, read through `path[0]`
-(one-document-model Phase 3).
+Neither the dates nor the custody counts are on the line (one-document-model
+Phase 3 and C8): a line's window is its PAIR's, read through `path[0]` — a
+subrent's hire `delivery_start` → `collection_end`, a buy's expected arrival
+`delivery_start` — and what it has received and returned is its row's
+custody, handed in beside the purchase ({@link supplyFromPurchase}).
 
 ```ts
-type StockPurchaseItemSource = typeLiteral | typeLiteral | typeLiteral;
+type StockPurchaseItemSource = typeLiteral | typeLiteral;
 ```
 
 ### `StockPurchaseSource`
@@ -46876,7 +46975,7 @@ which is correct: there is no count for the demand to exceed.
 On a TIE the earliest candidate wins (strict `>`), exactly as the strict `<`
 on `available` did.
 
-### `supplyFromPurchase(p: StockPurchaseSource, uidProduct: string): StockSupplyEntry[]`
+### `supplyFromPurchase(p: StockPurchaseSource, uidProduct: string, custody: ReadonlyMap<string, PurchaseLineCustody>): StockSupplyEntry[]`
 
 Reduce a purchase to the supply intervals it adds for ONE product — one
 entry per live item naming it, and `[]` otherwise. One product may sit on two
@@ -46885,8 +46984,16 @@ The item's ARM decides the interval:
 
 | item | entry | quantity |
 |---|---|---|
-| `rental` (Subrent) | its pair's `[delivery_start, collection_end]` (`end: null` is +∞), kind `subrent` | `quantity − canceled − returned` |
-| `sale` (Buy) | `[expected_date, +∞)`, kind `inbound` | `quantity − canceled − received` |
+| `rental` (Subrent) | its pair's `[delivery_start, collection_end]` (`end: null` is +∞), kind `subrent` | `quantity − returned` |
+| `sale` (Buy) | its pair's `[delivery_start, +∞)`, kind `inbound` | `quantity − received` |
+
+`custody` is each row's received and returned counts, keyed by path joined
+with `/` (`custodyBySourceItem`, `@cfs/core/utils/bookings-inbound`, or the
+same numbers off the line's inbound booking when one line holds the grain).
+It replaced the line buckets `quantity_received` / `quantity_returned` with
+the arithmetic unchanged (C8, ruling 60), so `scripts/audit-stock.ts` reads
+identical before and after. Required: an absent map would read every unit as
+still to come.
 | `service` / `replacement` | none — they bring no unit into custody | — |
 
 Liveness is the reducers' one filter, as for bookings and out-of-service:
@@ -46903,10 +47010,11 @@ the return card shows it overdue.
 
 On a BUY, receipt is the whole point: a received unit leaves the inbound
 entry and enters `quantity_held` as owned stock, so a partial receipt leaves
-`held + inbound` unchanged. ⚠️ An OVERDUE delivery stays `[expected_date, +∞)`
+`held + inbound` unchanged. ⚠️ An OVERDUE delivery stays `[delivery_start, +∞)`
 until it is received or short-closed (owner, 2026-10-27) — dropping it would
-need a clock-driven rebuild and hide stock CFS knows is coming. An item with
-no `expected_date` contributes nothing: there is no date to promise from.
+need a clock-driven rebuild and hide stock CFS knows is coming. A buy whose
+pair states no `delivery_start` contributes nothing: there is no date to
+promise from.
 
 An exhaustive switch with a `never` default (D7): a fourth item type is a
 compile error here, never a silent fall into the buy branch — which is how a
@@ -48300,14 +48408,14 @@ of these:
   mirror posts one side of a 2510 pair, unbalancing it. The pair reverses
   together, at the original amounts.
 - **A booking's movement** — the booking's `breakdown` is the other half.
-- **A purchase receipt** — the purchase line's `quantity_received` is; and
-  a subrent's **return** (`subrent_out`), whose other half is
-  `quantity_returned`, so it earns its own code and lever.
+- **A purchase receipt** — the line's INBOUND BOOKING is (`ordered →
+  received`, one-document-model C8); and a subrent's **return**
+  (`subrent_out`, `stocked → sent_back`), so it earns its own code and lever.
 - **An `out-of-service` endpoint, or a flag** (`service` set) — the record's
   buckets and `stores[]` are. A reason edit's SPLIT names two records.
 - **A `return_to_supplier`** — it names a purchase too, but its lever is the
-  RECORD PUT lowering `returned_to_supplier`, which moves the purchase's
-  `quantity_returned` back in the same write. So it answers `out_of_service`
+  RECORD PUT lowering `returned_to_supplier`, which moves the inbound
+  booking back in the same write. So it answers `out_of_service`
   with the record, checked before the purchase branch.
 
 Keyed on endpoints, sources and type — a shelf `write_off`
@@ -51708,7 +51816,7 @@ interface CreditableBillLine {
 A purchase line as the ruleset reads it.
 
 ```ts
-type PurchaseActionItem = Pick<PurchaseSaleItem, LineKeys | "type" | "quantity_received"> | Pick<PurchaseRentalItem, LineKeys | "type" | "quantity_received" | "quantity_returned"> | Pick<PurchaseServiceItem, LineKeys | "type"> | Pick<PurchaseReplacementItem, LineKeys | "type">;
+type PurchaseActionItem = Pick<PurchaseSaleItem, LineKeys | "type"> | Pick<PurchaseRentalItem, LineKeys | "type"> | Pick<PurchaseServiceItem, LineKeys | "type"> | Pick<PurchaseReplacementItem, LineKeys | "type">;
 ```
 
 ### `PurchaseActionOffer`
@@ -51775,6 +51883,8 @@ What {@link purchaseActionsFor} needs that the purchase alone does not carry.
 
 ```ts
 interface PurchaseOfferContext {
+  custody: ReadonlyMap<string, PurchaseLineCustody>;
+  now: string;
   billed_paths?: ReadonlySet<string>;
 }
 ```
@@ -51822,7 +51932,7 @@ header included: a credit of it copies every row below it by the bill's own
 ratio (`billLineCreditParts`), so the fold un-bills X and its components
 together. Time and $0 are judged over the subtree.
 
-### `purchaseActionsFor(purchase: Pick<Purchase, "status" | "query_by_bills"> & typeLiteral, _: unknown): PurchaseActionOffer[]`
+### `purchaseActionsFor(purchase: Pick<Purchase, "status" | "query_by_bills" | "destinations"> & typeLiteral, ctx: PurchaseOfferContext): PurchaseActionOffer[]`
 
 **Everything an operator may do to a purchase and its lines.** Per-line offers
 follow the purchase-level ones, in line order.
@@ -51890,14 +52000,15 @@ own `item.path`. A bill may bill several purchases, hence the scope.
 
 Everything an operator may do to a supplier credit: void it while nothing has drawn on it.
 
-### `purchaseItemClosable(item: PurchaseActionItem): boolean`
+### `purchaseItemClosable(item: PurchaseActionItem, custody: PurchaseLineCustody, pair: Pick<PurchaseDestination, "dates"> | undefined, now: string): boolean`
 
-**Would a close change this line?** Units still to arrive are dropped; a
-service or replacement drops its unbilled quantity, and a time line is canceled. A rental
-with units still out is NOT closable: the close zeroes its supply, so the API
-refuses it until they have gone back.
+**Would a close change this line?** Units still to arrive are dropped; a flat
+service or replacement drops its unbilled quantity, and a TIME line ends its
+pair's charge window, so it is closable while that window is open at `now`
+(ruling 63). A rental with units still out is NOT closable: the close zeroes
+its supply, so the API refuses it until they have gone back.
 
-### `purchaseItemTouched(item: PurchaseActionItem, billedPaths: ReadonlySet<string>): boolean`
+### `purchaseItemTouched(item: PurchaseActionItem, billedPaths: ReadonlySet<string>, custody: PurchaseLineCustody): boolean`
 
 **Has anything happened to this line that makes it history as well as an
 order?** A touched line cannot be removed or moved across bases. A time line
@@ -52033,7 +52144,9 @@ interface BillLineCredited {
 ### `PAYABLE_LINE_CLAIMS`
 
 The payable side of `orderLineClaimIssues`: a bill or credit's
-`path_purchase_item`. A canceled line cannot be billed.
+`path_purchase_item`. A line closed to 0 is removed (ruling 47), so there is
+no closed line to refuse: a claim on it names a row that is not there, as on
+the receivable side.
 
 ```ts
 const PAYABLE_LINE_CLAIMS: LineClaimSide<PurchaseRow>;
@@ -52237,7 +52350,7 @@ legal (D5) and still needs a default. A writer pricing anything against a
 line's `quantity_billed`, which may stand past `quantity`, prices through this
 and never through `cumulativeShareCents`, which throws there.
 
-### `payableScopedSync(prev: Purchase, next: Purchase, _: unknown): typeLiteral`
+### `payableScopedSync(prev: Purchase, next: Purchase): typeLiteral`
 
 **The payable side of the scoped initiator → billing sync**
 (`syncScopedDestinations`, `@cfs/core/utils/invoices`): the purchase → bill
@@ -52247,9 +52360,9 @@ purchase ↔ bill field set (one-document-model Phase 3).
 
 Built per sync over the two purchase revisions it converts
 ({@link asEngineSource}): the engine hands its projector the converted rows,
-and the side maps each back to the purchase row it came from. `stored` is the
-purchase's whole row set, which a pointer at a line closed out of the sync's
-rows is judged against; it defaults to the revision being synced.
+and the side maps each back to the purchase row it came from. A line closed to
+0 is removed (ruling 47), so an overridden bill row that billed it keeps no
+pointer, as an invoice row whose order line was removed keeps none.
 
 ### `projectPurchaseLineForBill(item: PurchaseItem, quantity: number): Record<string, unknown>`
 
@@ -52409,9 +52522,8 @@ it, which the diff has to be able to show.
 ### `purchaseLineCovers(purchase: Pick<Purchase, "status">, item: PurchaseItem): boolean`
 
 Does this purchase line COUNT for coverage — a subrent, charge or replacement
-line whose purchase was not canceled and which was not canceled in full with
-nothing billed (`purchaseItemCanceled`: it never happened)? A closed or
-completed line still covered what it covered.
+line whose purchase was not canceled? A line closed to nothing is removed
+(ruling 47), so every line still present covered what it covered.
 
 ### `purchaseLineCreditCents(args: typeLiteral): number`
 
@@ -52444,10 +52556,10 @@ documents (api-cloudrun#1441). A flat line's count is
 `.min(0)`; the diff keeps the unfloored number. A time line and a divider
 come back as they went in.
 
-⚠️ `quantity_billed` is unlike its sibling buckets. `quantity_received` and
-`quantity_returned` are kept by delta, because a receipt's quantity never
-changes; a bill line's does, so a delta here releases the wrong number on a
-void. Pass EVERY bill and credit of the purchase, including the one the
+⚠️ `quantity_billed` is recounted, never kept by delta: a bill line's
+quantity changes, so a delta here would release the wrong number on a void.
+(Its retired siblings `quantity_received` / `quantity_returned` are custody
+now, read off the inbound bookings and the journal, C8.) Pass EVERY bill and credit of the purchase, including the one the
 caller is writing.
 
 ### `rekeyPayableLines(items: readonly T[]): PayableLineRekey<T>`
@@ -52541,6 +52653,25 @@ pushed bill line, the per-line headroom, and the status rule.
 
 Design: api-cloudrun#1210.
 
+### `LandedCostTarget`
+
+One buy line as {@link allocateLandedCostCents} weighs it: the line and its row's received count.
+
+```ts
+interface LandedCostTarget {
+  line: Pick<PurchaseSaleItem, "amount_cents" | "quantity">;
+  received: number;
+}
+```
+
+### `NO_LINE_CUSTODY`
+
+No custody at all: a line nothing has been received for.
+
+```ts
+const NO_LINE_CUSTODY: PurchaseLineCustody;
+```
+
 ### `PayableLineUidFields`
 
 The payable line fields {@link payableLineUid} reads.
@@ -52600,7 +52731,40 @@ The result of {@link expandPurchaseItems}.
 type PurchaseExpansionResult = typeLiteral | typeLiteral;
 ```
 
-### `allocateLandedCostCents(amountCents: number, lines: readonly Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "quantity_received">[]): number[]`
+### `PurchaseLineCloseOutcome`
+
+What a close does to one line ({@link purchaseLineCloseOutcome}):
+
+- `lower` — its `quantity` drops to `quantity` (≥ 1), money restated;
+- `remove` — nothing is left, so the line goes, as an order line does
+  (ruling 47). Its inbound booking is KEPT while it holds custody, at
+  `quantity_ordered: 0`, and deleted while it is only a plan;
+- `end_window` — a TIME charge keeps its quantity and its pair's charge
+  window ends at the close (ruling 63): its bills metered the time, and a
+  carrier line simply stops, as an order ends a hire early by shortening
+  its pair.
+
+```ts
+type PurchaseLineCloseOutcome = typeLiteral | typeLiteral | typeLiteral;
+```
+
+### `PurchaseLineCustody`
+
+What a purchase line has received and returned — the two co-written buckets
+`quantity_received` / `quantity_returned` retired by one-document-model C8,
+now DERIVED from custody. Per GRAIN they are an inbound booking's
+({@link inboundCustodyCounts}); per LINE they are the net custody of the
+movements naming that row ({@link custodyBySourceItem}, ruling 65), because
+two lines may share one booking.
+
+```ts
+interface PurchaseLineCustody {
+  received: number;
+  returned: number;
+}
+```
+
+### `allocateLandedCostCents(amountCents: number, lines: readonly LandedCostTarget[]): number[]`
 
 Spread one landed amount over several buy lines, in proportion to each
 line's value still to arrive ({@link landedCostWeightCents}), with
@@ -52633,6 +52797,23 @@ cents, round once).
 A REVERSAL is the same call with the bounds swapped in sign: the units
 `(after, before]` leave at exactly what they cost to arrive, because the
 cumulative value at a count does not depend on the path.
+
+### `custodyBySourceItem(movements: readonly SourceItemMovement[]): Map<string, PurchaseLineCustody>`
+
+**Each purchase row's custody, from the journal** (ruling 65): the net of
+every movement naming the row in `path_source_item`, keyed by the path
+joined with `/`, then read as {@link PurchaseLineCustody}.
+
+A movement adds its quantity to its custody `to` key and takes it from its
+`from` key, plan keys contributing nothing — the per-booking replay's rule
+(`custodyByBooking`), applied per row. A `reverses` reversal carries its
+original's pair swapped, and a typed undo the mirrored pair, so both net out
+with no sign of their own. A movement with no row or no custody (a lineless
+annotation, an outbound step) is skipped.
+
+⚠️ **Pass ONE purchase's movements.** A path is a row identity within one
+document only (`cfs-items`); the caller scopes the read, as every writer
+already does by `sources array-contains {purchases, uid}`.
 
 ### `derivePurchaseCreditStatus(credit: typeLiteral, remainingCents: number): PurchaseCreditStatusType`
 
@@ -52745,11 +52926,13 @@ schema refuses — the caller's 400 to make, not this function's to clamp.
 **Returns** — `discount` is `null` when none was stated; otherwise its
 `amount_cents` is `gross − net`.
 
-### `isLandedCostFrozen(entry: Pick<PurchaseLandedCost, "received_at_entry">, line: Pick<PurchaseSaleItem, "quantity_received">): boolean`
+### `isLandedCostFrozen(entry: Pick<PurchaseLandedCost, "received_at_entry">, received: number): boolean`
 
-Is a landed cost frozen? A receipt has priced part of it once `received > received_at_entry`.
+Is a landed cost frozen? A receipt has priced part of it once the line's
+`received` count (its row's custody, `custodyBySourceItem`) passes
+`received_at_entry`.
 
-### `landedCostWeightCents(line: Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "quantity_received">): number`
+### `landedCostWeightCents(line: Pick<PurchaseSaleItem, "amount_cents" | "quantity">, received: number): number`
 
 A line's weight when one landed amount is spread over several lines: the
 value still to arrive, `cumulativeShareCents(amount, quantity, received,
@@ -52771,6 +52954,10 @@ cumulative received count: the units received since the entry was made,
 The clamp at 0 is what makes a REVERSAL that crosses the entry exact: units
 received before the entry never carried it, so taking them back returns none
 of it.
+
+### `lineCustodyAt(custody: ReadonlyMap<string, PurchaseLineCustody>, path: readonly string[]): PurchaseLineCustody`
+
+One row's custody from a {@link custodyBySourceItem} map — none when no movement names it.
 
 ### `payableInputUidIssue(line: typeLiteral): string | null`
 
@@ -52810,10 +52997,6 @@ migrated in prod, dev and `test`
 (`api-cloudrun/scripts/migrate-payable-line-uids.ts`). The input refine
 ({@link payableInputUidIssue}) went live a publish earlier.
 
-### `purchaseItemCanceled(item: PurchaseItem): boolean`
-
-Was this item canceled in full — nothing will come and nothing is billed?
-
 ### `purchaseItemCommittedCents(item: PurchaseItem): number`
 
 The amount an item COMMITS up front — the term of the purchase's
@@ -52825,16 +53008,16 @@ line, whose cost is decided as it accrues.
 The product an item ORDERS, or `undefined` — a service or replacement line's
 `uid_product` is attribution, not an order.
 
-### `purchaseLineCloseOutcome(item: PurchaseItem): typeLiteral`
+### `purchaseLineCloseOutcome(item: PurchaseItem, custody: PurchaseLineCustody): PurchaseLineCloseOutcome`
 
-**What a close leaves a line holding** (one-document-model Phase 5). A close is
-a quantity edit: a buy or subrent line drops to what was received, a flat
-charge to what was billed (never above what was ordered), and a line left with
-nothing is canceled at quantity 0. A TIME charge is canceled at its quantity,
-because its bills metered that quantity and a carrier line simply stops.
+**What a close leaves a line holding** (one-document-model Phase 5, ruling 47).
+A close is a quantity edit: a buy or subrent line drops to what its row has
+received (`custody`, from `custodyBySourceItem`), a flat charge to what was
+billed (never above what was ordered), and a line left with nothing is
+removed. A TIME charge ends its pair's window instead (ruling 63).
 
-Only the two facts both sides need live here; restating the money is the
-writer's, through the one payable pricer.
+Only the facts both sides need live here; restating the money, keeping the
+booking and moving the window are the writer's.
 
 ### `purchaseLineReceiptTargetCents(line: Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "landed_costs">, quantityReceived: number): number`
 
@@ -52882,17 +53065,17 @@ nothing left.
 null`): what it still owes is its units' unbilled charge windows, read by
 the bill projector, not a number here.
 
-### `remainingToReceive(item: ReceivableItem): number`
+### `remainingToReceive(item: Pick<PurchaseSaleItem, "quantity">, custody: Pick<PurchaseLineCustody, "received">): number`
 
-Units of a buy or subrent item still to be received: `quantity − received`.
+Units of a buy or subrent line still to be received: `quantity − received`, from its row's custody.
 
-### `remainingToReturn(item: Pick<PurchaseRentalItem, "quantity_received" | "quantity_returned">): number`
+### `remainingToReturn(custody: PurchaseLineCustody): number`
 
-Units of a SUBRENT item still to go back to the supplier: `received − returned`.
-Bounded by what came in, not by what was ordered — an unreceived unit owes no
-return.
+Units of a SUBRENT line still to go back to the supplier: `received −
+returned`, from its row's custody. Bounded by what came in, not by what was
+ordered — an unreceived unit owes no return.
 
-### `strandedLandedCents(line: Pick<PurchaseSaleItem, "quantity" | "quantity_received" | "landed_costs">): number`
+### `strandedLandedCents(line: Pick<PurchaseSaleItem, "quantity" | "landed_costs">, received: number): number`
 
 Landed cents a line can no longer price, because no unit is left to arrive:
 Σ over its entries of `amount_cents − landedPricedCents(entry, received)`,

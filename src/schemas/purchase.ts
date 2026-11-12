@@ -26,9 +26,13 @@
  * - **Its receipts name it in `sources[]`** and it finds them through
  *   `query_by_sources`. There is no `Movement.purchase` field and no back-list
  *   of movement ids here — the HISTORY of a purchase is the journal.
- * - **Co-written buckets** per item (`quantity_received`, `quantity_billed`,
- *   the line `status`), each written in the same transaction as the receipt,
- *   bill or close that moves it — the analogue of the record's `breakdown`.
+ * - **Custody lives on the inbound bookings, not here** (one-document-model
+ *   C8): what a line has received and returned is DERIVED, per grain from its
+ *   inbound booking and per row from the movements naming it
+ *   (`custodyBySourceItem`, `@cfs/core/utils/bookings-inbound`). The one
+ *   co-written bucket left is `quantity_billed`, until 6e-0b2 (ruling 42).
+ * - **A line closed to 0 is removed**, as an order line is (ruling 47); there
+ *   is no line status.
  * - **A derived status** in the record's vocabulary (`active | complete |
  *   canceled`), custody-only (rulings 55, 56): read off the purchase's INBOUND
  *   bookings by `derivePurchaseStatus` (`@cfs/core/utils/bookings-inbound`), and
@@ -235,7 +239,7 @@ export const PURCHASE_STATUS_TRAITS: Readonly<Record<PurchaseStatusType, Purchas
  *
  * 🔴 **Closed, and read through exhaustive switches.** Every reader that
  * branches on an item's arm switches over this union with a `never` default
- * (`purchaseItemSupplies`, `purchaseItemCanceled`, …), so a new member is a
+ * (`purchaseItemSupplies`, `purchaseItemCommittedCents`, …), so a new member is a
  * compile error at every one of them rather than a silent fall-through.
  *
  * Explicit tuple type rather than `as const` alone: core#43 is JSR's npm
@@ -271,7 +275,7 @@ export type PurchaseProductItemTypeType = typeof PURCHASE_PRODUCT_ITEM_TYPES[num
  *
  * `end: null` is open-ended — `+∞` in availability as on bookings and
  * out-of-service records (api-cloudrun#1392). The hire window doubles as the
- * expected delivery: a subrent item has no separate `expected_date`.
+ * expected delivery, as a Buy's pair's `delivery_start` does (C8).
  *
  * Named `dates` after out-of-service, bookings and cards. The object carries no
  * label of its own; its children are labelled.
@@ -483,14 +487,14 @@ export function purchaseItemBasis(item: { price?: PurchaseLinePrice }): PriceFor
  *
  * **What it spreads over is fixed at entry.** `quantity` is the item's
  * outstanding count when the entry was made, and `received_at_entry` is
- * `quantity_received` at that moment. The k-th receipt prices the units received
+ * what the line had received at that moment (its row's custody, C8). The k-th receipt prices the units received
  * since the entry, `clamp(received − received_at_entry, 0, quantity)`, with
  * `cumulativeShareCents`, so the shares telescope to `amount_cents` exactly when
  * every outstanding unit arrives (`purchaseLineReceiptTargetCents`,
  * `@cfs/core/utils/purchases`).
  *
  * **Append-only, the way the item amount is.** An entry no receipt has priced
- * (`quantity_received ≤ received_at_entry`) is editable and removable. One that
+ * (received `≤ received_at_entry`) is editable and removable. One that
  * a receipt has priced any part of is frozen. A short close still proceeds:
  * the unpriced remainder is DERIVED (`strandedLandedCents`), never stored. The
  * post-receipt re-base waits on depreciation (api-cloudrun#1388).
@@ -501,9 +505,9 @@ export interface PurchaseLandedCost {
   description: string;
   /** What this entry adds to the item's units, integer cents. */
   amount_cents: number;
-  /** The item's outstanding count (`quantity − canceled − received`) when the entry was made. */
+  /** The item's outstanding count (`quantity − received`) when the entry was made. */
   quantity: number;
-  /** The item's `quantity_received` when the entry was made. */
+  /** What the item had received when the entry was made (its row's custody). */
   received_at_entry: number;
   /** The bill this cost was charged on, or `null`. Traceability only; nothing reads it to price. */
   uid_purchase_bill: string | null;
@@ -545,11 +549,6 @@ export const PurchaseLandedCostSchema: z.ZodType<PurchaseLandedCost> = z.strictO
  * order line. A `stock_method: "none"` kit parent is a ROW, not a line: see
  * {@link isKitHeaderLine}.
  */
-/** Whether a close has stopped a purchase line. */
-export const PURCHASE_LINE_STATUSES = ["open", "canceled"] as const;
-/** One {@link PURCHASE_LINE_STATUSES} member. */
-export type PurchaseLineStatusType = typeof PURCHASE_LINE_STATUSES[number];
-
 interface PurchaseItemBase {
   /**
    * The line's product's uid, or a `custom-` uid for a line no product keys
@@ -560,16 +559,13 @@ interface PurchaseItemBase {
   uid: string;
   name: string;
   description: string;
-  /** Units ordered. `≥ 1`, except 0 on a line a close canceled — refined on each arm. */
-  quantity: number;
   /**
-   * `canceled` once a close stopped the whole line. A close that leaves units
-   * lowers `quantity` instead and the line stays `open` (one-document-model
-   * Phase 5; it replaced the `quantity_canceled` bucket). A flat or custody
-   * line canceled in full holds quantity 0; a TIME charge keeps its quantity,
-   * because its bills already metered it.
+   * Units ordered, `≥ 1`. A close lowers it, and a line closed to 0 is REMOVED
+   * (ruling 47, which retired the line `status`); its inbound booking is kept
+   * while it holds custody. A TIME charge is never lowered: a close ends its
+   * pair's charge window instead (ruling 63).
    */
-  status: PurchaseLineStatusType;
+  quantity: number;
   /**
    * Self-inclusive, under its destination divider (and group, when there is
    * one): `[destination uid, ...group uid, uid]`, authored by
@@ -602,13 +598,6 @@ export interface PurchaseSaleItem extends Omit<PurchaseItemBase, "ledger_account
    */
   price: PurchaseLinePrice;
   /**
-   * When the supplier says this item will arrive, or `null` when nobody said.
-   * A calendar date. Inbound supply (`supplyFromPurchase`) reads it.
-   */
-  expected_date: string | null;
-  /** Units received — Σ of the receipts naming this purchase for this item, net of reversals. */
-  quantity_received: number;
-  /**
    * Units billed — Σ of bill items minus Σ of credit items projecting this
    * item. May exceed what was ordered: over-billing is legal and flagged, never
    * refused (D5).
@@ -627,21 +616,8 @@ export interface PurchaseRentalItem extends Omit<PurchaseItemBase, "ledger_accou
   /** Net whole cost on a flat line; `null` on a time line (its bills decide it). */
   amount_cents: number | null;
   price: PurchaseLinePrice;
-  quantity_received: number;
   /** Units billed on a flat line; `null` on a time line, which resolves on custody alone (Q7). */
   quantity_billed: number | null;
-  /**
-   * Units no longer owed to the supplier: Σ of the `subrent_out` (handed back)
-   * and `return_to_supplier` (lost or damaged, settled to the supplier's
-   * account) movements naming this purchase for this item, net of reversals.
-   * Never more than received.
-   *
-   * ⚠️ **A settled unit counts as returned** (api-cloudrun#1360, D3). Every
-   * reader means "no longer owed" — `remainingToReturn`, the return card
-   * and supply — so the "Returned" column includes units
-   * that were never physically handed back.
-   */
-  quantity_returned: number;
   /**
    * The orders this item was raised for, possibly none. For margin and for
    * raising a subrent from an order's shortage; it is NOT a reservation, and
@@ -769,13 +745,12 @@ const itemShape = {
 // an untouched bill line follows both, and a line where either was edited
 // keeps both (one-document-model Phase 3). A partial bill differs from its
 // purchase line on both, so it keeps both and a purchase edit never re-bills it.
-// The co-written buckets below have no counterpart on a bill at all.
+// The co-written `quantity_billed` has no counterpart on a bill at all.
 const flatMoney = { propagate: true, shared_group: "flat_money" } as const;
-const quantityKey = z.int().min(0).meta({ column: true, label: "Quantity", ...flatMoney });
+// `≥ 1`: a line closed to 0 is removed (ruling 47), never stored at 0.
+const quantityKey = z.int().min(1).meta({ column: true, label: "Quantity", ...flatMoney });
 const amountKey = z.int().min(0).meta({ column: true, label: "Amount", ...flatMoney });
-const receivedKey = z.int().min(0).meta({ column: true, label: "Received" });
 const billedKey = z.int().min(0).meta({ column: true, label: "Billed" });
-const lineStatusKey = z.enum(PURCHASE_LINE_STATUSES).meta({ column: true, label: "Line Status" });
 const productKey = FirestoreId.meta({ propagate: true });
 const unitsKey = z.array(UnitId);
 
@@ -852,25 +827,6 @@ function uniqueUnitsIssue(units: readonly string[], ctx: z.RefinementCtx): void 
   }
 }
 
-function bucketIssues(
-  item: { quantity: number; quantity_received?: number; status: PurchaseLineStatusType },
-  ctx: z.RefinementCtx,
-): void {
-  if (item.quantity === 0 && item.status !== "canceled") {
-    ctx.addIssue({ code: "custom", path: ["quantity"], message: "quantity may be 0 only on a canceled line" });
-  }
-  // Received is bounded by what is still coming — the out-of-service
-  // `Σ breakdown ≤ quantity`. Billing has NO ceiling: over-billing is legal and
-  // flagged by the purchase↔bill diff, never refused (D5, reversing #1396).
-  if ((item.quantity_received ?? 0) > item.quantity) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["quantity_received"],
-      message: `received ${item.quantity_received ?? 0} exceeds the ${item.quantity} ordered`,
-    });
-  }
-}
-
 // Un-annotated so `_zod.propValues` survives for the discriminated union below
 // — see `_dividers.ts`. Each arm's refine sits HERE, on the Inner const: a
 // refine on an exported alias never runs inside the union (`invoice.ts`,
@@ -884,14 +840,10 @@ const SaleItemInner = z.strictObject({
   uid_product: productKey,
   amount_cents: amountKey,
   price: PurchaseLinePriceSchema,
-  expected_date: chicagoStartOfDay().nullable().meta({ column: true, label: "Expected" }),
-  quantity_received: receivedKey,
   quantity_billed: billedKey,
-  status: lineStatusKey,
   landed_costs: z.array(PurchaseLandedCostSchema).meta({ label: "Landed Cost" }),
 }).superRefine((item, ctx) => {
   storedUidIssue(item, ctx);
-  bucketIssues(item, ctx);
   addIssues(purchaseLineMoneyIssues(item), ctx);
   addIssues(payablePostingIssues(item.type, item.ledger_account), ctx);
   addIssues(kitHeaderIssues(item), ctx);
@@ -927,28 +879,16 @@ const RentalItemInner = z.strictObject({
   uid_product: productKey,
   amount_cents: amountKey.nullable(),
   price: PurchaseLinePriceSchema,
-  quantity_received: receivedKey,
   quantity_billed: billedKey.nullable(),
-  status: lineStatusKey,
-  quantity_returned: z.int().min(0).meta({ column: true, label: "Returned" }),
   uid_orders: z.array(FirestoreId),
   uid_units: unitsKey,
 }).superRefine((item, ctx) => {
   storedUidIssue(item, ctx);
-  bucketIssues(item, ctx);
   uniqueUnitsIssue(item.uid_units, ctx);
   addIssues(purchaseLineMoneyIssues(item), ctx);
   addIssues(payablePostingIssues(item.type, item.ledger_account), ctx);
   addIssues(kitHeaderIssues(item), ctx);
   addIssues(zeroPricedMoneyIssues(item), ctx);
-  // A unit can only go back to the supplier once it has come in.
-  if (item.quantity_returned > item.quantity_received) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["quantity_returned"],
-      message: `returned ${item.quantity_returned} exceeds the ${item.quantity_received} received`,
-    });
-  }
 });
 
 // The no-custody arms' shared keys; `replacement` adds a required record.
@@ -958,7 +898,6 @@ const noCustodyShape = {
   amount_cents: amountKey.nullable(),
   price: PurchaseLinePriceSchema,
   quantity_billed: billedKey.nullable(),
-  status: lineStatusKey,
   uid_units: unitsKey,
   // Permanent `.optional()`: freight and fees attribute nothing (api-cloudrun#1360).
   uid_product: FirestoreId.optional().meta({ propagate: true }),
@@ -969,7 +908,6 @@ function noCustodyIssues(
   ctx: z.RefinementCtx,
 ): void {
   storedUidIssue(item, ctx);
-  bucketIssues(item, ctx);
   uniqueUnitsIssue(item.uid_units, ctx);
   addIssues(purchaseLineMoneyIssues(item), ctx);
   addIssues(payablePostingIssues(item.type, item.ledger_account), ctx);
@@ -1033,19 +971,6 @@ export const PurchaseRowSchema: z.ZodType<PurchaseRow> = z.discriminatedUnion("t
 
 function unreachableItem(item: never): never {
   throw new Error(`unknown purchase item type: ${JSON.stringify(item)}`);
-}
-
-/** Was this item canceled in full — nothing will come and nothing is billed? */
-export function purchaseItemCanceled(item: PurchaseItem): boolean {
-  switch (item.type) {
-    case "sale":
-    case "rental":
-    case "service":
-    case "replacement":
-      return item.status === "canceled" && (item.quantity_billed ?? 0) === 0;
-    default:
-      return unreachableItem(item);
-  }
 }
 
 /**
@@ -1215,6 +1140,9 @@ export const PurchaseLineRefSchema: z.ZodType<PurchaseLineRef> = z.strictObject(
  *   follow their starts (a real window later, api-cloudrun#943), `days_active`
  *   is counted, and `charge_windows` defaults to one window over possession.
  *   Supply reads `delivery_start` → `collection_end`, as a booking's hold does.
+ *   A Buy's expected arrival IS its pair's `delivery_start` (C8, which retired
+ *   the line `expected_date`): two buys expected on different days sit under
+ *   two pairs.
  *   A standing hire states neither collection bound (`+∞` in supply); a pair
  *   with no hire states no dates at all.
  */
@@ -1276,8 +1204,13 @@ export interface Purchase {
    * the writers assert that, since it spans documents.
    */
   supplier: UidNameRefType;
-  /** The store the goods are coming to — a `{uid, name}` snapshot. */
-  store: UidNameRefType;
+  /**
+   * The store the goods come to (`stores/{uid}`) — the order's key, and REQUIRED
+   * where the order's is optional nullable (C8): a purchase always names its
+   * store, and tax ORIGIN reads it. A uid only, as on the order; a reader names
+   * it from its stores cache.
+   */
+  uid_store: string;
   /** The day the order was placed. A calendar date. */
   date: string;
   date_fs: FirestoreTimestampType;
@@ -1426,7 +1359,7 @@ export const PurchaseSchema: z.ZodType<Purchase> = z.strictObject({
   number: z.int().min(1).meta({ column: true, label: "#", linkTo: "purchaseDetail", serverSortVia: "number", ...homonym }),
   status: PurchaseStatusEnum.meta({ column: true, label: "Status", ...homonym }),
   supplier: UidNameRef.meta({ label: "Supplier", propagate: true }),
-  store: UidNameRef.meta({ label: "Store" }),
+  uid_store: FirestoreId.meta({ column: true, label: "Store" }),
   date: chicagoStartOfDay().meta({ serverSortVia: "date_fs", column: true, label: "Date", ...homonym }),
   date_fs: FirestoreTimestamp.meta(homonym),
   reference: z.string().max(200).nullable().meta({ column: true, label: "Reference", ...homonym }),
@@ -1565,7 +1498,6 @@ export interface PurchaseSaleItemInputType extends PurchaseItemInputBase {
   amount_cents: number;
   /** `null` is a stored kit header echoed back; the writer decides what a `none` product holds. */
   ledger_account?: COACodeType | null;
-  expected_date?: string | null;
   /**
    * The item's WHOLE landed-cost set. Absent keeps what is stored, so a client
    * that never names landed costs cannot erase them: this is a replacement, and
@@ -1682,10 +1614,9 @@ const saleItemInputArm = z.object({
   type: z.literal("sale"),
   ...inputHead,
   uid_product: FirestoreId,
-  quantity: z.int().min(0),
+  quantity: z.int().min(1),
   amount_cents: z.int().min(0),
   ledger_account: COACode.nullable().optional(),
-  expected_date: chicagoStartOfDay().nullable().optional(),
   landed_costs: z.array(PurchaseLandedCostInput).optional(),
 }).superRefine((item, ctx) => {
   inputPostingIssue(item, ctx);
@@ -1704,7 +1635,7 @@ const rentalItemInputArm = z.object({
   type: z.literal("rental"),
   ...inputHead,
   uid_product: FirestoreId,
-  quantity: z.int().min(0),
+  quantity: z.int().min(1),
   amount_cents: z.int().min(0).nullable().optional(),
   ledger_account: COACode.nullable().optional(),
   uid_orders: z.array(FirestoreId).optional(),
@@ -1895,13 +1826,17 @@ function purchaseRowsIssues(items: readonly PurchaseRowInputType[], ctx: z.Refin
 /**
  * Input for creating a purchase.
  *
- * `supplier` and `store` are uids only — the server resolves the names, as
+ * `supplier` is a uid only — the server resolves the name, as
  * `CreateTransactionInput.supplier` does, so a snapshot never disagrees with
- * its document. Items of any arm may mix (D3).
+ * its document. `uid_store` is stored as sent. Items of any arm may mix (D3).
+ *
+ * ⚠️ **`store` → `uid_store` (C8) has no safe order between the API and the
+ * manager**: a required key on a stripping input. It ships under the 7a
+ * window's manager freeze.
  */
 export interface CreatePurchaseInputType {
   supplier: { uid: string };
-  store: { uid: string };
+  uid_store: string;
   date: string;
   reference?: string | null;
   notes?: string | null;
@@ -1923,7 +1858,7 @@ export interface CreatePurchaseInputType {
 /** Zod schema for CreatePurchaseInputType. */
 export const CreatePurchaseInput: z.ZodType<CreatePurchaseInputType> = z.object({
   supplier: z.object({ uid: FirestoreId }),
-  store: z.object({ uid: FirestoreId }),
+  uid_store: FirestoreId,
   date: chicagoStartOfDay(),
   reference: z.string().max(200).nullable().optional(),
   notes: z.string().meta({ pii: "mask" }).nullable().optional(),
@@ -1979,9 +1914,10 @@ export const UpdatePurchaseInput: z.ZodType<UpdatePurchaseInputType> = z.object(
  *
  * Lowers each named buy or subrent item's `quantity` to what was received and a
  * flat charge's to what was billed, restating its money; a line with nothing
- * left is canceled (`purchaseLineCloseOutcome`). A time charge is canceled and
- * keeps its quantity. `path_purchase_items` absent closes every such item; a cancel is a
- * close of a purchase with nothing received. Billed beyond what was received is
+ * left is REMOVED, its inbound booking kept while it holds custody
+ * (`purchaseLineCloseOutcome`, ruling 47). A time charge keeps its quantity and
+ * its pair's charge window ends (ruling 63). `path_purchase_items` absent closes
+ * every such item; a cancel is a close of a purchase with nothing received. Billed beyond what was received is
  * a diff entry the operator credits by hand; a close raises no credit.
  */
 export interface ClosePurchaseInputType {
@@ -2086,7 +2022,8 @@ export const ReceivePurchaseInput: z.ZodType<ReceivePurchaseInputType> = z.objec
  * Input for reversing one receipt (`POST /purchases/{uid}/receipts/{movementUid}/reverse`).
  *
  * A standalone reversal of a receipt is refused; this lever reverses it AND
- * decrements `quantity_received` in one transaction. It posts nothing to Xero —
+ * moves the line's inbound booking back in one transaction (C8: the received
+ * count is derived from that custody, never stored on the line). It posts nothing to Xero —
  * a receipt never did.
  */
 export interface ReversePurchaseReceiptInputType {
@@ -2161,8 +2098,8 @@ export const ReturnPurchaseLineInput: z.ZodType<ReturnPurchaseLineInputType> = z
  * (`POST /purchases/{uid}/returns`) — the mirror of {@link ReceivePurchaseInput}.
  *
  * Each line becomes ONE `subrent_out` movement naming the purchase in
- * `sources[]`, in one transaction with the `quantity_returned` co-write. There
- * is no cost: a returned unit was never owned.
+ * `sources[]`, in one transaction with the inbound booking's `stocked →
+ * sent_back` step. There is no cost: a returned unit was never owned.
  */
 export interface ReturnPurchaseInputType {
   /** The physical instant the units left for the supplier. */
@@ -2185,7 +2122,7 @@ export const ReturnPurchaseInput: z.ZodType<ReturnPurchaseInputType> = z.object(
 /**
  * Input for reversing one return (`POST /purchases/{uid}/returns/{movementUid}/reverse`)
  * — the mirror of {@link ReversePurchaseReceiptInput}: it reverses the
- * `subrent_out` AND decrements `quantity_returned` in one transaction.
+ * `subrent_out` AND moves the inbound booking back in one transaction.
  */
 export interface ReversePurchaseReturnInputType {
   uuid_session: string;

@@ -205,6 +205,7 @@ import {
 } from "./purchase-documents.ts";
 import { priceFromFormula } from "./price-formulas.ts";
 import { roundDivHalfUp } from "./money.ts";
+import { lineCustodyAt, type PurchaseLineCustody } from "./bookings-inbound.ts";
 import { type PricingFormulas, statedChargeWindows } from "./price-document.ts";
 import {
   collectSubstitutionAnchors,
@@ -573,6 +574,14 @@ export interface DocumentDiffSources {
   bills?: readonly PurchaseBill[];
   /** Their supplier credits; a live credit nets out of `invoiced`. */
   purchaseCredits?: readonly PurchaseCredit[];
+  /**
+   * Each purchase's row custody, keyed by purchase uid: `custodyBySourceItem`
+   * over that purchase's movements (one-document-model C8 — the line no longer
+   * carries `quantity_received`). It fills a payable entry's `fulfilled`, which
+   * is stated and never a trigger. Absent ⇒ `fulfilled: null`, unknown rather
+   * than a wrong 0.
+   */
+  purchaseCustody?: ReadonlyMap<string, ReadonlyMap<string, PurchaseLineCustody>>;
 }
 
 /** What the order ↔ invoice explanation arms need, per order. */
@@ -1591,6 +1600,7 @@ function payableQuantityEntry(
   item: PurchaseItem,
   bills: readonly PurchaseBill[],
   credits: readonly PurchaseCredit[],
+  custody: ReadonlyMap<string, PurchaseLineCustody> | undefined,
 ): DocumentQuantityEntry | null {
   const k = key(item.path);
   // A document names the line when it bills any of it, a substitute standing in for it included.
@@ -1607,16 +1617,18 @@ function payableQuantityEntry(
     credits: namingCredits,
   });
   const ordered = item.quantity;
-  // A canceled line holds quantity 0 and states no money, so nothing is expected of its bills.
-  const expected_cents = item.quantity === 0
-    ? 0
-    : Number(roundDivHalfUp(BigInt(item.amount_cents ?? 0) * BigInt(Math.max(0, net.quantity)), BigInt(item.quantity)));
+  // `quantity ≥ 1`: a line closed to 0 is removed (ruling 47), so the share always has a divisor.
+  const expected_cents = Number(
+    roundDivHalfUp(BigInt(item.amount_cents ?? 0) * BigInt(Math.max(0, net.quantity)), BigInt(item.quantity)),
+  );
   if (net.quantity === ordered && net.amount_cents === expected_cents) return null;
   return {
     kind: "quantity",
     invoices: namingBills.map((b) => refOf("bill", b)),
     ordered,
-    fulfilled: item.type === "service" || item.type === "replacement" ? null : item.quantity_received,
+    fulfilled: item.type === "service" || item.type === "replacement" || custody === undefined
+      ? null
+      : lineCustodyAt(custody, item.path).received,
     invoiced: net.quantity,
     quantity_cents: null,
     extension_cents: null,
@@ -1674,7 +1686,9 @@ function payableDiffs(
     }
     for (const item of purchaseLines(purchase.items)) {
       if (!isFlat(item)) continue;
-      const entry = payableQuantityEntry(purchase, item, billsOf(purchase.uid), creditsOf(purchase.uid));
+      const entry = payableQuantityEntry(
+        purchase, item, billsOf(purchase.uid), creditsOf(purchase.uid), sources.purchaseCustody?.get(purchase.uid),
+      );
       if (entry !== null) push(out.lines, key(item.path), entry);
     }
     return;
@@ -1708,7 +1722,9 @@ function payableDiffs(
       const lineKey = purchaseLineKeyOf(line);
       const item = lineKey === null ? undefined : byKey.get(lineKey);
       if (item === undefined || !isFlat(item)) continue;
-      const entry = payableQuantityEntry(purchase, item, billsOf(uidPurchase), creditsOf(uidPurchase));
+      const entry = payableQuantityEntry(
+        purchase, item, billsOf(uidPurchase), creditsOf(uidPurchase), sources.purchaseCustody?.get(uidPurchase),
+      );
       if (entry !== null) push(out.lines, key(line.path), entry);
     }
   }

@@ -33,6 +33,7 @@ import {
   type PurchaseActionId,
   type PurchaseBill,
   type PurchaseCredit,
+  type PurchaseDestination,
   type PurchaseDocumentItem,
   purchaseItemBasis,
   purchaseLineKeyOf,
@@ -56,14 +57,15 @@ import { closeRefusal, InvoiceActionRefusal } from "./invoice-actions.ts";
 import { invoiceIsFrozen } from "./invoices.ts";
 import type { PurchaseBillXeroSyncStatus } from "./purchase-bill-xero-sync.ts";
 import { remainingToBill, remainingToReceive, remainingToReturn } from "./purchases.ts";
+import { lineCustodyAt, type PurchaseLineCustody } from "./bookings-inbound.ts";
 
 /** The keys of a purchase line the ruleset reads — so a line not yet saved can be asked too. */
-type LineKeys = "uid" | "path" | "quantity" | "quantity_billed" | "status" | "price";
+type LineKeys = "uid" | "path" | "quantity" | "quantity_billed" | "price";
 
 /** A purchase line as the ruleset reads it. */
 export type PurchaseActionItem =
-  | Pick<PurchaseSaleItem, LineKeys | "type" | "quantity_received">
-  | Pick<PurchaseRentalItem, LineKeys | "type" | "quantity_received" | "quantity_returned">
+  | Pick<PurchaseSaleItem, LineKeys | "type">
+  | Pick<PurchaseRentalItem, LineKeys | "type">
   | Pick<PurchaseServiceItem, LineKeys | "type">
   | Pick<PurchaseReplacementItem, LineKeys | "type">;
 
@@ -88,14 +90,29 @@ export interface PurchaseActionOffer {
    */
   lines?: CreditableBillLine[];
   /**
-   * `close`: what the close leaves the purchase as. `cancel` when every line
-   * ends canceled in full, so the purchase reads canceled; `close` otherwise.
+   * `close`: what the close leaves the purchase as. `cancel` when no line has
+   * anything received or billed, so every line goes and the purchase reads
+   * canceled (an AUTHORED status, ruling 55); `close` otherwise.
    */
   outcome?: "cancel" | "close";
 }
 
 /** What {@link purchaseActionsFor} needs that the purchase alone does not carry. */
 export interface PurchaseOfferContext {
+  /**
+   * Each row's custody, `custodyBySourceItem` over the purchase's movements
+   * (one-document-model C8): what a line has received and returned is no longer
+   * on the line. ⚠️ **Required**, unlike `billed_paths`: an absent map would
+   * read every line as untouched and offer its removal, which the server
+   * would refuse only if it re-read the journal.
+   */
+  custody: ReadonlyMap<string, PurchaseLineCustody>;
+  /**
+   * The instant the offer is made for, a Chicago instant. A TIME charge is
+   * closable only while its pair's charge window is still open at it (ruling
+   * 63: a close ends the window).
+   */
+  now: string;
   /**
    * The paths a live bill names ({@link purchaseBilledPaths}): how a TIME line,
    * which counts no `quantity_billed`, is known to be billed. **Absent ⇒ none**,
@@ -135,16 +152,20 @@ export function purchaseBilledPaths(
  * counts no `quantity_billed`, so whether a bill names it comes from
  * `billedPaths` ({@link purchaseBilledPaths}).
  */
-export function purchaseItemTouched(item: PurchaseActionItem, billedPaths: ReadonlySet<string>): boolean {
+export function purchaseItemTouched(
+  item: PurchaseActionItem,
+  billedPaths: ReadonlySet<string>,
+  custody: PurchaseLineCustody,
+): boolean {
   const billed = (item.quantity_billed ?? 0) > 0 || billedPaths.has(item.path.join("/"));
   switch (item.type) {
     case "sale":
-      return billed || item.quantity_received > 0 || item.status === "canceled";
     case "rental":
-      return billed || item.quantity_received + item.quantity_returned > 0 || item.status === "canceled";
+      // A unit can only go back once it has come in, so received covers returned.
+      return billed || custody.received > 0;
     case "service":
     case "replacement":
-      return billed || item.status === "canceled";
+      return billed;
     default: {
       const unreachable: never = item;
       throw new Error(`purchaseItemTouched: unknown item ${JSON.stringify(unreachable)}`);
@@ -153,21 +174,27 @@ export function purchaseItemTouched(item: PurchaseActionItem, billedPaths: Reado
 }
 
 /**
- * **Would a close change this line?** Units still to arrive are dropped; a
- * service or replacement drops its unbilled quantity, and a time line is canceled. A rental
- * with units still out is NOT closable: the close zeroes its supply, so the API
- * refuses it until they have gone back.
+ * **Would a close change this line?** Units still to arrive are dropped; a flat
+ * service or replacement drops its unbilled quantity, and a TIME line ends its
+ * pair's charge window, so it is closable while that window is open at `now`
+ * (ruling 63). A rental with units still out is NOT closable: the close zeroes
+ * its supply, so the API refuses it until they have gone back.
  */
-export function purchaseItemClosable(item: PurchaseActionItem): boolean {
-  if (item.status === "canceled") return false;
+export function purchaseItemClosable(
+  item: PurchaseActionItem,
+  custody: PurchaseLineCustody,
+  pair: Pick<PurchaseDestination, "dates"> | undefined,
+  now: string,
+): boolean {
   switch (item.type) {
     case "service":
     case "replacement":
+      if (purchaseItemBasis(item) === "time") return pair !== undefined && chargeWindowOpenAt(pair, now);
       return item.quantity - (item.quantity_billed ?? 0) > 0;
     case "rental":
-      return remainingToReturn(item) === 0 && remainingToReceive(item) > 0;
+      return remainingToReturn(custody) === 0 && remainingToReceive(item, custody) > 0;
     case "sale":
-      return remainingToReceive(item) > 0;
+      return remainingToReceive(item, custody) > 0;
     default: {
       const unreachable: never = item;
       throw new Error(`purchaseItemClosable: unknown item ${JSON.stringify(unreachable)}`);
@@ -175,21 +202,36 @@ export function purchaseItemClosable(item: PurchaseActionItem): boolean {
   }
 }
 
-/** Whether a close leaves this line canceled in full: nothing received, and no flat charge billed. */
-function closeCancels(item: PurchaseActionItem): boolean {
+/**
+ * Is a time line's pair still charging at `now`? Its last charge window ends
+ * after `now`; with no windows, its hire runs on (`collection_end` null or
+ * after `now`). Instants compare by `Date.parse`, never as strings.
+ */
+function chargeWindowOpenAt(pair: Pick<PurchaseDestination, "dates">, now: string): boolean {
+  const at = Date.parse(now);
+  const windows = pair.dates.charge_windows;
+  if (windows !== null) return Date.parse(windows[windows.length - 1].end) > at;
+  return pair.dates.collection_end === null || Date.parse(pair.dates.collection_end) > at;
+}
+
+/**
+ * Whether a close leaves this line with nothing: nothing received on a custody
+ * line, and nothing billed on a charge (a time charge's bills are read from
+ * `billedPaths`, since it counts no `quantity_billed`).
+ */
+function closeCancels(item: PurchaseActionItem, custody: PurchaseLineCustody, billedPaths: ReadonlySet<string>): boolean {
   return item.type === "service" || item.type === "replacement"
-    ? (item.quantity_billed ?? 0) === 0
-    : item.quantity_received === 0;
+    ? (item.quantity_billed ?? 0) === 0 && !billedPaths.has(item.path.join("/"))
+    : custody.received === 0;
 }
 
 /**
  * The units a line may still bill, 0 when it has nothing to bill: what is
- * ordered, less what is billed, and nothing on a canceled line. A TIME line counts no
- * `quantity_billed`, so it offers its open units every time — what is left of
- * its time is the bill writer's `remainingTimeCounts`, not a unit count.
+ * ordered, less what is billed. A TIME line counts no `quantity_billed`, so it
+ * offers its open units every time — what is left of its time is the bill
+ * writer's `remainingTimeCounts`, not a unit count.
  */
 function billableQuantity(item: PurchaseActionItem): number {
-  if (item.status === "canceled") return 0;
   return remainingToBill({ quantity: item.quantity, quantity_billed: item.quantity_billed ?? 0 });
 }
 
@@ -202,34 +244,38 @@ function billableQuantity(item: PurchaseActionItem): number {
  * close.
  */
 export function purchaseActionsFor(
-  purchase: Pick<Purchase, "status" | "query_by_bills"> & {
+  purchase: Pick<Purchase, "status" | "query_by_bills" | "destinations"> & {
     items: readonly (PurchaseActionItem | { type: PayableDividerType })[];
   },
-  ctx: PurchaseOfferContext = {},
+  ctx: PurchaseOfferContext,
 ): PurchaseActionOffer[] {
   const offers: PurchaseActionOffer[] = [];
   const { status } = purchase;
   const rows = purchase.items.filter((i): i is PurchaseActionItem => isPurchaseLine(i));
   const items = rows.filter((i) => !isKitHeaderLine(i));
   const active = status === "active";
-  const unitsOut = items.some((i) => i.type === "rental" && remainingToReturn(i) > 0);
-  if (active && !unitsOut && items.some(purchaseItemClosable)) {
-    offers.push({ key: "close", action: "close", outcome: items.every(closeCancels) ? "cancel" : "close" });
+  const billedPaths = ctx.billed_paths ?? new Set<string>();
+  const custodyOf = (i: PurchaseActionItem) => lineCustodyAt(ctx.custody, i.path);
+  const closable = (i: PurchaseActionItem) =>
+    purchaseItemClosable(i, custodyOf(i), purchase.destinations.find((d) => d.uid === i.path[0]), ctx.now);
+  const unitsOut = items.some((i) => i.type === "rental" && remainingToReturn(custodyOf(i)) > 0);
+  if (active && !unitsOut && items.some(closable)) {
+    const cancels = items.every((i) => closeCancels(i, custodyOf(i), billedPaths));
+    offers.push({ key: "close", action: "close", outcome: cancels ? "cancel" : "close" });
   }
   if (status !== "canceled") offers.push({ key: "add_bill", action: "add_bill" });
   if (purchase.query_by_bills.length > 0 || items.some((i) => (i.quantity_billed ?? 0) > 0)) {
     offers.push({ key: "add_credit", action: "add_credit" });
   }
-  const billedPaths = ctx.billed_paths ?? new Set<string>();
   for (const item of items) {
     const line = (action: PurchaseActionId, extra: Partial<PurchaseActionOffer> = {}) =>
       offers.push({ key: lineActionKey(action, item.path), action, path_purchase_item: [...item.path], ...extra });
-    if (active && purchaseItemClosable(item)) line("close_item");
+    if (active && closable(item)) line("close_item");
     if (status !== "canceled") {
       const max = billableQuantity(item);
       if (max > 0) line("bill_item", { max_quantity: max });
     }
-    if (!purchaseItemTouched(item, billedPaths)) {
+    if (!purchaseItemTouched(item, billedPaths, custodyOf(item))) {
       line("remove_item");
       line("change_basis");
     }
@@ -238,7 +284,7 @@ export function purchaseActionsFor(
   // while nothing under it has happened, and the removal takes its subtree.
   for (const header of rows.filter(isKitHeaderLine)) {
     const under = (i: PurchaseActionItem) => i.path.length > header.path.length && header.path.every((seg, k) => i.path[k] === seg);
-    if (!items.some((i) => under(i) && purchaseItemTouched(i, billedPaths))) {
+    if (!items.some((i) => under(i) && purchaseItemTouched(i, billedPaths, custodyOf(i)))) {
       offers.push({ key: lineActionKey("remove_item", header.path), action: "remove_item", path_purchase_item: [...header.path] });
     }
   }

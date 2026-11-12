@@ -1164,10 +1164,11 @@ export interface PurchaseDocument {
   number_str?: string;
   status: string;
   supplier: { uid?: string; name: string };
-  store: { uid?: string; name: string };
+  /** The store the goods come to (v5, C8): a uid, labelled by the reader. */
+  uid_store: string;
   reference?: string;
   /** Every item arm; `type` is the buy/subrent/usage/direct facet that replaced the document `kind` (api-cloudrun#1407). */
-  items?: Array<{ type?: string; uid_product?: string; name?: string; quantity_returned?: number }>;
+  items?: Array<{ type?: string; uid_product?: string; name?: string }>;
   /** 6e-0a (ruling 32): the bill mirror. */
   bills?: Array<{ uid: string; number: number; status: string }>;
   /** 6e-0a (ruling 32): the supplier-credit mirror. */

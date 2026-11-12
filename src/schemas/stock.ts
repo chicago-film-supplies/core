@@ -103,8 +103,8 @@ export interface StockUnavailableEntry {
  * operator panel.
  *
  * - `subrent` — a live subrent line, over its hire window.
- * - `inbound` — the unreceived remainder of a live BUY line, from its
- *   `expected_date` on (api-cloudrun#1228). Open-ended: an overdue delivery
+ * - `inbound` — the unreceived remainder of a live BUY line, from its pair's
+ *   `delivery_start` (its expected arrival, C8) on (api-cloudrun#1228). Open-ended: an overdue delivery
  *   keeps counting until it is received or short-closed (owner, 2026-10-27),
  *   and the operator panel marks it overdue. The public hard gate does not
  *   count it, so a late delivery cannot oversell a web customer — see
@@ -130,10 +130,10 @@ export const StockSupplyKindEnum: z.ZodType<StockSupplyKindType> = z.enum(STOCK_
  * and must take the MINIMUM of supply over it — the two are opposite
  * reductions.
  *
- * `quantity` is what the line still supplies: `quantity − canceled − returned`
- * on a subrent, `quantity − canceled − received` on a buy.
+ * `quantity` is what the line still supplies: `quantity − returned` on a
+ * subrent, `quantity − received` on a buy, each its row's custody (C8).
  *
- * ⚠️ **`end` is per KIND.** An `inbound` entry is `[expected_date, +∞)`, so its
+ * ⚠️ **`end` is per KIND.** An `inbound` entry is `[delivery_start, +∞)`, so its
  * `end` is always `null` and the schema refuses a bound. A `subrent` entry
  * carries its hire's due-back date — or `null` on a STANDING subrent (a hire
  * with no end, `PurchaseItemDates.end: null`, api-cloudrun#1392 folded into

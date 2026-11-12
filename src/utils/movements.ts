@@ -184,14 +184,14 @@ export interface StandaloneReversalRefusal {
  *   mirror posts one side of a 2510 pair, unbalancing it. The pair reverses
  *   together, at the original amounts.
  * - **A booking's movement** — the booking's `breakdown` is the other half.
- * - **A purchase receipt** — the purchase line's `quantity_received` is; and
- *   a subrent's **return** (`subrent_out`), whose other half is
- *   `quantity_returned`, so it earns its own code and lever.
+ * - **A purchase receipt** — the line's INBOUND BOOKING is (`ordered →
+ *   received`, one-document-model C8); and a subrent's **return**
+ *   (`subrent_out`, `stocked → sent_back`), so it earns its own code and lever.
  * - **An `out-of-service` endpoint, or a flag** (`service` set) — the record's
  *   buckets and `stores[]` are. A reason edit's SPLIT names two records.
  * - **A `return_to_supplier`** — it names a purchase too, but its lever is the
- *   RECORD PUT lowering `returned_to_supplier`, which moves the purchase's
- *   `quantity_returned` back in the same write. So it answers `out_of_service`
+ *   RECORD PUT lowering `returned_to_supplier`, which moves the inbound
+ *   booking back in the same write. So it answers `out_of_service`
  *   with the record, checked before the purchase branch.
  *
  * Keyed on endpoints, sources and type — a shelf `write_off`

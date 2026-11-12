@@ -7,6 +7,7 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
   type PurchaseActionItem,
+  type PurchaseOfferContext,
   assertPurchaseAction,
   assertPurchaseBillAction,
   assertPurchaseCreditAction,
@@ -25,11 +26,13 @@ import { deriveInvoiceStatus } from "../src/utils/invoices.ts";
 import { billLineCreditCents, billLineCreditParts, purchaseLineBilledNet } from "../src/utils/purchase-documents.ts";
 import { sliceSubstitutedFor } from "../src/utils/substitutions.ts";
 import { InvoiceActionRefusal } from "../src/utils/invoice-actions.ts";
+import type { PurchaseLineCustody } from "../src/utils/bookings-inbound.ts";
 import {
   PURCHASE_ACTION_IDS,
   PURCHASE_ACTIONS,
   type PurchaseBill,
   type PurchaseCredit,
+  type PurchaseDestination,
   type PurchaseDocumentItem,
   type PurchaseItem,
 } from "../src/schemas/mod.ts";
@@ -49,19 +52,40 @@ const TIME_PRICE = {
 };
 
 const buy = (o: Record<string, unknown> = {}) => ({
-  type: "sale", uid: "b", path: ["b"], quantity: 3, price: FIXED_PRICE,
-  quantity_received: 0, quantity_billed: 0, status: "open", ...o,
+  type: "sale", uid: "b", path: ["b"], quantity: 3, price: FIXED_PRICE, quantity_billed: 0, ...o,
 }) as PurchaseActionItem;
 const subrent = (o: Record<string, unknown> = {}) => ({
-  type: "rental", uid: "s", path: ["s"], quantity: 2, price: FIXED_PRICE,
-  quantity_received: 0, quantity_returned: 0, quantity_billed: 0, status: "open", ...o,
+  type: "rental", uid: "s", path: ["s"], quantity: 2, price: FIXED_PRICE, quantity_billed: 0, ...o,
 }) as PurchaseActionItem;
 const charge = (o: Record<string, unknown> = {}) => ({
-  type: "service", uid: "c", path: ["c"], quantity: 2, price: FIXED_PRICE, quantity_billed: 0, status: "open", ...o,
+  type: "service", uid: "c", path: ["c"], quantity: 2, price: FIXED_PRICE, quantity_billed: 0, ...o,
 }) as PurchaseActionItem;
 const timeCharge = (o: Record<string, unknown> = {}) => charge({ price: TIME_PRICE, quantity_billed: null, ...o });
 
-const po = (items: PurchaseActionItem[], status: "active" | "complete" | "canceled" = "active", query_by_bills: string[] = []) => ({ status, items, query_by_bills });
+/** The instant offers are asked at, and a window that ends before and after it. */
+const NOW = "2026-11-11T12:00:00.000-06:00";
+const BEFORE = "2026-11-01T00:00:00.000-05:00";
+const AFTER = "2026-12-01T00:00:00.000-06:00";
+/** A pair answering every fixture line's `path[0]` (the fixtures carry no dividers), its window ending at `end`. */
+const pairFor = (uid: string, end: string | null = null) =>
+  ({ uid, dates: { collection_end: end, charge_windows: end === null ? null : [{ start: BEFORE, end }] } }) as unknown as PurchaseDestination;
+/** Row custody (C8): what each fixture line has received and returned, by path. */
+type Got = Record<string, { received: number; returned?: number }>;
+const custodyOf = (got: Got): Map<string, PurchaseLineCustody> =>
+  new Map(Object.entries(got).map(([k, v]) => [k, { received: v.received, returned: v.returned ?? 0 }]));
+const ctx = (got: Got = {}, extra: Partial<PurchaseOfferContext> = {}): PurchaseOfferContext =>
+  ({ custody: custodyOf(got), now: NOW, ...extra });
+const NONE = { received: 0, returned: 0 };
+
+const po = (
+  items: PurchaseActionItem[],
+  status: "active" | "complete" | "canceled" = "active",
+  query_by_bills: string[] = [],
+  windowEnd: string | null = null,
+) => ({ status, items, query_by_bills, destinations: items.map((i) => pairFor(i.path[0], windowEnd)) });
+/** Offers on a purchase with row custody `got`. */
+const offersOf = (purchase: ReturnType<typeof po>, got: Got = {}, extra: Partial<PurchaseOfferContext> = {}) =>
+  purchaseActionsFor(purchase, ctx(got, extra));
 const keys = (offers: { key: string }[]) => offers.map((o) => o.key);
 const offer = (offers: ReturnType<typeof purchaseActionsFor>, key: string) => offers.find((o) => o.key === key);
 
@@ -70,28 +94,33 @@ Deno.test("PURCHASE_ACTION_IDS and PURCHASE_ACTIONS name the same actions, both 
   assertEquals(new Set(PURCHASE_ACTION_IDS).size, PURCHASE_ACTION_IDS.length);
 });
 
-Deno.test("purchaseItemClosable: units to arrive, an unbilled charge; never a subrent with units out", () => {
-  assert(purchaseItemClosable(buy()));
-  assert(!purchaseItemClosable(buy({ quantity_received: 3 })));
-  assert(!purchaseItemClosable(buy({ quantity: 0, status: "canceled" })));
-  assert(purchaseItemClosable(subrent()));
+Deno.test("purchaseItemClosable: units to arrive, an unbilled charge, a time line's open window; never a subrent with units out", () => {
+  const closable = (item: PurchaseActionItem, custody = NONE, end: string | null = null) =>
+    purchaseItemClosable(item, custody, pairFor(item.path[0], end), NOW);
+  assert(closable(buy()));
+  assert(!closable(buy(), { received: 3, returned: 0 }));
+  assert(closable(subrent()));
   // One of two arrived and is still out: the API refuses this close (the subrent plan, D4).
-  assert(!purchaseItemClosable(subrent({ quantity_received: 1 })));
-  assert(purchaseItemClosable(subrent({ quantity_received: 1, quantity_returned: 1 })));
-  assert(purchaseItemClosable(charge()));
-  assert(purchaseItemClosable(charge({ quantity_billed: 1 })));
-  assert(!purchaseItemClosable(charge({ quantity_billed: 2 })));
-  assert(!purchaseItemClosable(charge({ quantity_billed: 3 })), "an over-billed charge has nothing left to cancel");
-  assert(purchaseItemClosable(timeCharge()));
-  assert(!purchaseItemClosable(timeCharge({ status: "canceled" })));
+  assert(!closable(subrent(), { received: 1, returned: 0 }));
+  assert(closable(subrent(), { received: 1, returned: 1 }));
+  assert(closable(charge()));
+  assert(closable(charge({ quantity_billed: 1 })));
+  assert(!closable(charge({ quantity_billed: 2 })));
+  assert(!closable(charge({ quantity_billed: 3 })), "an over-billed charge has nothing left to cancel");
+  // Ruling 63: a time line's close ends its pair's window, so only an open window closes.
+  assert(closable(timeCharge()), "a standing hire runs on");
+  assert(closable(timeCharge(), NONE, AFTER));
+  assert(!closable(timeCharge(), NONE, BEFORE), "a window already ended has nothing to close");
+  assert(!purchaseItemClosable(timeCharge(), NONE, undefined, NOW), "no pair, no window to end: fail closed");
 });
 
-Deno.test("purchaseItemTouched: buckets, and a time line a bill names", () => {
-  assert(!purchaseItemTouched(buy(), new Set()));
-  for (const o of [{ quantity_received: 1 }, { quantity_billed: 1 }, { status: "canceled" as const }]) assert(purchaseItemTouched(buy(o), new Set()));
-  assert(purchaseItemTouched(subrent({ quantity_returned: 1 }), new Set()));
-  assert(!purchaseItemTouched(timeCharge(), new Set()));
-  assert(purchaseItemTouched(timeCharge(), new Set(["c"])), "a time line counts no quantity_billed");
+Deno.test("purchaseItemTouched: custody, a bill, and a time line a bill names", () => {
+  assert(!purchaseItemTouched(buy(), new Set(), NONE));
+  assert(purchaseItemTouched(buy(), new Set(), { received: 1, returned: 0 }));
+  assert(purchaseItemTouched(buy({ quantity_billed: 1 }), new Set(), NONE));
+  assert(purchaseItemTouched(subrent(), new Set(), { received: 1, returned: 1 }));
+  assert(!purchaseItemTouched(timeCharge(), new Set(), NONE));
+  assert(purchaseItemTouched(timeCharge(), new Set(["c"]), NONE), "a time line counts no quantity_billed");
 });
 
 Deno.test("purchaseBilledPaths: a voided bill names nothing; another purchase's lines are not this one's", () => {
@@ -112,59 +141,60 @@ Deno.test("purchaseBilledPaths: a substitute names the line it stands in for as 
 });
 
 Deno.test("close: refused whole while a subrent has units out, even with another line open", () => {
-  const out = subrent({ quantity: 1, quantity_received: 1 });
-  const offers = purchaseActionsFor(po([buy(), out]));
+  const out = subrent({ quantity: 1 });
+  const offers = offersOf(po([buy(), out]), { s: { received: 1 } });
   assertEquals(offer(offers, "close"), undefined);
   assert(offer(offers, "close_item:b"), "the open buy still closes on its own");
   assertEquals(offer(offers, "close_item:s"), undefined);
 });
 
 Deno.test("close: only an active purchase, and only with something to close", () => {
-  assertEquals(offer(purchaseActionsFor(po([buy()], "complete")), "close"), undefined);
-  assertEquals(offer(purchaseActionsFor(po([buy({ quantity_received: 3 })])), "close"), undefined);
+  assertEquals(offer(offersOf(po([buy()], "complete")), "close"), undefined);
+  assertEquals(offer(offersOf(po([buy()]), { b: { received: 3 } }), "close"), undefined);
 });
 
-Deno.test("close outcome: cancel only when every line ends canceled in full", () => {
-  const outcome = (items: PurchaseActionItem[]) => offer(purchaseActionsFor(po(items)), "close")?.outcome;
+Deno.test("close outcome: cancel only when nothing was received or billed", () => {
+  const outcome = (items: PurchaseActionItem[], got: Got = {}, extra: Partial<PurchaseOfferContext> = {}) =>
+    offer(offersOf(po(items), got, extra), "close")?.outcome;
   assertEquals(outcome([buy()]), "cancel");
-  assertEquals(outcome([buy({ quantity_received: 1 })]), "close");
+  assertEquals(outcome([buy()], { b: { received: 1 } }), "close");
   // A part-billed flat charge keeps its billed unit, so the purchase ends complete.
   assertEquals(outcome([charge({ quantity_billed: 1 })]), "close");
-  // A time charge cancels in full however much was billed.
+  // An unbilled time charge cancels; a billed one stays, its window ended (ruling 63).
   assertEquals(outcome([timeCharge()]), "cancel");
+  assertEquals(outcome([timeCharge()], {}, { billed_paths: new Set(["c"]) }), "close");
   // A billed, unreceived buy cancels too: the excess is a diff entry to credit by hand.
   assertEquals(outcome([buy({ quantity_billed: 1 })]), "cancel");
 });
 
 Deno.test("add_bill: any purchase that is not canceled, fully billed included (owner, 2026-11-05)", () => {
-  assert(offer(purchaseActionsFor(po([buy({ quantity_billed: 3, quantity_received: 3 })], "complete")), "add_bill"));
-  assertEquals(offer(purchaseActionsFor(po([buy({ quantity: 0, status: "canceled" })], "canceled")), "add_bill"), undefined);
+  assert(offer(offersOf(po([buy({ quantity_billed: 3 })], "complete"), { b: { received: 3 } }), "add_bill"));
+  assertEquals(offer(offersOf(po([buy()], "canceled")), "add_bill"), undefined);
 });
 
 Deno.test("add_credit: a billed line, or any bill, which reaches a time-only purchase", () => {
-  assertEquals(offer(purchaseActionsFor(po([timeCharge()])), "add_credit"), undefined);
-  assert(offer(purchaseActionsFor(po([buy({ quantity_billed: 1 })])), "add_credit"));
-  assert(offer(purchaseActionsFor(po([timeCharge()], "active", ["bill1"])), "add_credit"));
+  assertEquals(offer(offersOf(po([timeCharge()])), "add_credit"), undefined);
+  assert(offer(offersOf(po([buy({ quantity_billed: 1 })])), "add_credit"));
+  assert(offer(offersOf(po([timeCharge()], "active", ["bill1"])), "add_credit"));
 });
 
 Deno.test("bill_item: a flat line's remaining units; an over-billed line offers none", () => {
-  assertEquals(offer(purchaseActionsFor(po([buy({ quantity_billed: 1 })])), "bill_item:b")?.max_quantity, 2);
-  assertEquals(offer(purchaseActionsFor(po([buy({ quantity_billed: 4 })])), "bill_item:b"), undefined);
-  assertEquals(offer(purchaseActionsFor(po([buy()], "canceled")), "bill_item:b"), undefined);
+  assertEquals(offer(offersOf(po([buy({ quantity_billed: 1 })])), "bill_item:b")?.max_quantity, 2);
+  assertEquals(offer(offersOf(po([buy({ quantity_billed: 4 })])), "bill_item:b"), undefined);
+  assertEquals(offer(offersOf(po([buy()], "canceled")), "bill_item:b"), undefined);
 });
 
 Deno.test("bill_item: a time line offers its open units — nothing is metered until Phase 3", () => {
   const line = {
-    ...subrent({ uid: "t", path: ["t"], price: TIME_PRICE, quantity_billed: null, quantity: 1, quantity_received: 1, quantity_returned: 1 }),
+    ...subrent({ uid: "t", path: ["t"], price: TIME_PRICE, quantity_billed: null, quantity: 1 }),
     uid_units: ["unit-1"],
-    dates: null,
   } as unknown as PurchaseActionItem;
-  assertEquals(offer(purchaseActionsFor(po([line])), "bill_item:t")?.max_quantity, 1);
+  assertEquals(offer(offersOf(po([line]), { t: { received: 1, returned: 1 } }), "bill_item:t")?.max_quantity, 1);
 });
 
 Deno.test("remove_item and change_basis: only an untouched line, a billed time line included", () => {
-  assertEquals(keys(purchaseActionsFor(po([timeCharge()]))).filter((k) => /remove|basis/.test(k)), ["remove_item:c", "change_basis:c"]);
-  const billed = purchaseActionsFor(po([timeCharge()]), { billed_paths: new Set(["c"]) });
+  assertEquals(keys(offersOf(po([timeCharge()]))).filter((k) => /remove|basis/.test(k)), ["remove_item:c", "change_basis:c"]);
+  const billed = offersOf(po([timeCharge()]), {}, { billed_paths: new Set(["c"]) });
   assertEquals(keys(billed).filter((k) => /remove|basis/.test(k)), []);
   assert(offer(billed, "close_item:c"), "a billed time line offers Close instead");
 });
@@ -320,8 +350,8 @@ Deno.test("purchaseBillPushRefusal: one row per reason, and the offer follows it
 Deno.test("purchaseActionsFor: a divider row is no line — it offers nothing and changes no offer (one-document-model Phase 3)", () => {
   const divider = { type: "destination" as const };
   const lines = [buy({ quantity_billed: 1 }), timeCharge()];
-  const withDivider = { status: "active" as const, items: [divider, ...lines], query_by_bills: [] };
-  assertEquals(purchaseActionsFor(withDivider), purchaseActionsFor(po(lines)));
+  const withDivider = { ...po(lines), items: [divider, ...lines] };
+  assertEquals(purchaseActionsFor(withDivider, ctx()), offersOf(po(lines)));
 });
 
 Deno.test("a $0 bill offers Mark Paid until it is closed, then Reopen; the assert follows the offer", () => {
@@ -352,9 +382,9 @@ Deno.test("assertPurchaseCreditAction and assertPurchaseAction refuse what is no
   assertPurchaseCreditAction(credit, { action: "void_credit" });
   assertThrows(() => assertPurchaseCreditAction({ ...credit, remaining_credit_cents: 4 }, { action: "void_credit" }), InvoiceActionRefusal, "allocated");
   assertThrows(() => assertPurchaseCreditAction({ ...credit, status: "void" }, { action: "void_credit" }), InvoiceActionRefusal, "void");
-  assertPurchaseAction(po([timeCharge()]), {}, { action: "remove_item", path_purchase_item: ["c"] });
+  assertPurchaseAction(po([timeCharge()]), ctx(), { action: "remove_item", path_purchase_item: ["c"] });
   assertThrows(
-    () => assertPurchaseAction(po([timeCharge()]), { billed_paths: new Set(["c"]) }, { action: "remove_item", path_purchase_item: ["c"] }),
+    () => assertPurchaseAction(po([timeCharge()]), ctx({}, { billed_paths: new Set(["c"]) }), { action: "remove_item", path_purchase_item: ["c"] }),
     InvoiceActionRefusal,
     "remove_item",
   );

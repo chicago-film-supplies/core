@@ -15,6 +15,8 @@ import {
   emptyInboundBreakdown,
   INBOUND_BREAKDOWN_KEYS,
   INBOUND_HISTORY_KEYS,
+  INBOUND_RECEIVED_KEYS,
+  INBOUND_RETURNED_KEYS,
   type InboundBooking,
   type InboundBookingStatusType,
   type InboundBookingTypeType,
@@ -22,6 +24,7 @@ import {
   type InboundBreakdownKeyType,
   isInboundLive,
   isInboundTerminal,
+  type MovementCustodyType,
   PURCHASE_STATUS_TRAITS,
   type PurchaseStatusType,
 } from "../schemas/mod.ts";
@@ -37,6 +40,88 @@ function sumKeys(b: InboundBreakdown, keys: readonly InboundBreakdownKeyType[]):
   let n = 0;
   for (const key of keys) n += b[key];
   return n;
+}
+
+// ── Received and returned, derived (C8) ─────────────────────────────
+
+/**
+ * What a purchase line has received and returned — the two co-written buckets
+ * `quantity_received` / `quantity_returned` retired by one-document-model C8,
+ * now DERIVED from custody. Per GRAIN they are an inbound booking's
+ * ({@link inboundCustodyCounts}); per LINE they are the net custody of the
+ * movements naming that row ({@link custodyBySourceItem}, ruling 65), because
+ * two lines may share one booking.
+ */
+export interface PurchaseLineCustody {
+  /** Units that have arrived: Σ {@link INBOUND_RECEIVED_KEYS}. */
+  received: number;
+  /** Units no longer owed to the supplier: Σ {@link INBOUND_RETURNED_KEYS}. Read on a Subrent only. */
+  returned: number;
+}
+
+/** No custody at all: a line nothing has been received for. */
+export const NO_LINE_CUSTODY: PurchaseLineCustody = Object.freeze({ received: 0, returned: 0 });
+
+/** Units an inbound breakdown holds as received: Σ {@link INBOUND_RECEIVED_KEYS}. */
+export function inboundReceived(b: InboundBreakdown): number {
+  return sumKeys(b, INBOUND_RECEIVED_KEYS);
+}
+
+/** Units an inbound breakdown holds as no longer owed: Σ {@link INBOUND_RETURNED_KEYS}. */
+export function inboundReturned(b: InboundBreakdown): number {
+  return sumKeys(b, INBOUND_RETURNED_KEYS);
+}
+
+/** Both counts of one breakdown — a booking's, or a row's net custody. */
+export function inboundCustodyCounts(b: InboundBreakdown): PurchaseLineCustody {
+  return { received: inboundReceived(b), returned: inboundReturned(b) };
+}
+
+/** A movement as {@link custodyBySourceItem} reads it. */
+export interface SourceItemMovement {
+  path_source_item?: readonly string[] | null;
+  custody: MovementCustodyType | null;
+  quantity: number;
+}
+
+const INBOUND_HISTORY: ReadonlySet<string> = new Set(INBOUND_HISTORY_KEYS);
+
+/**
+ * **Each purchase row's custody, from the journal** (ruling 65): the net of
+ * every movement naming the row in `path_source_item`, keyed by the path
+ * joined with `/`, then read as {@link PurchaseLineCustody}.
+ *
+ * A movement adds its quantity to its custody `to` key and takes it from its
+ * `from` key, plan keys contributing nothing — the per-booking replay's rule
+ * (`custodyByBooking`), applied per row. A `reverses` reversal carries its
+ * original's pair swapped, and a typed undo the mirrored pair, so both net out
+ * with no sign of their own. A movement with no row or no custody (a lineless
+ * annotation, an outbound step) is skipped.
+ *
+ * ⚠️ **Pass ONE purchase's movements.** A path is a row identity within one
+ * document only (`cfs-items`); the caller scopes the read, as every writer
+ * already does by `sources array-contains {purchases, uid}`.
+ */
+export function custodyBySourceItem(movements: readonly SourceItemMovement[]): Map<string, PurchaseLineCustody> {
+  const nets = new Map<string, InboundBreakdown>();
+  for (const m of movements) {
+    if (!m.path_source_item || !m.custody) continue;
+    const key = m.path_source_item.join("/");
+    const net = nets.get(key) ?? emptyInboundBreakdown();
+    const { from, to } = m.custody;
+    if (to !== null && INBOUND_HISTORY.has(to)) net[to as InboundBreakdownKeyType] += m.quantity;
+    if (from !== null && INBOUND_HISTORY.has(from)) net[from as InboundBreakdownKeyType] -= m.quantity;
+    nets.set(key, net);
+  }
+  return new Map([...nets].map(([key, net]) => [key, inboundCustodyCounts(net)]));
+}
+
+/** One row's custody from a {@link custodyBySourceItem} map — none when no movement names it. */
+export function lineCustodyAt(
+  custody: ReadonlyMap<string, PurchaseLineCustody>,
+  path: readonly string[],
+): PurchaseLineCustody {
+  return custody.get(path.join("/")) ?? NO_LINE_CUSTODY;
 }
 
 /** The history keys only, every plan key at zero: what custody a booking has REACHED. */

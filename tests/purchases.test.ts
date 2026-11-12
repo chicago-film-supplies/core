@@ -59,11 +59,11 @@ import {
   deriveQueryByOrders,
   deriveQueryByProducts,
   deriveQueryByUnits,
-  purchaseItemCanceled,
   purchaseItemCommittedCents,
   remainingToBill,
   remainingToReceive,
   remainingToReturn,
+  NO_LINE_CUSTODY,
 } from "../src/utils/purchases.ts";
 import { apportionCents } from "../src/utils/money.ts";
 import { flatPurchaseLineMoney } from "../src/utils/purchases.ts";
@@ -212,10 +212,7 @@ const line = (over: Partial<PurchaseSaleItem> = {}): PurchaseSaleItem => {
     ledger_account: 1999,
     uid_tracking_category: null,
     uid_tax_class: TAX_CLASS,
-    expected_date: null,
-    quantity_received: 0,
     quantity_billed: 0,
-    status: "open",
     landed_costs: [],
     ...over,
   });
@@ -237,7 +234,7 @@ const weeklyPrice = {
   rates: [{ rate_key: "month", amount_cents: 15750 }, { rate_key: "week", amount_cents: 4500 }],
 };
 
-/** A FLAT subrent item of 10 steamers, received and returned per `over`. */
+/** A FLAT subrent item of 10 steamers. Its custody is the movements', handed in beside it (C8). */
 const hireLine = (over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem => {
   const uid = over.uid ?? lid(2);
   return withPayableMoney({
@@ -254,10 +251,7 @@ const hireLine = (over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem =>
     ledger_account: 5100,
     uid_tracking_category: null,
     uid_tax_class: TAX_CLASS,
-    quantity_received: 0,
     quantity_billed: 0,
-    status: "open",
-    quantity_returned: 0,
     uid_orders: [ORDER_1074],
     uid_units: [],
     ...over,
@@ -285,7 +279,6 @@ const carrierLine = (over: Partial<PurchaseServiceItem> = {}): PurchaseServiceIt
     uid_tracking_category: null,
     uid_tax_class: TAX_CLASS,
     quantity_billed: null,
-    status: "open",
     uid_units: [],
     uid_product: PRODUCT,
     ...over,
@@ -309,7 +302,6 @@ const freight = (over: Partial<PurchaseServiceItem> = {}): PurchaseServiceItem =
     uid_tracking_category: null,
     uid_tax_class: TAX_CLASS,
     quantity_billed: 0,
-    status: "open",
     uid_units: [],
     ...over,
   });
@@ -322,11 +314,11 @@ const freight = (over: Partial<PurchaseServiceItem> = {}): PurchaseServiceItem =
 // tests/bookings-inbound.test.ts.
 
 Deno.test("remainingToReceive / remainingToBill are each bounded by the quantity; remainingToReturn is received − returned", () => {
-  const l = line({ quantity: 2, quantity_received: 1, quantity_billed: 2 });
-  assertEquals(remainingToReceive(l), 1);
+  const l = line({ quantity: 2, quantity_billed: 2 });
+  assertEquals(remainingToReceive(l, { received: 1 }), 1);
   assertEquals(remainingToBill(l), 0);
   assertEquals(remainingToBill(line({ quantity_billed: 5 })), 0, "an over-billed line has nothing left, never a negative");
-  assertEquals(remainingToReturn(hireLine({ quantity_received: 7, quantity_returned: 3 })), 4);
+  assertEquals(remainingToReturn({ received: 7, returned: 3 }), 4);
 });
 
 // ── purchases ────────────────────────────────────────────────────────
@@ -349,7 +341,7 @@ function purchase(over: Record<string, unknown> = {}) {
     number: 1,
     status: "active",
     supplier: SUPPLIER,
-    store: { uid: "teststore10000000000", name: "Main" },
+    uid_store: "teststore10000000000",
     date: "2026-10-01T00:00:00.000-05:00",
     date_fs: mockTimestamp,
     reference: "Q-1182",
@@ -401,10 +393,14 @@ Deno.test("PurchaseSchema accepts every arm on ONE purchase — the kind is per 
   assertEquals(deriveQueryByItemTypes(items), ["sale", "rental", "service"]);
 });
 
-Deno.test("PurchaseSchema: received may not exceed the quantity ordered", () => {
-  assertEquals(issuePaths(PurchaseSchema, purchase({ items: [line({ quantity: 1, quantity_received: 2 })] })), [
-    "items.1.quantity_received",
-  ]);
+Deno.test("PurchaseSchema: the retired custody buckets and line status are refused on a stored line (C8)", () => {
+  for (const [key, value] of [["quantity_received", 0], ["status", "open"], ["expected_date", null]] as const) {
+    assertEquals(issuePaths(PurchaseSchema, withItems([{ ...line(), [key]: value } as PurchaseSaleItem])), ["items.1"], `buy with ${key}`);
+  }
+  assertEquals(issuePaths(PurchaseSchema, withItems([{ ...hireLine(), quantity_returned: 0 } as PurchaseRentalItem])), ["items.1"]);
+  const legacy = { ...purchase(), store: { uid: "teststore10000000000", name: "Main" } } as Record<string, unknown>;
+  delete legacy.uid_store;
+  assertEquals(issuePaths(PurchaseSchema, legacy), ["uid_store", ""]);
 });
 
 Deno.test("PurchaseSchema: OVER-billing is legal — the ceiling refine is gone; the diff flags it (D5)", () => {
@@ -475,16 +471,15 @@ Deno.test("COA_ASSET_CODES names exactly XERO_ASSET_ACCOUNTS' codes", () => {
 });
 
 Deno.test("PurchaseSchema: each arm carries exactly its own members — a buy cannot hold a hire, a subrent cannot hold landed costs", () => {
-  for (const [key, value] of [["dates", HIRE], ["quantity_returned", 0], ["uid_orders", []]] as const) {
+  for (const [key, value] of [["dates", HIRE], ["uid_orders", []]] as const) {
     assertEquals(issuePaths(PurchaseSchema, withItems([{ ...line(), [key]: value } as PurchaseSaleItem])), ["items.1"], `buy with ${key}`);
   }
   assertEquals(issuePaths(PurchaseSchema, withItems([{ ...hireLine(), landed_costs: [] } as PurchaseRentalItem])), ["items.1"]);
-  assertEquals(issuePaths(PurchaseSchema, withItems([{ ...hireLine(), expected_date: null } as PurchaseRentalItem])), ["items.1"]);
   // The hire window and `auto_link` are retired from the line (one-document-model Phase 3).
   for (const [key, value] of [["dates", HIRE], ["auto_link", false]] as const) {
     assertEquals(issuePaths(PurchaseSchema, withItems([{ ...hireLine(), [key]: value } as PurchaseRentalItem])), ["items.1"], `subrent with ${key}`);
   }
-  for (const key of ["quantity_returned", "uid_orders", "price"] as const) {
+  for (const key of ["uid_orders", "price"] as const) {
     const without = { ...hireLine() } as Record<string, unknown>;
     delete without[key];
     assertEquals(issuePaths(PurchaseSchema, withItems([hireLine()], { items: [without] })).includes(`items.1.${key}`), true, `subrent without ${key}`);
@@ -494,10 +489,7 @@ Deno.test("PurchaseSchema: each arm carries exactly its own members — a buy ca
   assertEquals(issuePaths(PurchaseSchema, purchase({ items: [noLanded] })), ["items.1.landed_costs"]);
 });
 
-Deno.test("PurchaseSchema: returned may not exceed received, and a hire may not end before it starts", () => {
-  assertEquals(issuePaths(PurchaseSchema, withItems([hireLine({ quantity_received: 3, quantity_returned: 4 })])), [
-    "items.1.quantity_returned",
-  ]);
+Deno.test("PurchaseSchema: a hire may not end before it starts", () => {
   // The hire window is the PAIR's (one-document-model Phase 3), and its supply end is `collection_end`.
   const pair = purchasePair(D, HIRE);
   const reversed = { ...pair, dates: { ...pair.dates, delivery_start: HIRE.end, collection_end: HIRE.start } };
@@ -638,10 +630,10 @@ Deno.test("the item-type switches are exhaustive over PURCHASE_ITEM_TYPES", () =
   };
   assertEquals(Object.keys(one).sort(), [...PURCHASE_ITEM_TYPES].sort());
   for (const type of PURCHASE_ITEM_TYPES) {
-    purchaseItemCanceled(one[type]);
     purchaseItemCommittedCents(one[type]);
+    purchaseLineCloseOutcome(one[type], NO_LINE_CUSTODY);
   }
-  assertThrows(() => purchaseItemCanceled({ ...line(), type: "lease" } as unknown as PurchaseItem));
+  assertThrows(() => purchaseItemCommittedCents({ ...line(), type: "lease" } as unknown as PurchaseItem));
 });
 
 // ── item inputs ──────────────────────────────────────────────────────
@@ -673,7 +665,7 @@ const endpoint = { uid: null };
 const pairInput = (over: Record<string, unknown> = {}) => ({ uid: PAIR_A, dates: nullDates, delivery: endpoint, collection: null, ...over });
 const createInput = (over: Record<string, unknown> = {}) => ({
   supplier: { uid: SUPPLIER.uid },
-  store: { uid: "teststore10000000000" },
+  uid_store: "teststore10000000000",
   date: "2026-10-01T00:00:00.000-05:00",
   items: [destRow(), buyInput],
   destinations: [pairInput()],
@@ -1514,13 +1506,12 @@ const CATALOG = new Map<string, PurchaseExpansionProduct>([
   ["svc", product("svc", "none", [comp("labor", ["svc"], 1, "bulk", { type: "service" })])],
 ]);
 
-const D1 = "2026-11-02T00:00:00.000-06:00";
 /** A buy line keyed by its product (W4K), as a client sends it. */
 const buy = (uid_product: string, quantity: number, amount_cents: number, over: Record<string, unknown> = {}) =>
   ({ type: "sale" as const, uid: uid_product, path: [PAIR_A, uid_product], uid_product, quantity, amount_cents, ...over });
 
 Deno.test("expandPurchaseItems: a stocked product passes through unchanged", () => {
-  const items = [buy("410", 7, 700, { expected_date: D1 })];
+  const items = [buy("410", 7, 700, { description: "" })];
   assertEquals(expandPurchaseItems(items, CATALOG), { ok: true, items });
 });
 
@@ -1719,7 +1710,7 @@ function journalAlong(l: PurchaseSaleItem, path: number[]): number[] {
 Deno.test("landed cost: $100 over two lines, two partial receipts each — Σ receipts is goods + $100 exactly", () => {
   const a = line({ uid_product: "testprod1000000000aa", quantity: 4, amount_cents: 40_000 });
   const b = line({ uid_product: "testprod1000000000bb", quantity: 3, amount_cents: 20_000 });
-  const split = allocateLandedCostCents(10_000, [a, b]);
+  const split = allocateLandedCostCents(10_000, [{ line: a, received: 0 }, { line: b, received: 0 }]);
   assertEquals(split, [6_667, 3_333]);
   const withA = { ...a, landed_costs: [entry({ amount_cents: split[0], quantity: 4 })] };
   const withB = { ...b, landed_costs: [entry({ amount_cents: split[1], quantity: 3 })] };
@@ -1804,27 +1795,27 @@ Deno.test("landed cost companion: a (before, after] landed partial on top of the
 
 Deno.test("strandedLandedCents: 0 while units are to come; the unpriced share once a short close cuts them", () => {
   const e = entry({ amount_cents: 10_000, quantity: 4 });
-  assertEquals(strandedLandedCents(line({ quantity: 4, quantity_received: 1, landed_costs: [e] })), 0);
+  assertEquals(strandedLandedCents(line({ quantity: 4, landed_costs: [e] }), 1), 0);
   // Closed after 1 of 4: three quarters never arrives.
-  assertEquals(strandedLandedCents(line({ quantity: 1, quantity_received: 1, landed_costs: [e] })), 7_500);
+  assertEquals(strandedLandedCents(line({ quantity: 1, landed_costs: [e] }), 1), 7_500);
   // Received in full: nothing stranded.
-  assertEquals(strandedLandedCents(line({ quantity: 4, quantity_received: 4, landed_costs: [e] })), 0);
-  // No entries, or absent: nothing.
-  assertEquals(strandedLandedCents(line({ quantity: 0, status: "canceled" })), 0);
+  assertEquals(strandedLandedCents(line({ quantity: 4, landed_costs: [e] }), 4), 0);
+  // No entries: nothing.
+  assertEquals(strandedLandedCents(line({ quantity: 1 }), 1), 0);
 });
 
 Deno.test("isLandedCostFrozen: frozen once a receipt after the entry has priced it", () => {
   const e = entry({ received_at_entry: 2 });
-  assertEquals(isLandedCostFrozen(e, { quantity_received: 2 }), false);
-  assertEquals(isLandedCostFrozen(e, { quantity_received: 3 }), true);
+  assertEquals(isLandedCostFrozen(e, 2), false);
+  assertEquals(isLandedCostFrozen(e, 3), true);
   // A reversal back to the entry point thaws it: nothing priced it any more.
-  assertEquals(isLandedCostFrozen(e, { quantity_received: 1 }), false);
+  assertEquals(isLandedCostFrozen(e, 1), false);
 });
 
 Deno.test("allocateLandedCostCents: weights are the value still to arrive, and a split over nothing is refused", () => {
-  const half = line({ quantity: 4, amount_cents: 40_000, quantity_received: 2 });
-  assertEquals(landedCostWeightCents(half), 20_000);
-  const done = line({ quantity: 2, amount_cents: 10_000, quantity_received: 2 });
+  const half = { line: line({ quantity: 4, amount_cents: 40_000 }), received: 2 };
+  assertEquals(landedCostWeightCents(half.line, half.received), 20_000);
+  const done = { line: line({ quantity: 2, amount_cents: 10_000 }), received: 2 };
   assertEquals(allocateLandedCostCents(5_000, [half, done]), [5_000, 0]);
   assertThrows(() => allocateLandedCostCents(5_000, [done]), RangeError);
 });
@@ -1917,19 +1908,23 @@ Deno.test("flatPurchaseLineMoney: a flat discount is cents per unit × quantity;
   assertThrows(() => flatPurchaseLineMoney(100.5, 1, null));
 });
 
-Deno.test("PurchaseSchema: quantity may be 0 only on a canceled line", () => {
-  assertEquals(issuePaths(PurchaseSchema, withItems([line({ quantity: 0, status: "open", amount_cents: 0 })])).includes("items.1.quantity"), true);
-  assertEquals(issuePaths(PurchaseSchema, withItems([line({ quantity: 0, status: "canceled" })])).includes("items.1.quantity"), false);
+Deno.test("PurchaseSchema: a stored line holds at least 1 — a line closed to 0 is removed (ruling 47)", () => {
+  assertEquals(issuePaths(PurchaseSchema, withItems([line({ quantity: 0, amount_cents: 0 })])).includes("items.1.quantity"), true);
+  assertEquals(issuePaths(PurchaseSchema, withItems([freight({ quantity: 0, amount_cents: 0 })])).includes("items.1.quantity"), true);
 });
 
-Deno.test("purchaseLineCloseOutcome: a buy drops to received, a flat charge to billed, a time charge cancels at its quantity", () => {
-  assertEquals(purchaseLineCloseOutcome(line({ quantity: 16, quantity_received: 14 })), { quantity: 14, status: "open" });
-  assertEquals(purchaseLineCloseOutcome(line({ quantity: 3, quantity_received: 0, quantity_billed: 3 })), { quantity: 0, status: "canceled" });
-  assertEquals(purchaseLineCloseOutcome(freight({ quantity: 1, quantity_billed: 0 })), { quantity: 0, status: "canceled" });
-  assertEquals(purchaseLineCloseOutcome(freight({ quantity: 2, quantity_billed: 5 })), { quantity: 2, status: "open" }, "over-billed stays at what was ordered");
-  assertEquals(purchaseLineCloseOutcome(carrierLine({ quantity: 2 })), { quantity: 2, status: "canceled" });
+Deno.test("purchaseLineCloseOutcome: a buy drops to received, a flat charge to billed, nothing left removes, a time charge ends its window", () => {
+  const got = (received: number) => ({ received, returned: 0 });
+  assertEquals(purchaseLineCloseOutcome(line({ quantity: 16 }), got(14)), { kind: "lower", quantity: 14 });
+  assertEquals(purchaseLineCloseOutcome(line({ quantity: 3, quantity_billed: 3 }), got(0)), { kind: "remove" });
+  assertEquals(purchaseLineCloseOutcome(line({ quantity: 3 }), got(5)), { kind: "lower", quantity: 3 }, "over-received stays at what was ordered");
+  assertEquals(purchaseLineCloseOutcome(hireLine({ quantity: 10 }), { received: 4, returned: 4 }), { kind: "lower", quantity: 4 });
+  assertEquals(purchaseLineCloseOutcome(freight({ quantity: 1, quantity_billed: 0 }), NO_LINE_CUSTODY), { kind: "remove" });
+  assertEquals(purchaseLineCloseOutcome(freight({ quantity: 2, quantity_billed: 5 }), NO_LINE_CUSTODY), { kind: "lower", quantity: 2 }, "over-billed stays at what was ordered");
+  assertEquals(purchaseLineCloseOutcome(carrierLine({ quantity: 2 }), NO_LINE_CUSTODY), { kind: "end_window" });
 });
 
-Deno.test("landedCostWeightCents: a canceled line weighs nothing rather than dividing by 0", () => {
-  assertEquals(landedCostWeightCents(line({ quantity: 0, status: "canceled", amount_cents: 0 })), 0);
+Deno.test("landedCostWeightCents: a line with nothing left to arrive weighs nothing, an over-receipt included", () => {
+  assertEquals(landedCostWeightCents(line({ quantity: 2, amount_cents: 1_000 }), 2), 0);
+  assertEquals(landedCostWeightCents(line({ quantity: 2, amount_cents: 1_000 }), 3), 0);
 });

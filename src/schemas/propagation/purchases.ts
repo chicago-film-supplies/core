@@ -3,11 +3,19 @@
  *
  * A purchase is the out-of-service record's shape: a parent document whose
  * HISTORY is the journal. Its receipts are movements naming it in `sources[]` —
- * `purchase` on a buy, `subrent_in` on a subrent — and the parent carries
- * co-written buckets: `quantity_received`, on a subrent `quantity_returned`,
- * moved by its `subrent_out` returns and by the `return_to_supplier` settles an
- * out-of-service record's PUT writes, and `quantity_billed`, which alone is a
- * recount (see *Billing*).
+ * `purchase` on a buy, `subrent_in` on a subrent — and each moves the line's
+ * INBOUND BOOKING (`bookings-inbound`) in the same commit: `ordered → received`
+ * on a receipt, `stocked → sent_back` on a `subrent_out` return, `stocked →
+ * lost | damaged` on the `return_to_supplier` settles an out-of-service
+ * record's PUT writes. What a line has received and returned is DERIVED from
+ * that custody (one-document-model C8 retired the line buckets
+ * `quantity_received` / `quantity_returned`); the one co-written bucket left
+ * is `quantity_billed`, a recount (see *Billing*).
+ *
+ * ⚠️ **The rule ids below still say `…-to-purchase`** although their target is
+ * the inbound booking: renaming them is the C13 vocabulary survey's, in the
+ * beta whose api commit emits the new ids (`propagationCoverage` has no
+ * pending list).
  *
  * ⚠️ **The arm is per ITEM since api-cloudrun#1407** — there is no document
  * `kind`, so "a buy" and "a subrent" below mean a buy ITEM and a subrent ITEM,
@@ -19,15 +27,15 @@
  * manual `purchase` movement does, so the receipt transactions name the movement
  * rules `create-transaction:*` / `reverse-transaction:*` and the shared
  * {@link STOCK_STEPS} as steps rather than minting a ledger rule per
- * transaction. The one edge they add is the bucket: the movement moves its
- * purchase line's `quantity_received` in the same commit.
+ * transaction. The one edge they add is the custody: the movement moves its
+ * line's inbound booking in the same commit.
  *
  * ## What a BUY's create, update and close propagate: inbound supply
  *
  * On a buy, `create-purchase` and `update-purchase` move no stock and post
  * nothing to Xero. But a dated buy line is INBOUND supply for its unreceived
- * remainder (api-cloudrun#1228), so a create, an `expected_date` or quantity
- * edit, and a close each change supply: they bump `stock-locks/{P}` and rebuild
+ * remainder (api-cloudrun#1228), so a create, a `delivery_start` (its pair's
+ * expected arrival, C8) or quantity edit, and a close each change supply: they bump `stock-locks/{P}` and rebuild
  * `stock/{P}` through {@link STOCK_STEPS}. ⚠️ An edit or a close can LOWER
  * supply, which is the direction that oversells, so the bump is not optional.
  * A close lowers the document's own line quantities and reaches its bills by the
@@ -47,10 +55,8 @@
  * A bill is its own document (`purchase-bills`), written in ONE transaction with
  * its purchase lines' `quantity_billed`.
  *
- * ⚠️ **That bucket is RECOUNTED, unlike its siblings** (api-cloudrun#1441).
- * `quantity_received` and `quantity_returned` are kept by delta, because a
- * receipt's quantity never changes. A bill line's quantity does, so a delta
- * releases the wrong number when that bill is voided. Every write that adds or
+ * ⚠️ **That bucket is RECOUNTED** (api-cloudrun#1441). A bill line's quantity
+ * changes, so a delta releases the wrong number when that bill is voided. Every write that adds or
  * voids a bill or credit, or edits a bill line's quantity, recalculates the count
  * from the purchase's live documents in the same commit: the shared steps
  * `purchase-billed:bills-to-purchase`, `purchase-billed:credits-to-purchase` and
@@ -73,7 +79,7 @@ const RECEIPT_MOVES_THE_BUCKET: EnforcementRef = {
   ref:
     "api-cloudrun/tests/integration/purchases/purchases.test.ts::receive — two partial receipts move quantity_received and each costs its cumulative share",
   clause:
-    "each receipt is one `purchase` movement naming the purchase in sources[], and the purchase line's quantity_received moves in the same commit; the two receipts' costs sum to the line amount exactly; receiving past what is still to come is refused",
+    "each receipt is one `purchase` movement naming the purchase in sources[] and its row in path_source_item, and the line's inbound booking moves ordered → received in the same commit; the two receipts' costs sum to the line amount exactly; receiving past what is still to come is refused. ⚠️ The anchor is the pre-C8 test name: the api's inbound-lever phase renames it",
   gates: true,
 };
 
@@ -83,7 +89,7 @@ const RECEIPT_REVERSAL_LEVER: EnforcementRef = {
   ref:
     "api-cloudrun/tests/integration/purchases/purchases.test.ts::reverse a receipt — the lever decrements quantity_received in one commit, and a standalone reverse is refused",
   clause:
-    "the reversal names the original and the purchase in sources[] and returns quantity_held; quantity_received falls by the receipt's quantity in the same commit; POST /transactions/{uid}/reverse on a receipt is a 400",
+    "the reversal names the original and the purchase in sources[] and returns quantity_held; the line's inbound booking moves received → ordered by the receipt's quantity in the same commit; POST /transactions/{uid}/reverse on a receipt is a 400",
   gates: true,
 };
 
@@ -116,44 +122,37 @@ const receivePurchaseRules: CollectionRule[] = [
   {
     id: "receive-purchase:receipt-to-purchase",
     source: "transactions",
-    target: "purchases",
+    target: "bookings-inbound",
     mode: "co-write",
     invariant:
-      "Every receipt is ONE movement naming its purchase in sources[] (exactly one `purchases` source — the movement refine) — a `purchase` on a buy, a cost-forbidden `subrent_in` on a subrent — written in ONE commit with the purchase line's `quantity_received` bump, so the bucket is the sum of the receipts naming it by construction. Receiving is refused past `quantity − quantity_received`. A buy receipt's cost is the line's CUMULATIVE target at the new received count — the goods' share plus every landed cost's share (`purchaseLineReceiptTargetCents`) — minus the cost the journal already holds for the product, never a client input, so the receipts of a fully received line sum to its `amount_cents` plus its landed costs exactly; a subrent receipt carries no cost at all, because a rented unit is never owned. A receipt posts nothing to Xero: the bill is its own document.",
+      "Every receipt is ONE movement naming its purchase in sources[] (exactly one `purchases` source — the movement refine), its inbound booking in uid_booking and its row in path_source_item — a `purchase` on a buy, a cost-forbidden `subrent_in` on a subrent — written in ONE commit with that booking's `ordered → received` step, so what the line has received is the net of the receipts naming its row by construction (`custodyBySourceItem`, C8). Receiving is refused past `quantity − received`. A buy receipt's cost is the line's CUMULATIVE target at the new received count — the goods' share plus every landed cost's share (`purchaseLineReceiptTargetCents`) — minus the cost the journal already holds for the product, never a client input, so the receipts of a fully received line sum to its `amount_cents` plus its landed costs exactly; a subrent receipt carries no cost at all, because a rented unit is never owned. A receipt posts nothing to Xero: the bill is its own document.",
     enforced_by: [RECEIPT_MOVES_THE_BUCKET],
     transaction: "receive-purchase",
     fields: [
       {
         source: ["quantity"],
-        target: ["items", "quantity_received"],
-        transform: "+ quantity on the line whose uid_product is the movement's",
+        target: ["breakdown", "received"],
+        transform: "+ quantity, and − quantity from `ordered`, on the booking the movement's uid_booking names",
       },
       {
         source: ["sources"],
-        target: ["uid"],
-        transform: "the movement's sources[] names the purchase; the purchase finds its receipts through query_by_sources",
-      },
-      {
-        source: ["cost", "amount_cents"],
-        target: ["items", "amount_cents"],
-        transform:
-          "a buy only: the goods' half of purchaseLineReceiptTargetCents(line, received_before + quantity) − Σ the journal's cost for the product — read from the line, never written to it. A subrent_in has no cost object.",
-      },
-      {
-        source: ["cost", "amount_cents"],
-        target: ["items", "landed_costs", "amount_cents"],
-        transform:
-          "a buy only: each landed cost adds cumulativeShareCents(entry.amount_cents, entry.quantity, 0, clamp(received_after − entry.received_at_entry, 0, entry.quantity)) to the same cumulative target — read, never written (api-cloudrun#1227)",
+        target: ["source"],
+        transform: "the movement's sources[] names the purchase the booking's `source` names; the purchase finds its receipts through query_by_sources",
       },
     ],
   },
 ];
 
-/** The return bucket, bounded by what came in — refused by the line refine. */
+/**
+ * Returned is bounded by what came in — by the movement contract, now that both
+ * are custody (C8): a return or settle moves units OFF `stocked`, which only a
+ * receipt and a put-away fill.
+ */
 const RETURN_BOUNDED: EnforcementRef = {
   kind: "zod",
-  ref: "core/src/schemas/purchase.ts::item.quantity_returned > item.quantity_received",
-  clause: "`quantity_returned ≤ quantity_received` — a unit can only go back once it has come in",
+  ref: "core/src/schemas/transaction.ts::function checkMovementContract",
+  clause:
+    "a `subrent_out` moves `stocked → sent_back` and a `return_to_supplier` settles `stocked → lost | damaged` on the inbound ladder, so a unit can only go back once it has come in",
   gates: true,
 };
 
@@ -168,7 +167,7 @@ const RETURN_MOVES_THE_BUCKET: EnforcementRef = {
   ref:
     "api-cloudrun/tests/integration/purchases/subrents.test.ts::the 1074 flow — receive 10, check out 20, check in 20, return 10, bill",
   clause:
-    "each return is one `subrent_out` naming the purchase, quantity_returned moves in the same commit, quantity_rented_in falls by the same amount and the owned average does not move; returning past what is in custody is refused",
+    "each return is one `subrent_out` naming the purchase and its row, the inbound booking moves stocked → sent_back in the same commit, quantity_rented_in falls by the same amount and the owned average does not move; returning past what is in custody is refused",
   gates: true,
 };
 
@@ -176,22 +175,22 @@ const returnPurchaseRules: CollectionRule[] = [
   {
     id: "return-purchase:return-to-purchase",
     source: "transactions",
-    target: "purchases",
+    target: "bookings-inbound",
     mode: "co-write",
     invariant:
-      "A subrent's units go back to the supplier as ONE `subrent_out` movement per product naming the purchase in sources[] (exactly one), written in ONE commit with the purchase line's `quantity_returned` bump, so the bucket is the sum of the returns naming it by construction. Returning is refused past `quantity_received − quantity_returned`, and on any item that is not a subrent. A return carries no cost — the units were never owned — and posts nothing to Xero.",
+      "A subrent's units go back to the supplier as ONE `subrent_out` movement per row naming the purchase in sources[] (exactly one) and the row in path_source_item, written in ONE commit with the inbound booking's `stocked → sent_back` step, so what the line has returned is the net of the returns and settles naming its row by construction. Returning is refused past `received − returned`, and on any item that is not a subrent. A return carries no cost — the units were never owned — and posts nothing to Xero.",
     enforced_by: [RETURN_BOUNDED, RETURN_MOVES_THE_BUCKET],
     transaction: "return-purchase",
     fields: [
       {
         source: ["quantity"],
-        target: ["items", "quantity_returned"],
-        transform: "+ quantity on the line whose uid_product is the movement's",
+        target: ["breakdown", "sent_back"],
+        transform: "+ quantity, and − quantity from `stocked`, on the booking the movement's uid_booking names",
       },
       {
         source: ["sources"],
-        target: ["uid"],
-        transform: "the movement's sources[] names the purchase; the purchase finds its returns through query_by_sources",
+        target: ["source"],
+        transform: "the movement's sources[] names the purchase the booking's `source` names; the purchase finds its returns through query_by_sources",
       },
     ],
   },
@@ -201,22 +200,22 @@ const reversePurchaseReturnRules: CollectionRule[] = [
   {
     id: "reverse-purchase-return:return-to-purchase",
     source: "transactions",
-    target: "purchases",
+    target: "bookings-inbound",
     mode: "co-write",
     invariant:
-      "A return is reversed only through its purchase, never standalone (`standaloneReversalRefusal` answers `purchase_return`): the reversal negates the `subrent_out`'s lines, names the original AND the purchase in sources[], and lowers the purchase line's `quantity_returned` in the same commit. Nothing is pushed to Xero.",
+      "A return is reversed only through its purchase, never standalone (`standaloneReversalRefusal` answers `purchase_return`): the reversal negates the `subrent_out`'s lines, carries its custody pair swapped (`sent_back → stocked`), names the original AND the purchase in sources[], and moves the inbound booking back in the same commit. Nothing is pushed to Xero.",
     enforced_by: [RETURN_BOUNDED, RETURN_MOVES_THE_BUCKET],
     transaction: "reverse-purchase-return",
     fields: [
       {
         source: ["quantity"],
-        target: ["items", "quantity_returned"],
-        transform: "− the reversed return's quantity",
+        target: ["breakdown", "sent_back"],
+        transform: "− the reversed return's quantity, back onto `stocked`",
       },
       {
         source: ["sources"],
-        target: ["uid"],
-        transform: "the reversal's sources[] names the original return and the purchase",
+        target: ["source"],
+        transform: "the reversal's sources[] names the original return and the purchase the booking's `source` names",
       },
     ],
   },
@@ -233,7 +232,7 @@ const SETTLE_MOVES_THE_PURCHASE: EnforcementRef = {
   ref:
     "api-cloudrun/tests/integration/purchases/subrents.test.ts::settle — a damaged rented unit and a lost one go back to the supplier from their records, and the PO closes",
   clause:
-    "each settle is one `return_to_supplier` naming the record, the purchase and its supplier; the purchase line's quantity_returned and the return card move in the same commit, quantity_rented_in falls and the owned basis does not; lowering the bucket reverses it and restores all three; a settle naming no purchase, a buy, another product's purchase, or more than that purchase still has out is refused. The `quantity_rented_in` bound is not asserted: the purchase bound is reached first through the API",
+    "each settle is one `return_to_supplier` naming the record, the purchase and its supplier; the inbound booking (stocked → lost | damaged) and the return card move in the same commit, quantity_rented_in falls and the owned basis does not; lowering the bucket reverses it and restores all three; a settle naming no purchase, a buy, another product's purchase, or more than that purchase still has out is refused. The `quantity_rented_in` bound is not asserted: the purchase bound is reached first through the API",
   gates: true,
 };
 
@@ -241,28 +240,28 @@ const SETTLE_MOVES_THE_PURCHASE: EnforcementRef = {
  * A settle, from the OUT-OF-SERVICE side: the record PUT is its lever, so the
  * rule is the `update-out-of-service-record` transaction's (declared in
  * `propagation/out-of-service.ts`), and it lives here beside the other writers
- * of `quantity_returned` — as `propagation/invoices.ts` holds `update-order:*`.
+ * of a subrent's returned custody — as `propagation/invoices.ts` holds `update-order:*`.
  */
 const settleToPurchaseRules: CollectionRule[] = [
   {
     id: "update-out-of-service-record:record-to-purchase",
     source: "out-of-service",
-    target: "purchases",
+    target: "bookings-inbound",
     mode: "co-write",
     invariant:
-      "A rise in a record's `returned_to_supplier` settles that many RENTED units to the subrent purchase the save names (`uid_purchase`, input-only): one `return_to_supplier` naming the record, the purchase (exactly one) and its supplier, written in ONE commit with the purchase line's `quantity_returned` bump and its return card — so `quantity_returned` stays the sum of the returns and settles naming it. Refused on an item that is not a subrent, on a purchase with no subrent item for the record's product, past `quantity_received − quantity_returned`, and past the ledger's `quantity_rented_in`. Lowering the bucket reverses the newest settles, each naming its original and ITS purchase, and lowers that purchase's `quantity_returned` in the same commit. A settle carries no cost and posts nothing to Xero; what the supplier charges for the unit is a line on its bill.",
+      "A rise in a record's `returned_to_supplier` settles that many RENTED units to the subrent purchase the save names (`uid_purchase`, input-only): one `return_to_supplier` naming the record, the purchase (exactly one), its supplier and the row it settles, written in ONE commit with the inbound booking's `stocked → lost | damaged` step (none for a unit received damaged, ruling 64) and its return card — so what the line has returned stays the net of the returns and settles naming its row. Refused on an item that is not a subrent, on a purchase with no subrent item for the record's product, past `received − returned`, and past the ledger's `quantity_rented_in`. Lowering the bucket reverses the newest settles, each naming its original and ITS purchase, and moves that booking back in the same commit. A settle carries no cost and posts nothing to Xero; what the supplier charges for the unit is a line on its bill.",
     enforced_by: [RETURN_BOUNDED, SETTLE_MOVES_THE_PURCHASE],
     transaction: "update-out-of-service-record",
     fields: [
       {
         source: ["breakdown", "returned_to_supplier"],
-        target: ["items", "quantity_returned"],
-        transform: "± the bucket's change, on the line whose uid_product is the record's",
+        target: ["breakdown", "lost"],
+        transform: "± the bucket's change off `stocked`, onto `lost` or `damaged` by the record's reason, on the booking of the row the settle names",
       },
       {
         source: ["uid"],
-        target: ["uid"],
-        transform: "the settle's sources[] names the record AND the purchase; the purchase finds it through query_by_sources",
+        target: ["source"],
+        transform: "the settle's sources[] names the record AND the purchase the booking's `source` names; the purchase finds it through query_by_sources",
       },
     ],
   },
@@ -272,7 +271,7 @@ const settleToPurchaseRules: CollectionRule[] = [
 const PURCHASE_CARD_TABLE: EnforcementRef = {
   kind: "test",
   ref: "core/tests/card.test.ts::computeCardStatusFromPurchase / computeCardActionFromPurchase — the table",
-  clause: "status and action are derived from the purchase's buckets: planned → active while units are out → complete when nothing is in custody or still coming; canceled with the purchase",
+  clause: "status and action are derived from the purchase's subrent rows' custody (`custodyBySourceItem`): planned → active while units are out → complete when nothing is in custody or still coming; canceled with the purchase",
   gates: true,
 };
 
@@ -291,12 +290,12 @@ const purchaseCardRules: CollectionRule[] = [
     target: "cards",
     mode: "co-write",
     invariant:
-      "Every purchase holding a SUBRENT item has exactly one \"return to supplier\" card, id `derivedDocId(\"purchase-return-card:\" + uid)`, written in the SAME commit as every write of the purchase that could move it (create, update, close, receive, return and their reversals, and a recount that moves the purchase's status) and never by a client. Its status, action and date are derived from its subrent items' buckets by `computeCardStatusFromPurchase` / `computeCardActionFromPurchase` / `purchaseCardDue` (@cfs/core/utils/cards); its kind is the `purchases` source PAYLOAD (`isPurchaseCard`), not the bare source, so a hand-authored to-do that links a PO is never taken over. A purchase with no subrent item has no card.",
+      "Every purchase holding a SUBRENT item has exactly one \"return to supplier\" card, id `derivedDocId(\"purchase-return-card:\" + uid)`, written in the SAME commit as every write of the purchase that could move it (create, update, close, receive, return and their reversals, and a recount that moves the purchase's status) and never by a client. Its status, action and date are derived from its subrent rows' custody (the journal, C8) by `computeCardStatusFromPurchase` / `computeCardActionFromPurchase` / `purchaseCardDue` (@cfs/core/utils/cards); its kind is the `purchases` source PAYLOAD (`isPurchaseCard`), not the bare source, so a hand-authored to-do that links a PO is never taken over. A purchase with no subrent item has no card.",
     enforced_by: [PURCHASE_CARD_TABLE, PURCHASE_CARD_SHAPE],
     fields: [
       { source: ["status"], target: ["status"], transform: "computeCardStatusFromPurchase(purchase, card.status)" },
-      { source: ["items", "quantity_received"], target: ["status"], transform: "see status — received > returned on any line is `active`" },
-      { source: ["items", "quantity_returned"], target: ["action"], transform: "computeCardActionFromPurchase — return_to_supplier while any unit is in custody" },
+      { source: ["items", "quantity"], target: ["status"], transform: "see status — received > returned on any row is `active`; complete once every row received its quantity and returned it (row custody from the journal, C8)" },
+      { source: ["items", "path"], target: ["action"], transform: "computeCardActionFromPurchase — return_to_supplier while any row has units in custody" },
       { source: ["destinations", "dates", "collection_end"], target: ["dates", "start"], transform: "purchaseCardDue — the earliest due-back among open lines, read off each line's pair" },
       { source: ["number"], target: ["purchases", "number"] },
       { source: ["supplier"], target: ["purchases", "supplier"] },
@@ -309,22 +308,22 @@ const reversePurchaseReceiptRules: CollectionRule[] = [
   {
     id: "reverse-purchase-receipt:receipt-to-purchase",
     source: "transactions",
-    target: "purchases",
+    target: "bookings-inbound",
     mode: "co-write",
     invariant:
-      "A receipt is reversed only through its purchase, never standalone (`assertStandaloneReversible`): the reversal negates the receipt's lines and cost exactly as `reverse-transaction` does, names the original AND the purchase in sources[], and lowers the purchase line's `quantity_received` in the same commit. Nothing is pushed to Xero, because the receipt pushed nothing.",
+      "A receipt is reversed only through its purchase, never standalone (`assertStandaloneReversible`): the reversal negates the receipt's lines and cost exactly as `reverse-transaction` does, carries its custody pair swapped (`received → ordered`), names the original AND the purchase in sources[], and moves the inbound booking back in the same commit. Nothing is pushed to Xero, because the receipt pushed nothing.",
     enforced_by: [RECEIPT_REVERSAL_LEVER],
     transaction: "reverse-purchase-receipt",
     fields: [
       {
         source: ["quantity"],
-        target: ["items", "quantity_received"],
-        transform: "− the reversed receipt's quantity",
+        target: ["breakdown", "received"],
+        transform: "− the reversed receipt's quantity, back onto `ordered`",
       },
       {
         source: ["sources"],
-        target: ["uid"],
-        transform: "the reversal's sources[] names the original receipt and the purchase",
+        target: ["source"],
+        transform: "the reversal's sources[] names the original receipt and the purchase the booking's `source` names",
       },
     ],
   },
@@ -1281,7 +1280,7 @@ const createPurchaseTransaction: TransactionDefinition = {
 const updatePurchaseTransaction: TransactionDefinition = {
   id: "update-purchase",
   description:
-    "Amends a purchase's date, reference, notes or items, matched by item uid. On a BUY item the quantity may not fall below what is received or billed, and its amount may not change once it has any receipt or bill — a price that moved after goods arrived is a short close plus a new purchase, because every receipt already carries its share of the old price; the update fires STOCK_STEPS, since a buy item's expected_date and unreceived quantity are inbound supply. On a SUBRENT item a receipt carries no cost, so the amount and the hire end stay editable after receipt (a paid extension), and the update fires STOCK_STEPS and the return card, since the hire window is supply. An amend that adds a purchase's FIRST subrent item writes its return card in the same commit, with the card's own default thread, as a create does. Every pushed, unsettled bill named in `query_by_bills` is synced in the same commit (D5) — fires on: an item's shared field changing while such a bill exists — and each bill it changes is re-pushed to Xero after the commit by the ACCPAY edit push.",
+    "Amends a purchase's date, reference, notes or items, matched by item uid. On a BUY item the quantity may not fall below what is received or billed, and its amount may not change once it has any receipt or bill — a price that moved after goods arrived is a short close plus a new purchase, because every receipt already carries its share of the old price; the update fires STOCK_STEPS, since a buy item's pair's delivery_start and its unreceived quantity are inbound supply. On a SUBRENT item a receipt carries no cost, so the amount and the hire end stay editable after receipt (a paid extension), and the update fires STOCK_STEPS and the return card, since the hire window is supply. An amend that adds a purchase's FIRST subrent item writes its return card in the same commit, with the card's own default thread, as a create does. Every pushed, unsettled bill named in `query_by_bills` is synced in the same commit (D5) — fires on: an item's shared field changing while such a bill exists — and each bill it changes is re-pushed to Xero after the commit by the ACCPAY edit push.",
   steps: [
     ...STOCK_STEPS,
     "purchase-card:purchases-to-card",
@@ -1305,7 +1304,7 @@ const closePurchaseTransaction: TransactionDefinition = {
 const receivePurchaseTransaction: TransactionDefinition = {
   id: "receive-purchase",
   description:
-    "Receives goods against a purchase: one movement per item naming the purchase in sources[] — a `purchase` costing its cumulative share of the line on a buy, a cost-forbidden `subrent_in` landing at the arrivals inbox on a subrent (which raises `quantity_rented_in` with `quantity_held`) — folded onto the ledger and the shelves through the one ledger writer, with the purchase's `quantity_received` moved in the same commit. Posts nothing to Xero. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: every receipt, since a receipt always moves quantity_held. The unit roster steps fire whenever the receipt names units — a buy or a subrent of a seeded serialized product, where a `subrent_in`'s opened history entry carries the purchase's `supplier`; the return card on a SUBRENT item only.",
+    "Receives goods against a purchase: one movement per item naming the purchase in sources[] — a `purchase` costing its cumulative share of the line on a buy, a cost-forbidden `subrent_in` landing at the arrivals inbox on a subrent (which raises `quantity_rented_in` with `quantity_held`) — folded onto the ledger and the shelves through the one ledger writer, with the line's inbound booking moved `ordered → received` in the same commit. Posts nothing to Xero. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: every receipt, since a receipt always moves quantity_held. The unit roster steps fire whenever the receipt names units — a buy or a subrent of a seeded serialized product, where a `subrent_in`'s opened history entry carries the purchase's `supplier`; the return card on a SUBRENT item only.",
   steps: [
     "receive-purchase:receipt-to-purchase",
     "create-transaction:transaction-to-ledger",
@@ -1320,7 +1319,7 @@ const receivePurchaseTransaction: TransactionDefinition = {
 const reversePurchaseReceiptTransaction: TransactionDefinition = {
   id: "reverse-purchase-receipt",
   description:
-    "Reverses one receipt through its purchase: the reversal is the receipt's lines and cost negated, applied through the one ledger writer, and the purchase's `quantity_received` falls in the same commit. Posts nothing to Xero. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: every receipt reversal. The roster steps fire whenever the receipt named units, a subrent's included; the return card on a subrent only.",
+    "Reverses one receipt through its purchase: the reversal is the receipt's lines and cost negated, applied through the one ledger writer, and the line's inbound booking moves back `received → ordered` in the same commit. Posts nothing to Xero. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: every receipt reversal. The roster steps fire whenever the receipt named units, a subrent's included; the return card on a subrent only.",
   steps: [
     "reverse-purchase-receipt:receipt-to-purchase",
     "reverse-transaction:transaction-to-ledger",
@@ -1335,7 +1334,7 @@ const reversePurchaseReceiptTransaction: TransactionDefinition = {
 const returnPurchaseTransaction: TransactionDefinition = {
   id: "return-purchase",
   description:
-    "Returns a subrent's units to the supplier (`POST /purchases/{uid}/returns`): one cost-forbidden `subrent_out` per subrent item, from the shelves, naming the purchase in sources[] and folded through the one ledger writer — which lowers `quantity_held` and `quantity_rented_in` together and leaves owned basis untouched — with the purchase's `quantity_returned` moved in the same commit. Refused on any item that is not a subrent. Posts nothing to Xero. Rebuilds `stock/{P}` via STOCK_STEPS and moves the return card — fires on: every return. The unit roster steps fire whenever the return names units, each of which must be vendor-owned by this purchase's supplier.",
+    "Returns a subrent's units to the supplier (`POST /purchases/{uid}/returns`): one cost-forbidden `subrent_out` per subrent item, from the shelves, naming the purchase in sources[] and folded through the one ledger writer — which lowers `quantity_held` and `quantity_rented_in` together and leaves owned basis untouched — with the line's inbound booking moved `stocked → sent_back` in the same commit. Refused on any item that is not a subrent. Posts nothing to Xero. Rebuilds `stock/{P}` via STOCK_STEPS and moves the return card — fires on: every return. The unit roster steps fire whenever the return names units, each of which must be vendor-owned by this purchase's supplier.",
   steps: [
     "return-purchase:return-to-purchase",
     "create-transaction:transaction-to-ledger",
@@ -1350,7 +1349,7 @@ const returnPurchaseTransaction: TransactionDefinition = {
 const reversePurchaseReturnTransaction: TransactionDefinition = {
   id: "reverse-purchase-return",
   description:
-    "Reverses one return through its purchase: the `subrent_out`'s lines negated through the one ledger writer, and the purchase's `quantity_returned` falls in the same commit. Posts nothing to Xero. Rebuilds `stock/{P}` via STOCK_STEPS and moves the return card — fires on: every return reversal. The unit roster steps fire whenever the return named units.",
+    "Reverses one return through its purchase: the `subrent_out`'s lines negated through the one ledger writer, and the inbound booking moves back `sent_back → stocked` in the same commit. Posts nothing to Xero. Rebuilds `stock/{P}` via STOCK_STEPS and moves the return card — fires on: every return reversal. The unit roster steps fire whenever the return named units.",
   steps: [
     "reverse-purchase-return:return-to-purchase",
     "reverse-transaction:transaction-to-ledger",

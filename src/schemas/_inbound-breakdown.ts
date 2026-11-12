@@ -115,6 +115,25 @@ export const INBOUND_HISTORY_KEYS = [
   "transit_inbound", "received", "stocked", "transit_outbound", "sent_back", "lost", "damaged",
 ] as const;
 
+/**
+ * The keys a unit sits in once it has been RECEIVED: every history key past
+ * `transit_inbound`. Their sum is what the retired purchase line bucket
+ * `quantity_received` counted (one-document-model C8, the C12 identity), read
+ * off a booking or off the net custody of the movements naming one row.
+ */
+export const INBOUND_RECEIVED_KEYS = [
+  "received", "stocked", "transit_outbound", "sent_back", "lost", "damaged",
+] as const;
+
+/**
+ * The keys a unit sits in once it is NO LONGER OWED to the supplier: handed
+ * back, or settled lost or damaged. Their sum is what the retired subrent
+ * bucket `quantity_returned` counted (the C12 identity), a settled unit
+ * included (api-cloudrun#1360, D3). ⚠️ On a Buy `damaged` is a unit received
+ * broken, which CFS owns; nothing reads this sum on a Buy.
+ */
+export const INBOUND_RETURNED_KEYS = ["sent_back", "lost", "damaged"] as const;
+
 /** One key of the inbound breakdown. */
 export type InboundBreakdownKeyType = typeof INBOUND_BREAKDOWN_KEYS[number];
 
@@ -154,7 +173,10 @@ const _inboundParity: [
   _Both<InboundBreakdownKeyType, keyof InboundBreakdown>,
   _Both<typeof INBOUND_PLAN_KEYS[number] | typeof INBOUND_HISTORY_KEYS[number], InboundBreakdownKeyType>,
   _Both<InboundUnitBucketType, typeof INBOUND_HISTORY_KEYS[number]>,
-] = [true, true, true];
+  // Received is the history less what is still on its way in; returned is a subset of it.
+  _Both<typeof INBOUND_RECEIVED_KEYS[number] | "transit_inbound", typeof INBOUND_HISTORY_KEYS[number]>,
+  _Both<Extract<typeof INBOUND_RECEIVED_KEYS[number], typeof INBOUND_RETURNED_KEYS[number]>, typeof INBOUND_RETURNED_KEYS[number]>,
+] = [true, true, true, true, true];
 void _inboundParity;
 
 /** A breakdown with every inbound key at zero. */

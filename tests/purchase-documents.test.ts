@@ -104,10 +104,7 @@ function visionLine(over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem 
     ledger_account: 5100,
     uid_tracking_category: null,
     uid_tax_class: TAX_CLASS,
-    quantity_received: 2,
     quantity_billed: null,
-    status: "open",
-    quantity_returned: 0,
     uid_orders: [],
     uid_units: ["unit-1", "unit-2"],
     ...over,
@@ -131,10 +128,7 @@ function buyLine(over: Record<string, unknown> = {}): PurchaseItem {
     ledger_account: 1999,
     uid_tracking_category: null,
     uid_tax_class: TAX_CLASS,
-    expected_date: null,
-    quantity_received: 0,
     quantity_billed: 0,
-    status: "open",
     landed_costs: [],
     ...over,
   }) as PurchaseItem;
@@ -390,7 +384,7 @@ function purchaseDoc(items: PurchaseItem[]): Purchase {
     number: 1,
     status: "active",
     supplier: { uid: "testsupp100000000000", name: "Vision" },
-    store: { uid: "teststore10000000000", name: "Fillmore" },
+    uid_store: "teststore10000000000",
     date: jan(1),
     date_fs: mockTimestamp,
     reference: null,
@@ -444,27 +438,26 @@ const parses = (bill: PurchaseBill) => {
   assert(r.success, JSON.stringify(r.error?.issues));
 };
 
-Deno.test("syncPurchaseToBills: a line closed to 0 removes an untouched bill line, keeps an edited one, and never empties a bill", () => {
+Deno.test("syncPurchaseToBills: a line closed to 0 (removed, ruling 47) removes an untouched bill line, keeps an edited one, and never empties a bill", () => {
   const prevItem = buyLine({ quantity_billed: 3 });
-  const closed = { ...prevItem, quantity: 0, amount_cents: 0, status: "canceled" } as PurchaseItem;
   const other = buyLine({ uid: lid(5), path: [DIV, lid(5)] });
   const whole = project(prevItem, 10, 3);
   const second = project(other, 10, 3);
 
   // The bill keeps its other line, and the closed one goes.
-  const [out] = syncPurchaseToBillsOver([prevItem, other], [closed, other], [billDoc(1, [whole, second])]);
+  const [out] = syncPurchaseToBillsOver([prevItem, other], [other], [billDoc(1, [whole, second])]);
   assert(out.changed);
   assertEquals(linesOf(out.bill).map((l) => l.uid), [second.uid]);
   assertEquals(out.kept_no_lines, undefined);
 
   // An edited bill line is an override: it stays, and the diff reports it.
   const edited = { ...whole, name: "Walkie (supplier's wording)" };
-  const [kept] = syncPurchaseToBillsOver([prevItem, other], [closed, other], [billDoc(1, [edited, second])]);
+  const [kept] = syncPurchaseToBillsOver([prevItem, other], [other], [billDoc(1, [edited, second])]);
   assertEquals(linesOf(kept.bill).map((l) => l.uid).sort(), [whole.uid, second.uid].sort());
 
   // Its only line: left as it stood and reported, because Xero ignores an empty LineItems.
   const only = billDoc(1, [whole]);
-  const [lone] = syncPurchaseToBillsOver([prevItem], [closed], [only]);
+  const [lone] = syncPurchaseToBillsOver([prevItem], [], [only]);
   assertEquals(lone.changed, false);
   assertEquals(lone.kept_no_lines, true);
   assertEquals(lone.bill, only);
@@ -837,12 +830,16 @@ const credit = (items: PurchaseDocumentItem[], status: PurchaseCredit["status"] 
 // The payable diff reads no receivable context; the shared engine still takes one.
 const DIFF_CTX = { taxNameByUid: new Map(), isOrderFrozen: () => false, formulas: {}, holidays: [] } as unknown as DocumentDiffContext;
 type DiffSources = { purchase: Purchase; bills: PurchaseBill[]; credits: PurchaseCredit[] };
-const docsOf = (s: DiffSources) => ({ purchases: [s.purchase], bills: s.bills, purchaseCredits: s.credits });
+/** Each fixture line has received what it ordered: the diff's `fulfilled` reads row custody (C8). */
+const receivedInFull = (p: Purchase) =>
+  new Map([[p.uid, new Map(purchaseLines(p.items).map((l) => [l.path.join("/"), { received: l.quantity, returned: 0 }]))]]);
+const docsOf = (s: DiffSources) =>
+  ({ purchases: [s.purchase], bills: s.bills, purchaseCredits: s.credits, purchaseCustody: receivedInFull(s.purchase) });
 const poDiffs = (s: DiffSources) => computeDocumentDiffs(docsOf(s), { kind: "purchase", uid: s.purchase.uid }, DIFF_CTX);
 const billDiffs = (uid: string, s: DiffSources) => computeDocumentDiffs(docsOf(s), { kind: "bill", uid }, DIFF_CTX);
 
 Deno.test("diff: a bill line that matches its purchase line is silent, on both views", () => {
-  const item = buyLine({ quantity_billed: 3, quantity_received: 3 });
+  const item = buyLine({ quantity_billed: 3 });
   const line = project(buyLine(), 10, 3);
   const bill = billDoc(1, [line]);
   const sources = { purchase: purchaseDoc([item]), bills: [bill], credits: [] };
@@ -851,7 +848,7 @@ Deno.test("diff: a bill line that matches its purchase line is silent, on both v
 });
 
 Deno.test("diff: an overridden account is a `differs` on both views, here/there in each view's own sense", () => {
-  const item = buyLine({ quantity_billed: 3, quantity_received: 3 });
+  const item = buyLine({ quantity_billed: 3 });
   const line = { ...project(buyLine(), 10, 3), ledger_account: 6500 };
   const bill = billDoc(1, [line]);
   const sources = { purchase: purchaseDoc([item]), bills: [bill], credits: [] };
@@ -863,7 +860,7 @@ Deno.test("diff: an overridden account is a `differs` on both views, here/there 
 });
 
 Deno.test("diff: OVER-billing a flat line is a `quantity` entry summed across bills net of credits — flagged, never refused", () => {
-  const item = buyLine({ quantity_billed: 4, quantity_received: 3 });
+  const item = buyLine({ quantity_billed: 4 });
   const a = project(buyLine(), 10, 2);
   const b = project(buyLine({ quantity_billed: 2 }), 11, 2);
   const sources = { purchase: purchaseDoc([item]), bills: [billDoc(1, [a]), billDoc(2, [b])], credits: [] };
@@ -881,7 +878,7 @@ Deno.test("diff: OVER-billing a flat line is a `quantity` entry summed across bi
 });
 
 Deno.test("diff: a flat line billed at the wrong money is flagged even at the right count", () => {
-  const item = buyLine({ quantity_billed: 3, quantity_received: 3 });
+  const item = buyLine({ quantity_billed: 3 });
   const line = { ...project(buyLine(), 10, 3), amount_cents: 140000 };
   const sources = { purchase: purchaseDoc([item]), bills: [billDoc(1, [line], { origin: "linked", xero_id: "8a1b2c3d-0000-4000-8000-000000000001" })], credits: [] };
   const [entry] = poDiffs(sources).lines.get(item.path.join("/"))!;
@@ -890,7 +887,7 @@ Deno.test("diff: a flat line billed at the wrong money is flagged even at the ri
 });
 
 Deno.test("diff: a document-only charge line is `not_on_source` on the bill view", () => {
-  const item = buyLine({ quantity_billed: 3, quantity_received: 3 });
+  const item = buyLine({ quantity_billed: 3 });
   const freight: PurchaseDocumentItem = {
     type: "service", uid: `custom-${iuid(20)}`, path: [PURCHASE, DIV, `custom-${iuid(20)}`], name: "Freight", description: "", zero_priced: null, quantity: 1, amount_cents: 1500, ledger_account: 5300,
     uid_tracking_category: null, uid_tax_class: TAX_CLASS, price: { ...payablePrice(1500, { formula: FIXED_REF }), counts: [] },
@@ -1028,7 +1025,7 @@ Deno.test("a stamped bill parses, and an unstamped one does too", () => {
 });
 
 Deno.test("diff: a live credit with no live bill left under it reads as a negative `invoiced`", () => {
-  const item = buyLine({ quantity_billed: 0, quantity_received: 3 });
+  const item = buyLine({ quantity_billed: 0 });
   const billLine = project(buyLine(), 10, 3);
   const creditLine = { ...billLine, quantity: 2, amount_cents: 93990 };
   const bill = voidedBill(billDoc(1, [billLine]));
@@ -1057,7 +1054,7 @@ const part = (uid: string, over: Partial<PurchaseItem> = {}) =>
 Deno.test("kit header: it is a row, so purchaseLines drops it", () => {
   // The header books nothing either, so it holds no purchase open: since 7a the
   // status reads inbound bookings (tests/bookings-inbound.test.ts).
-  const done = part(VEST, { quantity_received: 100, quantity_billed: 100 } as Partial<PurchaseItem>);
+  const done = part(VEST, { quantity_billed: 100 } as Partial<PurchaseItem>);
   const items = [purchaseDivider(DIV), header(), done];
   assertEquals(purchaseLines(items).map((l) => l.uid), [VEST]);
 });
@@ -1138,16 +1135,21 @@ Deno.test("purchase → bill sync: a left-out header stays out until a new compo
 });
 
 Deno.test("purchaseActionsFor: a header offers removal only, and not once anything beneath it has happened", () => {
-  const offersOn = (lines: PurchaseItem[]) => purchaseActionsFor({ status: "active", query_by_bills: [], items: [header(), ...lines] }).filter((o) => o.path_purchase_item?.at(-1) === KIT).map((o) => o.action);
+  const offersOn = (lines: PurchaseItem[], received = 0) =>
+    purchaseActionsFor(
+      { status: "active", query_by_bills: [], destinations: purchaseDoc(lines).destinations, items: [header(), ...lines] },
+      { custody: new Map(lines.map((l) => [l.path.join("/"), { received, returned: 0 }])), now: jan(1) },
+    ).filter((o) => o.path_purchase_item?.at(-1) === KIT).map((o) => o.action);
   assertEquals(offersOn([part(VEST)]), ["remove_item"]);
-  assertEquals(offersOn([part(VEST, { quantity_received: 1 } as Partial<PurchaseItem>)]), []);
+  assertEquals(offersOn([part(VEST)], 1), []);
 });
 
 Deno.test("supplyFromPurchase: a header supplies nothing even when it names the product asked about", () => {
-  const dated = header({ expected_date: jan(5) } as Partial<PurchaseItem>);
-  assertEquals(supplyFromPurchase({ status: "active", items: [dated], destinations: [] }, KIT), []);
-  const buy = buyLine({ expected_date: jan(5) } as Partial<PurchaseItem>);
-  assertEquals(supplyFromPurchase({ status: "active", items: [buy], destinations: [] }, (buy as { uid_product: string }).uid_product).length, 1, "control");
+  // The buy's expected arrival is its pair's `delivery_start` (C8).
+  const destinations = [{ uid: DIV, dates: { delivery_start: jan(5), collection_end: null } }];
+  assertEquals(supplyFromPurchase({ status: "active", items: [header()], destinations }, KIT, new Map()), []);
+  const buy = buyLine();
+  assertEquals(supplyFromPurchase({ status: "active", items: [buy], destinations }, (buy as { uid_product: string }).uid_product, new Map()).length, 1, "control");
 });
 
 // ── A bill's rows move, split and swap as an invoice's do (6c-W, W3) ─────
@@ -1214,18 +1216,19 @@ Deno.test("remainingTimeCounts: a fully billed time line that was split leaves n
   assert(left.every((t) => t.num === 0), JSON.stringify(left));
 });
 
-Deno.test("orderLineClaimIssues, payable: a canceled line cannot be claimed; a live one can; the receivable reader is unchanged", () => {
+Deno.test("orderLineClaimIssues, payable: a closed (removed) line cannot be claimed; a live one can; the receivable reader is unchanged", () => {
   const open = buyLine();
-  const canceled = { ...buyLine({ uid: lid(6), path: [DIV, lid(6)] }), status: "canceled", quantity: 0 } as PurchaseItem;
+  const removed = lid(6);
   const rows = (x: string) => [
     { uid: PURCHASE, type: "purchase", path: [PURCHASE] },
     { uid: "r", type: "sale", path: [PURCHASE, "r"], path_purchase_item: [DIV, x] },
   ] as never[];
-  const lines = () => [open, canceled];
+  const lines = () => [open];
   assertEquals(orderLineClaimIssues(rows(open.uid), lines, [], PAYABLE_LINE_CLAIMS), []);
-  assertEquals(orderLineClaimIssues(rows(canceled.uid), lines, [], PAYABLE_LINE_CLAIMS).map((i) => i.reason), ["line_closed"]);
+  // A line closed to 0 is removed (ruling 47), so a claim on it names no line.
+  assertEquals(orderLineClaimIssues(rows(removed), lines, [], PAYABLE_LINE_CLAIMS).map((i) => i.reason), ["not_a_line"]);
   // The default side reads `path_order_item`, so this payable pointer is no claim there.
-  assertEquals(orderLineClaimIssues(rows(canceled.uid), lines), []);
+  assertEquals(orderLineClaimIssues(rows(removed), lines), []);
 });
 
 Deno.test("UpdatePurchaseBillInput: takes the W3 keys and a bill's pair, and refuses a pair the hire rule refuses", () => {
@@ -1369,7 +1372,7 @@ Deno.test("syncPurchaseToBills: a linked bill follows only when the writer clear
   assertEquals(syncPurchaseToBills({ ...args, bills: [paid], linked_cleared: new Set([paid.uid]) })[0].changed, false, "settled");
 });
 
-Deno.test("syncPurchaseToBills: an overridden row keeps its pointer at a line closed to 0, through a later edit too", () => {
+Deno.test("syncPurchaseToBills: an overridden row whose line was closed out stays, naming no line — the invoice rule (ruling 47)", () => {
   const item = buyLine();
   const other = buyLine({ uid: lid(50), path: [DIV, lid(50)] });
   const line = { ...project(item, 10, 1), name: "Supplier's wording" };
@@ -1377,14 +1380,15 @@ Deno.test("syncPurchaseToBills: an overridden row keeps its pointer at a line cl
   const otherLine = project(other, 10, 1);
   const base = billDoc(1, [otherLine]);
   const bill = { ...base, items: [base.items[0], base.items[1], otherLine, groupRow, row], totals: { ...base.totals, total_cents: 93990, amount_due_cents: 93990 } } as PurchaseBill;
-  const closed = { ...item, quantity: 0, amount_cents: 0, status: "canceled" } as PurchaseItem;
-  const [out] = syncPurchaseToBills({ prev: purchaseDoc([item, other]), next: purchaseDoc([closed, other]), bills: [bill], tax: TAX, time: BILL_SYNC_TIME });
+  // Closed to 0, so removed (ruling 47).
+  const [out] = syncPurchaseToBills({ prev: purchaseDoc([item, other]), next: purchaseDoc([other]), bills: [bill], tax: TAX, time: BILL_SYNC_TIME });
   const kept = linesOf(out.changed ? out.bill : bill).find((l) => l.path.includes(GROUP))!;
-  assertEquals((kept as { path_purchase_item?: string[] }).path_purchase_item, [DIV, item.uid]);
+  assertEquals((kept as { path_purchase_item?: string[] }).path_purchase_item, undefined, "the line is gone, so the row is the bill's own");
+  assertEquals(kept.name, "Supplier's wording");
   const renamed = { ...other, name: "Renamed" } as PurchaseItem;
-  const [later] = syncPurchaseToBills({ prev: purchaseDoc([closed, other]), next: purchaseDoc([closed, renamed]), bills: [out.changed ? out.bill : bill], tax: TAX, time: BILL_SYNC_TIME });
+  const [later] = syncPurchaseToBills({ prev: purchaseDoc([other]), next: purchaseDoc([renamed]), bills: [out.changed ? out.bill : bill], tax: TAX, time: BILL_SYNC_TIME });
   const still = linesOf(later.bill).find((l) => l.path.includes(GROUP))!;
-  assertEquals((still as { path_purchase_item?: string[] }).path_purchase_item, [DIV, item.uid], "a later edit reads it as no longer on the purchase's rows");
+  assertEquals((still as { path_purchase_item?: string[] }).path_purchase_item, undefined, "a later edit leaves it the bill's own");
 });
 
 Deno.test("remainingTimeCounts: metered_over bills the BILL's pair, and a later document is the caller's to leave out", () => {
@@ -1567,14 +1571,13 @@ function lossLine(over: Record<string, unknown> = {}): PurchaseItem {
     uid_tracking_category: null,
     uid_tax_class: TAX_CLASS,
     quantity_billed: 0,
-    status: "open",
     uid_units: [],
     out_of_service: [{ uid: OOS_A, quantity: 2 }, { uid: OOS_B, quantity: 2 }],
     ...over,
   }) as PurchaseItem;
 }
 
-Deno.test("W4R PurchaseReplacementItemSchema: the list is required; the retired single link is refused; shares sum to quantity; a close to 0 keeps naming its records", () => {
+Deno.test("W4R PurchaseReplacementItemSchema: the list is required; the retired single link is refused; shares sum to quantity; a line is never stored at 0", () => {
   const paths = (over: Record<string, unknown>) => {
     const r = PurchaseReplacementItemSchema.safeParse(lossLine(over));
     return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
@@ -1585,10 +1588,10 @@ Deno.test("W4R PurchaseReplacementItemSchema: the list is required; the retired 
   assertEquals(paths({ out_of_service: undefined, uid_out_of_service: OOS_A }), ["out_of_service", ""], "the pre-W4R spelling");
   assertEquals(paths({ uid_out_of_service: OOS_A }), [""], "beside the list");
   assertEquals(paths({ out_of_service: [{ uid: OOS_A, quantity: 3 }] }), ["out_of_service"], "3 is not the line's 4");
+  // A line closed to 0 is removed (ruling 47), so a stored 0 is refused.
   assertEquals(
-    paths({ quantity: 0, amount_cents: 0, status: "canceled", out_of_service: [{ uid: OOS_A, quantity: 0 }, { uid: OOS_B, quantity: 0 }] }),
-    [],
-    "a line closed to 0 still names both records",
+    paths({ quantity: 0, amount_cents: 0, out_of_service: [{ uid: OOS_A, quantity: 0 }, { uid: OOS_B, quantity: 0 }] }).includes("quantity"),
+    true,
   );
   const input = (over: Record<string, unknown>) => {
     const r = PurchaseItemInput.safeParse({

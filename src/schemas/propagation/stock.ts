@@ -311,14 +311,14 @@ const rules: CollectionRule[] = [
     target: "stock",
     mode: "fan-out",
     invariant:
-      'stock.supply[] is re-derived from every live (status active) purchase naming the product (`query_by_products`), each item PRE-REDUCED by `supplyFromPurchase` (@cfs/core/utils/stock) to an anonymous interval. A SUBRENT item is {kind:"subrent"} over its hire window — delivery_start → collection_end on the destination PAIR it sits under (a null end is +∞), counted from the moment the purchase exists — receipt is custody only. A BUY item with an expected_date is {kind:"inbound"} over [expected_date, +∞) for its unreceived remainder, so a receipt moves units from the entry into quantity_held, and an overdue delivery keeps counting until it is received or short-closed. Every write of a purchase that changes the supply of an item therefore bumps `stock-locks/{P}` like any other input. The public hard gate counts subrent supply only (`supplyKinds`). A SEPARATE array from unavailable[], because the fold takes the MINIMUM of supply over a window where it sums consumption. Anonymous for the reason unavailable[] is: no purchase uid, no supplier.',
+      'stock.supply[] is re-derived from every live (status active) purchase naming the product (`query_by_products`), each item PRE-REDUCED by `supplyFromPurchase` (@cfs/core/utils/stock) to an anonymous interval. A SUBRENT item is {kind:"subrent"} over its hire window — delivery_start → collection_end on the destination PAIR it sits under (a null end is +∞), counted from the moment the purchase exists — receipt is custody only. A BUY item whose pair states a delivery_start (its expected arrival, C8) is {kind:"inbound"} over [delivery_start, +∞) for its unreceived remainder, so a receipt moves units from the entry into quantity_held, and an overdue delivery keeps counting until it is received or short-closed. Every write of a purchase that changes the supply of an item therefore bumps `stock-locks/{P}` like any other input. The public hard gate counts subrent supply only (`supplyKinds`). A SEPARATE array from unavailable[], because the fold takes the MINIMUM of supply over a window where it sums consumption. Anonymous for the reason unavailable[] is: no purchase uid, no supplier.',
     enforced_by: [SUPPLY_FOLD, SUPPLY_MODEL],
     trigger: REBUILD_TRIGGER,
     fields: [
       {
         source: ["destinations", "dates", "delivery_start"],
         target: ["supply", "start"],
-        transform: "a subrent item's hire start, read off its PAIR (`path[0]`)",
+        transform: "a subrent item's hire start, or a buy item's expected arrival, read off its PAIR (`path[0]`); a buy whose pair states none contributes nothing",
       },
       {
         source: ["destinations", "dates", "collection_end"],
@@ -326,18 +326,11 @@ const rules: CollectionRule[] = [
         transform: "a subrent item's hire end, read off its pair (null on a standing subrent, +∞); an inbound entry's end is null (+∞)",
       },
       {
-        source: ["items", "expected_date"],
-        target: ["supply", "start"],
-        transform: "a buy item's expected date; a buy item with none contributes nothing",
-      },
-      {
         source: ["items", "quantity"],
         target: ["supply", "quantity"],
         transform:
-          "subrent: quantity − quantity_returned; buy: quantity − quantity_received (`remainingToReceive`). An entry supplying nothing is DROPPED, not stored as a zero",
+          "subrent: quantity − returned; buy: quantity − received (`remainingToReceive`), each the row's custody (`custodyBySourceItem` over the purchase's movements, C8 and ruling 60 — the arithmetic of the retired line buckets, unchanged). An entry supplying nothing is DROPPED, not stored as a zero",
       },
-      { source: ["items", "quantity_returned"], target: ["supply", "quantity"], transform: "subtracted on a subrent — see quantity" },
-      { source: ["items", "quantity_received"], target: ["supply", "quantity"], transform: "subtracted on a buy — see quantity" },
       {
         source: ["status"],
         target: [],

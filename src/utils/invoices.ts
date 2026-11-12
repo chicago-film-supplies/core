@@ -1837,13 +1837,6 @@ export interface ScopedSyncSide<R extends InvoiceItem = InvoiceDocItemType> {
    */
   isStructural?(item: LineItem): boolean;
   /**
-   * A claimed line that has left the initiator's rows the sync reads but is still
-   * stored on the initiator. A kept row's pointer at such a line stays. Absent
-   * means the sync's rows are all there is. A payable line closed to quantity 0
-   * is the case: the bill line still bills it.
-   */
-  stillStored?(path: readonly string[]): boolean;
-  /**
    * The billing document's own row IS this new initiator line, so the line adopts
    * it rather than being projected beside it. Asked only of a line no previous
    * initiator revision held, and only of a stored row under the same parent that
@@ -2213,18 +2206,18 @@ function syncScopedItems<R extends InvoiceItem>(
       return out;
     };
     const prevX = prevByPath.get(itemPathKey(x));
-    // A kept row's pointer at a line that left the sync's rows but is still stored stays.
-    const keptPointer = side.stillStored?.(x) ? x : undefined;
     // X was not on the order this row was claimed against: the row is the
-    // invoice's own, and a root's pointer names nothing.
-    if (prevX === undefined) return { keep: true, row: pointing(row, keptPointer) };
+    // invoice's own, and a root's pointer names nothing. (A payable line closed
+    // to 0 used to stay stored and keep its pointer; it is removed now, ruling 47.)
+    if (prevX === undefined) return { keep: true, row: pointing(row, undefined) };
     const nextPath = moved.toPath(x) ?? (newByPath.has(itemPathKey(x)) ? x : undefined);
     const nextX = nextPath === undefined ? undefined : newByPath.get(itemPathKey(nextPath));
     if (nextX !== undefined) {
       const merged = { ...mergeLine(prevX, nextX, row, orderDividerUid), path: row.path } as R;
       return { keep: true, row: pointing(merged, nextPath) };
     }
-    if (lineOverridden(prevX, row, orderDividerUid)) return { keep: true, row: pointing(row, keptPointer) };
+    // X left the initiator: an overridden row stays as the billing document's own, naming nothing.
+    if (lineOverridden(prevX, row, orderDividerUid)) return { keep: true, row: pointing(row, undefined) };
     return { keep: false, row };
   };
 
@@ -3111,22 +3104,21 @@ export interface OrderLineClaimIssue {
    * `outside_order_block` — the row hangs under no scope divider, which
    * includes every line of a standalone invoice; `not_a_line` — the initiator
    * this row's block bills carries no line at the claimed path; `order_unknown`
-   * — the caller could not supply that initiator's items; `line_closed` — the
-   * side refuses a claim on that line ({@link LineClaimSide.lineClosed}).
+   * — the caller could not supply that initiator's items. (`line_closed`
+   * retired with the purchase line `status`, one-document-model C8: a line
+   * closed to 0 is removed, so it reads `not_a_line` like any absent row.)
    */
-  reason: "outside_order_block" | "not_a_line" | "order_unknown" | "line_closed";
+  reason: "outside_order_block" | "not_a_line" | "order_unknown";
 }
 
 /**
  * What {@link orderLineClaimIssues} needs to know about a SIDE: the pair
- * {@link ScopedSyncSide} already carries, and whether a claim on a line that
- * exists may still be refused.
+ * {@link ScopedSyncSide} already carries. `L` is the side's line shape, which
+ * fixes what the `orderLines` callback returns.
  */
 export interface LineClaimSide<L> {
   scopeType: "order" | "purchase";
   pointerKey: keyof MovePointerCarrier;
-  /** A line the side does not let a row claim. Absent means none is closed. */
-  lineClosed?(line: L): boolean;
 }
 
 /** The receivable side of {@link orderLineClaimIssues}: an invoice's `path_order_item`. */
@@ -3174,7 +3166,6 @@ export function orderLineClaimIssues<L extends { type: string; path?: readonly s
     if (lines === undefined) return issue("order_unknown");
     const target = lines.find((l) => itemPathKey(l.path ?? []) === itemPathKey(x));
     if (target === undefined || !isLineItemType(target.type)) return issue("not_a_line");
-    if (side.lineClosed?.(target)) issue("line_closed");
   });
   return issues;
 }

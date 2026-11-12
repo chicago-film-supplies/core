@@ -52,7 +52,6 @@ import {
   type PurchaseItem,
   purchaseItemBasis,
   purchaseLines,
-  purchaseItemCanceled,
   purchaseLineKeyOf,
   type PurchaseRow,
   PurchaseSchema,
@@ -302,12 +301,11 @@ function foldPurchaseDocument(
 
 /**
  * Does this purchase line COUNT for coverage — a subrent, charge or replacement
- * line whose purchase was not canceled and which was not canceled in full with
- * nothing billed (`purchaseItemCanceled`: it never happened)? A closed or
- * completed line still covered what it covered.
+ * line whose purchase was not canceled? A line closed to nothing is removed
+ * (ruling 47), so every line still present covered what it covered.
  */
 export function purchaseLineCovers(purchase: Pick<Purchase, "status">, item: PurchaseItem): boolean {
-  return purchase.status !== "canceled" && item.type !== "sale" && !purchaseItemCanceled(item);
+  return purchase.status !== "canceled" && item.type !== "sale";
 }
 
 /** What the live documents bill of one purchase line, net of credits. */
@@ -412,10 +410,10 @@ export function remainingTimeCounts(args: RemainingTimeCountsArgs): TierCount[] 
  * `.min(0)`; the diff keeps the unfloored number. A time line and a divider
  * come back as they went in.
  *
- * ⚠️ `quantity_billed` is unlike its sibling buckets. `quantity_received` and
- * `quantity_returned` are kept by delta, because a receipt's quantity never
- * changes; a bill line's does, so a delta here releases the wrong number on a
- * void. Pass EVERY bill and credit of the purchase, including the one the
+ * ⚠️ `quantity_billed` is recounted, never kept by delta: a bill line's
+ * quantity changes, so a delta here would release the wrong number on a void.
+ * (Its retired siblings `quantity_received` / `quantity_returned` are custody
+ * now, read off the inbound bookings and the journal, C8.) Pass EVERY bill and credit of the purchase, including the one the
  * caller is writing.
  */
 export function recomputePurchaseQuantityBilled(
@@ -1113,11 +1111,11 @@ function asEngineSource(row: PurchaseRow): LineItem {
  *
  * Built per sync over the two purchase revisions it converts
  * ({@link asEngineSource}): the engine hands its projector the converted rows,
- * and the side maps each back to the purchase row it came from. `stored` is the
- * purchase's whole row set, which a pointer at a line closed out of the sync's
- * rows is judged against; it defaults to the revision being synced.
+ * and the side maps each back to the purchase row it came from. A line closed to
+ * 0 is removed (ruling 47), so an overridden bill row that billed it keeps no
+ * pointer, as an invoice row whose order line was removed keeps none.
  */
-export function payableScopedSync(prev: Purchase, next: Purchase, stored: readonly PurchaseRow[] = next.items): {
+export function payableScopedSync(prev: Purchase, next: Purchase): {
   side: ScopedSyncSide<PurchaseDocumentRow>;
   prevItems: LineItem[];
   nextItems: LineItem[];
@@ -1131,12 +1129,10 @@ export function payableScopedSync(prev: Purchase, next: Purchase, stored: readon
     });
   const prevItems = convert(prev.items);
   const nextItems = convert(next.items);
-  const storedPaths = new Set(stored.map((r) => r.path.join("/")));
   const side: ScopedSyncSide<PurchaseDocumentRow> = {
     scopeType: "purchase",
     pointerKey: "path_purchase_item",
     isStructural: (item) => isKitHeaderLine(item),
-    stillStored: (path) => storedPaths.has(path.join("/")),
     // A bill's own sale or rental line is the purchase line added after it for the
     // same product. A charge or a replacement line names no product it orders.
     adopts: (item, row) => {
@@ -1240,12 +1236,13 @@ const PAYABLE_PAIR_SIDE: ScopedPairSide<PurchaseDestination, PurchaseDocDestinat
 
 /**
  * The payable side of `orderLineClaimIssues`: a bill or credit's
- * `path_purchase_item`. A canceled line cannot be billed.
+ * `path_purchase_item`. A line closed to 0 is removed (ruling 47), so there is
+ * no closed line to refuse: a claim on it names a row that is not there, as on
+ * the receivable side.
  */
 export const PAYABLE_LINE_CLAIMS: LineClaimSide<PurchaseRow> = {
   scopeType: "purchase",
   pointerKey: "path_purchase_item",
-  lineClosed: (line) => isPurchaseLine(line) && line.status === "canceled",
 };
 
 /**
@@ -1302,7 +1299,7 @@ export function syncPurchaseToBills(args: SyncPurchaseToBillsArgs): PurchaseBill
     let end = start + 1;
     while (end < bill.items.length && bill.items[end].path[0] === uidPurchase) end++;
     const scoped = bill.items.slice(start + 1, end);
-    const { side, prevItems, nextItems } = payableScopedSync(withoutCanceledLines(args.prev), withoutCanceledLines(args.next), args.next.items);
+    const { side, prevItems, nextItems } = payableScopedSync(args.prev, args.next);
     // A dropped pair is the purchase's own removal, so nothing here reports it.
     const { items: synced, destinations } = syncScopedDestinations(
       { items: prevItems, destinations: args.prev.destinations },
@@ -1334,17 +1331,6 @@ export function syncPurchaseToBills(args: SyncPurchaseToBillsArgs): PurchaseBill
       changed: true,
     };
   });
-}
-
-/**
- * The purchase as a bill sync sees it: a line canceled to quantity 0 is a line
- * the purchase no longer has. Bill lines are `≥ 1`, so a 0 could never be
- * followed, and the invoice sync's rule applies as it stands: an untouched line
- * goes, an edited one stays and the diff reports it (one-document-model Phase 5).
- * A canceled TIME line keeps its quantity, and so stays.
- */
-function withoutCanceledLines(purchase: Purchase): Purchase {
-  return { ...purchase, items: purchase.items.filter((r) => !isPurchaseLine(r) || r.quantity > 0) };
 }
 
 /**

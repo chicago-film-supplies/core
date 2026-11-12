@@ -63,7 +63,8 @@ export interface InventoryLedger {
    * live subrent — in CFS's custody, never owned. Moved only by the
    * `SUBRENT_MOVEMENT_TYPES` (`subrent_in`, `subrent_out`, `return_to_supplier`)
    * and their reversals, so it equals Σ (received − returned) over the product's
-   * subrent purchases, where `quantity_returned` counts settled units too. Never
+   * subrent purchases' inbound bookings, where returned counts settled units too
+   * (`inboundReturned`). Never
    * more than held; `0` on an uncounted ledger (a subrent of an uncounted
    * product is refused).
    *
