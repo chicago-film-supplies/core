@@ -59,9 +59,11 @@
  * changes, so a delta releases the wrong number when that bill is voided. Every write that adds or
  * voids a bill or credit, or edits a bill line's quantity, recalculates the count
  * from the purchase's live documents in the same commit: the shared steps
- * `purchase-billed:bills-to-purchase`, `purchase-billed:credits-to-purchase` and
- * the return card, referenced as `RECOUNT_STEPS`. It is one rule with several
- * firing contexts, not one per transaction, for the reason `STOCK_STEPS` is.
+ * `purchase-billed:bills-to-purchase` and `purchase-billed:credits-to-purchase`,
+ * referenced as `RECOUNT_STEPS`. It is one rule with several firing contexts,
+ * not one per transaction, for the reason `STOCK_STEPS` is. A recount moves no
+ * status and so no return card: a purchase's status is custody-only (7a C7,
+ * rulings 55 and 56) and the purchase finalize writes it.
  *
  * A card payment linked as a bill is BORN PAID: the same transaction appends its
  * one `bill_payment` row and folds it, so its due is 0 from the first write. The
@@ -283,6 +285,83 @@ const PURCHASE_CARD_SHAPE: EnforcementRef = {
   gates: true,
 };
 
+const INBOUND_RECONCILE: EnforcementRef = {
+  kind: "assertion",
+  ref: "api-cloudrun/src/lib/inboundBookingReconcile.ts::reconcileInboundBookings",
+  clause:
+    "one booking per (purchase, product, leg, signature) grain a Buy or Subrent row books; physical quantity from the receipt rows, quantity_ordered from the purchase lines; history carried, the rest planned; a grain the purchase no longer implies kept at quantity_ordered 0 while it holds history, else deleted",
+  gates: true,
+};
+
+const RECEIPT_SYNC: EnforcementRef = {
+  kind: "assertion",
+  ref: "api-cloudrun/src/lib/purchaseReceiptSync.ts::syncReceiptContent",
+  clause:
+    "the three-way merge over purchaseReceiptSharedFields: an untouched row follows the purchase, a receiver's row quantity stays; a removed row is kept at quantity_ordered 0 while its grain holds custody history",
+  gates: true,
+};
+
+/**
+ * The custody projection every purchase write and every inbound custody step
+ * runs (one-document-model 7a, W2): purchase → receipt → inbound bookings →
+ * purchase. One rule per edge with several firing contexts, referenced as
+ * `PURCHASE_CUSTODY_STEPS`, for the reason `STOCK_STEPS` is one: the hole a
+ * per-transaction copy would vary on is a transaction id, not a collection.
+ */
+const purchaseCustodyRules: CollectionRule[] = [
+  {
+    id: "purchase-custody:purchase-to-receipt",
+    source: "purchases",
+    target: "purchase-receipts",
+    mode: "co-write",
+    invariant:
+      "`purchase-receipts/{uid}` is the purchase's custody projection, written in the same commit as every purchase write: its rows are the purchase's dividers and Buy / Subrent rows, merged three-way over the shared fields (`purchaseReceiptSharedFields`) so a receiver's row quantity survives a purchase edit; `number`, `status` and `reference` are copies; `due_at` and `query_by_uid_store` are derived from the inbound bookings. A missing receipt is created by the next write.",
+    enforced_by: [RECEIPT_SYNC],
+    fields: [
+      { source: ["items"], target: ["items"], transform: "syncReceiptContent — dividers and Buy / Subrent rows, quantity_ordered the purchase's" },
+      { source: ["destinations"], target: ["destinations"], transform: "each pair follows its divider" },
+      { source: ["supplier"], target: ["supplier"], transform: "taken whole (an atom)" },
+      { source: ["subject"], target: ["subject"] },
+      { source: ["status"], target: ["status"], transform: "a copy" },
+      { source: ["number"], target: ["number"], transform: "a copy" },
+    ],
+  },
+  {
+    id: "purchase-custody:receipt-to-inbound-bookings",
+    source: "purchase-receipts",
+    target: "bookings-inbound",
+    mode: "co-write",
+    invariant:
+      "A purchase's inbound bookings reconcile from its receipt and its lines in the same commit: one booking per (purchase, product, leg, component signature) grain of a Buy or Subrent row (a kit header books nothing), its `quantity` the receipt rows' physical count, `quantity_ordered` the purchase lines', its breakdown `calculateInboundBreakdown` over the purchase status (history carried, the rest `ordered`; none on a canceled purchase). A grain the purchase no longer implies is kept at `quantity_ordered: 0` while it holds custody history and deleted while it is plan only. A Buy and a Subrent of one product on one leg are refused, since they would share a booking.",
+    enforced_by: [INBOUND_RECONCILE],
+    fields: [
+      { source: ["items", "quantity"], target: ["quantity"], transform: "Σ receipt row quantity at the grain; the breakdown follows calculateInboundBreakdown" },
+      { source: ["items", "quantity_ordered"], target: ["quantity_ordered"], transform: "Σ purchase line quantity at the grain" },
+      { source: ["destinations", "dates"], target: ["dates"], transform: "buildBookingDates over the row's pair — a Buy from delivery_start, open-ended; a Subrent its hire" },
+    ],
+  },
+  {
+    id: "purchase-custody:inbound-bookings-to-purchase",
+    source: "bookings-inbound",
+    target: "purchases",
+    mode: "co-write",
+    invariant:
+      "A purchase's `status` and `bookings_breakdown` are read off its inbound bookings in the commit that writes them: `derivePurchaseStatus` (canceled is authored; otherwise complete once every booking is closed, a purchase booking nothing included, rulings 55 and 61) and the bookings' breakdowns summed.",
+    enforced_by: [INBOUND_RECONCILE],
+    fields: [
+      { source: ["breakdown"], target: ["bookings_breakdown"], transform: "Σ every booking's breakdown" },
+      { source: ["breakdown"], target: ["status"], transform: "derivePurchaseStatus(stored, bookings)" },
+    ],
+  },
+];
+
+/** The custody projection's steps, as its firing transactions name them. */
+const PURCHASE_CUSTODY_STEPS = [
+  "purchase-custody:purchase-to-receipt",
+  "purchase-custody:receipt-to-inbound-bookings",
+  "purchase-custody:inbound-bookings-to-purchase",
+] as const;
+
 const purchaseCardRules: CollectionRule[] = [
   {
     id: "purchase-card:purchases-to-card",
@@ -290,7 +369,7 @@ const purchaseCardRules: CollectionRule[] = [
     target: "cards",
     mode: "co-write",
     invariant:
-      "Every purchase holding a SUBRENT item has exactly one \"return to supplier\" card, id `derivedDocId(\"purchase-return-card:\" + uid)`, written in the SAME commit as every write of the purchase that could move it (create, update, close, receive, return and their reversals, and a recount that moves the purchase's status) and never by a client. Its status, action and date are derived from its subrent rows' custody (the journal, C8) by `computeCardStatusFromPurchase` / `computeCardActionFromPurchase` / `purchaseCardDue` (@cfs/core/utils/cards); its kind is the `purchases` source PAYLOAD (`isPurchaseCard`), not the bare source, so a hand-authored to-do that links a PO is never taken over. A purchase with no subrent item has no card.",
+      "Every purchase holding a SUBRENT item has exactly one \"return to supplier\" card, id `derivedDocId(\"purchase-return-card:\" + uid)`, written in the SAME commit as every write of the purchase that could move it (create, update, close, and every custody step on its inbound bookings) and never by a client. Its status, action and date are derived from its subrent rows' custody (the journal, C8) by `computeCardStatusFromPurchase` / `computeCardActionFromPurchase` / `purchaseCardDue` (@cfs/core/utils/cards); its kind is the `purchases` source PAYLOAD (`isPurchaseCard`), not the bare source, so a hand-authored to-do that links a PO is never taken over. A purchase with no subrent item has no card.",
     enforced_by: [PURCHASE_CARD_TABLE, PURCHASE_CARD_SHAPE],
     fields: [
       { source: ["status"], target: ["status"], transform: "computeCardStatusFromPurchase(purchase, card.status)" },
@@ -1114,20 +1193,20 @@ const purchaseBilledRules: CollectionRule[] = [
 ];
 
 /**
- * The recount as its firing transactions name it, the return card included: a
- * recount can move the purchase's status, and the card reads it. `STOCK_STEPS`'s
- * shape, and file-local because no other module fires it.
+ * The recount as its firing transactions name it. `STOCK_STEPS`'s shape, and
+ * file-local because no other module fires it. Billing holds no purchase open
+ * (ruling 61), so a recount writes no status and the return card, which reads
+ * custody, does not follow it (7a C7).
  */
 const RECOUNT_STEPS = [
   "purchase-billed:bills-to-purchase",
   "purchase-billed:credits-to-purchase",
-  "purchase-card:purchases-to-card",
 ] as const;
 
 const createPurchaseBillTransaction: TransactionDefinition = {
   id: "create-purchase-bill",
   description:
-    "Bills a purchase: either PUSHES a new ACCPAY (`CFS-BILL-n`, posted by a post-commit task with read-before-create) or LINKS an existing Xero bill or card payment, read from Xero rather than the caller. The bill recounts its purchase lines' `quantity_billed` in the same transaction, and the return card follows when that moves the purchase's status. A linked card payment is born paid, and a linked ACCPAY carries the payments Xero already reports, as `bill_payment` settlement rows in the same transaction — fires on: a link whose Xero document holds any payment.",
+    "Bills a purchase: either PUSHES a new ACCPAY (`CFS-BILL-n`, posted by a post-commit task with read-before-create) or LINKS an existing Xero bill or card payment, read from Xero rather than the caller. The bill recounts its purchase lines' `quantity_billed` in the same transaction. A linked card payment is born paid, and a linked ACCPAY carries the payments Xero already reports, as `bill_payment` settlement rows in the same transaction — fires on: a link whose Xero document holds any payment.",
   steps: [
     "create-purchase-bill:bill-to-purchase",
     "create-purchase-bill:bill-to-settlements",
@@ -1141,7 +1220,7 @@ const createPurchaseBillTransaction: TransactionDefinition = {
 const updatePurchaseBillTransaction: TransactionDefinition = {
   id: "update-purchase-bill",
   description:
-    "Edits a PUSHED, unsettled bill (`PUT /purchase-bills/{uid}`, D5): any line's shared field may be overridden until the bill settles, exactly the invoice rule; the writer re-prices the edited bill with `priceDocument` (payable arm), whose stated-total arm states each line's money from its amount and discount. Refused on a linked bill (Xero is authoritative) and, per field class, on a frozen one (`PURCHASE_BILL_FIELD_FREEZE`). The accepted edit is pushed to Xero after the commit by the ACCPAY edit push — GET-modify-POST against Xero's own InvoiceID, hash-gated so an unchanged body pushes nothing. Editing a flat line's quantity recounts the purchase's `quantity_billed` and bumps its version in the same commit — fires on: an edit that moves a line's count, with the return card when that moves the purchase's status.",
+    "Edits a PUSHED, unsettled bill (`PUT /purchase-bills/{uid}`, D5): any line's shared field may be overridden until the bill settles, exactly the invoice rule; the writer re-prices the edited bill with `priceDocument` (payable arm), whose stated-total arm states each line's money from its amount and discount. Refused on a linked bill (Xero is authoritative) and, per field class, on a frozen one (`PURCHASE_BILL_FIELD_FREEZE`). The accepted edit is pushed to Xero after the commit by the ACCPAY edit push — GET-modify-POST against Xero's own InvoiceID, hash-gated so an unchanged body pushes nothing. Editing a flat line's quantity recounts the purchase's `quantity_billed` and bumps its version in the same commit — fires on: an edit that moves a line's count.",
   steps: [...RECOUNT_STEPS],
 };
 
@@ -1271,6 +1350,7 @@ const createPurchaseTransaction: TransactionDefinition = {
     "cowrite-thread:purchases-to-thread",
     "cowrite-thread:thread-to-purchases",
     ...STOCK_STEPS,
+    ...PURCHASE_CUSTODY_STEPS,
     "purchase-card:purchases-to-card",
     "cowrite-thread:cards-to-thread",
     "cowrite-thread:thread-to-cards",
@@ -1283,6 +1363,7 @@ const updatePurchaseTransaction: TransactionDefinition = {
     "Amends a purchase's date, reference, notes or items, matched by item uid. On a BUY item the quantity may not fall below what is received or billed, and its amount may not change once it has any receipt or bill — a price that moved after goods arrived is a short close plus a new purchase, because every receipt already carries its share of the old price; the update fires STOCK_STEPS, since a buy item's pair's delivery_start and its unreceived quantity are inbound supply. On a SUBRENT item a receipt carries no cost, so the amount and the hire end stay editable after receipt (a paid extension), and the update fires STOCK_STEPS and the return card, since the hire window is supply. An amend that adds a purchase's FIRST subrent item writes its return card in the same commit, with the card's own default thread, as a create does. Every pushed, unsettled bill named in `query_by_bills` is synced in the same commit (D5) — fires on: an item's shared field changing while such a bill exists — and each bill it changes is re-pushed to Xero after the commit by the ACCPAY edit push.",
   steps: [
     ...STOCK_STEPS,
+    ...PURCHASE_CUSTODY_STEPS,
     "purchase-card:purchases-to-card",
     "cowrite-thread:cards-to-thread",
     "cowrite-thread:thread-to-cards",
@@ -1293,10 +1374,12 @@ const updatePurchaseTransaction: TransactionDefinition = {
 const closePurchaseTransaction: TransactionDefinition = {
   id: "close-purchase",
   description:
-    "Closes some or all of a purchase's lines: a buy or subrent line lowers its quantity to what was received, a flat charge to what was billed, restating its money; a line with nothing left is canceled, and a time charge is canceled at its quantity. The lowered lines reach the purchase's bills by the three-way sync. Raises no credit: billed beyond what was received is a diff entry.",
+    "Closes some or all of a purchase's lines — a close is a quantity edit (ruling 47): a buy or subrent line lowers its quantity to what its row received, a flat charge to what was billed, restating its money, and a line left with nothing is REMOVED (its inbound booking kept while it holds custody, deleted while it is plan only); a time charge ends its pair's charge window (ruling 63). A close that would leave no line is a CANCEL: the purchase reads canceled (authored, ruling 55), its lines stay as they stand, and every plan-only inbound booking goes — refused while any booking holds live custody (`inboundCancelRefusal`). The lowered lines reach the purchase's bills by the three-way sync. Raises no credit: billed beyond what was received is a diff entry.",
   steps: [
     "close-purchase:purchase-to-bills",
     ...STOCK_STEPS,
+    ...PURCHASE_CUSTODY_STEPS,
+    "purchase-card:purchases-to-card",
     ...RECOUNT_STEPS,
   ],
 };
@@ -1371,6 +1454,7 @@ export const purchases: PropagationModule = {
     ...reversePurchaseReturnRules,
     ...settleToPurchaseRules,
     ...purchaseCardRules,
+    ...purchaseCustodyRules,
     ...updatePurchaseBillRules,
     ...createPurchaseBillRules,
     ...settlePurchaseBillRules,
