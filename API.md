@@ -707,6 +707,18 @@ service with a reason. A booking is `complete` when these hold all its units.
 const BOOKING_BREAKDOWN_TERMINAL_KEYS: "returned" | "lost" | "damaged" | "cleaning" | "maintenance"[];
 ```
 
+### `BOOKING_LADDERS`
+
+Which booking ladder a movement's `uid_booking` and custody pair belong to:
+`outbound` (an order's `bookings`) or `inbound` (a purchase's
+`bookings-inbound`). Named for the LADDER, not the side, because core's `Side`
+(`schemas/side.ts`) is `receivable | payable` and means the document, not the
+direction units travel.
+
+```ts
+const BOOKING_LADDERS: "outbound" | "inbound"[];
+```
+
 ### `BOOKING_PLAN_KEYS`
 
 The PLAN keys: what an order asks for before any unit is touched. Every other
@@ -773,10 +785,10 @@ interface BaseLogFields {
 
 ### `BaseMovementContract`
 
-A contract before its `undoes` is filled in.
+A contract before its `undoes` and `booking_ladder` are filled in.
 
 ```ts
-type BaseMovementContract = Omit<MovementContract, "undoes">;
+type BaseMovementContract = Omit<MovementContract, "undoes" | "booking_ladder">;
 ```
 
 ### `BillingSettings`
@@ -1041,6 +1053,14 @@ segment" section above. Built only through `booking-id.ts`'s
 
 ```ts
 const BookingId: z.ZodType<string>;
+```
+
+### `BookingLadderType`
+
+One {@link BOOKING_LADDERS} member.
+
+```ts
+type BookingLadderType = indexedAccess;
 ```
 
 ### `BookingSchema`
@@ -5570,6 +5590,116 @@ interface HorizonMaterializedData {
 }
 ```
 
+### `INBOUND_BOOKING_TYPES`
+
+An inbound booking's `type`: a Buy is a `sale` line, a Subrent a `rental`
+line. Narrower than `ComponentTypeEnum` on purpose, so every predicate below
+is total over it — a `service` (Charge) line moves no units and books nothing.
+
+```ts
+const INBOUND_BOOKING_TYPES: "sale" | "rental"[];
+```
+
+### `INBOUND_BREAKDOWN_KEYS`
+
+Every inbound key, in LADDER order (not the schema's alphabetical order).
+
+```ts
+const INBOUND_BREAKDOWN_KEYS: "quoted" | "ordered" | "transit_inbound" | "received" | "stocked" | "transit_outbound" | "sent_back" | "lost" | "damaged"[];
+```
+
+### `INBOUND_BREAKDOWN_LABELS`
+
+Display label per inbound bucket — the one declaration, read by the schema's
+`.meta()` annotations below and by any page that heads a column with one.
+
+⚠️ **Every label is unique, and must stay so.** A table renders one heading
+per key (display rule T9), so two keys sharing "In transit" would render two
+indistinguishable columns. `tests/inbound-breakdown.test.ts` pins it.
+
+```ts
+const INBOUND_BREAKDOWN_LABELS: Record<keyof InboundBreakdown, string>;
+```
+
+### `INBOUND_CUSTODY_PLACE_KINDS`
+
+{@link CUSTODY_PLACE_KINDS} for the INBOUND ladder (`schemas/_inbound-breakdown.ts`):
+the kind of place a purchase's unit is in, per inbound key. Its own table rather
+than more rows in the outbound one, because five keys are spelled the same on
+both ladders (`quoted`, `lost`, `damaged` and the two transit keys) and mean a
+different place on each — a lost RENTED unit has been settled with the supplier
+and is nowhere, where an outbound `lost` unit is at its out-of-service record.
+A check that looked an inbound key up in the outbound table would validate it
+against the wrong place, silently; so `checkMovementContract` reads the table of
+the movement type's `booking_ladder` (the contract beta).
+
+`damaged` takes two places by type, on the precedent of `out` above: a Buy
+received damaged is on a CFS shelf (`locations`), a settled damaged Subrent
+unit is gone (`outside`).
+
+```ts
+const INBOUND_CUSTODY_PLACE_KINDS: Readonly<Record<InboundBreakdownKeyType, readonly PlaceKindType[]>>;
+```
+
+### `INBOUND_HISTORY_KEYS`
+
+Every inbound key but the plan: units something physically happened to. The
+twin of `CUSTODY_HISTORY_KEYS`, and the set the journal replay folds an
+inbound booking over (`net[k] === breakdown[k]`).
+
+```ts
+const INBOUND_HISTORY_KEYS: "transit_inbound" | "received" | "stocked" | "transit_outbound" | "sent_back" | "lost" | "damaged"[];
+```
+
+### `INBOUND_LADDER_MOVEMENT_TYPES`
+
+The forward types whose booking is on the INBOUND ladder — the one
+declaration {@link MovementContract.booking_ladder} is derived from. Empty
+until the 7a contract beta moves the purchase receive and return types onto
+inbound bookings; an undo needs no entry, because it inherits its forward's.
+
+```ts
+const INBOUND_LADDER_MOVEMENT_TYPES: readonly ForwardMovementTypeType[];
+```
+
+### `INBOUND_PLAN_KEYS`
+
+The inbound PLAN keys: promised, nothing moved. Every other key is history.
+
+```ts
+const INBOUND_PLAN_KEYS: "quoted" | "ordered"[];
+```
+
+### `INBOUND_STAGE_TWINS`
+
+Each inbound key's outbound twin BY PLACE — for display and as the shared
+allocator's input, never for arithmetic (the ladders' orders differ; see the
+module docblock).
+
+| inbound | outbound | the shared place |
+|---|---|---|
+| `received` | `prepped` | CFS staging |
+| `stocked` | `returned` | a CFS shelf |
+| `sent_back` | `out` | away from CFS |
+
+⚠️ **The transit keys map to `null` until the outbound breakdown carries
+them.** They are named relative to CFS, so they will be literally the same
+two keys on both ladders, but the outbound breakdown gains them only in the
+Phase 9 window (0b). A `null` here is "no outbound key yet", not "no twin".
+
+```ts
+const INBOUND_STAGE_TWINS: Readonly<Record<InboundBreakdownKeyType, BookingBreakdownKeyType | null>>;
+```
+
+### `INBOUND_UNIT_BUCKETS`
+
+The buckets that hold NAMED units on a serialized product's inbound booking:
+the history keys, alphabetized, as `BOOKING_UNIT_BUCKETS` is.
+
+```ts
+const INBOUND_UNIT_BUCKETS: "damaged" | "lost" | "received" | "sent_back" | "stocked" | "transit_inbound" | "transit_outbound"[];
+```
+
 ### `INVOICE_ACTIONS`
 
 Every action, keyed by id. `Readonly<Record<InvoiceActionId, …>>` makes an id
@@ -5654,6 +5784,77 @@ table total over `ITEM_TYPES`, so a new item type fails to compile here.
 
 ```ts
 const ITEM_CONTRACTS: Readonly<Record<ItemTypeType, ItemContract>>;
+```
+
+### `InboundBookingTypeEnum`
+
+Zod enum over {@link INBOUND_BOOKING_TYPES}.
+
+```ts
+const InboundBookingTypeEnum: z.ZodType<InboundBookingTypeType>;
+```
+
+### `InboundBookingTypeType`
+
+One inbound booking type.
+
+```ts
+type InboundBookingTypeType = indexedAccess;
+```
+
+### `InboundBreakdown`
+
+Per-stage quantity breakdown for an inbound booking (a purchase line's units).
+
+🔴 **Never add its keys up by name** — the same rule, and the same reason, as
+`BookingBreakdown`'s: a sum spelled key by key compiles straight through the
+arrival of a new key and silently stops counting it.
+
+```ts
+interface InboundBreakdown {
+  damaged: number;
+  lost: number;
+  ordered: number;
+  quoted: number;
+  received: number;
+  sent_back: number;
+  stocked: number;
+  transit_inbound: number;
+  transit_outbound: number;
+}
+```
+
+### `InboundBreakdownKeyEnum`
+
+Zod enum over the inbound keys.
+
+```ts
+const InboundBreakdownKeyEnum: z.ZodType<InboundBreakdownKeyType>;
+```
+
+### `InboundBreakdownKeyType`
+
+One key of the inbound breakdown.
+
+```ts
+type InboundBreakdownKeyType = indexedAccess;
+```
+
+### `InboundBreakdownSchema`
+
+Zod schema for {@link InboundBreakdown}. Keys alphabetical, because a schema's
+key order is its column order (`core/CLAUDE.md`).
+
+```ts
+const InboundBreakdownSchema: z.ZodType<InboundBreakdown>;
+```
+
+### `InboundUnitBucketType`
+
+One inbound bucket that holds named units.
+
+```ts
+type InboundUnitBucketType = indexedAccess;
 ```
 
 ### `InclusionTypeEnum`
@@ -7205,21 +7406,10 @@ interface MovementAllocationInputType {
 
 ### `MovementContract`
 
-How the three axes may be filled for one movement type.
-
-Fixing this per type is what makes a missing axis a validation error rather
-than a silent zero, a stray axis a validation error, and reversal a pure
-negate-every-line transform. It is `hasCosts(type)` generalized to all three
-axes.
-
-`custody: "with_booking"` — required exactly when `uid_booking` is set. Sales
-are the only types that legitimately happen both ways: 247 stored rows are
-order-sourced (a booking's units being sold), and the manual transaction form
-lets an operator key an off-the-shelf sale with no order at all.
-
 ```ts
 interface MovementContract {
   undoes: MovementTypeType | null;
+  booking_ladder: BookingLadderType | null;
   custody: "required" | "forbidden" | "with_booking";
   cost: "required" | "forbidden";
   places: typeLiteral | null;
@@ -17298,6 +17488,10 @@ movements are distinct per rule, so the rental reading is the stricter one.
 
 Empty sets in every unit bucket: a seeded booking that names no unit yet.
 
+### `emptyInboundBreakdown(): InboundBreakdown`
+
+A breakdown with every inbound key at zero.
+
 ### `enumValues(schema: z.ZodType<T>): T[]`
 
 Return the values of a `ZodEnum` in declaration order. Throws when passed a
@@ -17546,6 +17740,15 @@ differently and each answer is right for its own document.
 
 Whether a movement type carries a cost object. Derived from the contract.
 
+### `inboundOwnsKey(type: InboundBookingTypeType, key: InboundBreakdownKeyType): boolean`
+
+Whether CFS OWNS an inbound booking's units in `key` — the inbound twin of
+`ownsKey`. A Buy owns from `received` on; a Subrent owns nothing, ever.
+
+⭐ The movement-cost rule reads this: a receive must carry a cost exactly
+when it moves units into an owned key, so a Buy receive costs and a Subrent
+receive does not.
+
 ### `isCollectionLineType(type: unknown): boolean`
 
 Whether a line of this `type` comes back on a collection leg. See {@link hasCollectionLine}.
@@ -17664,6 +17867,19 @@ Illinois ZIP prefixes are 600–629. Used only as a **cross-check** against the
 region — `audit-order-tax-snapshot.ts` reports a disagreement rather than
 letting either field silently win, because a wrong region and a wrong
 postcode are both live in prod and neither is authoritative.
+
+### `isInboundLive(type: InboundBookingTypeType, key: InboundBreakdownKeyType): boolean`
+
+Whether units in `key` are LIVE custody for an inbound booking of `type` —
+physically moving or in CFS's hands and not yet at an end. The twin of
+`liveCustody`'s key set: a purchase line holding any is refused a cancel
+(`inboundCancelRefusal`, the contract beta).
+
+### `isInboundTerminal(type: InboundBookingTypeType, key: InboundBreakdownKeyType): boolean`
+
+Whether `key` is TERMINAL for an inbound booking of `type`: a booking whose
+units all sit in terminal keys is closed. A Buy ends on a shelf (or damaged);
+a Subrent ends back with the supplier, or settled lost or damaged.
 
 ### `isIntegerSafeLeaf(node: z.ZodType): boolean`
 
@@ -21149,6 +21365,36 @@ service with a reason. A booking is `complete` when these hold all its units.
 const BOOKING_BREAKDOWN_TERMINAL_KEYS: "returned" | "lost" | "damaged" | "cleaning" | "maintenance"[];
 ```
 
+### `BOOKING_CORE`
+
+The fields an OUTBOUND booking (`bookings`, an order's) and an INBOUND one
+(`bookings-inbound`, a purchase's — the 7a contract beta) declare identically:
+one instance per field, referenced key by key from each schema
+(`api-cloudrun/.claude/plans/one-document-model.md` C5).
+
+⭐ **Referenced PER KEY, not spread — the `TotalsCore` answer
+(`schemas/order.ts`), for the same reason.** A schema's key order is its
+column order, and these fields are interleaved with outbound-only ones
+(`uid_order`, `organization`, `subject`, …); a spread would move every
+outbound column. Each schema keeps its own order.
+
+🔴 **So the anti-drift guarantee is `tests/booking-core-parity.test.ts`**,
+which asserts INSTANCE identity: `z.globalRegistry` is keyed on the instance,
+so a re-declared twin would carry none of these `.meta()` headings.
+
+What is NOT here, because the two collections genuinely differ: `uid`,
+`number` (its `linkTo` names a different detail page), `type` (inbound is
+`sale | rental`), `status`, `breakdown`, `units` and `quantity_ordered`
+(inbound is required from day one). Outbound only: `uid_order`,
+`organization`, `subject`, `crms_id`, `crms_product_id`, `shortage`.
+
+⚠️ **Not on the `@cfs/core/schemas` barrel**, as `TotalsCore` is not: no
+consumer assembles a booking from parts.
+
+```ts
+const BOOKING_CORE: typeLiteral;
+```
+
 ### `BOOKING_PLAN_KEYS`
 
 The PLAN keys: what an order asks for before any unit is touched. Every other
@@ -21503,6 +21749,156 @@ carried set and the api's custody key lists were each a copy.
 const CUSTODY_HISTORY_KEYS: "prepped" | "out" | "returned" | "lost" | "damaged" | "cleaning" | "maintenance"[];
 ```
 
+### `INBOUND_BOOKING_TYPES`
+
+An inbound booking's `type`: a Buy is a `sale` line, a Subrent a `rental`
+line. Narrower than `ComponentTypeEnum` on purpose, so every predicate below
+is total over it — a `service` (Charge) line moves no units and books nothing.
+
+```ts
+const INBOUND_BOOKING_TYPES: "sale" | "rental"[];
+```
+
+### `INBOUND_BREAKDOWN_KEYS`
+
+Every inbound key, in LADDER order (not the schema's alphabetical order).
+
+```ts
+const INBOUND_BREAKDOWN_KEYS: "quoted" | "ordered" | "transit_inbound" | "received" | "stocked" | "transit_outbound" | "sent_back" | "lost" | "damaged"[];
+```
+
+### `INBOUND_BREAKDOWN_LABELS`
+
+Display label per inbound bucket — the one declaration, read by the schema's
+`.meta()` annotations below and by any page that heads a column with one.
+
+⚠️ **Every label is unique, and must stay so.** A table renders one heading
+per key (display rule T9), so two keys sharing "In transit" would render two
+indistinguishable columns. `tests/inbound-breakdown.test.ts` pins it.
+
+```ts
+const INBOUND_BREAKDOWN_LABELS: Record<keyof InboundBreakdown, string>;
+```
+
+### `INBOUND_HISTORY_KEYS`
+
+Every inbound key but the plan: units something physically happened to. The
+twin of `CUSTODY_HISTORY_KEYS`, and the set the journal replay folds an
+inbound booking over (`net[k] === breakdown[k]`).
+
+```ts
+const INBOUND_HISTORY_KEYS: "transit_inbound" | "received" | "stocked" | "transit_outbound" | "sent_back" | "lost" | "damaged"[];
+```
+
+### `INBOUND_PLAN_KEYS`
+
+The inbound PLAN keys: promised, nothing moved. Every other key is history.
+
+```ts
+const INBOUND_PLAN_KEYS: "quoted" | "ordered"[];
+```
+
+### `INBOUND_STAGE_TWINS`
+
+Each inbound key's outbound twin BY PLACE — for display and as the shared
+allocator's input, never for arithmetic (the ladders' orders differ; see the
+module docblock).
+
+| inbound | outbound | the shared place |
+|---|---|---|
+| `received` | `prepped` | CFS staging |
+| `stocked` | `returned` | a CFS shelf |
+| `sent_back` | `out` | away from CFS |
+
+⚠️ **The transit keys map to `null` until the outbound breakdown carries
+them.** They are named relative to CFS, so they will be literally the same
+two keys on both ladders, but the outbound breakdown gains them only in the
+Phase 9 window (0b). A `null` here is "no outbound key yet", not "no twin".
+
+```ts
+const INBOUND_STAGE_TWINS: Readonly<Record<InboundBreakdownKeyType, BookingBreakdownKeyType | null>>;
+```
+
+### `INBOUND_UNIT_BUCKETS`
+
+The buckets that hold NAMED units on a serialized product's inbound booking:
+the history keys, alphabetized, as `BOOKING_UNIT_BUCKETS` is.
+
+```ts
+const INBOUND_UNIT_BUCKETS: "damaged" | "lost" | "received" | "sent_back" | "stocked" | "transit_inbound" | "transit_outbound"[];
+```
+
+### `InboundBookingTypeEnum`
+
+Zod enum over {@link INBOUND_BOOKING_TYPES}.
+
+```ts
+const InboundBookingTypeEnum: z.ZodType<InboundBookingTypeType>;
+```
+
+### `InboundBookingTypeType`
+
+One inbound booking type.
+
+```ts
+type InboundBookingTypeType = indexedAccess;
+```
+
+### `InboundBreakdown`
+
+Per-stage quantity breakdown for an inbound booking (a purchase line's units).
+
+🔴 **Never add its keys up by name** — the same rule, and the same reason, as
+`BookingBreakdown`'s: a sum spelled key by key compiles straight through the
+arrival of a new key and silently stops counting it.
+
+```ts
+interface InboundBreakdown {
+  damaged: number;
+  lost: number;
+  ordered: number;
+  quoted: number;
+  received: number;
+  sent_back: number;
+  stocked: number;
+  transit_inbound: number;
+  transit_outbound: number;
+}
+```
+
+### `InboundBreakdownKeyEnum`
+
+Zod enum over the inbound keys.
+
+```ts
+const InboundBreakdownKeyEnum: z.ZodType<InboundBreakdownKeyType>;
+```
+
+### `InboundBreakdownKeyType`
+
+One key of the inbound breakdown.
+
+```ts
+type InboundBreakdownKeyType = indexedAccess;
+```
+
+### `InboundBreakdownSchema`
+
+Zod schema for {@link InboundBreakdown}. Keys alphabetical, because a schema's
+key order is its column order (`core/CLAUDE.md`).
+
+```ts
+const InboundBreakdownSchema: z.ZodType<InboundBreakdown>;
+```
+
+### `InboundUnitBucketType`
+
+One inbound bucket that holds named units.
+
+```ts
+type InboundUnitBucketType = indexedAccess;
+```
+
 ### `OPEN_BOOKING_STATUSES`
 
 Every booking status but `complete` — the statuses whose booking may still
@@ -21649,6 +22045,32 @@ interface UpdateBookingResponseType {
 ### `emptyBookingUnitSets(): BookingUnitSetsType`
 
 Empty sets in every unit bucket: a seeded booking that names no unit yet.
+
+### `emptyInboundBreakdown(): InboundBreakdown`
+
+A breakdown with every inbound key at zero.
+
+### `inboundOwnsKey(type: InboundBookingTypeType, key: InboundBreakdownKeyType): boolean`
+
+Whether CFS OWNS an inbound booking's units in `key` — the inbound twin of
+`ownsKey`. A Buy owns from `received` on; a Subrent owns nothing, ever.
+
+⭐ The movement-cost rule reads this: a receive must carry a cost exactly
+when it moves units into an owned key, so a Buy receive costs and a Subrent
+receive does not.
+
+### `isInboundLive(type: InboundBookingTypeType, key: InboundBreakdownKeyType): boolean`
+
+Whether units in `key` are LIVE custody for an inbound booking of `type` —
+physically moving or in CFS's hands and not yet at an end. The twin of
+`liveCustody`'s key set: a purchase line holding any is refused a cancel
+(`inboundCancelRefusal`, the contract beta).
+
+### `isInboundTerminal(type: InboundBookingTypeType, key: InboundBreakdownKeyType): boolean`
+
+Whether `key` is TERMINAL for an inbound booking of `type`: a booking whose
+units all sit in terminal keys is closed. A Buy ends on a shelf (or damaged);
+a Subrent ends back with the supplier, or settled lost or damaged.
 
 ## `@cfs/core/schemas/custody`
 
@@ -31080,12 +31502,32 @@ for a cost-only adjustment too, and that is the trap: no contract pairs
 `lines: []` with a cost, and `applyMovementToLedger` would fold one to nothing
 if one did. See the depreciation note on {@link MOVEMENT_TYPES} (core#75).
 
-### `BaseMovementContract`
+### `BOOKING_LADDERS`
 
-A contract before its `undoes` is filled in.
+Which booking ladder a movement's `uid_booking` and custody pair belong to:
+`outbound` (an order's `bookings`) or `inbound` (a purchase's
+`bookings-inbound`). Named for the LADDER, not the side, because core's `Side`
+(`schemas/side.ts`) is `receivable | payable` and means the document, not the
+direction units travel.
 
 ```ts
-type BaseMovementContract = Omit<MovementContract, "undoes">;
+const BOOKING_LADDERS: "outbound" | "inbound"[];
+```
+
+### `BaseMovementContract`
+
+A contract before its `undoes` and `booking_ladder` are filled in.
+
+```ts
+type BaseMovementContract = Omit<MovementContract, "undoes" | "booking_ladder">;
+```
+
+### `BookingLadderType`
+
+One {@link BOOKING_LADDERS} member.
+
+```ts
+type BookingLadderType = indexedAccess;
 ```
 
 ### `CUSTODY_PLACE_KINDS`
@@ -31182,6 +31624,37 @@ Every movement type that is not an undo.
 
 ```ts
 type ForwardMovementTypeType = Exclude<MovementTypeType, UndoMovementTypeType>;
+```
+
+### `INBOUND_CUSTODY_PLACE_KINDS`
+
+{@link CUSTODY_PLACE_KINDS} for the INBOUND ladder (`schemas/_inbound-breakdown.ts`):
+the kind of place a purchase's unit is in, per inbound key. Its own table rather
+than more rows in the outbound one, because five keys are spelled the same on
+both ladders (`quoted`, `lost`, `damaged` and the two transit keys) and mean a
+different place on each — a lost RENTED unit has been settled with the supplier
+and is nowhere, where an outbound `lost` unit is at its out-of-service record.
+A check that looked an inbound key up in the outbound table would validate it
+against the wrong place, silently; so `checkMovementContract` reads the table of
+the movement type's `booking_ladder` (the contract beta).
+
+`damaged` takes two places by type, on the precedent of `out` above: a Buy
+received damaged is on a CFS shelf (`locations`), a settled damaged Subrent
+unit is gone (`outside`).
+
+```ts
+const INBOUND_CUSTODY_PLACE_KINDS: Readonly<Record<InboundBreakdownKeyType, readonly PlaceKindType[]>>;
+```
+
+### `INBOUND_LADDER_MOVEMENT_TYPES`
+
+The forward types whose booking is on the INBOUND ladder — the one
+declaration {@link MovementContract.booking_ladder} is derived from. Empty
+until the 7a contract beta moves the purchase receive and return types onto
+inbound bookings; an undo needs no entry, because it inherits its forward's.
+
+```ts
+const INBOUND_LADDER_MOVEMENT_TYPES: readonly ForwardMovementTypeType[];
 ```
 
 ### `MOVEMENT_CONTRACTS`
@@ -31336,21 +31809,10 @@ interface MovementAllocationInputType {
 
 ### `MovementContract`
 
-How the three axes may be filled for one movement type.
-
-Fixing this per type is what makes a missing axis a validation error rather
-than a silent zero, a stray axis a validation error, and reversal a pure
-negate-every-line transform. It is `hasCosts(type)` generalized to all three
-axes.
-
-`custody: "with_booking"` — required exactly when `uid_booking` is set. Sales
-are the only types that legitimately happen both ways: 247 stored rows are
-order-sourced (a booking's units being sold), and the manual transaction form
-lets an operator key an off-the-shelf sale with no order at all.
-
 ```ts
 interface MovementContract {
   undoes: MovementTypeType | null;
+  booking_ladder: BookingLadderType | null;
   custody: "required" | "forbidden" | "with_booking";
   cost: "required" | "forbidden";
   places: typeLiteral | null;

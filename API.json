@@ -296,6 +296,12 @@
         },
         {
           "kind": "variable",
+          "name": "BOOKING_LADDERS",
+          "declaration": "const BOOKING_LADDERS: \"outbound\" | \"inbound\"[];",
+          "doc": "Which booking ladder a movement's `uid_booking` and custody pair belong to:\n`outbound` (an order's `bookings`) or `inbound` (a purchase's\n`bookings-inbound`). Named for the LADDER, not the side, because core's `Side`\n(`schemas/side.ts`) is `receivable | payable` and means the document, not the\ndirection units travel."
+        },
+        {
+          "kind": "variable",
           "name": "BOOKING_PLAN_KEYS",
           "declaration": "const BOOKING_PLAN_KEYS: \"quoted\" | \"reserved\"[];",
           "doc": "The PLAN keys: what an order asks for before any unit is touched. Every other\nkey is custody HISTORY ({@link CUSTODY_HISTORY_KEYS})."
@@ -327,8 +333,8 @@
         {
           "kind": "typeAlias",
           "name": "BaseMovementContract",
-          "declaration": "type BaseMovementContract = Omit<MovementContract, \"undoes\">;",
-          "doc": "A contract before its `undoes` is filled in."
+          "declaration": "type BaseMovementContract = Omit<MovementContract, \"undoes\" | \"booking_ladder\">;",
+          "doc": "A contract before its `undoes` and `booking_ladder` are filled in."
         },
         {
           "kind": "interface",
@@ -437,6 +443,12 @@
           "name": "BookingId",
           "declaration": "const BookingId: z.ZodType<string>;",
           "doc": "`bookings.uid` — deterministic composite, sparse by construction:\n`{uid_order}:{item uid}:{destination pair uid}` for a top-level occurrence\n(the middle segment is the order item's uid, which for a custom product is\n`custom-{uuid}`; the third is the LEG, **not** the address — see the\n\"`BookingId`'s 3rd segment\" section above), or\n`{uid_order}:{item uid}:{destination pair uid}:{hash}` for\nan occurrence that is a component of a kit — see the \"`BookingId`'s 4th\nsegment\" section above. Built only through `booking-id.ts`'s\n`buildBookingId`; never assembled by hand at a second call site."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "BookingLadderType",
+          "declaration": "type BookingLadderType = indexedAccess;",
+          "doc": "One {@link BOOKING_LADDERS} member."
         },
         {
           "kind": "variable",
@@ -2492,6 +2504,60 @@
         },
         {
           "kind": "variable",
+          "name": "INBOUND_BOOKING_TYPES",
+          "declaration": "const INBOUND_BOOKING_TYPES: \"sale\" | \"rental\"[];",
+          "doc": "An inbound booking's `type`: a Buy is a `sale` line, a Subrent a `rental`\nline. Narrower than `ComponentTypeEnum` on purpose, so every predicate below\nis total over it — a `service` (Charge) line moves no units and books nothing."
+        },
+        {
+          "kind": "variable",
+          "name": "INBOUND_BREAKDOWN_KEYS",
+          "declaration": "const INBOUND_BREAKDOWN_KEYS: \"quoted\" | \"ordered\" | \"transit_inbound\" | \"received\" | \"stocked\" | \"transit_outbound\" | \"sent_back\" | \"lost\" | \"damaged\"[];",
+          "doc": "Every inbound key, in LADDER order (not the schema's alphabetical order)."
+        },
+        {
+          "kind": "variable",
+          "name": "INBOUND_BREAKDOWN_LABELS",
+          "declaration": "const INBOUND_BREAKDOWN_LABELS: Record<keyof InboundBreakdown, string>;",
+          "doc": "Display label per inbound bucket — the one declaration, read by the schema's\n`.meta()` annotations below and by any page that heads a column with one.\n\n⚠️ **Every label is unique, and must stay so.** A table renders one heading\nper key (display rule T9), so two keys sharing \"In transit\" would render two\nindistinguishable columns. `tests/inbound-breakdown.test.ts` pins it."
+        },
+        {
+          "kind": "variable",
+          "name": "INBOUND_CUSTODY_PLACE_KINDS",
+          "declaration": "const INBOUND_CUSTODY_PLACE_KINDS: Readonly<Record<InboundBreakdownKeyType, readonly PlaceKindType[]>>;",
+          "doc": "{@link CUSTODY_PLACE_KINDS} for the INBOUND ladder (`schemas/_inbound-breakdown.ts`):\nthe kind of place a purchase's unit is in, per inbound key. Its own table rather\nthan more rows in the outbound one, because five keys are spelled the same on\nboth ladders (`quoted`, `lost`, `damaged` and the two transit keys) and mean a\ndifferent place on each — a lost RENTED unit has been settled with the supplier\nand is nowhere, where an outbound `lost` unit is at its out-of-service record.\nA check that looked an inbound key up in the outbound table would validate it\nagainst the wrong place, silently; so `checkMovementContract` reads the table of\nthe movement type's `booking_ladder` (the contract beta).\n\n`damaged` takes two places by type, on the precedent of `out` above: a Buy\nreceived damaged is on a CFS shelf (`locations`), a settled damaged Subrent\nunit is gone (`outside`)."
+        },
+        {
+          "kind": "variable",
+          "name": "INBOUND_HISTORY_KEYS",
+          "declaration": "const INBOUND_HISTORY_KEYS: \"transit_inbound\" | \"received\" | \"stocked\" | \"transit_outbound\" | \"sent_back\" | \"lost\" | \"damaged\"[];",
+          "doc": "Every inbound key but the plan: units something physically happened to. The\ntwin of `CUSTODY_HISTORY_KEYS`, and the set the journal replay folds an\ninbound booking over (`net[k] === breakdown[k]`)."
+        },
+        {
+          "kind": "variable",
+          "name": "INBOUND_LADDER_MOVEMENT_TYPES",
+          "declaration": "const INBOUND_LADDER_MOVEMENT_TYPES: readonly ForwardMovementTypeType[];",
+          "doc": "The forward types whose booking is on the INBOUND ladder — the one\ndeclaration {@link MovementContract.booking_ladder} is derived from. Empty\nuntil the 7a contract beta moves the purchase receive and return types onto\ninbound bookings; an undo needs no entry, because it inherits its forward's."
+        },
+        {
+          "kind": "variable",
+          "name": "INBOUND_PLAN_KEYS",
+          "declaration": "const INBOUND_PLAN_KEYS: \"quoted\" | \"ordered\"[];",
+          "doc": "The inbound PLAN keys: promised, nothing moved. Every other key is history."
+        },
+        {
+          "kind": "variable",
+          "name": "INBOUND_STAGE_TWINS",
+          "declaration": "const INBOUND_STAGE_TWINS: Readonly<Record<InboundBreakdownKeyType, BookingBreakdownKeyType | null>>;",
+          "doc": "Each inbound key's outbound twin BY PLACE — for display and as the shared\nallocator's input, never for arithmetic (the ladders' orders differ; see the\nmodule docblock).\n\n| inbound | outbound | the shared place |\n|---|---|---|\n| `received` | `prepped` | CFS staging |\n| `stocked` | `returned` | a CFS shelf |\n| `sent_back` | `out` | away from CFS |\n\n⚠️ **The transit keys map to `null` until the outbound breakdown carries\nthem.** They are named relative to CFS, so they will be literally the same\ntwo keys on both ladders, but the outbound breakdown gains them only in the\nPhase 9 window (0b). A `null` here is \"no outbound key yet\", not \"no twin\"."
+        },
+        {
+          "kind": "variable",
+          "name": "INBOUND_UNIT_BUCKETS",
+          "declaration": "const INBOUND_UNIT_BUCKETS: \"damaged\" | \"lost\" | \"received\" | \"sent_back\" | \"stocked\" | \"transit_inbound\" | \"transit_outbound\"[];",
+          "doc": "The buckets that hold NAMED units on a serialized product's inbound booking:\nthe history keys, alphabetized, as `BOOKING_UNIT_BUCKETS` is."
+        },
+        {
+          "kind": "variable",
           "name": "INVOICE_ACTIONS",
           "declaration": "const INVOICE_ACTIONS: Readonly<Record<InvoiceActionId, InvoiceActionDefinition>>;",
           "doc": "Every action, keyed by id. `Readonly<Record<InvoiceActionId, …>>` makes an id\nwith no row a type error; the both-ways test makes a row with no id one."
@@ -2525,6 +2591,48 @@
           "name": "ITEM_CONTRACTS",
           "declaration": "const ITEM_CONTRACTS: Readonly<Record<ItemTypeType, ItemContract>>;",
           "doc": "The per-type item contract table. @see {@link ItemContract}\n\nRejoins {@link ITEM_CONTRACTS_INNER}'s literals with each type's\n`parentable_by`. Safe to hold references: this const carries an explicit\nannotation, so the emitter copies that rather than inferring anything — the\nreason the split above works at all. `Record<ItemTypeType, …>` also keeps the\ntable total over `ITEM_TYPES`, so a new item type fails to compile here."
+        },
+        {
+          "kind": "variable",
+          "name": "InboundBookingTypeEnum",
+          "declaration": "const InboundBookingTypeEnum: z.ZodType<InboundBookingTypeType>;",
+          "doc": "Zod enum over {@link INBOUND_BOOKING_TYPES}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InboundBookingTypeType",
+          "declaration": "type InboundBookingTypeType = indexedAccess;",
+          "doc": "One inbound booking type."
+        },
+        {
+          "kind": "interface",
+          "name": "InboundBreakdown",
+          "declaration": "interface InboundBreakdown {\n  damaged: number;\n  lost: number;\n  ordered: number;\n  quoted: number;\n  received: number;\n  sent_back: number;\n  stocked: number;\n  transit_inbound: number;\n  transit_outbound: number;\n}",
+          "doc": "Per-stage quantity breakdown for an inbound booking (a purchase line's units).\n\n🔴 **Never add its keys up by name** — the same rule, and the same reason, as\n`BookingBreakdown`'s: a sum spelled key by key compiles straight through the\narrival of a new key and silently stops counting it."
+        },
+        {
+          "kind": "variable",
+          "name": "InboundBreakdownKeyEnum",
+          "declaration": "const InboundBreakdownKeyEnum: z.ZodType<InboundBreakdownKeyType>;",
+          "doc": "Zod enum over the inbound keys."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InboundBreakdownKeyType",
+          "declaration": "type InboundBreakdownKeyType = indexedAccess;",
+          "doc": "One key of the inbound breakdown."
+        },
+        {
+          "kind": "variable",
+          "name": "InboundBreakdownSchema",
+          "declaration": "const InboundBreakdownSchema: z.ZodType<InboundBreakdown>;",
+          "doc": "Zod schema for {@link InboundBreakdown}. Keys alphabetical, because a schema's\nkey order is its column order (`core/CLAUDE.md`)."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InboundUnitBucketType",
+          "declaration": "type InboundUnitBucketType = indexedAccess;",
+          "doc": "One inbound bucket that holds named units."
         },
         {
           "kind": "variable",
@@ -3213,8 +3321,8 @@
         {
           "kind": "interface",
           "name": "MovementContract",
-          "declaration": "interface MovementContract {\n  undoes: MovementTypeType | null;\n  custody: \"required\" | \"forbidden\" | \"with_booking\";\n  cost: \"required\" | \"forbidden\";\n  places: typeLiteral | null;\n  booking: \"required\" | \"forbidden\" | \"optional\";\n  service: \"required\" | \"forbidden\" | \"nullable\";\n  units: \"forbidden\" | \"allowed\";\n  uncounted: \"lineless\" | \"refused\";\n}",
-          "doc": "How the three axes may be filled for one movement type.\n\nFixing this per type is what makes a missing axis a validation error rather\nthan a silent zero, a stray axis a validation error, and reversal a pure\nnegate-every-line transform. It is `hasCosts(type)` generalized to all three\naxes.\n\n`custody: \"with_booking\"` — required exactly when `uid_booking` is set. Sales\nare the only types that legitimately happen both ways: 247 stored rows are\norder-sourced (a booking's units being sold), and the manual transaction form\nlets an operator key an off-the-shelf sale with no order at all."
+          "declaration": "interface MovementContract {\n  undoes: MovementTypeType | null;\n  booking_ladder: BookingLadderType | null;\n  custody: \"required\" | \"forbidden\" | \"with_booking\";\n  cost: \"required\" | \"forbidden\";\n  places: typeLiteral | null;\n  booking: \"required\" | \"forbidden\" | \"optional\";\n  service: \"required\" | \"forbidden\" | \"nullable\";\n  units: \"forbidden\" | \"allowed\";\n  uncounted: \"lineless\" | \"refused\";\n}",
+          "doc": ""
         },
         {
           "kind": "variable",
@@ -7821,6 +7929,14 @@
         },
         {
           "kind": "function",
+          "name": "emptyInboundBreakdown",
+          "signature": "emptyInboundBreakdown(): InboundBreakdown",
+          "doc": "A breakdown with every inbound key at zero.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "enumValues",
           "signature": "enumValues(schema: z.ZodType<T>): T[]",
           "doc": "Return the values of a `ZodEnum` in declaration order. Throws when passed a\nnon-enum schema — callers should pass the enum directly (e.g.\n`enumValues(CardStatusEnum)`), not a wrapped schema.",
@@ -7987,6 +8103,14 @@
         },
         {
           "kind": "function",
+          "name": "inboundOwnsKey",
+          "signature": "inboundOwnsKey(type: InboundBookingTypeType, key: InboundBreakdownKeyType): boolean",
+          "doc": "Whether CFS OWNS an inbound booking's units in `key` — the inbound twin of\n`ownsKey`. A Buy owns from `received` on; a Subrent owns nothing, ever.\n\n⭐ The movement-cost rule reads this: a receive must carry a cost exactly\nwhen it moves units into an owned key, so a Buy receive costs and a Subrent\nreceive does not.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "isCollectionLineType",
           "signature": "isCollectionLineType(type: unknown): boolean",
           "doc": "Whether a line of this `type` comes back on a collection leg. See {@link hasCollectionLine}.",
@@ -8070,6 +8194,22 @@
           "name": "isIllinoisPostcode",
           "signature": "isIllinoisPostcode(postcode: string | null | undefined): boolean",
           "doc": "Illinois ZIP prefixes are 600–629. Used only as a **cross-check** against the\nregion — `audit-order-tax-snapshot.ts` reports a disagreement rather than\nletting either field silently win, because a wrong region and a wrong\npostcode are both live in prod and neither is authoritative.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isInboundLive",
+          "signature": "isInboundLive(type: InboundBookingTypeType, key: InboundBreakdownKeyType): boolean",
+          "doc": "Whether units in `key` are LIVE custody for an inbound booking of `type` —\nphysically moving or in CFS's hands and not yet at an end. The twin of\n`liveCustody`'s key set: a purchase line holding any is refused a cancel\n(`inboundCancelRefusal`, the contract beta).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isInboundTerminal",
+          "signature": "isInboundTerminal(type: InboundBookingTypeType, key: InboundBreakdownKeyType): boolean",
+          "doc": "Whether `key` is TERMINAL for an inbound booking of `type`: a booking whose\nunits all sit in terminal keys is closed. A Buy ends on a shelf (or damaged);\na Subrent ends back with the supplier, or settled lost or damaged.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -9896,6 +10036,12 @@
         },
         {
           "kind": "variable",
+          "name": "BOOKING_CORE",
+          "declaration": "const BOOKING_CORE: typeLiteral;",
+          "doc": "The fields an OUTBOUND booking (`bookings`, an order's) and an INBOUND one\n(`bookings-inbound`, a purchase's — the 7a contract beta) declare identically:\none instance per field, referenced key by key from each schema\n(`api-cloudrun/.claude/plans/one-document-model.md` C5).\n\n⭐ **Referenced PER KEY, not spread — the `TotalsCore` answer\n(`schemas/order.ts`), for the same reason.** A schema's key order is its\ncolumn order, and these fields are interleaved with outbound-only ones\n(`uid_order`, `organization`, `subject`, …); a spread would move every\noutbound column. Each schema keeps its own order.\n\n🔴 **So the anti-drift guarantee is `tests/booking-core-parity.test.ts`**,\nwhich asserts INSTANCE identity: `z.globalRegistry` is keyed on the instance,\nso a re-declared twin would carry none of these `.meta()` headings.\n\nWhat is NOT here, because the two collections genuinely differ: `uid`,\n`number` (its `linkTo` names a different detail page), `type` (inbound is\n`sale | rental`), `status`, `breakdown`, `units` and `quantity_ordered`\n(inbound is required from day one). Outbound only: `uid_order`,\n`organization`, `subject`, `crms_id`, `crms_product_id`, `shortage`.\n\n⚠️ **Not on the `@cfs/core/schemas` barrel**, as `TotalsCore` is not: no\nconsumer assembles a booking from parts."
+        },
+        {
+          "kind": "variable",
           "name": "BOOKING_PLAN_KEYS",
           "declaration": "const BOOKING_PLAN_KEYS: \"quoted\" | \"reserved\"[];",
           "doc": "The PLAN keys: what an order asks for before any unit is touched. Every other\nkey is custody HISTORY ({@link CUSTODY_HISTORY_KEYS})."
@@ -10046,6 +10192,90 @@
         },
         {
           "kind": "variable",
+          "name": "INBOUND_BOOKING_TYPES",
+          "declaration": "const INBOUND_BOOKING_TYPES: \"sale\" | \"rental\"[];",
+          "doc": "An inbound booking's `type`: a Buy is a `sale` line, a Subrent a `rental`\nline. Narrower than `ComponentTypeEnum` on purpose, so every predicate below\nis total over it — a `service` (Charge) line moves no units and books nothing."
+        },
+        {
+          "kind": "variable",
+          "name": "INBOUND_BREAKDOWN_KEYS",
+          "declaration": "const INBOUND_BREAKDOWN_KEYS: \"quoted\" | \"ordered\" | \"transit_inbound\" | \"received\" | \"stocked\" | \"transit_outbound\" | \"sent_back\" | \"lost\" | \"damaged\"[];",
+          "doc": "Every inbound key, in LADDER order (not the schema's alphabetical order)."
+        },
+        {
+          "kind": "variable",
+          "name": "INBOUND_BREAKDOWN_LABELS",
+          "declaration": "const INBOUND_BREAKDOWN_LABELS: Record<keyof InboundBreakdown, string>;",
+          "doc": "Display label per inbound bucket — the one declaration, read by the schema's\n`.meta()` annotations below and by any page that heads a column with one.\n\n⚠️ **Every label is unique, and must stay so.** A table renders one heading\nper key (display rule T9), so two keys sharing \"In transit\" would render two\nindistinguishable columns. `tests/inbound-breakdown.test.ts` pins it."
+        },
+        {
+          "kind": "variable",
+          "name": "INBOUND_HISTORY_KEYS",
+          "declaration": "const INBOUND_HISTORY_KEYS: \"transit_inbound\" | \"received\" | \"stocked\" | \"transit_outbound\" | \"sent_back\" | \"lost\" | \"damaged\"[];",
+          "doc": "Every inbound key but the plan: units something physically happened to. The\ntwin of `CUSTODY_HISTORY_KEYS`, and the set the journal replay folds an\ninbound booking over (`net[k] === breakdown[k]`)."
+        },
+        {
+          "kind": "variable",
+          "name": "INBOUND_PLAN_KEYS",
+          "declaration": "const INBOUND_PLAN_KEYS: \"quoted\" | \"ordered\"[];",
+          "doc": "The inbound PLAN keys: promised, nothing moved. Every other key is history."
+        },
+        {
+          "kind": "variable",
+          "name": "INBOUND_STAGE_TWINS",
+          "declaration": "const INBOUND_STAGE_TWINS: Readonly<Record<InboundBreakdownKeyType, BookingBreakdownKeyType | null>>;",
+          "doc": "Each inbound key's outbound twin BY PLACE — for display and as the shared\nallocator's input, never for arithmetic (the ladders' orders differ; see the\nmodule docblock).\n\n| inbound | outbound | the shared place |\n|---|---|---|\n| `received` | `prepped` | CFS staging |\n| `stocked` | `returned` | a CFS shelf |\n| `sent_back` | `out` | away from CFS |\n\n⚠️ **The transit keys map to `null` until the outbound breakdown carries\nthem.** They are named relative to CFS, so they will be literally the same\ntwo keys on both ladders, but the outbound breakdown gains them only in the\nPhase 9 window (0b). A `null` here is \"no outbound key yet\", not \"no twin\"."
+        },
+        {
+          "kind": "variable",
+          "name": "INBOUND_UNIT_BUCKETS",
+          "declaration": "const INBOUND_UNIT_BUCKETS: \"damaged\" | \"lost\" | \"received\" | \"sent_back\" | \"stocked\" | \"transit_inbound\" | \"transit_outbound\"[];",
+          "doc": "The buckets that hold NAMED units on a serialized product's inbound booking:\nthe history keys, alphabetized, as `BOOKING_UNIT_BUCKETS` is."
+        },
+        {
+          "kind": "variable",
+          "name": "InboundBookingTypeEnum",
+          "declaration": "const InboundBookingTypeEnum: z.ZodType<InboundBookingTypeType>;",
+          "doc": "Zod enum over {@link INBOUND_BOOKING_TYPES}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InboundBookingTypeType",
+          "declaration": "type InboundBookingTypeType = indexedAccess;",
+          "doc": "One inbound booking type."
+        },
+        {
+          "kind": "interface",
+          "name": "InboundBreakdown",
+          "declaration": "interface InboundBreakdown {\n  damaged: number;\n  lost: number;\n  ordered: number;\n  quoted: number;\n  received: number;\n  sent_back: number;\n  stocked: number;\n  transit_inbound: number;\n  transit_outbound: number;\n}",
+          "doc": "Per-stage quantity breakdown for an inbound booking (a purchase line's units).\n\n🔴 **Never add its keys up by name** — the same rule, and the same reason, as\n`BookingBreakdown`'s: a sum spelled key by key compiles straight through the\narrival of a new key and silently stops counting it."
+        },
+        {
+          "kind": "variable",
+          "name": "InboundBreakdownKeyEnum",
+          "declaration": "const InboundBreakdownKeyEnum: z.ZodType<InboundBreakdownKeyType>;",
+          "doc": "Zod enum over the inbound keys."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InboundBreakdownKeyType",
+          "declaration": "type InboundBreakdownKeyType = indexedAccess;",
+          "doc": "One key of the inbound breakdown."
+        },
+        {
+          "kind": "variable",
+          "name": "InboundBreakdownSchema",
+          "declaration": "const InboundBreakdownSchema: z.ZodType<InboundBreakdown>;",
+          "doc": "Zod schema for {@link InboundBreakdown}. Keys alphabetical, because a schema's\nkey order is its column order (`core/CLAUDE.md`)."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InboundUnitBucketType",
+          "declaration": "type InboundUnitBucketType = indexedAccess;",
+          "doc": "One inbound bucket that holds named units."
+        },
+        {
+          "kind": "variable",
           "name": "OPEN_BOOKING_STATUSES",
           "declaration": "const OPEN_BOOKING_STATUSES: readonly BookingStatusType[];",
           "doc": "Every booking status but `complete` — the statuses whose booking may still\nconsume stock (`unavailableFromBooking` drops a complete booking and nothing\nelse). An ARRAY, because its main readers are Firestore\n`where(\"status\", \"in\", …)` queries (core#110: the api's pick sheets and the\nmanager's stock store each derived it by hand). Derived as the complement, so\na new status is open until someone says otherwise."
@@ -10115,6 +10345,38 @@
           "name": "emptyBookingUnitSets",
           "signature": "emptyBookingUnitSets(): BookingUnitSetsType",
           "doc": "Empty sets in every unit bucket: a seeded booking that names no unit yet.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "emptyInboundBreakdown",
+          "signature": "emptyInboundBreakdown(): InboundBreakdown",
+          "doc": "A breakdown with every inbound key at zero.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "inboundOwnsKey",
+          "signature": "inboundOwnsKey(type: InboundBookingTypeType, key: InboundBreakdownKeyType): boolean",
+          "doc": "Whether CFS OWNS an inbound booking's units in `key` — the inbound twin of\n`ownsKey`. A Buy owns from `received` on; a Subrent owns nothing, ever.\n\n⭐ The movement-cost rule reads this: a receive must carry a cost exactly\nwhen it moves units into an owned key, so a Buy receive costs and a Subrent\nreceive does not.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isInboundLive",
+          "signature": "isInboundLive(type: InboundBookingTypeType, key: InboundBreakdownKeyType): boolean",
+          "doc": "Whether units in `key` are LIVE custody for an inbound booking of `type` —\nphysically moving or in CFS's hands and not yet at an end. The twin of\n`liveCustody`'s key set: a purchase line holding any is refused a cancel\n(`inboundCancelRefusal`, the contract beta).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isInboundTerminal",
+          "signature": "isInboundTerminal(type: InboundBookingTypeType, key: InboundBreakdownKeyType): boolean",
+          "doc": "Whether `key` is TERMINAL for an inbound booking of `type`: a booking whose\nunits all sit in terminal keys is closed. A Buy ends on a shelf (or damaged);\na Subrent ends back with the supplier, or settled lost or damaged.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -14590,10 +14852,22 @@
       "moduleDoc": "Movement document schema — Firestore collection: `transactions`\n\nAn append-only journal of inventory movement. Every event is **one subject**\n(a booking for custody events, a product for ownership events) plus a set of\nsigned lines, grouped with its siblings by a client-minted `uuid_session`.\n\nThe collection keeps its name — the journal was migrated in place — but the\ndocument is a `Movement`, not the old current-state `Transaction`.\n\n## Four axes\n\nEach answers an independent question about the same physical unit:\n\n| Axis       | Question                              | Lands on                                  |\n|------------|---------------------------------------|-------------------------------------------|\n| `custody`  | How far through this order is it?     | `booking.breakdown` — `BOOKING_BREAKDOWN_KEYS` |\n| `lines[]`  | Where is it in the warehouse?         | `locations.products[]`; `quantity_held`   |\n| `cost`     | What is it carried at on the books?   | `inventory-ledgers.total_cost_basis`      |\n| `service`  | Is it out of service, and why?        | `out_of_service_breakdown`; per-shelf OOS |\n\n`service` is the newest and the only optional one: movements written before\nit existed carry no key, and read as \"no service change\" — see\n{@link MovementServiceType}.\n\n`cost` is **cost only, never revenue** — customer-facing money lives in Xero;\nthe only money here is inventory's carrying value.\n\n`custody` and `lines` are correlated but not derivable from each other:\ncustody implies the *kind* of place a unit is in ({@link CUSTODY_PLACE_KINDS})\nbut not *which* location, because where a returning unit goes back to is an\noperator's choice.\n\n## Conservation is structural, not checked\n\nA line's contribution to `quantity_held` is\n`(location.to ? +q : 0) + (location.from ? −q : 0)` — no cross-line\nsummation. `{from: null, to: L3}` reads \"entered ownership at L3\";\n`{from: L3, to: null}` reads \"left ownership from L3\"; both non-null is a\nmove that leaves ownership untouched. A half-move is inexpressible.\n\n`lines: []` means **nothing physically moved** — a rebook (the units stay at\nthe customer), an uncounted product's step (no shelves to name), or a `prep`\nthat stages nothing (api-cloudrun#1302: a prep moves units shelf → a staging\nlocation, except where the applier exempts it). ⚠️ It *reads* like the shape\nfor a cost-only adjustment too, and that is the trap: no contract pairs\n`lines: []` with a cost, and `applyMovementToLedger` would fold one to nothing\nif one did. See the depreciation note on {@link MOVEMENT_TYPES} (core#75).",
       "symbols": [
         {
+          "kind": "variable",
+          "name": "BOOKING_LADDERS",
+          "declaration": "const BOOKING_LADDERS: \"outbound\" | \"inbound\"[];",
+          "doc": "Which booking ladder a movement's `uid_booking` and custody pair belong to:\n`outbound` (an order's `bookings`) or `inbound` (a purchase's\n`bookings-inbound`). Named for the LADDER, not the side, because core's `Side`\n(`schemas/side.ts`) is `receivable | payable` and means the document, not the\ndirection units travel."
+        },
+        {
           "kind": "typeAlias",
           "name": "BaseMovementContract",
-          "declaration": "type BaseMovementContract = Omit<MovementContract, \"undoes\">;",
-          "doc": "A contract before its `undoes` is filled in."
+          "declaration": "type BaseMovementContract = Omit<MovementContract, \"undoes\" | \"booking_ladder\">;",
+          "doc": "A contract before its `undoes` and `booking_ladder` are filled in."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "BookingLadderType",
+          "declaration": "type BookingLadderType = indexedAccess;",
+          "doc": "One {@link BOOKING_LADDERS} member."
         },
         {
           "kind": "variable",
@@ -14630,6 +14904,18 @@
           "name": "ForwardMovementTypeType",
           "declaration": "type ForwardMovementTypeType = Exclude<MovementTypeType, UndoMovementTypeType>;",
           "doc": "Every movement type that is not an undo."
+        },
+        {
+          "kind": "variable",
+          "name": "INBOUND_CUSTODY_PLACE_KINDS",
+          "declaration": "const INBOUND_CUSTODY_PLACE_KINDS: Readonly<Record<InboundBreakdownKeyType, readonly PlaceKindType[]>>;",
+          "doc": "{@link CUSTODY_PLACE_KINDS} for the INBOUND ladder (`schemas/_inbound-breakdown.ts`):\nthe kind of place a purchase's unit is in, per inbound key. Its own table rather\nthan more rows in the outbound one, because five keys are spelled the same on\nboth ladders (`quoted`, `lost`, `damaged` and the two transit keys) and mean a\ndifferent place on each — a lost RENTED unit has been settled with the supplier\nand is nowhere, where an outbound `lost` unit is at its out-of-service record.\nA check that looked an inbound key up in the outbound table would validate it\nagainst the wrong place, silently; so `checkMovementContract` reads the table of\nthe movement type's `booking_ladder` (the contract beta).\n\n`damaged` takes two places by type, on the precedent of `out` above: a Buy\nreceived damaged is on a CFS shelf (`locations`), a settled damaged Subrent\nunit is gone (`outside`)."
+        },
+        {
+          "kind": "variable",
+          "name": "INBOUND_LADDER_MOVEMENT_TYPES",
+          "declaration": "const INBOUND_LADDER_MOVEMENT_TYPES: readonly ForwardMovementTypeType[];",
+          "doc": "The forward types whose booking is on the INBOUND ladder — the one\ndeclaration {@link MovementContract.booking_ladder} is derived from. Empty\nuntil the 7a contract beta moves the purchase receive and return types onto\ninbound bookings; an undo needs no entry, because it inherits its forward's."
         },
         {
           "kind": "variable",
@@ -14670,8 +14956,8 @@
         {
           "kind": "interface",
           "name": "MovementContract",
-          "declaration": "interface MovementContract {\n  undoes: MovementTypeType | null;\n  custody: \"required\" | \"forbidden\" | \"with_booking\";\n  cost: \"required\" | \"forbidden\";\n  places: typeLiteral | null;\n  booking: \"required\" | \"forbidden\" | \"optional\";\n  service: \"required\" | \"forbidden\" | \"nullable\";\n  units: \"forbidden\" | \"allowed\";\n  uncounted: \"lineless\" | \"refused\";\n}",
-          "doc": "How the three axes may be filled for one movement type.\n\nFixing this per type is what makes a missing axis a validation error rather\nthan a silent zero, a stray axis a validation error, and reversal a pure\nnegate-every-line transform. It is `hasCosts(type)` generalized to all three\naxes.\n\n`custody: \"with_booking\"` — required exactly when `uid_booking` is set. Sales\nare the only types that legitimately happen both ways: 247 stored rows are\norder-sourced (a booking's units being sold), and the manual transaction form\nlets an operator key an off-the-shelf sale with no order at all."
+          "declaration": "interface MovementContract {\n  undoes: MovementTypeType | null;\n  booking_ladder: BookingLadderType | null;\n  custody: \"required\" | \"forbidden\" | \"with_booking\";\n  cost: \"required\" | \"forbidden\";\n  places: typeLiteral | null;\n  booking: \"required\" | \"forbidden\" | \"optional\";\n  service: \"required\" | \"forbidden\" | \"nullable\";\n  units: \"forbidden\" | \"allowed\";\n  uncounted: \"lineless\" | \"refused\";\n}",
+          "doc": ""
         },
         {
           "kind": "variable",

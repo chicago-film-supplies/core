@@ -504,6 +504,7 @@ Deno.test("no contract pairs `places: null` with a required cost — the fold co
   assertEquals(
     costOnly({
       undoes: null,
+      booking_ladder: null,
       custody: "forbidden",
       cost: "required",
       places: null,

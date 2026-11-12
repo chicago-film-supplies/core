@@ -1041,6 +1041,24 @@ export {
   type PrepShortfallType,
   ShelfShortfall,
   type ShelfShortfallType,
+  emptyInboundBreakdown,
+  INBOUND_BOOKING_TYPES,
+  INBOUND_BREAKDOWN_KEYS,
+  INBOUND_BREAKDOWN_LABELS,
+  INBOUND_HISTORY_KEYS,
+  INBOUND_PLAN_KEYS,
+  INBOUND_STAGE_TWINS,
+  INBOUND_UNIT_BUCKETS,
+  type InboundBookingTypeType,
+  InboundBookingTypeEnum,
+  type InboundBreakdown,
+  InboundBreakdownKeyEnum,
+  type InboundBreakdownKeyType,
+  InboundBreakdownSchema,
+  type InboundUnitBucketType,
+  inboundOwnsKey,
+  isInboundLive,
+  isInboundTerminal,
 } from "./booking.ts";
 export {
   BookingAction,
@@ -1266,6 +1284,10 @@ export {
   type ReverseTransactionInputType,
   type CreateStoreTransferInputType,
   type StoreTransferLineInputType,
+  BOOKING_LADDERS,
+  type BookingLadderType,
+  INBOUND_CUSTODY_PLACE_KINDS,
+  INBOUND_LADDER_MOVEMENT_TYPES,
 } from "./transaction.ts";
 
 export {

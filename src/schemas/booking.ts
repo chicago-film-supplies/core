@@ -65,6 +65,27 @@ export {
   type OutOfServiceKeyType,
 } from "./_breakdown.ts";
 
+export {
+  emptyInboundBreakdown,
+  INBOUND_BOOKING_TYPES,
+  INBOUND_BREAKDOWN_KEYS,
+  INBOUND_BREAKDOWN_LABELS,
+  INBOUND_HISTORY_KEYS,
+  INBOUND_PLAN_KEYS,
+  INBOUND_STAGE_TWINS,
+  INBOUND_UNIT_BUCKETS,
+  type InboundBookingTypeType,
+  InboundBookingTypeEnum,
+  type InboundBreakdown,
+  InboundBreakdownKeyEnum,
+  type InboundBreakdownKeyType,
+  InboundBreakdownSchema,
+  type InboundUnitBucketType,
+  inboundOwnsKey,
+  isInboundLive,
+  isInboundTerminal,
+} from "./_inbound-breakdown.ts";
+
 /** A specific location within a store allocated for a booking. */
 export interface BookingStoreLocation {
   uid_location: string;
@@ -617,20 +638,86 @@ function checkBookingUnits(
   }
 }
 
-/** Zod schema for Booking. */
-export const BookingSchema: z.ZodType<Booking> = z.strictObject({
-  uid: BookingId,
-  uid_order: FirestoreId,
+/**
+ * The fields an OUTBOUND booking (`bookings`, an order's) and an INBOUND one
+ * (`bookings-inbound`, a purchase's — the 7a contract beta) declare identically:
+ * one instance per field, referenced key by key from each schema
+ * (`api-cloudrun/.claude/plans/one-document-model.md` C5).
+ *
+ * ⭐ **Referenced PER KEY, not spread — the `TotalsCore` answer
+ * (`schemas/order.ts`), for the same reason.** A schema's key order is its
+ * column order, and these fields are interleaved with outbound-only ones
+ * (`uid_order`, `organization`, `subject`, …); a spread would move every
+ * outbound column. Each schema keeps its own order.
+ *
+ * 🔴 **So the anti-drift guarantee is `tests/booking-core-parity.test.ts`**,
+ * which asserts INSTANCE identity: `z.globalRegistry` is keyed on the instance,
+ * so a re-declared twin would carry none of these `.meta()` headings.
+ *
+ * What is NOT here, because the two collections genuinely differ: `uid`,
+ * `number` (its `linkTo` names a different detail page), `type` (inbound is
+ * `sale | rental`), `status`, `breakdown`, `units` and `quantity_ordered`
+ * (inbound is required from day one). Outbound only: `uid_order`,
+ * `organization`, `subject`, `crms_id`, `crms_product_id`, `shortage`.
+ *
+ * ⚠️ **Not on the `@cfs/core/schemas` barrel**, as `TotalsCore` is not: no
+ * consumer assembles a booking from parts.
+ */
+export const BOOKING_CORE: {
+  uid_product: z.ZodType<string>;
+  component_signature_hash: z.ZodType<string | null>;
+  name: z.ZodType<string>;
+  quantity: z.ZodType<number>;
+  dates: z.ZodType<Booking["dates"]>;
+  destinations: z.ZodType<Booking["destinations"]>;
+  stores: z.ZodType<BookingStore[]>;
+  query_by_uid_store: z.ZodType<string[]>;
+  query_by_uid_location: z.ZodType<string[]>;
+  uid_destination_delivery: z.ZodType<string>;
+  uid_destination_collection: z.ZodType<string | null>;
+  version: z.ZodType<number>;
+  created_at: z.ZodType<FirestoreTimestampType>;
+  updated_at: z.ZodType<FirestoreTimestampType>;
+} = {
   uid_product: FirestoreId,
   // Required and NULLABLE — see the interface field's own note: `null` is the
   // 3-segment (top-level) id, and every stored booking states one or the other.
   component_signature_hash: z.string().regex(/^[0-9a-f]{12}$/, "Must be a 12-hex component signature hash")
     .nullable(),
   name: z.string().meta({ column: true, label: "Product", linkTo: "productDetail" }),
+  quantity: z.int().meta({ serverSortVia: "quantity", column: true, label: "Quantity" }),
+  dates: z.strictObject({
+    start: chicagoInstant().meta({ serverSortVia: "dates.start_fs", column: true, label: "Start" }).nullable(),
+    start_fs: FirestoreTimestamp.nullable(),
+    end: chicagoInstant().meta({ serverSortVia: "dates.end_fs", column: true, label: "End" }).nullable(),
+    end_fs: FirestoreTimestamp.nullable(),
+  }),
+  destinations: z.strictObject({
+    delivery: BookingDestinationRefSchema.nullable().meta({ label: "Delivery" }),
+    collection: BookingDestinationRefSchema.nullable().meta({ label: "Collection" }),
+  }),
+  stores: z.array(BookingStoreSchema).meta({ label: "Store" }),
+  query_by_uid_store: z.array(FirestoreId),
+  query_by_uid_location: z.array(FirestoreId),
+  uid_destination_delivery: FirestoreId,
+  uid_destination_collection: FirestoreId.nullable(),
+  version: z.int().min(0).default(0),
+  created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
+  updated_at: FirestoreTimestamp.meta({ column: true, label: "Updated" }),
+};
+
+/** Zod schema for Booking. */
+export const BookingSchema: z.ZodType<Booking> = z.strictObject({
+  // Key order is this schema's own and is preserved exactly — see `BOOKING_CORE`.
+  uid: BookingId,
+  uid_order: FirestoreId,
+  uid_product: BOOKING_CORE.uid_product,
+  component_signature_hash: BOOKING_CORE.component_signature_hash,
+  name: BOOKING_CORE.name,
   number: z.int().meta({ column: true, label: "#", linkTo: "fulfillmentDetail", serverSortVia: "number" }),
   type: ComponentTypeEnum.meta({ column: true, label: "Type" }),
   status: BookingStatus.meta({ column: true, label: "Status" }),
-  quantity: z.int().meta({ serverSortVia: "quantity", column: true, label: "Quantity" }),
+  quantity: BOOKING_CORE.quantity,
   // Optional, not required — see the interface field's own note. No `column`
   // meta on purpose: every stored booking reads it as absent today, and a
   // column that is blank on 7,306 rows is not a column.
@@ -644,28 +731,20 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   breakdown: BookingBreakdownSchema,
   // Required-nullable — see the interface field's own note. `null` is "not unit-tracked".
   units: BookingUnitSetsSchema.nullable(),
-  dates: z.strictObject({
-    start: chicagoInstant().meta({ serverSortVia: "dates.start_fs", column: true, label: "Start" }).nullable(),
-    start_fs: FirestoreTimestamp.nullable(),
-    end: chicagoInstant().meta({ serverSortVia: "dates.end_fs", column: true, label: "End" }).nullable(),
-    end_fs: FirestoreTimestamp.nullable(),
-  }),
-  destinations: z.strictObject({
-    delivery: BookingDestinationRefSchema.nullable().meta({ label: "Delivery" }),
-    collection: BookingDestinationRefSchema.nullable().meta({ label: "Collection" }),
-  }),
+  dates: BOOKING_CORE.dates,
+  destinations: BOOKING_CORE.destinations,
   organization: z.strictObject({
     ...OrgSnapshotCore,
     crms_id: z.int().nullable(),
   }).meta({ label: "Organization" }),
-  stores: z.array(BookingStoreSchema).meta({ label: "Store" }),
-  query_by_uid_store: z.array(FirestoreId),
-  query_by_uid_location: z.array(FirestoreId),
-  uid_destination_delivery: FirestoreId,
-  uid_destination_collection: FirestoreId.nullable(),
-  version: z.int().min(0).default(0),
-  created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
-  updated_at: FirestoreTimestamp.meta({ column: true, label: "Updated" }),
+  stores: BOOKING_CORE.stores,
+  query_by_uid_store: BOOKING_CORE.query_by_uid_store,
+  query_by_uid_location: BOOKING_CORE.query_by_uid_location,
+  uid_destination_delivery: BOOKING_CORE.uid_destination_delivery,
+  uid_destination_collection: BOOKING_CORE.uid_destination_collection,
+  version: BOOKING_CORE.version,
+  created_at: BOOKING_CORE.created_at,
+  updated_at: BOOKING_CORE.updated_at,
 }).superRefine(checkBookingCollection).superRefine(checkBookingDelivery).superRefine(checkBookingUnits).meta({
   title: "Booking",
   collection: "bookings",

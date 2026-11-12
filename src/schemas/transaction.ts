@@ -69,6 +69,7 @@ import {
   type UidNameRefType,
 } from "./common.ts";
 import { BookingBreakdownKeyEnum, type BookingBreakdownKeyType } from "./booking.ts";
+import type { InboundBreakdownKeyType } from "./_inbound-breakdown.ts";
 
 // ── Movement types ──────────────────────────────────────────────────
 
@@ -536,6 +537,36 @@ export const CUSTODY_PLACE_KINDS: Readonly<
   maintenance: ["locations"],
 };
 
+/**
+ * {@link CUSTODY_PLACE_KINDS} for the INBOUND ladder (`schemas/_inbound-breakdown.ts`):
+ * the kind of place a purchase's unit is in, per inbound key. Its own table rather
+ * than more rows in the outbound one, because five keys are spelled the same on
+ * both ladders (`quoted`, `lost`, `damaged` and the two transit keys) and mean a
+ * different place on each — a lost RENTED unit has been settled with the supplier
+ * and is nowhere, where an outbound `lost` unit is at its out-of-service record.
+ * A check that looked an inbound key up in the outbound table would validate it
+ * against the wrong place, silently; so `checkMovementContract` reads the table of
+ * the movement type's `booking_ladder` (the contract beta).
+ *
+ * `damaged` takes two places by type, on the precedent of `out` above: a Buy
+ * received damaged is on a CFS shelf (`locations`), a settled damaged Subrent
+ * unit is gone (`outside`).
+ */
+export const INBOUND_CUSTODY_PLACE_KINDS: Readonly<
+  Record<InboundBreakdownKeyType, readonly PlaceKindType[]>
+> = {
+  quoted: ["outside"],
+  ordered: ["outside"],
+  transit_inbound: ["outside"],
+  received: ["locations"],
+  // A stocked unit may go out on an outbound booking or be flagged on a record.
+  stocked: ["locations", "bookings", "out-of-service"],
+  transit_outbound: ["outside"],
+  sent_back: ["outside"],
+  lost: ["outside"],
+  damaged: ["locations", "outside"],
+};
+
 // ── The per-kind contract ───────────────────────────────────────────
 
 /**
@@ -551,6 +582,17 @@ export const CUSTODY_PLACE_KINDS: Readonly<
  * order-sourced (a booking's units being sold), and the manual transaction form
  * lets an operator key an off-the-shelf sale with no order at all.
  */
+/**
+ * Which booking ladder a movement's `uid_booking` and custody pair belong to:
+ * `outbound` (an order's `bookings`) or `inbound` (a purchase's
+ * `bookings-inbound`). Named for the LADDER, not the side, because core's `Side`
+ * (`schemas/side.ts`) is `receivable | payable` and means the document, not the
+ * direction units travel.
+ */
+export const BOOKING_LADDERS = ["outbound", "inbound"] as const;
+/** One {@link BOOKING_LADDERS} member. */
+export type BookingLadderType = typeof BOOKING_LADDERS[number];
+
 export interface MovementContract {
   /**
    * The forward type this one says never happened, or `null` for a forward
@@ -558,6 +600,19 @@ export interface MovementContract {
    * ({@link MOVEMENT_UNDOES}); `isReversing` (`utils/movements.ts`) reads it.
    */
   undoes: MovementTypeType | null;
+  /**
+   * The booking ladder this type's `uid_booking` and custody keys belong to —
+   * `null` EXACTLY when `booking` is `forbidden` (`tests/inbound-breakdown.test.ts`
+   * asserts both directions). Derived when {@link MOVEMENT_CONTRACTS} is built,
+   * from {@link INBOUND_LADDER_MOVEMENT_TYPES}, so a forward contract never
+   * spells it and an undo inherits its forward's.
+   *
+   * ⚠️ **Every type reads `outbound` until the contract beta of 7a**, which
+   * gives the purchase receive and return types a booking on the inbound
+   * ladder. The field ships first so readers can be written against it
+   * (one-document-model C14 step 1).
+   */
+  booking_ladder: BookingLadderType | null;
   /** Whether the custody axis must, must not, or conditionally appears. */
   custody: "required" | "forbidden" | "with_booking";
   /** Whether the cost axis must or must not appear. */
@@ -1117,11 +1172,25 @@ export const MOVEMENT_UNDOES: Readonly<Record<UndoMovementTypeType, ForwardMovem
   sale_damaged_undo: "sale_damaged",
 };
 
-/** A contract before its `undoes` is filled in. */
-export type BaseMovementContract = Omit<MovementContract, "undoes">;
+/**
+ * The forward types whose booking is on the INBOUND ladder — the one
+ * declaration {@link MovementContract.booking_ladder} is derived from. Empty
+ * until the 7a contract beta moves the purchase receive and return types onto
+ * inbound bookings; an undo needs no entry, because it inherits its forward's.
+ */
+export const INBOUND_LADDER_MOVEMENT_TYPES: readonly ForwardMovementTypeType[] = [];
+
+/** {@link MovementContract.booking_ladder} for one forward contract. */
+function bookingLadderOf(type: ForwardMovementTypeType, contract: BaseMovementContract): BookingLadderType | null {
+  if (contract.booking === "forbidden") return null;
+  return INBOUND_LADDER_MOVEMENT_TYPES.includes(type) ? "inbound" : "outbound";
+}
+
+/** A contract before its `undoes` and `booking_ladder` are filled in. */
+export type BaseMovementContract = Omit<MovementContract, "undoes" | "booking_ladder">;
 
 /** The forward contract mirrored: `places` swapped end for end, every other axis identical. */
-function mirrorContract(forward: BaseMovementContract, undoes: MovementTypeType): MovementContract {
+function mirrorContract(forward: BaseMovementContract, undoes: MovementTypeType): Omit<MovementContract, "booking_ladder"> {
   return {
     ...forward,
     undoes,
@@ -1139,12 +1208,13 @@ function mirrorContract(forward: BaseMovementContract, undoes: MovementTypeType)
 export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContract>> = (() => {
   const table = {} as Record<MovementTypeType, MovementContract>;
   for (const type of MOVEMENT_TYPES) {
-    if ((UNDO_MOVEMENT_TYPES as readonly string[]).includes(type)) {
-      const forward = MOVEMENT_UNDOES[type as UndoMovementTypeType];
-      table[type] = mirrorContract(FORWARD_CONTRACTS[forward], forward);
-    } else {
-      table[type] = { ...FORWARD_CONTRACTS[type as ForwardMovementTypeType], undoes: null };
-    }
+    const isUndo = (UNDO_MOVEMENT_TYPES as readonly string[]).includes(type);
+    const forward = isUndo ? MOVEMENT_UNDOES[type as UndoMovementTypeType] : type as ForwardMovementTypeType;
+    const base = FORWARD_CONTRACTS[forward];
+    const booking_ladder = bookingLadderOf(forward, base);
+    table[type] = isUndo
+      ? { ...mirrorContract(base, forward), booking_ladder }
+      : { ...base, undoes: null, booking_ladder };
   }
   return table;
 })();
