@@ -185,10 +185,7 @@ Deno.test("bill_item: a flat line's remaining units; an over-billed line offers 
 });
 
 Deno.test("bill_item: a time line offers its open units — nothing is metered until Phase 3", () => {
-  const line = {
-    ...subrent({ uid: "t", path: ["t"], price: TIME_PRICE, quantity_billed: null, quantity: 1 }),
-    uid_units: ["unit-1"],
-  } as unknown as PurchaseActionItem;
+  const line = subrent({ uid: "t", path: ["t"], price: TIME_PRICE, quantity_billed: null, quantity: 1 }) as unknown as PurchaseActionItem;
   assertEquals(offer(offersOf(po([line]), { t: { received: 1, returned: 1 } }), "bill_item:t")?.max_quantity, 1);
 });
 

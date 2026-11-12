@@ -12,7 +12,6 @@ import {
   deriveQueryByItemTypes,
   deriveQueryByOrders,
   deriveQueryByProducts,
-  deriveQueryByUnits,
   type ProductTypeType,
   purchaseItemCommittedCents,
   purchaseItemProduct,
@@ -54,7 +53,6 @@ export {
   deriveQueryByItemTypes,
   deriveQueryByOrders,
   deriveQueryByProducts,
-  deriveQueryByUnits,
   purchaseItemCommittedCents,
   purchaseItemProduct,
 };

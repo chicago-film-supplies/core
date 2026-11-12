@@ -488,7 +488,6 @@ const pline = (over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem => {
     price: payablePrice(50_000),
     quantity_billed: 0,
     uid_orders: [],
-    uid_units: [],
     ...over,
   }, PAIR);
 };

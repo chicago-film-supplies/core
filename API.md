@@ -11096,7 +11096,6 @@ interface Purchase {
   credits: Array<typeLiteral>;
   query_by_credits: string[];
   bookings_breakdown: InboundBreakdown;
-  query_by_units?: string[];
   uid_thread?: string;
   version: number;
   created_by: ActorRefType;
@@ -12177,7 +12176,6 @@ interface PurchaseRentalItem {
   price: PurchaseLinePrice;
   quantity_billed: number | null;
   uid_orders: string[];
-  uid_units: string[];
 }
 ```
 
@@ -12194,7 +12192,7 @@ interface PurchaseRentalItemInputType {
   amount_cents?: number | null;
   ledger_account?: COACodeType | null;
   uid_orders?: string[];
-  uid_units?: string[];
+  uid_units?: never;
 }
 ```
 
@@ -17814,12 +17812,6 @@ of the mirror, called by every writer.
 
 The purchases a bill's `purchase` dividers name, in document order — the
 one author of `PurchaseBill.query_by_purchases`.
-
-### `deriveQueryByUnits(rows: readonly PurchaseRow[]): string[]`
-
-Derive `query_by_units` — the distinct units the RENTAL lines cover, sorted.
-Only a subrent names units: a charge states none (ruling 73), and a buy's units
-are minted at receipt.
 
 ### `destinationJoinViolations(items: ReadonlyArray<unknown>, destinations: ReadonlyArray<unknown>): DestinationJoinViolation[]`
 
@@ -29239,7 +29231,6 @@ interface Purchase {
   credits: Array<typeLiteral>;
   query_by_credits: string[];
   bookings_breakdown: InboundBreakdown;
-  query_by_units?: string[];
   uid_thread?: string;
   version: number;
   created_by: ActorRefType;
@@ -29621,7 +29612,6 @@ interface PurchaseRentalItem {
   price: PurchaseLinePrice;
   quantity_billed: number | null;
   uid_orders: string[];
-  uid_units: string[];
 }
 ```
 
@@ -29638,7 +29628,7 @@ interface PurchaseRentalItemInputType {
   amount_cents?: number | null;
   ledger_account?: COACodeType | null;
   uid_orders?: string[];
-  uid_units?: string[];
+  uid_units?: never;
 }
 ```
 
@@ -29918,12 +29908,6 @@ Derive `query_by_orders` — the distinct union of the rental items' `uid_orders
 Derive `query_by_products` — the distinct products the items ORDER, in first
 appearance order. Attribution is not an order and is left out. The one author
 of the mirror, called by every writer.
-
-### `deriveQueryByUnits(rows: readonly PurchaseRow[]): string[]`
-
-Derive `query_by_units` — the distinct units the RENTAL lines cover, sorted.
-Only a subrent names units: a charge states none (ruling 73), and a buy's units
-are minted at receipt.
 
 ### `isKitHeaderLine(row: object): boolean`
 
@@ -53546,12 +53530,6 @@ Derive `query_by_orders` — the distinct union of the rental items' `uid_orders
 Derive `query_by_products` — the distinct products the items ORDER, in first
 appearance order. Attribution is not an order and is left out. The one author
 of the mirror, called by every writer.
-
-### `deriveQueryByUnits(rows: readonly PurchaseRow[]): string[]`
-
-Derive `query_by_units` — the distinct units the RENTAL lines cover, sorted.
-Only a subrent names units: a charge states none (ruling 73), and a buy's units
-are minted at receipt.
 
 ### `expandPurchaseItems(items: readonly PurchaseRowInputType[], products: ReadonlyMap<string, PurchaseExpansionProduct>): PurchaseExpansionResult`
 

@@ -4917,7 +4917,7 @@
         {
           "kind": "interface",
           "name": "Purchase",
-          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  uid_store: string;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseRow[];\n  destinations: PurchaseDestination[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  bills: Array<typeLiteral>;\n  credits: Array<typeLiteral>;\n  query_by_credits: string[];\n  bookings_breakdown: InboundBreakdown;\n  query_by_units?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  uid_store: string;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseRow[];\n  destinations: PurchaseDestination[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  bills: Array<typeLiteral>;\n  credits: Array<typeLiteral>;\n  query_by_credits: string[];\n  bookings_breakdown: InboundBreakdown;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A purchase order placed with a supplier."
         },
         {
@@ -5415,13 +5415,13 @@
         {
           "kind": "interface",
           "name": "PurchaseRentalItem",
-          "declaration": "interface PurchaseRentalItem {\n  ledger_account: COACodeType | null;\n  type: \"rental\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  quantity_billed: number | null;\n  uid_orders: string[];\n  uid_units: string[];\n}",
+          "declaration": "interface PurchaseRentalItem {\n  ledger_account: COACodeType | null;\n  type: \"rental\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  quantity_billed: number | null;\n  uid_orders: string[];\n}",
           "doc": "A RENTAL (Subrent) item — `quantity` units borrowed for a hire window and given back. Flat or time."
         },
         {
           "kind": "interface",
           "name": "PurchaseRentalItemInputType",
-          "declaration": "interface PurchaseRentalItemInputType {\n  type: \"rental\";\n  quantity: number;\n  amount_cents?: number | null;\n  ledger_account?: COACodeType | null;\n  uid_orders?: string[];\n  uid_units?: string[];\n}",
+          "declaration": "interface PurchaseRentalItemInputType {\n  type: \"rental\";\n  quantity: number;\n  amount_cents?: number | null;\n  ledger_account?: COACodeType | null;\n  uid_orders?: string[];\n  uid_units?: never;\n}",
           "doc": "A rental (Subrent) item as an operator orders it. `amount_cents` on a flat line\nonly (gross when discounted). Its hire window is its pair's dates, stated on\n`destinations[]`, never on the line (one-document-model Phase 5b)."
         },
         {
@@ -8043,14 +8043,6 @@
           "name": "deriveQueryByPurchases",
           "signature": "deriveQueryByPurchases(rows: readonly Pick<PurchaseDocumentRow, \"type\" | \"uid\">[]): string[]",
           "doc": "The purchases a bill's `purchase` dividers name, in document order — the\none author of `PurchaseBill.query_by_purchases`.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
-          "name": "deriveQueryByUnits",
-          "signature": "deriveQueryByUnits(rows: readonly PurchaseRow[]): string[]",
-          "doc": "Derive `query_by_units` — the distinct units the RENTAL lines cover, sorted.\nOnly a subrent names units: a charge states none (ruling 73), and a buy's units\nare minted at receipt.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -13700,7 +13692,7 @@
         {
           "kind": "interface",
           "name": "Purchase",
-          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  uid_store: string;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseRow[];\n  destinations: PurchaseDestination[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  bills: Array<typeLiteral>;\n  credits: Array<typeLiteral>;\n  query_by_credits: string[];\n  bookings_breakdown: InboundBreakdown;\n  query_by_units?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  uid_store: string;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseRow[];\n  destinations: PurchaseDestination[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  bills: Array<typeLiteral>;\n  credits: Array<typeLiteral>;\n  query_by_credits: string[];\n  bookings_breakdown: InboundBreakdown;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A purchase order placed with a supplier."
         },
         {
@@ -13856,13 +13848,13 @@
         {
           "kind": "interface",
           "name": "PurchaseRentalItem",
-          "declaration": "interface PurchaseRentalItem {\n  ledger_account: COACodeType | null;\n  type: \"rental\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  quantity_billed: number | null;\n  uid_orders: string[];\n  uid_units: string[];\n}",
+          "declaration": "interface PurchaseRentalItem {\n  ledger_account: COACodeType | null;\n  type: \"rental\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  quantity_billed: number | null;\n  uid_orders: string[];\n}",
           "doc": "A RENTAL (Subrent) item — `quantity` units borrowed for a hire window and given back. Flat or time."
         },
         {
           "kind": "interface",
           "name": "PurchaseRentalItemInputType",
-          "declaration": "interface PurchaseRentalItemInputType {\n  type: \"rental\";\n  quantity: number;\n  amount_cents?: number | null;\n  ledger_account?: COACodeType | null;\n  uid_orders?: string[];\n  uid_units?: string[];\n}",
+          "declaration": "interface PurchaseRentalItemInputType {\n  type: \"rental\";\n  quantity: number;\n  amount_cents?: number | null;\n  ledger_account?: COACodeType | null;\n  uid_orders?: string[];\n  uid_units?: never;\n}",
           "doc": "A rental (Subrent) item as an operator orders it. `amount_cents` on a flat line\nonly (gross when discounted). Its hire window is its pair's dates, stated on\n`destinations[]`, never on the line (one-document-model Phase 5b)."
         },
         {
@@ -14006,14 +13998,6 @@
           "name": "deriveQueryByProducts",
           "signature": "deriveQueryByProducts(rows: readonly PurchaseRow[]): string[]",
           "doc": "Derive `query_by_products` — the distinct products the items ORDER, in first\nappearance order. Attribution is not an order and is left out. The one author\nof the mirror, called by every writer.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
-          "name": "deriveQueryByUnits",
-          "signature": "deriveQueryByUnits(rows: readonly PurchaseRow[]): string[]",
-          "doc": "Derive `query_by_units` — the distinct units the RENTAL lines cover, sorted.\nOnly a subrent names units: a charge states none (ruling 73), and a buy's units\nare minted at receipt.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25740,14 +25724,6 @@
           "name": "deriveQueryByProducts",
           "signature": "deriveQueryByProducts(rows: readonly PurchaseRow[]): string[]",
           "doc": "Derive `query_by_products` — the distinct products the items ORDER, in first\nappearance order. Attribution is not an order and is left out. The one author\nof the mirror, called by every writer.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
-          "name": "deriveQueryByUnits",
-          "signature": "deriveQueryByUnits(rows: readonly PurchaseRow[]): string[]",
-          "doc": "Derive `query_by_units` — the distinct units the RENTAL lines cover, sorted.\nOnly a subrent names units: a charge states none (ruling 73), and a buy's units\nare minted at receipt.",
           "paramTags": [],
           "returnsTag": null
         },

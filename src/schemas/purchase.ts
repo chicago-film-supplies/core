@@ -117,7 +117,7 @@
  * @module
  */
 import { z } from "zod";
-import { FirestoreId, ItemUid, ThreadId, UnitId } from "./_uid.ts";
+import { FirestoreId, ItemUid, ThreadId } from "./_uid.ts";
 import { chicagoInstant, chicagoStartOfDay } from "./_datetime.ts";
 import { COACode, type COACodeType } from "./chart-of-accounts.ts";
 import {
@@ -619,14 +619,6 @@ export interface PurchaseRentalItem extends Omit<PurchaseItemBase, "ledger_accou
    * the units stay fungible across every booking.
    */
   uid_orders: string[];
-  /**
-   * The units this line covers (`units/{uid}`), each named once. The LINE names
-   * the unit and the unit names nothing back — the invoice ↔ out-of-service
-   * direction (`uid_out_of_service`). Mirrored on `Purchase.query_by_units`.
-   * Not shared with a bill line, which states its own `units` (D5). The only
-   * payable line that names units: a charge states none (ruling 73).
-   */
-  uid_units: string[];
 }
 
 /**
@@ -752,7 +744,6 @@ const flatMoney = { propagate: true, shared_group: "flat_money" } as const;
 const quantityKey = z.int().min(1).meta({ column: true, label: "Quantity", ...flatMoney });
 const amountKey = z.int().min(0).meta({ column: true, label: "Amount", ...flatMoney });
 const billedKey = z.int().min(0).meta({ column: true, label: "Billed" });
-const unitsKey = z.array(UnitId);
 
 /**
  * May a payable line of `type` post to `account`? The class is
@@ -821,12 +812,6 @@ function replacementIssues(item: { price: { replacement_cents?: number | null } 
     : [];
 }
 
-function uniqueUnitsIssue(units: readonly string[], ctx: z.RefinementCtx): void {
-  if (new Set(units).size !== units.length) {
-    ctx.addIssue({ code: "custom", path: ["uid_units"], message: "a line names each unit once" });
-  }
-}
-
 // Un-annotated so `_zod.propValues` survives for the discriminated union below
 // — see `_dividers.ts`. Each arm's refine sits HERE, on the Inner const: a
 // refine on an exported alias never runs inside the union (`invoice.ts`,
@@ -879,10 +864,8 @@ const RentalItemInner = z.strictObject({
   price: PurchaseLinePriceSchema,
   quantity_billed: billedKey.nullable(),
   uid_orders: z.array(FirestoreId),
-  uid_units: unitsKey,
 }).superRefine((item, ctx) => {
   storedUidIssue(item, ctx);
-  uniqueUnitsIssue(item.uid_units, ctx);
   addIssues(purchaseLineMoneyIssues(item), ctx);
   addIssues(payablePostingIssues(item.type, item.ledger_account), ctx);
   addIssues(kitHeaderIssues(item), ctx);
@@ -1094,15 +1077,6 @@ export function deriveQueryByOrders(rows: readonly PurchaseRow[]): string[] {
   return [...new Set(purchaseLines(rows).flatMap((i) => (i.type === "rental" ? i.uid_orders : [])))];
 }
 
-/**
- * Derive `query_by_units` — the distinct units the RENTAL lines cover, sorted.
- * Only a subrent names units: a charge states none (ruling 73), and a buy's units
- * are minted at receipt.
- */
-export function deriveQueryByUnits(rows: readonly PurchaseRow[]): string[] {
-  return [...new Set(purchaseLines(rows).flatMap((i) => (i.type === "rental" ? i.uid_units : [])))].sort();
-}
-
 /** Derive `query_by_item_types` — the distinct LINE types, in first-seen order (dividers are not a type of purchase). */
 export function deriveQueryByItemTypes(rows: readonly Pick<PurchaseRow, "type">[]): PurchaseItemTypeType[] {
   return [...new Set(rows.filter(isPurchaseLine).map((i) => i.type as PurchaseItemTypeType))];
@@ -1290,14 +1264,6 @@ export interface Purchase {
    * `due_at` reads the bookings themselves.
    */
   bookings_breakdown: InboundBreakdown;
-  /**
-   * Mirror of the units the subrent lines cover ({@link deriveQueryByUnits}) — "which
-   * purchases cover this unit" as one `array-contains`, the read behind every
-   * coverage question (`coversForUnit`, the uncovered-window offer).
-   * The `Invoice.query_by_out_of_service` twin. Optional only until the Phase 5
-   * backfill stamps it; every writer states it.
-   */
-  query_by_units?: string[];
   uid_thread?: string;
   version: number;
   created_by: ActorRefType;
@@ -1347,9 +1313,6 @@ function checkPurchase(p: Purchase, ctx: z.RefinementCtx): void {
     if (!sameMembers(mirror, derived)) {
       ctx.addIssue({ code: "custom", path: [key], message: `${key} must list exactly ${what}` });
     }
-  }
-  if (p.query_by_units !== undefined && !sameMembers(p.query_by_units, deriveQueryByUnits(p.items))) {
-    ctx.addIssue({ code: "custom", path: ["query_by_units"], message: "query_by_units must list exactly the units the lines cover" });
   }
 
   const total = purchaseLines(p.items).reduce((sum, item) => sum + purchaseItemCommittedCents(item), 0);
@@ -1408,7 +1371,6 @@ export const PurchaseSchema: z.ZodType<Purchase> = z.strictObject({
   // twin (7a, owner 2026-11-11). Written by `finalize-purchase`; a summary for
   // display, never a leg rule (it sums Buys and Subrents, whose keys differ).
   bookings_breakdown: InboundBreakdownSchema.meta({ derived: true }),
-  query_by_units: z.array(UnitId).optional(),
   uid_thread: ThreadId.optional().meta(homonym),
   version: z.int().min(0).default(0).meta(homonym),
   created_by: ActorRef.meta({ column: true, label: "Created By", ...homonym }),
@@ -1548,8 +1510,8 @@ export interface PurchaseRentalItemInputType extends PurchaseItemInputBase {
   ledger_account?: COACodeType | null;
   /** The orders the item was raised for. Absent is `[]`: the writer states it. */
   uid_orders?: string[];
-  /** The units the line covers. Absent keeps the stored list on an amend, `[]` on a create. */
-  uid_units?: string[];
+  /** Retired — see `retiredUnitsKey`. Present is a 400. */
+  uid_units?: never;
 }
 
 /**
@@ -1614,15 +1576,17 @@ function inputPostingIssue(
 }
 
 /**
- * `uid_units` on a charge input, declared only so a payload still carrying it is
- * REFUSED rather than stripped (ruling 73, 2026-11-11). The input is a stripping
- * `z.object`, so without this a client naming a carrier line's device would get
- * a 200 and a line that names nothing. Same shape as `retiredKey` in
- * `schemas/booking.ts`, including the OpenAPI meta its comment explains.
+ * `uid_units` on a line input, declared only so a payload still carrying it is
+ * REFUSED rather than stripped. The input is a stripping `z.object`, so without
+ * this a client naming units would get a 200 and a line that names nothing.
+ * A charge lost it to ruling 73 (2026-11-11), a Subrent to ruling 79
+ * (2026-11-12): a purchase line names no units, as an order line names none;
+ * units are named at the custody step and held on the inbound booking. Same
+ * shape as `retiredKey` in `schemas/booking.ts`, including the OpenAPI meta its
+ * comment explains.
  */
-function retiredUnitsKey() {
-  const why = "a charge names no units; place it under the product row it costs";
-  return z.never({ error: `"uid_units" is retired on a charge: ${why}` })
+function retiredUnitsKey(why: string) {
+  return z.never({ error: `"uid_units" is retired: ${why}` })
     .meta({ type: "null", not: {}, description: `Retired: ${why}. Present is a 400.` })
     .optional();
 }
@@ -1634,7 +1598,7 @@ const noCustodyInput = {
   amount_cents: z.int().min(0).nullable().optional(),
   // Optional, not nullable: `null` is a kit header's, and a charge is never one.
   ledger_account: COACode.optional(),
-  uid_units: retiredUnitsKey(),
+  uid_units: retiredUnitsKey("a charge names no units; place it under the product row it costs"),
 };
 
 /** A line input names its product by its uid ({@link payableInputUidIssue}). */
@@ -1680,9 +1644,8 @@ const rentalItemInputArm = z.object({
   amount_cents: z.int().min(0).nullable().optional(),
   ledger_account: COACode.nullable().optional(),
   uid_orders: z.array(FirestoreId).optional(),
-  uid_units: unitsKey.optional(),
+  uid_units: retiredUnitsKey("a purchase line names no units; name them on the receipt's custody step"),
 }).superRefine((item, ctx) => {
-  if (item.uid_units) uniqueUnitsIssue(item.uid_units, ctx);
   inputPostingIssue(item, ctx);
   inputUidIssue(item, ctx);
 });

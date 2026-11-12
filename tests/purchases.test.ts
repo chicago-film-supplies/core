@@ -57,7 +57,6 @@ import {
   type PurchaseExpansionProduct,
   deriveQueryByOrders,
   deriveQueryByProducts,
-  deriveQueryByUnits,
   purchaseItemCommittedCents,
   remainingToBill,
   remainingToReceive,
@@ -240,7 +239,6 @@ const hireLine = (over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem =>
     uid_tax_class: TAX_CLASS,
     quantity_billed: 0,
     uid_orders: [ORDER_1074],
-    uid_units: [],
     ...over,
   }, D);
 };
@@ -572,35 +570,26 @@ Deno.test("PurchaseSchema: all three mirrors and `query_by_bills` are required, 
   assertEquals(issuePaths(PurchaseSchema, purchase({ kind: "buy" })), [""]);
 });
 
-Deno.test("uid_units: only a subrent names units (ruling 73); query_by_units mirrors the subrent lines, optional until the backfill", () => {
-  assertEquals(issuePaths(PurchaseRentalItemSchema, hireLine({ uid_units: ["unit-3"] })), []);
-  assertEquals(issuePaths(PurchaseRentalItemSchema, hireLine({ uid_units: ["unit-3", "unit-3"] })), ["uid_units"]);
-  const { uid_units: _, ...bare } = hireLine();
-  assertEquals(issuePaths(PurchaseRentalItemSchema, bare), ["uid_units"], "required on the stored subrent line (hard cutover, ruling 5)");
-  // A stored charge carries no unit list: the strict arm refuses the key outright.
+Deno.test("uid_units and query_by_units are retired: a purchase line names no units (rulings 73, 79)", () => {
+  // The stored arms are strict: a carried key, even an empty one, is refused outright.
+  assertEquals(issuePaths(PurchaseRentalItemSchema, hireLine()), [], "control");
+  assertEquals(issuePaths(PurchaseRentalItemSchema, { ...hireLine(), uid_units: [] }), [""], "a subrent carries no unit list");
   assertEquals(issuePaths(PurchaseServiceItemSchema, { ...freight(), uid_units: ["unit-7"] }), [""]);
   assertEquals(issuePaths(PurchaseServiceItemSchema, { ...carrierLine(), uid_units: [] }), [""], "even an empty list");
-
-  const items: PurchaseItem[] = [line(), hireLine({ uid_units: ["unit-9", "unit-3"] }), freight()];
-  assertEquals(deriveQueryByUnits(items), ["unit-3", "unit-9"], "distinct, sorted; a buy and a charge name none");
-  assertEquals(issuePaths(PurchaseSchema, withItems(items)), [], "absent until the backfill stamps it");
-  assertEquals(issuePaths(PurchaseSchema, withItems(items, { query_by_units: deriveQueryByUnits(items) })), []);
-  assertEquals(issuePaths(PurchaseSchema, withItems(items, { query_by_units: ["unit-3"] })), ["query_by_units"]);
-  assertEquals(
-    issuePaths(PurchaseSchema, withItems(items, { query_by_units: ["unit-12", "unit-3", "unit-9"] })),
-    ["query_by_units"],
-    "a unit only a charge once named is not mirrored",
-  );
+  const items: PurchaseItem[] = [line(), hireLine(), freight()];
+  assertEquals(issuePaths(PurchaseSchema, withItems(items)), [], "control");
+  assertEquals(issuePaths(PurchaseSchema, withItems(items, { query_by_units: [] })), [""], "the mirror is gone");
 });
 
-Deno.test("PurchaseItemInput: a charge input naming units is REFUSED, never stripped (ruling 73)", () => {
+Deno.test("PurchaseItemInput: a line input naming units is REFUSED, never stripped (rulings 73, 79)", () => {
   const charge = { type: "service", ...lineHead(3), name: "Freight", amount_cents: 1, ledger_account: 5300 };
   assertEquals(issuePaths(PurchaseItemInput, charge), [], "control");
   assertEquals(issuePaths(PurchaseItemInput, { ...charge, uid_units: ["unit-7"] }), ["uid_units"]);
   assertEquals(issuePaths(PurchaseItemInput, { ...charge, uid_units: [] }), ["uid_units"], "even an empty list");
   const sub = { type: "rental", ...keyedHead(2), quantity: 10, amount_cents: 1 };
-  assertEquals(issuePaths(PurchaseItemInput, { ...sub, uid_units: ["unit-7"] }), [], "a subrent still names its units");
-  assertEquals(issuePaths(PurchaseItemInput, { ...sub, uid_units: ["unit-7", "unit-7"] }), ["uid_units"]);
+  assertEquals(issuePaths(PurchaseItemInput, sub), [], "control");
+  assertEquals(issuePaths(PurchaseItemInput, { ...sub, uid_units: ["unit-7"] }), ["uid_units"], "a subrent names its units on the receipt");
+  assertEquals(issuePaths(PurchaseItemInput, { ...sub, uid_units: [] }), ["uid_units"], "even an empty list");
 });
 
 Deno.test("deriveQueryByProducts leaves a charge out, catalog-keyed or not; deriveQueryByOrders reads subrent items only", () => {

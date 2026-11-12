@@ -752,7 +752,6 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "deriveQueryByItemTypes",
     "deriveQueryByOrders",
     "deriveQueryByProducts",
-    "deriveQueryByUnits",
     "custodyBySourceItem",
     "derivePurchaseStatus",
     "expandPurchaseItems",

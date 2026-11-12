@@ -102,7 +102,6 @@ function visionLine(over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem 
     uid_tax_class: TAX_CLASS,
     quantity_billed: null,
     uid_orders: [],
-    uid_units: ["unit-1", "unit-2"],
     ...over,
   }, DIV);
 }

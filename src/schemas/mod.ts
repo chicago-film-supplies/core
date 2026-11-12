@@ -773,7 +773,6 @@ export {
   type PayableDividerType,
   PurchaseSchema,
   deriveQueryByItemTypes,
-  deriveQueryByUnits,
   type PurchaseLineRef,
   PurchaseLineRefSchema,
   deriveQueryByOrders,
