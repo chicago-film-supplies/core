@@ -1889,19 +1889,16 @@ Deno.test("costedProductUid: a placed charge costs the line above it; a top-leve
   assertEquals(costedProductUid(billRow, rows), null);
 });
 
-Deno.test("PurchaseCreditSchema: a credit takes nothing back, but keeps a substitute's sliced substituted_for (C16)", () => {
+Deno.test("PurchaseCreditSchema: a credit row carries substituted_for and exchanged_for as its bill row states them (C16)", () => {
   const X = billItem().path;
-  const taking = billItem({ quantity: 1, amount_cents: 46995, exchanged_for: [{ path: X.slice(1), quantity: 1, reason: "damaged" }] });
+  const row = billItem({
+    quantity: 1,
+    amount_cents: 46995,
+    substituted_for: [{ path: X.slice(1), quantity: 1 }],
+    exchanged_for: [{ path: X.slice(1), quantity: 1, reason: "damaged" }],
+  });
   assertEquals(
-    issuePaths(PurchaseCreditSchema, credit({ items: [taking] })).filter((p) => p.endsWith("exchanged_for")).length > 0,
-    true,
-    "a supplier credit line carries no exchanged_for",
-  );
-  // Ruling 23 / api-cloudrun#1475: a credit raised from a substitute's bill line
-  // carries the slice of its substituted_for, which the billed fold reads.
-  const slice = billItem({ quantity: 1, amount_cents: 46995, substituted_for: [{ path: X.slice(1), quantity: 1 }] });
-  assertEquals(
-    issuePaths(PurchaseCreditSchema, credit({ items: [slice] })).filter((p) => p.endsWith("substituted_for")),
+    issuePaths(PurchaseCreditSchema, credit({ items: [row] })).filter((p) => p.endsWith("substituted_for") || p.endsWith("exchanged_for")),
     [],
   );
 });
