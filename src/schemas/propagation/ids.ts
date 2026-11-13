@@ -72,6 +72,8 @@ export type TransactionId =
   // purchases.ts
   | "create-purchase"
   | "update-purchase"
+  | "extend-subrent"
+  | "undo-extend-subrent"
   | "close-purchase"
   | "update-inbound-booking"
   | "finalize-purchase"
@@ -232,6 +234,10 @@ export type RuleId =
   | "undo-extend-rental:rebook-to-bookings"
   | "undo-extend-rental:bookings-to-transactions"
   // purchases.ts
+  | "extend-subrent:rebook-to-inbound-bookings"
+  | "extend-subrent:inbound-bookings-to-transactions"
+  | "undo-extend-subrent:rebook-to-inbound-bookings"
+  | "undo-extend-subrent:inbound-bookings-to-transactions"
   | "update-purchase:purchase-to-bills"
   | "update-purchase:purchase-to-movement-paths"
   | "create-purchase-bill:bill-to-purchase"

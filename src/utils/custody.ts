@@ -69,10 +69,8 @@ import {
   type FullBookingBreakdown,
   fullBookingBreakdown,
   isBookingClosed,
-  sumBookingBreakdown,
   sumBreakdownKeys,
   terminalQuantity,
-  untrackedUnitCount,
 } from "./bookings.ts";
 import { parseBookingId } from "./booking-id.ts";
 import { deriveOOSStatus, sumOOSBreakdown } from "./out-of-service.ts";
@@ -1582,6 +1580,88 @@ export function reclassifyRefusal(args: Parameters<typeof planReclassification>[
 
 // ── undoing a rental extension (api-cloudrun#1235, gap G11 (d)) ──────
 
+/**
+ * The ladder a rental extension rebooks on. An order's extension moves `out`
+ * units between outbound bookings with `rebook_out` / `rebook_in`; a subrent's
+ * (one-document-model ruling 57) moves `stocked` units between inbound bookings
+ * with their twins `subrent_rebook_out` / `subrent_rebook_in` (ruling 59). The
+ * rules are the same rules, so they are ONE function over this table, never a
+ * copy per side; only the held bucket, the movement types and the nouns differ.
+ */
+export interface RebookLadder {
+  /** The bucket an extension moves: what the customer still has, or what CFS still holds from the supplier. */
+  held: "out" | "stocked";
+  /** The movement that puts units on the new leg's booking. */
+  rebookIn: "rebook_in" | "subrent_rebook_in";
+  /** The movement that takes them off the old leg's. */
+  rebookOut: "rebook_out" | "subrent_rebook_out";
+  /** The collection a `rebookIn`'s counterpart booking is named under in `sources[]`. */
+  bookingsCollection: "bookings" | "bookings-inbound";
+  /** Nouns for the messages. */
+  words: {
+    /** The initiator: "order" or "purchase". */
+    document: string;
+    /** Who holds the custody document's row quantity: "the warehouse" or "the receipt". */
+    custodian: string;
+    /** The custody document, as the fix names it. */
+    custodyDocument: string;
+    /** The held bucket as a predicate: "out" or "held". */
+    held: string;
+    /** What moving the units means, past tense: "checked in, marked or re-ordered". */
+    moved: string;
+  };
+}
+
+/** An order's extension: `out` units, `rebook_out` / `rebook_in`. */
+export const OUTBOUND_REBOOK: RebookLadder = {
+  held: "out",
+  rebookIn: "rebook_in",
+  rebookOut: "rebook_out",
+  bookingsCollection: "bookings",
+  words: {
+    document: "order",
+    custodian: "the warehouse",
+    custodyDocument: "the fulfillment",
+    held: "out",
+    moved: "checked in, marked or re-ordered",
+  },
+};
+
+/** A subrent's extension (ruling 57): `stocked` units, `subrent_rebook_out` / `subrent_rebook_in`. */
+export const INBOUND_REBOOK: RebookLadder = {
+  held: "stocked",
+  rebookIn: "subrent_rebook_in",
+  rebookOut: "subrent_rebook_out",
+  bookingsCollection: "bookings-inbound",
+  words: {
+    document: "purchase",
+    custodian: "the receipt",
+    custodyDocument: "the receipt",
+    held: "held",
+    moved: "sent back, settled or re-ordered",
+  },
+};
+
+/**
+ * A booking as the extension rules read it, on either ladder: its breakdown and
+ * unit sets by key, so an outbound `Booking` and an `InboundBooking` both fit.
+ */
+export interface RebookBooking {
+  uid: string;
+  name: string;
+  /** Every key a breakdown carries is summed; the held one is read by name. */
+  breakdown: { readonly out?: number; readonly stocked?: number };
+  quantity_ordered?: number | null;
+  units: { readonly out?: readonly number[]; readonly stocked?: readonly number[] } | null;
+}
+
+/** Σ every key of a breakdown, whichever ladder's it is. */
+const breakdownTotal = (b: object): number => {
+  let n = 0;
+  for (const v of Object.values(b)) n += v as number;
+  return n;
+};
+
 /** What an extension undo returns, or why it may not. */
 export type ExtensionUndoPlan =
   | {
@@ -1614,53 +1694,60 @@ export type ExtensionUndoPlan =
  */
 export function extensionUndoRefusal(args: {
   pairUid: string;
-  /** Every destination pair uid the order carries now. */
+  /** Every destination pair uid the order (or purchase) carries now. */
   orderPairUids: readonly string[];
-  /** The order's bookings; those on leg B are picked by their id's leg segment. */
-  bookings: readonly Pick<Booking, "uid" | "name" | "breakdown" | "quantity_ordered" | "units">[];
+  /** The document's bookings; those on leg B are picked by their id's leg segment. */
+  bookings: readonly RebookBooking[];
   /** Every movement on leg B's bookings. */
   movements: readonly Pick<Movement, "uid" | "type" | "uid_booking" | "sources" | "quantity" | "units">[];
+  /** The ladder; absent is an order's ({@link OUTBOUND_REBOOK}). */
+  ladder?: RebookLadder;
 }): ExtensionUndoPlan {
+  const ladder = args.ladder ?? OUTBOUND_REBOOK;
+  const w = ladder.words;
   const refuse = (message: string): ExtensionUndoPlan => ({ ok: false, message });
   const onLeg = args.bookings.filter((b) => parseBookingId(b.uid)?.destUid === args.pairUid);
   if (onLeg.length === 0) return refuse("This leg holds no units an extension moved");
   const ids = new Set(onLeg.map((b) => b.uid));
   const moves = args.movements.filter((m) => m.uid_booking != null && ids.has(m.uid_booking));
-  const rebooksIn = moves.filter((m) => m.type === "rebook_in");
+  const rebooksIn = moves.filter((m) => m.type === ladder.rebookIn);
   if (rebooksIn.length === 0) return refuse("This leg was not made by an extension, so there is nothing to undo");
-  const later = moves.find((m) => m.type !== "rebook_in");
+  const later = moves.find((m) => m.type !== ladder.rebookIn);
   if (later !== undefined) {
     return refuse(`This leg has had a ${later.type.replaceAll("_", " ")} since the extension, so it cannot be undone`);
   }
   const legs = new Set(
     rebooksIn.flatMap((m) =>
-      m.sources.filter((s) => s.collection === "bookings").map((s) => parseBookingId(s.uid)?.destUid ?? "")
+      m.sources.filter((s) => s.collection === ladder.bookingsCollection).map((s) => parseBookingId(s.uid)?.destUid ?? "")
     ),
   );
   const [pairFrom] = legs;
   if (legs.size !== 1 || !pairFrom || pairFrom === args.pairUid) {
     return refuse("This leg's units came from more than one leg, so it cannot be undone in one step");
   }
-  if (!args.orderPairUids.includes(pairFrom)) return refuse("The leg this one was extended from is no longer on the order");
+  if (!args.orderPairUids.includes(pairFrom)) {
+    return refuse(`The leg this one was extended from is no longer on the ${w.document}`);
+  }
 
   let units = 0;
   for (const b of onLeg) {
-    const out = b.breakdown.out;
+    const out = b.breakdown[ladder.held] ?? 0;
     const brought = rebooksIn.filter((m) => m.uid_booking === b.uid);
     if (brought.length === 0) {
-      if (sumBookingBreakdown(b.breakdown) === 0) continue;
+      if (breakdownTotal(b.breakdown) === 0) continue;
       return refuse(`${b.name}: this leg's booking was changed after the extension, so it cannot be undone`);
     }
-    if (sumBookingBreakdown(b.breakdown) !== out || b.quantity_ordered !== out) {
+    if (breakdownTotal(b.breakdown) !== out || b.quantity_ordered !== out) {
       return refuse(
-        `${b.name}: units on this leg have moved since the extension (checked in, marked or re-ordered), so it cannot be undone`,
+        `${b.name}: units on this leg have moved since the extension (${w.moved}), so it cannot be undone`,
       );
     }
     const quantity = brought.reduce((n, m) => n + m.quantity, 0);
-    if (quantity !== out) return refuse(`${b.name}: the undo returns ${quantity} of the ${out} out on this leg`);
+    if (quantity !== out) return refuse(`${b.name}: the undo returns ${quantity} of the ${out} ${w.held} on this leg`);
     if (b.units != null) {
       const named = new Set(brought.flatMap((m) => m.units.map((u) => u.number)));
-      if (b.units.out.length !== out || b.units.out.some((n) => !named.has(n)) || named.size !== out) {
+      const held = b.units[ladder.held] ?? [];
+      if (held.length !== out || held.some((n) => !named.has(n)) || named.size !== out) {
         return refuse(`${b.name}: this leg's units changed since the extension, so it cannot be undone`);
       }
     }
@@ -1929,9 +2016,13 @@ export interface RebookProblem {
 export function rebookProblems(args: {
   kind: "extend" | "undo";
   lines: readonly RebookLine[];
-  bookings: ReadonlyMap<string, Pick<Booking, "uid" | "name" | "breakdown" | "quantity_ordered" | "units">>;
+  bookings: ReadonlyMap<string, RebookBooking>;
   unattributed: (uidProduct: string) => readonly number[] | null;
+  /** The ladder; absent is an order's ({@link OUTBOUND_REBOOK}). */
+  ladder?: RebookLadder;
 }): RebookProblem[] {
+  const ladder = args.ladder ?? OUTBOUND_REBOOK;
+  const w = ladder.words;
   const problems: RebookProblem[] = [];
   const grains = new Map<string, { line: RebookLine; quantity: number; units: number[] | null }>();
   for (const line of args.lines) {
@@ -1940,12 +2031,13 @@ export function rebookProblems(args: {
       problems.push({
         code: "picker_mismatch",
         path,
-        message: `${line.name}: the warehouse holds ${line.pickedQuantity} on this row against the order's ` +
-          `${line.orderQuantity} — align the fulfillment before extending it`,
+        message: `${line.name}: ${w.custodian} holds ${line.pickedQuantity} on this row against the ${w.document}'s ` +
+          `${line.orderQuantity} — align ${w.custodyDocument} before extending it`,
       });
     }
     if (line.serialized && line.units === undefined) {
-      problems.push({ code: "units_required", path, message: `${line.name}: its units are tracked by number — name the units that stay out` });
+      const stay = ladder.held === "out" ? "stay out" : "stay with CFS";
+      problems.push({ code: "units_required", path, message: `${line.name}: its units are tracked by number — name the units that ${stay}` });
     }
     if (!line.serialized && line.units !== undefined) {
       problems.push({ code: "units_forbidden", path, message: `${line.name}: its units are not tracked by number, so name none` });
@@ -1973,26 +2065,26 @@ export function rebookProblems(args: {
 
   for (const [from, grain] of grains) {
     const a = args.bookings.get(from)!;
-    const out = a.breakdown.out;
+    const out = a.breakdown[ladder.held] ?? 0;
     if (args.kind === "undo") {
-      if (sumBookingBreakdown(a.breakdown) !== out || a.quantity_ordered !== out) {
+      if (breakdownTotal(a.breakdown) !== out || a.quantity_ordered !== out) {
         problems.push({
           code: "booking_moved",
           uid_booking: a.uid,
-          message: `${a.name}: units on this leg have moved since the extension (checked in, marked or re-ordered), ` +
+          message: `${a.name}: units on this leg have moved since the extension (${w.moved}), ` +
             "so it cannot be undone",
         });
       } else if (grain.quantity !== out) {
-        problems.push({ code: "undo_partial", uid_booking: a.uid, message: `${a.name}: the undo returns ${grain.quantity} of the ${out} out on this leg` });
+        problems.push({ code: "undo_partial", uid_booking: a.uid, message: `${a.name}: the undo returns ${grain.quantity} of the ${out} ${w.held} on this leg` });
       } else {
-        const named = a.units?.out ?? [];
+        const named = a.units?.[ladder.held] ?? [];
         if (grain.units !== null && (named.length !== out || named.some((n) => !grain.units!.includes(n)))) {
           problems.push({ code: "undo_units_changed", uid_booking: a.uid, message: `${a.name}: this leg's units changed since the extension, so it cannot be undone` });
         }
       }
     }
     if (grain.quantity > out) {
-      problems.push({ code: "exceeds_out", uid_booking: a.uid, message: `${a.name}: extends ${grain.quantity}, but ${out} are out on this leg` });
+      problems.push({ code: "exceeds_out", uid_booking: a.uid, message: `${a.name}: extends ${grain.quantity}, but ${out} are ${w.held} on this leg` });
     }
     if (args.kind === "extend" && grain.line.to !== null && args.bookings.has(grain.line.to)) {
       problems.push({ code: "target_exists", uid_booking: grain.line.to, message: `${a.name}: the new leg already holds this booking` });
@@ -2007,18 +2099,19 @@ export function rebookProblems(args: {
       });
       continue;
     }
-    const aOut = a.units?.out ?? [];
+    const aOut = a.units?.[ladder.held] ?? [];
     const unrecorded = new Set(pool);
     const notOwn = grain.units.filter((n) => !aOut.includes(n));
     const notOut = notOwn.filter((n) => !unrecorded.has(n));
     if (notOut.length > 0) {
-      problems.push({ code: "unit_not_out", uid_booking: a.uid, units: notOut, message: `${a.name}: unit ${notOut.join(", ")} is not out on this leg` });
+      problems.push({ code: "unit_not_out", uid_booking: a.uid, units: notOut, message: `${a.name}: unit ${notOut.join(", ")} is not ${w.held} on this leg` });
     }
     // Only the units drawn from the pool spend the untracked allowance: a unit
     // in neither set is already `unit_not_out`, and counting it here too made
     // one bad number read as two problems (core#135).
     const drawn = notOwn.filter((n) => unrecorded.has(n));
-    const untracked = untrackedUnitCount(a, "out", true);
+    // Untracked = the bucket's count less its named units (a conversion residue).
+    const untracked = Math.max(0, out - aOut.length);
     if (drawn.length > untracked) {
       problems.push({
         code: "too_many_unrecorded",

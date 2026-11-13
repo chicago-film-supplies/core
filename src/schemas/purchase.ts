@@ -119,6 +119,7 @@
 import { z } from "zod";
 import { FirestoreId, ItemUid, ThreadId } from "./_uid.ts";
 import { chicagoInstant, chicagoStartOfDay } from "./_datetime.ts";
+import { UnitSet } from "./unit.ts";
 import { COACode, type COACodeType } from "./chart-of-accounts.ts";
 import {
   ActorRef,
@@ -153,6 +154,7 @@ import {
   type TaxRefType,
   checkDestinationJoin,
   checkLeadingDivider,
+  DestinationEndpoint,
   type DestinationEndpointType,
   leadingDividerViolations,
   type OrderDatesType,
@@ -1937,5 +1939,81 @@ export interface ClosePurchaseInputType {
 /** Zod schema for ClosePurchaseInputType. */
 export const ClosePurchaseInput: z.ZodType<ClosePurchaseInputType> = z.object({
   path_purchase_items: z.array(z.array(ItemUid).min(1)).min(1).optional(),
+  version: z.int().min(0),
+});
+
+// ── Subrent extension input (one-document-model ruling 57) ───────
+
+/** One row of a subrent extension: the units of one leg-A subrent row CFS keeps. */
+export interface ExtendSubrentLineType {
+  /** The row's CURRENT path on leg A. */
+  path: string[];
+  /** Units to move onto leg B; at most the row's quantity, and at most what is stocked on A. */
+  quantity: number;
+  /**
+   * Which units CFS keeps, on a `serialized` product: exactly `quantity` numbers,
+   * each in leg A's inbound booking `units.stocked`. Required for a serialized
+   * product and refused for any other (the operator picks, the server never
+   * infers; serial-tracking D3).
+   */
+  units?: number[];
+  /**
+   * What the supplier charges for the extension on a FLAT line, integer cents,
+   * on top of the moved units' share of the line's amount (owner, 2026-11-12:
+   * "split, then add"). Required on a flat line (0 is a free extension) and
+   * refused on a time line, whose rates meter leg B's window as an order's do.
+   */
+  extension_cents?: number;
+}
+
+/**
+ * The body of `POST /purchases/{uid}/extensions`: CFS keeps some of a subrent
+ * leg's units past the supplier's collection (ruling 57, the twin of
+ * {@link ExtendRentalInputType} on an order).
+ *
+ * The write mints leg B (A's delivery, the new collection), moves each row's
+ * `quantity` from A to B and rebooks the units' custody from A's inbound booking
+ * to B's (`subrent_rebook_out` / `subrent_rebook_in`), so the bill meters each
+ * window. A flat line's amount is split at the partition (A keeps the share of
+ * its remaining units, B takes the moved units' share, each rounded on the
+ * cumulative amount so they sum to the original) and B adds `extension_cents`.
+ *
+ * Its own schema rather than the order's: `extension_cents` has no order
+ * meaning, since an order line is always priced by its rates. Undo takes
+ * {@link UndoRentalExtensionInput} unchanged (the version alone).
+ *
+ * A `z.object`, as the order's: an api older than a field strips it.
+ */
+export interface ExtendSubrentInputType {
+  /** Leg A: the pair whose units CFS keeps. */
+  uid_pair_from: string;
+  /** Where the supplier collects the new leg from; `null` is leg A's own collection endpoint. */
+  collection: DestinationEndpointType | null;
+  /** The new collection; it must be later than leg A's. */
+  collection_start: string;
+  /** Defaults to `collection_start`. */
+  collection_end?: string | null;
+  lines: ExtendSubrentLineType[];
+  /** The purchase's version, as for `PUT /purchases/{uid}`. */
+  version: number;
+}
+
+/** Zod schema for {@link ExtendSubrentInputType}. */
+export const ExtendSubrentInput: z.ZodType<ExtendSubrentInputType> = z.object({
+  uid_pair_from: z.uuid(),
+  collection: DestinationEndpoint.nullable(),
+  collection_start: chicagoInstant(),
+  collection_end: chicagoInstant().nullable().optional(),
+  lines: z.array(
+    z.object({
+      path: z.array(z.string()).min(2),
+      quantity: z.int().min(1),
+      units: UnitSet.optional(),
+      extension_cents: z.int().min(0).optional(),
+    }).refine((l) => l.units === undefined || l.units.length === l.quantity, {
+      message: "a line that names units names exactly `quantity` of them",
+      path: ["units"],
+    }),
+  ).min(1),
   version: z.int().min(0),
 });

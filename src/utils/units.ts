@@ -678,6 +678,23 @@ export function foldRosterUnits(roster: RosterUnits, m: RosterMovement): RosterU
 
   if (m.type === "enroll" || m.type === "unenroll") return foldRosterBoundary(next, m, once);
 
+  // The subrent rebook pair (one-document-model ruling 57): a subrent Extend
+  // moves `stocked` units from leg A's INBOUND booking to leg B's. The roster
+  // never names an inbound booking — a stocked unit stands on a shelf, at a
+  // record, or with a customer on an OUTBOUND booking — so nothing it records
+  // moves. Each named unit must still be on the roster: a rented-in unit joined
+  // it at `subrent_in` and leaves it at `subrent_out`, so one absent here was
+  // already sent back.
+  if (m.lines.length === 0 && (m.type === "subrent_rebook_out" || m.type === "subrent_rebook_in")) {
+    for (const { number: n } of m.units) {
+      once(n);
+      if (next[String(n)] === undefined) {
+        throw new RosterFoldError(`"${m.type}" rebooks unit ${n}, but the unit is not on the roster`, n);
+      }
+    }
+    return roster;
+  }
+
   // A step wholly on the customer's side (a sale's unit lost in transit, and its
   // undo): the unit left the roster at the sale, so it must still be absent,
   // and nothing changes (stock campaign decision 5).

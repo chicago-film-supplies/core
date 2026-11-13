@@ -790,6 +790,7 @@ export {
   CreatePurchaseInput,
   UpdatePurchaseInput,
   ClosePurchaseInput,
+  ExtendSubrentInput,
   type PurchaseStatusType,
   type PurchaseItemTypeType,
   type PurchaseProductItemTypeType,
@@ -816,6 +817,8 @@ export {
   type PurchaseDestinationInputType,
   type CreatePurchaseInputType,
   type UpdatePurchaseInputType,
+  type ExtendSubrentInputType,
+  type ExtendSubrentLineType,
   type ClosePurchaseInputType,
 } from "./purchase.ts";
 

@@ -392,6 +392,31 @@ Deno.test("foldRosterUnits: an unattributed_out unit (a conversion residue) rebo
   assertThrows(() => foldRosterUnits(inFirst, rebook("rebook_out", [1001], BOOKING, LEG_B)), RosterFoldError, `out on ${LEG_B}`);
 });
 
+Deno.test("foldRosterUnits: the SUBRENT rebook pair (ruling 57) moves nothing the roster records, and refuses a unit no longer on it", () => {
+  // A stocked rented-in unit may be on a shelf, at a record, or out with a
+  // customer on an OUTBOUND booking; the roster never names the inbound booking.
+  const start: RosterUnits = {
+    ...shelfRoster([1001]),
+    "1002": { state: "out", uid_booking: BOOKING },
+    "1003": { state: "away", uid_out_of_service: "record-1" },
+  };
+  const half = (type: "subrent_rebook_out" | "subrent_rebook_in", numbers: number[]): RosterMovement => ({
+    uid: `${SESSION}|${type}|po:${PRODUCT}:leg`,
+    type,
+    uid_booking: `po:${PRODUCT}:leg`,
+    custody: type === "subrent_rebook_out" ? { from: "stocked", to: null } : { from: null, to: "stocked" },
+    service: null,
+    lines: [],
+    units: numbers.map((n) => ({ uid_unit: `unit-${n}`, number: n, serial_number: null })),
+    sources: [{ collection: "bookings-inbound", uid: "po:other:leg" }],
+  });
+  assertEquals(foldRosterUnits(start, half("subrent_rebook_out", [1001, 1002, 1003])), start);
+  assertEquals(foldRosterUnits(start, half("subrent_rebook_in", [1001, 1002, 1003])), start);
+  // A unit already sent back (off the roster) cannot be rebooked.
+  assertThrows(() => foldRosterUnits(start, half("subrent_rebook_in", [1004])), RosterFoldError, "not on the roster");
+  assertThrows(() => foldRosterUnits(start, half("subrent_rebook_out", [1001, 1001])), RosterFoldError, "twice");
+});
+
 Deno.test("foldRosterUnits: a terminal rebook pair moves no unit — the roster comes back as the same object", () => {
   const start: RosterUnits = {
     ...shelfRoster([1001]),

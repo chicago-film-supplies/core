@@ -1321,6 +1321,140 @@ const updatePurchaseTransaction: TransactionDefinition = {
   ],
 };
 
+// ── extend-subrent / undo-extend-subrent (one-document-model ruling 57) ──
+//
+// POST /purchases/{uid}/extensions — CFS keeps some of a subrent leg's units
+// past the supplier's collection. The twin of `extend-rental` on the inbound
+// ladder: the units stay on the shelf, only the BOOKING holding them moves,
+// because an inbound booking's window IS its leg's dates. So the write is a
+// purchase edit (leg B, the kept quantity moved onto it, a flat line's money
+// split and the extension charge added) plus a custody re-attribution an
+// ordinary purchase edit never makes. Its own ids, so the drift check stays on;
+// it reuses the `update-purchase` and `purchase-custody` rules the edit fires.
+
+const SUBRENT_EXTENSION_TESTS = "api-cloudrun/tests/integration/purchases/subrentExtension.test.ts";
+
+const SUBRENT_REBOOK_MOVES_CUSTODY: EnforcementRef = {
+  kind: "test",
+  ref: `${SUBRENT_EXTENSION_TESTS}::an extension moves stocked custody to leg B, not stock`,
+  clause:
+    "A's inbound booking falls by k `stocked` and B's holds `stocked: k`, the receipt keeps no row at quantity_ordered: 0, each row's received count follows its units, and supply holds the physical count",
+  gates: true,
+};
+
+const SUBRENT_REBOOK_JOURNAL: EnforcementRef = {
+  kind: "test",
+  ref: `${SUBRENT_EXTENSION_TESTS}::one session holds subrent_rebook_out on A and subrent_rebook_in on B`,
+  clause:
+    "one subrent_rebook_out on A's booking naming A's row and one subrent_rebook_in on B's naming B's row per moved row, in one session, the out numbered first, the in naming A in sources[] under bookings-inbound",
+  gates: true,
+};
+
+const SUBRENT_UNDO_ROUND_TRIP: EnforcementRef = {
+  kind: "test",
+  ref: `${SUBRENT_EXTENSION_TESTS}::extend then undo restores the purchase, its bookings and supply`,
+  clause:
+    "after an extension and its undo, A's inbound bookings hold the pre-extension stocked counts, B's bookings and pair are gone, and the purchase's rows and quantities equal the pre-extension purchase",
+  gates: true,
+};
+
+const SUBRENT_CUSTODY_REPLAY: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-custody-replay.ts",
+  clause:
+    "every inbound booking's breakdown is the net of its journal, the subrent rebook pair included (`classifyInboundReplay`); every non-`ok` inbound verdict fails",
+  gates: true,
+};
+
+const extendSubrentRules: CollectionRule[] = [
+  {
+    id: "extend-subrent:rebook-to-inbound-bookings",
+    source: "purchases",
+    target: "bookings-inbound",
+    mode: "co-write",
+    invariant:
+      "For each inbound booking grain a moved row belongs to, A's booking gives up k units of `stocked` and leg B's (the same grain on the new leg) is created holding `stocked: k`. The rebook is applied to the purchase's stored-booking view and per-row custody BEFORE the floors, the receipt sync and the reconcile read them, so the receipt keeps no `quantity_ordered: 0` row, B's booking carries its units rather than ordering k fresh ones, and the row floors read each row's units where they now stand. k never exceeds A's `stocked` at that grain, and the receipt row must agree with the purchase row. On a serialized product the operator names the units, each in A's `units.stocked`.",
+    enforced_by: [SUBRENT_REBOOK_MOVES_CUSTODY],
+    transaction: "extend-subrent",
+    fields: [
+      { source: ["items", "quantity"], target: ["breakdown", "stocked"], transform: "A: stocked − k; B: stocked = k" },
+      { source: ["destinations", "dates"], target: ["dates"], transform: "B's booking takes leg B's window: A's delivery, the extension's collection" },
+    ],
+  },
+  {
+    id: "extend-subrent:inbound-bookings-to-transactions",
+    source: "bookings-inbound",
+    target: "transactions",
+    mode: "co-write",
+    invariant:
+      "The re-attribution is journaled per moved ROW as a pair in one session: `subrent_rebook_out` on A's booking (custody {stocked → null}, `path_source_item` A's row) and `subrent_rebook_in` on B's ({null → stocked}, B's row, `sources[]` naming A under `bookings-inbound` exactly once). No lines and no ledger effect: nothing moved physically. On a serialized product both halves name the units and the roster is folded in the purchase transaction. The out half takes the lower number.",
+    enforced_by: [SUBRENT_REBOOK_JOURNAL, SUBRENT_CUSTODY_REPLAY],
+    transaction: "extend-subrent",
+    fields: [
+      { source: ["uid"], target: ["uid_booking"] },
+      { source: ["breakdown", "stocked"], target: ["quantity"], transform: "k, the units re-attributed" },
+      { source: [], target: ["sources"], transform: "[{purchases}, {bookings-inbound: the other leg's}] on both halves" },
+    ],
+  },
+  {
+    id: "undo-extend-subrent:rebook-to-inbound-bookings",
+    source: "purchases",
+    target: "bookings-inbound",
+    mode: "co-write",
+    invariant:
+      "For each inbound booking on leg B, its `stocked` (every unit it holds; nothing else may be non-zero) returns to leg A's booking at the same grain, which gains it or is re-created holding it, and B's falls to zero and is deleted by the reconcile as plan-only. Refused unless B is still exactly what the extension made (only `subrent_rebook_in` on its bookings, nothing sent back or settled since, no live bill billing B). A flat line's money merges back as the sum of A's and B's amounts, the extension charge included.",
+    enforced_by: [SUBRENT_UNDO_ROUND_TRIP],
+    transaction: "undo-extend-subrent",
+    fields: [
+      { source: ["items", "quantity"], target: ["breakdown", "stocked"], transform: "A: stocked + k; B: deleted" },
+    ],
+  },
+  {
+    id: "undo-extend-subrent:inbound-bookings-to-transactions",
+    source: "bookings-inbound",
+    target: "transactions",
+    mode: "co-write",
+    invariant:
+      "The return is journaled as the reverse pair per row in one session: `subrent_rebook_out` on B's booking and `subrent_rebook_in` on A's, `sources[]` naming B under `bookings-inbound`. No lines and no ledger effect; on a serialized product both halves name the units.",
+    enforced_by: [SUBRENT_UNDO_ROUND_TRIP, SUBRENT_CUSTODY_REPLAY],
+    transaction: "undo-extend-subrent",
+    fields: [
+      { source: ["uid"], target: ["uid_booking"] },
+      { source: ["breakdown", "stocked"], target: ["quantity"], transform: "k, the units returned to A" },
+    ],
+  },
+];
+
+const extendSubrentTransaction: TransactionDefinition = {
+  id: "extend-subrent",
+  description:
+    "Extends part of a subrent leg (ruling 57): mints leg B (A's delivery, a new collection), moves the chosen rows' quantities from A to B, splits a flat line's amount at the partition and adds the extension charge, and re-attributes the kept units' custody from A's inbound bookings to B's with a `subrent_rebook_out`/`subrent_rebook_in` pair, all in the purchase write's one transaction. Otherwise runs the `update-purchase` cascade unchanged: the receipt, the inbound bookings and the status, supply via STOCK_STEPS, the return card and the bill sync.",
+  steps: [
+    "extend-subrent:rebook-to-inbound-bookings",
+    "extend-subrent:inbound-bookings-to-transactions",
+    "units:transactions-to-roster",
+    ...STOCK_STEPS,
+    ...PURCHASE_CUSTODY_STEPS,
+    "purchase-card:purchases-to-card",
+    "update-purchase:purchase-to-bills",
+  ],
+};
+
+const undoExtendSubrentTransaction: TransactionDefinition = {
+  id: "undo-extend-subrent",
+  description:
+    "Undoes a subrent extension: merges leg B's rows back onto leg A (core `mergeLegBack`, a flat line's amounts summed), deletes B, and re-attributes B's custody to A's inbound bookings with the reverse pair, in the purchase write's one transaction. Refused unless B is still exactly what the extension made. Otherwise runs the `update-purchase` cascade unchanged.",
+  steps: [
+    "undo-extend-subrent:rebook-to-inbound-bookings",
+    "undo-extend-subrent:inbound-bookings-to-transactions",
+    "units:transactions-to-roster",
+    ...STOCK_STEPS,
+    ...PURCHASE_CUSTODY_STEPS,
+    "purchase-card:purchases-to-card",
+    "update-purchase:purchase-to-bills",
+  ],
+};
+
 const closePurchaseTransaction: TransactionDefinition = {
   id: "close-purchase",
   description:
@@ -1370,6 +1504,7 @@ export const purchases: PropagationModule = {
     ...purchaseCustodyRules,
     ...updateInboundBookingRules,
     ...updatePurchaseBillRules,
+    ...extendSubrentRules,
     ...createPurchaseBillRules,
     ...settlePurchaseBillRules,
     settlementsToCreditRule("settle-purchase-bill:settlements-to-credit", "settle-purchase-bill"),
@@ -1388,6 +1523,8 @@ export const purchases: PropagationModule = {
   transactions: [
     createPurchaseTransaction,
     updatePurchaseTransaction,
+    extendSubrentTransaction,
+    undoExtendSubrentTransaction,
     closePurchaseTransaction,
     updateInboundBookingTransaction,
     finalizePurchaseTransaction,

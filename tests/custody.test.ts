@@ -20,6 +20,7 @@ import {
   type Booking,
   type BookingBreakdown,
   type BookingBreakdownKeyType,
+  emptyInboundBreakdown,
   BookingAction,
   BookingActions,
   BookingUpdate,
@@ -75,6 +76,8 @@ import {
   deriveCustodyStatus,
   expandCustodyOffer,
   extensionUndoRefusal,
+  INBOUND_REBOOK,
+  rebookProblems,
   planCustodyTransfer,
   substitutionCapacity,
   getCustodyRulesMarkdown,
@@ -1516,6 +1519,94 @@ Deno.test("custody - extensionUndoRefusal: one rule for the route, the transacti
   // Renamed units — the manager offered it.
   assertEquals(extensionUndoRefusal({ ...base, bookings: [bookingB({ units: [3, 4] })], movements: [rebookIn([3, 4])] }).ok, true);
   assert(why({ ...base, bookings: [bookingB({ units: [3, 5] })], movements: [rebookIn([3, 4])] }).includes("units changed"));
+});
+
+Deno.test("custody - extensionUndoRefusal on the inbound ladder: a subrent leg made by subrent_rebook_in (ruling 57)", () => {
+  const A = "po:prod:legA";
+  const B = "po:prod:legB";
+  const bookingB = (over: Partial<{ stocked: number; sent_back: number; quantity_ordered: number; units: number[] | null }> = {}) => ({
+    uid: B,
+    name: "Hotspot",
+    breakdown: { ...emptyInboundBreakdown(), stocked: over.stocked ?? 2, sent_back: over.sent_back ?? 0 },
+    quantity_ordered: over.quantity_ordered ?? 2,
+    units: over.units === undefined || over.units === null
+      ? null
+      : { ordered: [], received: [], stocked: over.units, sent_back: [], lost: [], damaged: [] },
+  });
+  const rebookIn = (units: number[] = []) => ({
+    uid: "m1",
+    type: "subrent_rebook_in" as const,
+    uid_booking: B,
+    sources: [{ collection: "bookings-inbound" as const, uid: A }],
+    quantity: 2,
+    units: units.map((n) => ({ uid_unit: `u${n}`, number: n, serial_number: null })),
+  });
+  const base = {
+    pairUid: "legB",
+    orderPairUids: ["legA", "legB"],
+    bookings: [bookingB()],
+    movements: [rebookIn()],
+    ladder: INBOUND_REBOOK,
+  };
+  assertEquals(extensionUndoRefusal(base), { ok: true, pairFrom: "legA", units: 2 });
+  const why = (args: Parameters<typeof extensionUndoRefusal>[0]) => {
+    const r = extensionUndoRefusal(args);
+    return r.ok ? "" : r.message;
+  };
+  // The outbound pair is not this ladder's: a leg rebooked by `rebook_in` is no subrent extension.
+  assert(why({ ...base, movements: [{ ...rebookIn(), type: "rebook_in" as const }] }).includes("not made by an extension"));
+  // The counterpart is named under `bookings-inbound`, never `bookings`.
+  assert(why({ ...base, movements: [{ ...rebookIn(), sources: [{ collection: "bookings" as const, uid: A }] }] }).includes("more than one leg"));
+  assert(why({ ...base, movements: [rebookIn(), { ...rebookIn(), uid: "m2", type: "subrent_out" as const }] }).includes("subrent out since"));
+  assert(why({ ...base, bookings: [bookingB({ stocked: 1, sent_back: 1 })] }).includes("sent back, settled or re-ordered"));
+  assert(why({ ...base, orderPairUids: ["legB"] }).includes("no longer on the purchase"));
+  assertEquals(extensionUndoRefusal({ ...base, bookings: [bookingB({ units: [3, 4] })], movements: [rebookIn([3, 4])] }).ok, true);
+  assert(why({ ...base, bookings: [bookingB({ units: [3, 5] })], movements: [rebookIn([3, 4])] }).includes("units changed"));
+});
+
+Deno.test("custody - rebookProblems on the inbound ladder reads `stocked` and the receipt (ruling 57)", () => {
+  const A = "po:prod:legA";
+  const B = "po:prod:legB";
+  const a = (stocked: number, units: number[] | null = null) => ({
+    uid: A,
+    name: "Hotspot",
+    breakdown: { ...emptyInboundBreakdown(), received: 1, stocked },
+    quantity_ordered: stocked + 1,
+    units: units === null ? null : { ordered: [], received: [], stocked: units, sent_back: [], lost: [], damaged: [] },
+  });
+  const line = (over: Partial<{ quantity: number; units: number[]; picked: number | null; serialized: boolean }> = {}) => ({
+    path: ["legA", "prod"],
+    name: "Hotspot",
+    uidProduct: "prod",
+    quantity: over.quantity ?? 2,
+    ...(over.units === undefined ? {} : { units: over.units }),
+    orderQuantity: 4,
+    pickedQuantity: over.picked === undefined ? 4 : over.picked,
+    serialized: over.serialized ?? false,
+    from: A,
+    to: B,
+  });
+  const codes = (lines: ReturnType<typeof line>[], booking = a(3)) =>
+    rebookProblems({
+      kind: "extend",
+      lines,
+      bookings: new Map([[A, booking]]),
+      unattributed: () => [],
+      ladder: INBOUND_REBOOK,
+    }).map((p) => `${p.code}: ${p.message}`);
+  assertEquals(codes([line()]), []);
+  // `received` (not yet put away) is not `stocked`: only shelved units extend.
+  assertEquals(codes([line({ quantity: 4 })]), ["exceeds_out: Hotspot: extends 4, but 3 are held on this leg"]);
+  assertEquals(codes([line({ picked: 3 })]), [
+    "picker_mismatch: Hotspot: the receipt holds 3 on this row against the purchase's 4 — align the receipt before extending it",
+  ]);
+  assertEquals(codes([line({ serialized: true, units: [7, 9] })], a(3, [7, 8, 9])), []);
+  assertEquals(codes([line({ serialized: true, units: [7, 6] })], a(3, [7, 8, 9])), [
+    "unit_not_out: Hotspot: unit 6 is not held on this leg",
+  ]);
+  assertEquals(codes([line({ serialized: true })], a(3, [7, 8, 9])), [
+    "units_required: Hotspot: its units are tracked by number — name the units that stay with CFS",
+  ]);
 });
 
 // ── custody transfer between bookings (decisions 1 and 11) ───────────
