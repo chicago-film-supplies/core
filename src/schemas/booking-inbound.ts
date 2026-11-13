@@ -213,10 +213,17 @@ export const InboundBookingSchema: z.ZodType<InboundBooking> = z.strictObject({
  *   it the undo consumes the row's received-damaged records newest first. Any
  *   other rule naming one is refused.
  *
- * ⚠️ **A settle is not an operator row.** `settle_lost` / `settle_damaged` and
- * their undos move only in the out-of-service record's `return_to_supplier`
- * commit (C4, the 0b lost-subrent trace), which reaches the lever as an internal
- * row; on this wire they are refused, as `reclassify_*` is on the outbound one.
+ * ⚠️ **A settle is not an operator row — with ONE paired exception.** `settle_lost`
+ * and every settle undo move only in the out-of-service record's
+ * `return_to_supplier` commit (C4, the 0b lost-subrent trace), which reaches the
+ * lever as an internal row; on this wire they are refused, as `reclassify_*` is on
+ * the outbound one. `settle_damaged` is accepted here ONLY as the take-back of a
+ * `same_trip` exchange line received in the same request (ruling 83): on a
+ * serialized X it is how the operator names which units go back damaged, as the
+ * outbound operator sends X's `mark_*` actions. This schema checks only that the
+ * request receives something ({@link BulkInboundBookingUpdateInput}); the LEVER
+ * does the real pairing, since only it can read `exchanged_for` and the
+ * disposition, and refuses an unpaired one.
  */
 export interface InboundBookingActionType {
   rule: InboundCustodyRuleId;
@@ -243,7 +250,7 @@ export const InboundBookingAction: z.ZodType<InboundBookingActionType> = z.objec
       message: "only a receive_damaged_undo names the out-of-service record it consumes",
     });
   }
-  if (inboundCustodyRule(a.rule).stage === "settle") {
+  if (inboundCustodyRule(a.rule).stage === "settle" && a.rule !== "settle_damaged") {
     ctx.addIssue({
       code: "custom",
       path: ["rule"],
@@ -347,5 +354,20 @@ export const BulkInboundBookingUpdateInput: z.ZodType<BulkInboundBookingUpdateIn
   b.updates.forEach((u, i) => {
     if (seen.has(u.uid)) ctx.addIssue({ code: "custom", path: ["updates", i, "uid"], message: "a booking is addressed once per request" });
     seen.add(u.uid);
+  });
+  // A wire `settle_damaged` is an exchange take-back (ruling 83): it travels with
+  // the exchange line's receive. The lever checks the pairing itself.
+  const receives = b.updates.some((u) => u.actions.some((a) => a.rule === "receive"));
+  b.updates.forEach((u, i) => {
+    u.actions.forEach((a, j) => {
+      if (a.rule === "settle_damaged" && !receives) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["updates", i, "actions", j, "rule"],
+          message: "settle_damaged is accepted only as the take-back of a same_trip exchange line received in the same " +
+            "request; settle a record's units on the record (return_to_supplier)",
+        });
+      }
+    });
   });
 });

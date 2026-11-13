@@ -326,7 +326,7 @@ export interface FulfillmentLineOrderFacts {
    */
   readonly quantity_ordered?: number | null;
   /**
-   * An exchange replacement line's pointer at the damaged rows
+   * An exchange line's pointer at the damaged rows
    * (api-cloudrun#1114), as the ORDER states it. Deep-copied, so the stored row
    * never aliases the order's array.
    */
@@ -411,7 +411,7 @@ export function substitutionRootQuantityPerParent(
 
 /**
  * The {@link FulfillmentLineSource} of a CATALOG component row — a row inside a
- * substituted subtree, or a component sent with an exchange's replacement.
+ * substituted subtree, or a component sent with an exchange line.
  *
  * Every descriptive fact comes from `deriveLineCatalogShape`, the one author an
  * order line's facts come from too, so a component reads the same on an order

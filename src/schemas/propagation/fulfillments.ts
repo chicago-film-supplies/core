@@ -467,7 +467,7 @@ const createFulfillmentExchangeRules: CollectionRule[] = [
     mode: "co-write",
     invariant:
       "A warehouse-staged mid-rental exchange is ONE write: the exchange pair, its " +
-      "destination divider and its replacement rows land together, with `version` " +
+      "destination divider and its exchange lines land together, with `version` " +
       "bumped and both `query_by_*` arrays re-derived from what is about to be " +
       "stored. 🔴 This is the ONE writer that adds a destination pair a fulfillment's " +
       "order does not have — `update-fulfillment-destinations` explicitly refuses " +
@@ -480,7 +480,7 @@ const createFulfillmentExchangeRules: CollectionRule[] = [
     transaction: "create-fulfillment-exchange",
     fields: [
       { source: ["destinations"], target: ["destinations"], transform: "the exchange pair appended" },
-      { source: ["items"], target: ["items"], transform: "the leg's divider and replacement rows appended" },
+      { source: ["items"], target: ["items"], transform: "the leg's divider and exchange lines appended" },
       { source: ["version"], target: ["version"], transform: "incremented" },
       {
         source: [],
@@ -517,7 +517,7 @@ const createFulfillmentExchangeTransaction: TransactionDefinition = {
   id: "create-fulfillment-exchange",
   description:
     "Stage a mid-rental EXCHANGE on a fulfillment: a destination pair carrying " +
-    "`exchange: { uid_pair, disposition }`, its divider, and the replacement row(s) " +
+    "`exchange: { uid_pair, disposition }`, its divider, and the exchange line(s) " +
     "under it naming — through `exchanged_for` — the rows they go out against, each entry " +
     "with its `reason`. Chaining is FLAT: the pair always names the original leg, and " +
     "a later exchange may name a row on an earlier exchange leg of it (api-cloudrun#1116). " +
@@ -526,7 +526,7 @@ const createFulfillmentExchangeTransaction: TransactionDefinition = {
     "reason `update-fulfillment-destinations` records: `buildBookingDates` has one " +
     "author and it is in `updateOrder`. The leg reaches the booking projection as an " +
     "INPUT (`api-cloudrun/src/lib/exchangeLegs.ts`, the api-cloudrun#882 pattern), so " +
-    "the next order write creates the replacement's booking whether or not the " +
+    "the next order write creates the exchange line's booking whether or not the " +
     "best-effort organization echo this route fires wins its version race.\n\n" +
     "⚠️ The unit taken back, X, is NOT touched here. For `disposition: \"same_trip\"` it " +
     "moves when the exchange's own trip is checked out (the rider in " +

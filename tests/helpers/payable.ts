@@ -131,6 +131,7 @@ export function purchasePair(uid: string, window: { start: string; end: string |
     dates: hireDates(window),
     delivery: STORE_ENDPOINT,
     collection: window ? STORE_ENDPOINT : null,
+    exchange: null,
   };
 }
 

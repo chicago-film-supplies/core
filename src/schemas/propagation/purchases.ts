@@ -269,6 +269,19 @@ const RECEIVE_DAMAGED_RECORD: EnforcementRef = {
   gates: true,
 };
 
+/**
+ * The inbound swap rider (C16, rulings 81-83): receiving a `same_trip` exchange
+ * line takes X back in the same request, bounded by its claims less the
+ * take-back forwards already sourced to the exchange line's booking.
+ */
+const EXCHANGE_TAKE_BACK: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/purchases/receiptExchange.test.ts::receiving a same_trip exchange line sends one back and flags and settles one in one request",
+  clause:
+    "a `same_trip` exchange of 2 (1 `cleaning`, 1 `damaged`): receiving the exchange line writes a `subrent_out` for the cleaning unit and, for the damaged one, a standalone `flag` opening a record sourced to the purchase and X's inbound booking plus its `return_to_supplier` settle, every take-back movement naming the exchange line's booking in sources[]; a second partial receive takes nothing more",
+  gates: true,
+};
+
 const updateInboundBookingRules: CollectionRule[] = [
   {
     id: "update-inbound-booking:booking-to-transactions",
@@ -291,8 +304,9 @@ const updateInboundBookingRules: CollectionRule[] = [
     target: "out-of-service",
     mode: "co-write",
     invariant:
-      "A unit received damaged (`receive_damaged`, ruling 80) opens one out-of-service record per step: its id and number are the step's `receive_flag` movement's, its reason `damaged`, its units flagged where the receipt put them (away on an uncounted product), its sources the purchase and the inbound booking (never `bookings:`, which core reads as the outbound owner), its supplier the purchase's, with its default thread. `receive_damaged_undo` cancels the row's open records newest first, whole (or the one `uid_out_of_service` names), and re-opens what it did not undo on a new record under the remainder sub-session, inheriting the oldest consumed record's details and shelf, as the outbound loss undo does (api-cloudrun#1218); a record with resolved units, or one no receipt of this row opened, is a 400.",
-    enforced_by: [RECEIVE_DAMAGED_RECORD],
+      "A unit received damaged (`receive_damaged`, ruling 80) opens one out-of-service record per step: its id and number are the step's `receive_flag` movement's, its reason `damaged`, its units flagged where the receipt put them (away on an uncounted product), its sources the purchase and the inbound booking (never `bookings:`, which core reads as the outbound owner), its supplier the purchase's, with its default thread. `receive_damaged_undo` cancels the row's open records newest first, whole (or the one `uid_out_of_service` names), and re-opens what it did not undo on a new record under the remainder sub-session, inheriting the oldest consumed record's details and shelf, as the outbound loss undo does (api-cloudrun#1218); a record with resolved units, or one no receipt of this row opened, is a 400. " +
+      "A `damaged` exchange TAKE-BACK (C16, rulings 81-83) is the second writer: received on a `same_trip` exchange line, it first settles X's units received damaged on their own records (no custody step, ruling 64), then flags X's clean `stocked` units in place on a NEW record (a standalone `flag`, sourced to the record and X's inbound booking, never a purchase) and settles that record (`return_to_supplier`, `stocked → damaged`) in the same commit, so no record is born terminal. Every take-back movement names the exchange line's inbound booking in sources[]; the record never does.",
+    enforced_by: [RECEIVE_DAMAGED_RECORD, EXCHANGE_TAKE_BACK],
     transaction: "update-inbound-booking",
     fields: [
       { source: ["breakdown", "damaged"], target: ["breakdown", "flagged"], transform: "the step's quantity; `away` on an uncounted product" },
@@ -302,6 +316,35 @@ const updateInboundBookingRules: CollectionRule[] = [
         target: ["sources"],
         transform: "[{collection:'purchases', uid, label: 'PO-' + number}, {collection:'bookings-inbound', uid: booking.uid, label}]",
       },
+    ],
+  },
+];
+
+/** A receipt-authored exchange leg is one write (ruling 82), the fulfillment route's twin. */
+const RECEIPT_EXCHANGE_LEG_IS_ATOMIC: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/purchases/receiptExchange.test.ts::POST /exchanges on a receipt stages the leg, its divider and its exchange line",
+  clause:
+    "one call stores the pair (with its `exchange` block and the parent's endpoints), the destination divider keyed on the pair uid and the exchange line under it carrying `exchanged_for`; a stale `version` is a 409",
+  gates: true,
+};
+
+const createReceiptExchangeRules: CollectionRule[] = [
+  {
+    id: "create-receipt-exchange:leg-self",
+    source: "purchase-receipts",
+    target: "purchase-receipts",
+    mode: "co-write",
+    invariant:
+      "A receiver-staged exchange on a subrent (ruling 82) is ONE write: the exchange pair, its destination divider and its exchange lines land together, with `version` bumped and the derived fields (`due_at`, the `query_by_*` arrays) re-derived from what is about to be stored. It is the one writer that adds a pair the receipt's purchase does not have, admissible because the exchange is a fact about what the supplier DID. The inbound bookings follow as an INPUT to `reconcileInboundBookings` (the receipt's stored-only pairs), converged best-effort after commit, as the fulfillment route's are.",
+    enforced_by: [RECEIPT_EXCHANGE_LEG_IS_ATOMIC],
+    transaction: "create-receipt-exchange",
+    fields: [
+      { source: ["destinations"], target: ["destinations"], transform: "the exchange pair appended" },
+      { source: ["items"], target: ["items"], transform: "the leg's divider and exchange lines appended" },
+      { source: ["version"], target: ["version"], transform: "incremented" },
+      { source: [], target: ["query_by_dates"], transform: "recomputed from the merged destinations" },
+      { source: [], target: ["query_by_contacts"], transform: "recomputed from the merged destinations" },
     ],
   },
 ];
@@ -1471,7 +1514,7 @@ const closePurchaseTransaction: TransactionDefinition = {
 const updateInboundBookingTransaction: TransactionDefinition = {
   id: "update-inbound-booking",
   description:
-    "The inbound lever (`PUT /purchase-receipts/{uid}/bookings`, ruling 75): operator custody steps on a purchase's inbound bookings — receive, put away, send back, a flag on arrival, and each one's undo. A flag on arrival opens an out-of-service record (ruling 80); its undo cancels it, re-opening any remainder. A settle is the out-of-service record's (`update-out-of-service-record:record-to-inbound-booking`), not this lever's. Each step writes its movement and folds it onto the ledger and the shelves through the one ledger writer, claiming `stock-locks/{P}`; then the purchase is finalized from its committed bookings. A receipt posts nothing to Xero. Fires on: every custody step on an inbound booking. The unit roster steps fire when a step names units.",
+    "The inbound lever (`PUT /purchase-receipts/{uid}/bookings`, ruling 75): operator custody steps on a purchase's inbound bookings — receive, put away, send back, a flag on arrival, and each one's undo. A flag on arrival opens an out-of-service record (ruling 80); its undo cancels it, re-opening any remainder. A settle is the out-of-service record's (`update-out-of-service-record:record-to-inbound-booking`), and reaches this lever only as an exchange TAKE-BACK: receiving a `same_trip` exchange line takes X back in the same request (C16, rulings 81-83) — a `send_back` for a `cleaning`/`maintenance` entry, and for `damaged` a settle of X's units received damaged then a flag and settle of clean stock; on a serialized X the operator sends those actions, paired with the receive. Each step writes its movement and folds it onto the ledger and the shelves through the one ledger writer, claiming `stock-locks/{P}`; then the purchase is finalized from its committed bookings. A receipt posts nothing to Xero. Fires on: every custody step on an inbound booking. The unit roster steps fire when a step names units.",
   steps: [
     "update-inbound-booking:booking-to-transactions",
     "update-inbound-booking:booking-to-out-of-service",
@@ -1483,6 +1526,14 @@ const updateInboundBookingTransaction: TransactionDefinition = {
     ...PURCHASE_CUSTODY_STEPS,
     "purchase-card:purchases-to-card",
   ],
+};
+
+const createReceiptExchangeTransaction: TransactionDefinition = {
+  id: "create-receipt-exchange",
+  description:
+    "Stage a mid-hire EXCHANGE on a purchase receipt (`POST /purchase-receipts/{uid}/exchanges`, ruling 82), the twin of `create-fulfillment-exchange`: a destination pair carrying `exchange: { uid_pair, disposition }`, its divider, and the exchange line(s) under it naming — through `exchanged_for` — the subrent rows they go out against, each entry with its `reason`. Optimistic concurrency via `version`; writes the receipt only. A purchase has ONE card and an exchange leg never drives its due date, so no card step.\n\n" +
+    "🔴 The inbound BOOKINGS that follow are not a step: the leg reaches `reconcileInboundBookings` as an INPUT (the receipt's stored-only pairs), converged best-effort after commit, so the next purchase write books it whether or not the converge wins. X is NOT touched here: for `same_trip` it moves when the exchange line is received (the inbound rider, `update-inbound-booking`); for `send_now` by an ordinary send-back later.",
+  steps: ["create-receipt-exchange:leg-self"],
 };
 
 const finalizePurchaseTransaction: TransactionDefinition = {
@@ -1503,6 +1554,7 @@ export const purchases: PropagationModule = {
     ...purchaseCardRules,
     ...purchaseCustodyRules,
     ...updateInboundBookingRules,
+    ...createReceiptExchangeRules,
     ...updatePurchaseBillRules,
     ...extendSubrentRules,
     ...createPurchaseBillRules,
@@ -1527,6 +1579,7 @@ export const purchases: PropagationModule = {
     undoExtendSubrentTransaction,
     closePurchaseTransaction,
     updateInboundBookingTransaction,
+    createReceiptExchangeTransaction,
     finalizePurchaseTransaction,
     createPurchaseBillTransaction,
     updatePurchaseBillTransaction,

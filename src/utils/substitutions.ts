@@ -540,7 +540,7 @@ export function substitutionResync(
   };
 }
 
-/** One `exchanged_for` entry, as an exchange's replacement row carries it. */
+/** One `exchanged_for` entry, as an exchange line carries it. */
 export interface ExchangeEntry {
   readonly path: readonly string[];
   readonly quantity: number;
@@ -569,7 +569,7 @@ function presentPaths(rows: ReadonlyArray<{ readonly path: readonly string[] }>)
 
 /** One `exchanged_for` entry naming a row its own document does not carry. */
 export interface UnresolvedExchangeEntry {
-  /** The exchange's replacement row — the row carrying the entry. */
+  /** The exchange line — the row carrying the entry. */
   path: string[];
   entry: ExchangeEntry;
 }

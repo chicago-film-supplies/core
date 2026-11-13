@@ -98,20 +98,25 @@ const RULES_BY_GRAIN: Record<ItemArrayGrain, ItemArrayRule[]> = {
     "leading_divider", "destination_join", "parentage", "uniqueness", "path_empty", "path_not_self",
     "path_fixed_point", "zero_priced_non_component", "zero_priced_unstated", "exchanged_for",
   ],
-  // The payable grains (one-document-model Phase 3): a purchase at order depth, a
-  // bill or credit at invoice depth under a `purchase` divider. A payable pair
-  // carries no exchange leg, and no booking grain until Phase 7.
+  // The payable grains (one-document-model Phase 3): a purchase and its receipt at
+  // order depth, a bill or credit at invoice depth under a `purchase` divider. A
+  // payable pair carries an exchange leg since ruling 81 (7a, C16), so each runs
+  // the `exchanged_for` arm of its role; no booking-grain rule until Phase 7b.
   purchase: [
     "leading_divider", "destination_join", "parentage", "uniqueness", "path_empty", "path_not_self",
-    "path_fixed_point", "zero_priced_non_component", "zero_priced_unstated",
+    "path_fixed_point", "zero_priced_non_component", "zero_priced_unstated", "exchanged_for",
+  ],
+  purchase_receipt: [
+    "leading_divider", "destination_join", "parentage", "uniqueness", "path_empty", "path_not_self",
+    "path_fixed_point", "zero_priced_non_component", "zero_priced_unstated", "exchanged_for",
   ],
   purchase_document: [
     "leading_divider", "destination_join", "parentage", "uniqueness", "path_empty", "path_not_self",
-    "path_fixed_point", "zero_priced_non_component", "zero_priced_unstated",
+    "path_fixed_point", "zero_priced_non_component", "zero_priced_unstated", "exchanged_for",
   ],
 };
 
-const GRAINS: ItemArrayGrain[] = ["order", "fulfillment", "invoice", "purchase", "purchase_document"];
+const GRAINS: ItemArrayGrain[] = ["order", "fulfillment", "invoice", "purchase", "purchase_receipt", "purchase_document"];
 
 for (const grain of GRAINS) {
   Deno.test(`itemArrayIssues(${grain}): a clean document has no issues`, () => {

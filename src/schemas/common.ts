@@ -319,7 +319,7 @@ export function exchangedForKey(entry: { path: readonly string[]; reason: string
 }
 
 /**
- * `exchanged_for` on an exchange's replacement line: the rows this row is going out
+ * `exchanged_for` on an exchange line: the rows this row is going out
  * against, with how many units each and why they come back.
  *
  * ⭐ **The shape of {@link SubstitutedForList} plus a `reason`, deliberately,

@@ -129,6 +129,9 @@ import {
   COA_COST_CODES,
   COA_EXPENSED_ASSET_CODES,
   COA_REVENUE_CODES,
+  ExchangedForList,
+  ExchangedForListInput,
+  type ExchangedForEntryType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
   InvoiceStatusEnum,
@@ -153,8 +156,13 @@ import {
   TaxRef,
   type TaxRefType,
   checkDestinationJoin,
+  checkExchangedFor,
+  checkExchangePairs,
   checkLeadingDivider,
   DestinationEndpoint,
+  type DestinationExchangeType,
+  DestinationPairCore,
+  DestinationPairInputCore,
   type DestinationEndpointType,
   leadingDividerViolations,
   type OrderDatesType,
@@ -621,6 +629,18 @@ export interface PurchaseRentalItem extends Omit<PurchaseItemBase, "ledger_accou
    * the units stay fungible across every booking.
    */
   uid_orders: string[];
+  /**
+   * An EXCHANGE LINE's take-back list (ruling 81 of the one-document-model plan):
+   * the rows of this purchase the line goes out against, with how many units and
+   * why each goes back to the supplier — the order line's `exchanged_for`, on the
+   * payable side. Valid only on a row under a pair marked `exchange`
+   * ({@link checkExchangedFor}). A take-back keeps X's quantity and its billing.
+   *
+   * Tagged `shared: "value"`, as the order line's: its entries carry no `uid`, so
+   * the merge takes it WHOLE. The receipt and bill lines carry it untagged.
+   * Plain `.optional()`, as on the order: meaningful on exchange lines only.
+   */
+  exchanged_for?: ExchangedForEntryType[];
 }
 
 /**
@@ -866,6 +886,9 @@ const RentalItemInner = z.strictObject({
   price: PurchaseLinePriceSchema,
   quantity_billed: billedKey.nullable(),
   uid_orders: z.array(FirestoreId),
+  // See the interface docblock. `seed: false`: a seeded `[]` would claim a
+  // take-back list on a line under no exchange pair, which `checkExchangedFor` refuses.
+  exchanged_for: ExchangedForList.optional().meta({ shared: "value", seed: false }),
 }).superRefine((item, ctx) => {
   storedUidIssue(item, ctx);
   addIssues(purchaseLineMoneyIssues(item), ctx);
@@ -1103,8 +1126,9 @@ export const PurchaseLineRefSchema: z.ZodType<PurchaseLineRef> = z.strictObject(
 // ── Document ─────────────────────────────────────────────────────
 
 /**
- * A purchase's destination pair — the side-neutral {@link PairCoreType}, with
- * no customer flags, jurisdiction or exchange leg (one-document-model Phase 3).
+ * A purchase's destination pair — the side-neutral {@link PairCoreType} plus the
+ * exchange-leg marker (ruling 81 of the one-document-model plan), with no
+ * customer flags or jurisdiction.
  *
  * - `delivery` — where the goods come INTO CFS's hands: the store by default; a
  *   customer's address on a drop ship; the supplier's when CFS collects.
@@ -1121,10 +1145,26 @@ export const PurchaseLineRefSchema: z.ZodType<PurchaseLineRef> = z.strictObject(
  *   A standing hire states neither collection bound (`+∞` in supply); a pair
  *   with no hire states no dates at all.
  */
-export type PurchaseDestination = PairCoreType;
+export interface PurchaseDestination extends PairCoreType {
+  /**
+   * Set when this pair is an EXCHANGE leg against another leg of the same
+   * purchase — a supplier swapping units mid-hire (ruling 81). The order's
+   * `DestinationExchangeType`, the same instance key by key, so the merge and
+   * the pair-parity identity hold. Required-nullable, as the order's stored pair:
+   * `null` is an ordinary leg.
+   */
+  exchange: DestinationExchangeType | null;
+}
 
-/** Zod schema for {@link PurchaseDestination}. */
-export const PurchaseDestinationSchema: z.ZodType<PurchaseDestination> = z.strictObject({ ...PairCore }).superRefine(
+/**
+ * Zod schema for {@link PurchaseDestination}. The receipt carries the same pair.
+ * The pair-to-pair rule (an exchange names an ordinary leg of this document) is
+ * on the ARRAY, `checkExchangePairs`, as on the order.
+ */
+export const PurchaseDestinationSchema: z.ZodType<PurchaseDestination> = z.strictObject({
+  ...PairCore,
+  exchange: DestinationPairCore.exchange,
+}).superRefine(
   (pair, ctx) => hireOrderIssue(pair.dates, ctx),
 );
 
@@ -1306,6 +1346,7 @@ function checkPurchase(p: Purchase, ctx: z.RefinementCtx): void {
   }
   checkLeadingDivider("purchase")(p, ctx);
   checkDestinationJoin(p, ctx);
+  checkExchangedFor(p, ctx);
   const mirrors = [
     ["query_by_products", p.query_by_products, deriveQueryByProducts(p.items), "the products the items order"],
     ["query_by_orders", p.query_by_orders, deriveQueryByOrders(p.items), "the distinct uid_orders on the subrent items"],
@@ -1351,7 +1392,7 @@ export const PurchaseSchema: z.ZodType<Purchase> = z.strictObject({
   // invoice, fulfillment and receipt (C15 item 1). The writer refused both
   // before; this is what lets a corpus re-parse see a stored violation.
   items: z.array(PurchaseRowSchema).min(1).meta({ label: "Item" }).superRefine(checkZeroPricedComponents),
-  destinations: z.array(PurchaseDestinationSchema).min(1).meta({ label: "Destination" }),
+  destinations: z.array(PurchaseDestinationSchema).min(1).superRefine(checkExchangePairs).meta({ label: "Destination" }),
   total_cents: z.int().min(0).meta({ column: true, label: "Total", ...homonym }),
   query_by_products: z.array(FirestoreId).meta({ derived: true }),
   query_by_orders: z.array(FirestoreId).meta({ derived: true }),
@@ -1512,6 +1553,8 @@ export interface PurchaseRentalItemInputType extends PurchaseItemInputBase {
   ledger_account?: COACodeType | null;
   /** The orders the item was raised for. Absent is `[]`: the writer states it. */
   uid_orders?: string[];
+  /** @see {@link PurchaseRentalItem.exchanged_for}. A stripping list ({@link ExchangedForListInput}). */
+  exchanged_for?: ExchangedForEntryType[];
   /** Retired — see `retiredUnitsKey`. Present is a 400. */
   uid_units?: never;
 }
@@ -1646,6 +1689,7 @@ const rentalItemInputArm = z.object({
   amount_cents: z.int().min(0).nullable().optional(),
   ledger_account: COACode.nullable().optional(),
   uid_orders: z.array(FirestoreId).optional(),
+  exchanged_for: ExchangedForListInput.optional().meta({ seed: false }),
   uid_units: retiredUnitsKey("a purchase line names no units; name them on the receipt's custody step"),
 }).superRefine((item, ctx) => {
   inputPostingIssue(item, ctx);
@@ -1749,6 +1793,8 @@ export interface PurchaseDestinationInputType {
   dates: OrderDatesType;
   delivery: DestinationEndpointType;
   collection: DestinationEndpointType | null;
+  /** @see {@link PurchaseDestination.exchange}. Optional on input: the writer stamps `null`. */
+  exchange?: DestinationExchangeType | null;
 }
 
 /**
@@ -1768,6 +1814,7 @@ export interface PurchaseDestinationInputType {
 export const PurchaseDestinationInput: z.ZodType<PurchaseDestinationInputType> = z.object({
   uid: z.uuid(),
   ...PairInputCore,
+  exchange: DestinationPairInputCore.exchange,
 }).superRefine(purchaseDestinationInputIssues);
 
 /** The rules a payable pair input carries, shared with a bill's pair input. */

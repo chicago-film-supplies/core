@@ -59,13 +59,15 @@ import {
   type ActorRefType,
   checkZeroPricedAmount,
   checkZeroPricedComponents,
+  ExchangedForList,
+  type ExchangedForEntryType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
   TimestampFields,
   UidNameRef,
   type UidNameRefType,
 } from "./common.ts";
-import { checkDestinationJoin, checkLeadingDivider } from "./order.ts";
+import { checkDestinationJoin, checkExchangedFor, checkExchangePairs, checkLeadingDivider } from "./order.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import { LineItemCore } from "./_items.ts";
 import {
@@ -112,6 +114,15 @@ export interface PurchaseReceiptLineItemType {
    * field's presence. Required-nullable: there is no legacy population.
    */
   quantity_ordered: number | null;
+  /**
+   * An exchange line's take-back list, as the purchase line states it
+   * (`PurchaseRentalItem.exchanged_for`, ruling 81): merged three-way from the
+   * purchase like any shared value, but a row whose booking grain holds live
+   * custody keeps its stored list, as the fulfillment row does. Untagged: the
+   * purchase line's `shared: "value"` tag classifies it. Refused on a `sale` row
+   * (a Buy is not hired, so nothing goes back on an exchange).
+   */
+  exchanged_for?: ExchangedForEntryType[];
 }
 
 // Un-annotated so `_zod.propValues` survives for the discriminated union below
@@ -120,9 +131,19 @@ const PurchaseReceiptLineItemInner = z.strictObject({
   type: z.enum(PURCHASE_PRODUCT_ITEM_TYPES).meta({ column: true, label: "Type" }),
   ...LineItemCore,
   quantity_ordered: z.int().min(0).nullable(),
+  // See the interface docblock. `seed: false`, as on the purchase line.
+  exchanged_for: ExchangedForList.optional().meta({ seed: false }),
   // Vacuous at this grain, as on the fulfillment: no `price`, so it returns
   // early. Attached so the custody grains read identically.
-}).superRefine(checkZeroPricedAmount);
+}).superRefine(checkZeroPricedAmount).superRefine((row, ctx) => {
+  if (row.type === "sale" && row.exchanged_for !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["exchanged_for"],
+      message: "a Buy row takes nothing back: exchanged_for is valid only on a Subrent row",
+    });
+  }
+});
 
 export const PurchaseReceiptLineItem: z.ZodType<PurchaseReceiptLineItemType> = PurchaseReceiptLineItemInner;
 
@@ -224,7 +245,7 @@ export const PurchaseReceiptSchema: z.ZodType<PurchaseReceipt> = z.strictObject(
   number: z.int().min(1).meta({ column: true, label: "#", linkTo: "purchaseDetail" }),
   status: z.enum(PURCHASE_STATUSES).meta({ column: true, label: "Status" }),
   supplier: UidNameRef.meta({ label: "Supplier" }),
-  destinations: z.array(PurchaseDestinationSchema).min(1).meta({ label: "Destination" }),
+  destinations: z.array(PurchaseDestinationSchema).min(1).superRefine(checkExchangePairs).meta({ label: "Destination" }),
   items: z.array(PurchaseReceiptItem).min(1).meta({ label: "Item" }).superRefine(checkZeroPricedComponents),
   subject: z.string().meta({ pii: "mask", column: true, label: "Subject", linkTo: "purchaseDetail" }),
   reference: z.string().max(200).nullable().meta({ column: true, label: "Reference" }),
@@ -244,7 +265,8 @@ export const PurchaseReceiptSchema: z.ZodType<PurchaseReceipt> = z.strictObject(
   created_by: ActorRef.nullable().meta({ column: true, label: "Created By", propagate: false }),
   updated_by: ActorRef.nullable().meta({ column: true, label: "Updated By", propagate: false }),
   ...TimestampFields,
-}).superRefine(checkDestinationJoin).superRefine(checkLeadingDivider("purchase_receipt")).meta({
+}).superRefine(checkDestinationJoin).superRefine(checkLeadingDivider("purchase_receipt")).superRefine(checkExchangedFor)
+  .meta({
   title: "Purchase Receipt",
   collection: "purchase-receipts",
   displayDefaults: {

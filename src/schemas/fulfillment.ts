@@ -173,7 +173,7 @@ export interface FulfillmentLineItemType {
    */
   substituted_for?: SubstitutedForEntryType[];
   /**
-   * Set on a mid-rental exchange's replacement line: the DAMAGED rows this one is
+   * Set on a mid-rental exchange line: the DAMAGED rows this one is
    * going out against, with how many units each — see `ExchangedForList`.
    *
    * ⚠️ **Not `substituted_for`, and the difference is physical**: a substitution
@@ -342,7 +342,7 @@ export interface FulfillmentItemInputLineType {
    */
   substituted_for?: SubstitutedForEntryType[];
   /**
-   * The damaged rows an exchange's replacement line goes out against — see the
+   * The damaged rows an exchange line goes out against — see the
    * stored line's `exchanged_for`. It needs an input channel for the reason this
    * file records above: a plain `z.object` STRIPS an undeclared key, so without
    * it a picker write would silently drop the exchange's link to the rows it

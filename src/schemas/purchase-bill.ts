@@ -91,8 +91,12 @@ import {
   payableLineUidIssue,
 } from "./purchase.ts";
 import {
+  billingExchangedForViolations,
   checkDestinationJoin,
   checkLeadingDivider,
+  type DestinationExchangeType,
+  DestinationPairCore,
+  DestinationPairInputCore,
   type OrderDocDestinationItemType,
   type OrderDocGroupItemType,
   PairCore,
@@ -120,6 +124,9 @@ import {
   InvoiceStatusEnum,
   type InvoiceStatusType,
   type SettlementReasonType,
+  ExchangedForList,
+  ExchangedForListInput,
+  type ExchangedForEntryType,
   SubstitutedForList,
   SubstitutedForListInput,
   type SubstitutedForEntryType,
@@ -295,6 +302,19 @@ export interface PurchaseDocumentProductItem extends Omit<PurchaseDocumentLineBa
    * billed rather than still open.
    */
   substituted_for?: SubstitutedForEntryType[];
+  /**
+   * An exchange line's take-back list, as the purchase line states it
+   * (`PurchaseRentalItem.exchanged_for`; ruling 82): the invoice line's twin.
+   * PURCHASE-relative — no purchase-divider prefix — as `path_purchase_item` and
+   * `substituted_for` are, so an un-overridden line takes the purchase's list
+   * through the merge. A billing fact only: no quantity cap here. The document
+   * checks what it can see ({@link billingExchangedForViolations} over
+   * `uid_purchase`); the writer checks the rest against the purchase's pairs.
+   * Untagged: the purchase line's `shared: "value"` tag classifies it. A
+   * supplier credit refuses it (`checkPurchaseCredit`), as the AR credit note's
+   * line carries none.
+   */
+  exchanged_for?: ExchangedForEntryType[];
 }
 
 /**
@@ -393,12 +413,20 @@ export function purchaseDocumentLines(rows: readonly PurchaseDocumentRow[]): Pur
  */
 export interface PurchaseDocDestination extends PairCoreType {
   uid_purchase: string;
+  /**
+   * The purchase pair's exchange-leg marker (`PurchaseDestination.exchange`),
+   * as an invoice pair carries its order pair's. Forced: the purchase pair is
+   * spread into this one. No `checkExchangePairs` on the array, as on the
+   * invoice: a bill may carry an exchange pair whose parent another bill bills.
+   */
+  exchange: DestinationExchangeType | null;
 }
 
 /** Zod schema for {@link PurchaseDocDestination}. */
 export const PurchaseDocDestinationSchema: z.ZodType<PurchaseDocDestination> = z.strictObject({
   uid_purchase: FirestoreId,
   ...PairCore,
+  exchange: DestinationPairCore.exchange,
 });
 
 /**
@@ -485,6 +513,8 @@ const PurchaseDocumentProductItemInner = z.strictObject({
   path_purchase_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
   // Plain `.optional()`, matching the invoice line's. Only a substitute carries it.
   substituted_for: SubstitutedForList.optional(),
+  // See the interface docblock. `seed: false`, as the invoice line's.
+  exchanged_for: ExchangedForList.optional().meta({ seed: false }),
 });
 
 const noCustodyLine = {
@@ -720,6 +750,13 @@ function checkPurchaseBill(b: PurchaseBill, ctx: z.RefinementCtx): void {
   purchaseScopeIssues(b, ctx);
   checkLeadingDivider("purchase_document")(b, ctx);
   checkDestinationJoin(b, ctx);
+  for (const v of billingExchangedForViolations(b, "uid_purchase")) {
+    ctx.addIssue({
+      code: "custom",
+      path: v.entry === null ? ["items", v.index, "exchanged_for"] : ["items", v.index, "exchanged_for", v.entry, v.field],
+      message: v.message,
+    });
+  }
   if (b.origin === "linked" && b.xero_id === null) {
     ctx.addIssue({ code: "custom", path: ["xero_id"], message: "a linked bill names the Xero document it links" });
   }
@@ -960,6 +997,16 @@ function checkPurchaseCredit(c: PurchaseCredit, ctx: z.RefinementCtx): void {
   // An empty credit (allowed at zero) has no rows to lead with.
   if (c.items.length > 0) checkLeadingDivider("purchase_document")({ items: c.items, query_by_purchases: uidPurchase ? [uidPurchase] : [] }, ctx);
   checkDestinationJoin(c, ctx);
+  // A credit credits money; it bills no substitute and takes nothing back. The
+  // shared row schema admits both keys for the bill, so the credit refuses them
+  // here, as the AR credit note's line schema carries neither (owner, 2026-11-12).
+  c.items.forEach((row, i) => {
+    for (const key of ["exchanged_for", "substituted_for"] as const) {
+      if ((row as Partial<Record<typeof key, unknown>>)[key] !== undefined) {
+        ctx.addIssue({ code: "custom", path: ["items", i, key], message: `a supplier credit line carries no ${key}` });
+      }
+    }
+  });
   if (c.origin === "linked" && c.xero_id === null) {
     ctx.addIssue({ code: "custom", path: ["xero_id"], message: "a linked credit names the Xero document it links" });
   }
@@ -1356,6 +1403,8 @@ export interface PurchaseBillLineInputType {
   path_purchase_item?: string[];
   /** What this row stands in for ({@link PurchaseDocumentProductItem.substituted_for}). */
   substituted_for?: SubstitutedForEntryType[];
+  /** An exchange line's take-back list ({@link PurchaseDocumentProductItem.exchanged_for}). */
+  exchanged_for?: ExchangedForEntryType[];
   /** Absent keeps; `null` clears the operator's class, restoring the line's own. */
   uid_tax_class_override?: string | null;
   /** Absent keeps the line's category; a uid sets it; `null` restores its product's, the order/invoice line rule (none with no product). */
@@ -1405,6 +1454,7 @@ export const PurchaseBillDestinationInput: z.ZodType<PurchaseBillDestinationInpu
   uid_purchase: FirestoreId,
   uid: z.uuid(),
   ...PairInputCore,
+  exchange: DestinationPairInputCore.exchange,
 }).superRefine(purchaseDestinationInputIssues);
 
 const billDividerInput = (type: "purchase" | "destination" | "group") =>
@@ -1424,6 +1474,7 @@ const billLineShape = (type: SharedLineType) => ({
   out_of_service: OutOfServiceListInput.optional().meta({ seed: false }),
   path_purchase_item: z.array(ItemUid).min(1).optional(),
   substituted_for: SubstitutedForListInput.optional(),
+  exchanged_for: ExchangedForListInput.optional().meta({ seed: false }),
   uid_tax_class_override: FirestoreId.nullable().optional(),
   uid_tracking_category: FirestoreId.nullable().optional(),
   price: z.object({

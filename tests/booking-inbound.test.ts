@@ -129,6 +129,24 @@ Deno.test("inbound lever: an action names its row, and a settle is the record's,
   assertEquals(actionIssues({ rule: "settle_lost", quantity: 1, path_source_item: ROW }), "rule");
   assertEquals(actionIssues({ rule: "settle_damaged_undo", quantity: 1, path_source_item: ROW }), "rule");
   assertEquals(actionIssues({ rule: "send_back", quantity: 1, path_source_item: ROW }), "");
+  // The one paired exception (ruling 83): admitted per action, judged per request.
+  assertEquals(actionIssues({ rule: "settle_damaged", quantity: 1, path_source_item: ROW }), "");
+});
+
+Deno.test("inbound lever: a wire settle_damaged travels with a receive in the same request (ruling 83)", () => {
+  const X = `${PURCHASE}:${PRODUCT}:${LEG}`;
+  const Y = `${PURCHASE}:${PRODUCT}:22222222-2222-4222-8222-222222222222`;
+  const settle = { uid: X, version: 0, actions: [{ rule: "settle_damaged", quantity: 1, path_source_item: ROW }] };
+  const receive = {
+    uid: Y,
+    version: 0,
+    actions: [{ rule: "receive", quantity: 1, path_source_item: ["22222222-2222-4222-8222-222222222222", PRODUCT] }],
+  };
+  const body = { version: 0, uuid_session: "11111111-1111-4111-8111-111111111111" };
+  const bare = BulkInboundBookingUpdateInput.safeParse({ ...body, updates: [settle] });
+  assert(!bare.success, "a bare settle_damaged stays refused: a record's units are settled on the record");
+  assertEquals(bare.error.issues.map((i) => i.path.join(".")), ["updates.0.actions.0.rule"]);
+  assert(BulkInboundBookingUpdateInput.safeParse({ ...body, updates: [receive, settle] }).success, "paired with a receive, the lever judges it");
 });
 
 Deno.test("inbound lever: allocations sum to the quantity, units are exactly `quantity` and ascending", () => {

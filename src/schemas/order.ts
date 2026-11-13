@@ -531,11 +531,11 @@ export const DocDestinationEndpoint: z.ZodType<DocDestinationEndpointType> = z.s
   contact: DocDestinationContact.nullable().meta({ column: true, label: "Contact" }),
 });
 
-/** What happens to the damaged unit the replacement is going out against. */
+/** What happens to the unit an exchange line is going out against. */
 export const EXCHANGE_DISPOSITIONS = ["same_trip", "send_now"] as const;
 /**
  * `same_trip` — the units taken back come back on the exchange's own trip.
- * `send_now` — the replacement goes out now and the units come back at the
+ * `send_now` — the exchange line goes out now and the units come back at the
  * normal return (or, for a `lost` entry, never). A fact about the TRIP; why each
  * unit comes back is the `exchanged_for` entry's `reason`.
  *
@@ -550,7 +550,7 @@ export const ExchangeDispositionEnum: z.ZodType<ExchangeDispositionType> = z.enu
  * A mid-rental exchange, stated ON the destination pair that carries it.
  *
  * 🔴 **An exchange IS a destination pair — an exchange LEG — not a structure of
- * its own.** The replacement unit goes out on its own trip, so it needs its own
+ * its own.** The exchange line's unit goes out on its own trip, so it needs its own
  * dates, its own booking, its own card and its own section of items; a
  * destination pair is all four already. Making it a pair is what puts an exchange
  * through the three-way merge (`utils/shared-fields.ts`) and the diff
@@ -697,8 +697,8 @@ export function checkStoredEndpoints(
  * An `exchanged_for` entry is a claim about two rows of THIS document, so only the
  * document can check it:
  *
- * 1. the row carrying it sits under a pair marked `exchange` — an exchange's
- *    replacement line, not an ordinary one;
+ * 1. the row carrying it sits under a pair marked `exchange` — an exchange
+ *    line, not an ordinary one;
  * 2. every path it names is on that pair's PARENT leg, or on ANOTHER exchange leg
  *    of the same parent (`path[0]`) — the units taken back are ones the family of
  *    legs sent out. The second arm is FLAT chaining (api-cloudrun#1116, owner
@@ -1462,9 +1462,10 @@ export interface DocDestinationType {
 
 /**
  * The side-neutral half of a destination pair — identity, dates and the two
- * endpoints — shared by BOTH sides (one-document-model Phase 3). A purchase's
- * pair is exactly this: a supplier leg has no collecting/returning flags, no
- * customer jurisdiction and no exchange leg. Read off {@link DocDestinationType}
+ * endpoints — shared by BOTH sides (one-document-model Phase 3). A supplier leg
+ * has no collecting/returning flags and no customer jurisdiction; its exchange-leg
+ * marker is the receivable one's instance, added by the purchase pair itself
+ * (`PurchaseDestination`, ruling 81), never here. Read off {@link DocDestinationType}
  * so the two cannot drift.
  */
 export type PairCoreType = Pick<DocDestinationType, "uid" | "dates" | "delivery" | "collection">;
@@ -2540,7 +2541,7 @@ export interface OrderDocLineItemType {
    */
   uid_tax_class_override?: string | null;
   /**
-   * Set on a mid-rental EXCHANGE's replacement line: the DAMAGED rows this one goes
+   * Set on a mid-rental EXCHANGE LINE: the DAMAGED rows this one goes
    * out against, with how many units each — see `ExchangedForList`. Only valid
    * on a row under a pair carrying `exchange`, naming rows on that pair's parent
    * leg ({@link checkExchangedFor}).
@@ -2603,7 +2604,7 @@ const OrderDocLineItemInner = z.strictObject({
   // shared with the invoice line (`_items.ts`).
   ...LineTaxCore,
   // Plain `.optional()`, matching `substituted_for` and `path_extension_for`:
-  // only an exchange's replacement line carries it. See the interface docblock.
+  // only an exchange line carries it. See the interface docblock.
   exchanged_for: ExchangedForList.optional().meta({ shared: "value" }),
 }).superRefine(checkItemContract).superRefine(checkZeroPricedAmount).superRefine(checkFormulaLineMoney);
 

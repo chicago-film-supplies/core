@@ -130,8 +130,12 @@ Deno.test("purchaseReceiptSharedFields: classified once, grouped by merge unit",
     "propagated quantity [flat_money]",
     "propagated zero_priced",
     "propagated quantity_per_parent",
+    // An exchange line's take-back list (ruling 81): merged WHOLE, three-way,
+    // through the purchase line's `shared: "value"` tag; the custody keep runs after.
+    "propagated exchanged_for",
   ]);
   assert(a.pair.some((f) => f.path === "dates.delivery_start" && f.kind === "propagated"));
+  assert(a.pair.some((f) => f.path === "exchange.uid_pair" && f.kind === "propagated"), "the exchange marker merges per leaf");
   assert(a.pair.some((f) => f.path === "delivery" && f.kind === "atom"));
   assert(a.doc.some((f) => f.path === "supplier" && f.kind === "atom"));
 
