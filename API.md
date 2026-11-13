@@ -39140,6 +39140,14 @@ interface PurchaseLineCustody {
 }
 ```
 
+### `RECEIVE_DAMAGED_MARK`
+
+The movement type a RECEIVED-damaged out-of-service record's mark is (ruling 80).
+
+```ts
+const RECEIVE_DAMAGED_MARK: "receive_flag";
+```
+
 ### `SourceItemMovement`
 
 A movement as {@link custodyBySourceItem} reads it.
@@ -39290,9 +39298,27 @@ every unit is back with its supplier or settled lost or damaged — a rented
 unit on a CFS shelf holds the booking open. A booking holding nothing is
 closed.
 
+### `isReceiveDamagedMark(mark: Pick<Movement, "type" | "service" | "uid_booking"> | null): mark is `
+
+Is `mark` a `receive_damaged` flag — the mark of an out-of-service record a
+unit RECEIVED damaged opened (ruling 80)? The forward flag only
+(`{none → damaged}`) naming its inbound booking; a clearing one is an undo and
+opens nothing. A record's mark is the movement sharing its id.
+
+The ONE author, read by the api's record PUT (reason edit, settle) and by the
+manager's record page, so the page never offers an edit the api refuses. Such
+a record names `purchases:` and `bookings-inbound:`, never `bookings:`, so
+`recordOwner` reads it as standalone; ask this instead.
+
 ### `lineCustodyAt(custody: ReadonlyMap<string, PurchaseLineCustody>, path: readonly string[]): PurchaseLineCustody`
 
 One row's custody from a {@link custodyBySourceItem} map — none when no movement names it.
+
+### `receiveDamagedReasonRefusal(recordNumber: number): string`
+
+Why a received-damaged record's reason cannot change: its units sit in the
+inbound booking's `damaged` key, and the inbound ladder holds no other
+out-of-service reason. One sentence for the api's refusal and the manager's hint.
 
 ### `sumInboundBreakdown(b: InboundBreakdown): number`
 

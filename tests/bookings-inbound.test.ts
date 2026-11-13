@@ -19,6 +19,8 @@ import {
   calculateInboundBreakdown,
   custodyBySourceItem,
   inboundBookingIdFor,
+  isReceiveDamagedMark,
+  receiveDamagedReasonRefusal,
   deriveInboundBookingStatus,
   derivePurchaseStatus,
   inboundCancelRefusal,
@@ -296,4 +298,16 @@ Deno.test("inboundBookingIdFor — a row books into {purchase}:{product}:{leg}[:
     assertEquals(component.split(":").length, 4);
     assert(component !== inboundBookingIdFor("po1", { uid: "prodA", path: [LEG, "prodA"] }));
   });
+});
+
+Deno.test("isReceiveDamagedMark — the forward receive_flag naming its booking, and nothing else (ruling 80)", async (t) => {
+  const mark = { type: "receive_flag" as const, service: { from: null, to: "damaged" as const }, uid_booking: "po1:prodA:leg" };
+  await t.step("the forward flag is the mark", () => assert(isReceiveDamagedMark(mark)));
+  await t.step("no mark, a clearing flag, an outbound flag and a booking-less flag are not", () => {
+    assertEquals(isReceiveDamagedMark(null), false);
+    assertEquals(isReceiveDamagedMark({ ...mark, service: { from: "damaged", to: null } }), false);
+    assertEquals(isReceiveDamagedMark({ ...mark, type: "flag" }), false);
+    assertEquals(isReceiveDamagedMark({ ...mark, uid_booking: null }), false);
+  });
+  await t.step("the refusal names the record", () => assertStringIncludes(receiveDamagedReasonRefusal(42), "#42: it was received damaged"));
 });

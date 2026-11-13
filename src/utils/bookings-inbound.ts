@@ -33,12 +33,44 @@ import {
   type InboundBreakdownKeyType,
   isInboundLive,
   isInboundTerminal,
+  type Movement,
   type MovementCustodyType,
   PURCHASE_STATUS_TRAITS,
   type PurchaseStatusType,
 } from "../schemas/mod.ts";
 import { CustodyRefusal } from "./custody.ts";
 import { buildBookingIdFromSignature, componentSignatureHash } from "./booking-id.ts";
+
+/** The movement type a RECEIVED-damaged out-of-service record's mark is (ruling 80). */
+export const RECEIVE_DAMAGED_MARK = "receive_flag" as const;
+
+/**
+ * Is `mark` a `receive_damaged` flag — the mark of an out-of-service record a
+ * unit RECEIVED damaged opened (ruling 80)? The forward flag only
+ * (`{none → damaged}`) naming its inbound booking; a clearing one is an undo and
+ * opens nothing. A record's mark is the movement sharing its id.
+ *
+ * The ONE author, read by the api's record PUT (reason edit, settle) and by the
+ * manager's record page, so the page never offers an edit the api refuses. Such
+ * a record names `purchases:` and `bookings-inbound:`, never `bookings:`, so
+ * `recordOwner` reads it as standalone; ask this instead.
+ */
+export function isReceiveDamagedMark(
+  mark: Pick<Movement, "type" | "service" | "uid_booking"> | null,
+): mark is Pick<Movement, "type" | "service"> & { uid_booking: string } {
+  return mark !== null && mark.type === RECEIVE_DAMAGED_MARK && mark.service?.from === null &&
+    mark.service?.to === "damaged" && typeof mark.uid_booking === "string";
+}
+
+/**
+ * Why a received-damaged record's reason cannot change: its units sit in the
+ * inbound booking's `damaged` key, and the inbound ladder holds no other
+ * out-of-service reason. One sentence for the api's refusal and the manager's hint.
+ */
+export function receiveDamagedReasonRefusal(recordNumber: number): string {
+  return `Cannot change the reason of out-of-service record #${recordNumber}: it was received damaged, and a ` +
+    "purchase's inbound booking holds no other reason. Return it to service and flag it again, or settle it.";
+}
 
 /** Σ of an inbound breakdown, over every key — never spelled key by key. */
 export function sumInboundBreakdown(b: InboundBreakdown): number {

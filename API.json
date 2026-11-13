@@ -18061,6 +18061,12 @@
           "doc": "What a purchase line has received and returned — the two co-written buckets\n`quantity_received` / `quantity_returned` retired by one-document-model C8,\nnow DERIVED from custody. Per GRAIN they are an inbound booking's\n({@link inboundCustodyCounts}); per LINE they are the net custody of the\nmovements naming that row ({@link custodyBySourceItem}, ruling 65), because\ntwo lines may share one booking."
         },
         {
+          "kind": "variable",
+          "name": "RECEIVE_DAMAGED_MARK",
+          "declaration": "const RECEIVE_DAMAGED_MARK: \"receive_flag\";",
+          "doc": "The movement type a RECEIVED-damaged out-of-service record's mark is (ruling 80)."
+        },
+        {
           "kind": "interface",
           "name": "SourceItemMovement",
           "declaration": "interface SourceItemMovement {\n  path_source_item?: readonly string[] | null;\n  custody: MovementCustodyType | null;\n  quantity: number;\n}",
@@ -18164,9 +18170,25 @@
         },
         {
           "kind": "function",
+          "name": "isReceiveDamagedMark",
+          "signature": "isReceiveDamagedMark(mark: Pick<Movement, \"type\" | \"service\" | \"uid_booking\"> | null): mark is ",
+          "doc": "Is `mark` a `receive_damaged` flag — the mark of an out-of-service record a\nunit RECEIVED damaged opened (ruling 80)? The forward flag only\n(`{none → damaged}`) naming its inbound booking; a clearing one is an undo and\nopens nothing. A record's mark is the movement sharing its id.\n\nThe ONE author, read by the api's record PUT (reason edit, settle) and by the\nmanager's record page, so the page never offers an edit the api refuses. Such\na record names `purchases:` and `bookings-inbound:`, never `bookings:`, so\n`recordOwner` reads it as standalone; ask this instead.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "lineCustodyAt",
           "signature": "lineCustodyAt(custody: ReadonlyMap<string, PurchaseLineCustody>, path: readonly string[]): PurchaseLineCustody",
           "doc": "One row's custody from a {@link custodyBySourceItem} map — none when no movement names it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "receiveDamagedReasonRefusal",
+          "signature": "receiveDamagedReasonRefusal(recordNumber: number): string",
+          "doc": "Why a received-damaged record's reason cannot change: its units sit in the\ninbound booking's `damaged` key, and the inbound ladder holds no other\nout-of-service reason. One sentence for the api's refusal and the manager's hint.",
           "paramTags": [],
           "returnsTag": null
         },
