@@ -6223,6 +6223,7 @@ interface InvoiceDocLineItemType {
   substituted_for?: SubstitutedForEntryType[];
   out_of_service?: OutOfServiceEntryType[];
   path_order_item?: string[];
+  exchanged_for?: ExchangedForEntryType[];
 }
 ```
 
@@ -6384,6 +6385,7 @@ interface InvoiceItemInputLineType {
   uid_tracking_category?: string | null;
   uid_tax_class_override?: string | null;
   substituted_for?: SubstitutedForEntryType[];
+  exchanged_for?: ExchangedForEntryType[];
   zero_priced?: boolean | null;
   quantity_per_parent?: number | null;
   out_of_service?: OutOfServiceEntryType[];
@@ -17004,6 +17006,25 @@ invoice-shaped data themselves.
 
 **Returns** — Deduped namespace list, always-on first, in collection order.
 
+### `billingExchangedForViolations(doc: typeLiteral, scopeKey: K): ExchangedForViolation[]`
+
+{@link exchangedForViolations} on a BILLING document (an invoice, a bill, a supplier
+credit; ruling 82 of the one-document-model plan). Its rows sit one level deeper than
+their source's (`[scope, leg, …]`, the scope divider being the source document's uid),
+its pairs are keyed `(scope, uid)`, and an `exchanged_for` entry stays SOURCE-relative,
+as every billing-line pointer does. So the rule runs once per scope over that scope's
+rows with the scope prefix stripped and that scope's pairs — the SAME rule, not a copy.
+
+⚠️ **One rule is deferred, never dropped:** an entry naming a leg this document does
+not carry may be a sibling exchange billed on another document, so it is the writer's
+to check against the source's pairs (`unknownLegs: "defer"`). The parent leg always
+resolves locally: it is named on the exchange pair itself (`exchange.uid_pair`).
+
+**Parameters**
+
+- `scopeKey` — the pair field naming the source document: `uid_order` on an
+invoice, `uid_purchase` on a bill or credit.
+
 ### `billsOutOfService(line: OutOfServiceLinkCarrier): boolean`
 
 Whether a line bills an out-of-service record at all.
@@ -17075,6 +17096,13 @@ API's write guard still applies the same function to an invoice at write time.
 `items` or only `destinations` is checked when it supplies the merged document.
 It is a REFINE, so under `z.strictObject` a stored violator becomes unwritable
 the moment a consumer pins it: the corpus has to read 0 first.
+
+### `checkInvoiceExchangedFor(inv: typeLiteral, ctx: z.RefinementCtx): void`
+
+An invoice line's `exchanged_for` (ruling 82): the order's rules
+(`checkExchangedFor`) over each order block, through
+{@link billingExchangedForViolations}. An entry naming a leg this invoice does not
+carry is left to the writer, which checks it against the ORDER's pairs.
 
 ### `checkItemContract(item: typeLiteral, ctx: z.RefinementCtx): void`
 
@@ -17508,7 +17536,7 @@ two entries on one path.
 
 A row's `exchanged_for` entries, with absent read as none.
 
-### `exchangedForViolations(doc: typeLiteral): ExchangedForViolation[]`
+### `exchangedForViolations(doc: typeLiteral, _: unknown): ExchangedForViolation[]`
 
 {@link checkExchangedFor}'s rules as DATA, so a writer or a client can ask the
 same question without a Zod context — the refinement is this function plus an
@@ -19528,6 +19556,17 @@ pair; line facts live here.
 
 ```ts
 const ExchangedForList: z.ZodType<ExchangedForEntryType[]>;
+```
+
+### `ExchangedForListInput`
+
+{@link ExchangedForList} as an input takes it: an extra key is stripped, as every input
+node's is (the {@link SubstitutedForListInput} pattern). The order and fulfillment inputs
+still take the strict list, which `tests/input-strictness.test.ts` freezes as debt; new
+inputs take this one.
+
+```ts
+const ExchangedForListInput: z.ZodType<ExchangedForEntryType[]>;
 ```
 
 ### `FIRESTORE_TIMESTAMP_META`
@@ -23936,6 +23975,7 @@ interface InvoiceDocLineItemType {
   substituted_for?: SubstitutedForEntryType[];
   out_of_service?: OutOfServiceEntryType[];
   path_order_item?: string[];
+  exchanged_for?: ExchangedForEntryType[];
 }
 ```
 
@@ -24091,6 +24131,7 @@ interface InvoiceItemInputLineType {
   uid_tracking_category?: string | null;
   uid_tax_class_override?: string | null;
   substituted_for?: SubstitutedForEntryType[];
+  exchanged_for?: ExchangedForEntryType[];
   zero_priced?: boolean | null;
   quantity_per_parent?: number | null;
   out_of_service?: OutOfServiceEntryType[];
@@ -24248,6 +24289,13 @@ May an operator move `from` to `to` via `PUT /invoices/{uid}`?
 Read this rather than the column, so the manager cannot offer a button the
 server will 400 — and so a status outside the vocabulary answers `false`
 instead of throwing on an undefined lookup.
+
+### `checkInvoiceExchangedFor(inv: typeLiteral, ctx: z.RefinementCtx): void`
+
+An invoice line's `exchanged_for` (ruling 82): the order's rules
+(`checkExchangedFor`) over each order block, through
+{@link billingExchangedForViolations}. An entry naming a leg this invoice does not
+carry is left to the writer, which checks it against the ORDER's pairs.
 
 ### `isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocLineItemType`
 
@@ -25985,6 +26033,25 @@ interface UpdateOrderInputType {
 }
 ```
 
+### `billingExchangedForViolations(doc: typeLiteral, scopeKey: K): ExchangedForViolation[]`
+
+{@link exchangedForViolations} on a BILLING document (an invoice, a bill, a supplier
+credit; ruling 82 of the one-document-model plan). Its rows sit one level deeper than
+their source's (`[scope, leg, …]`, the scope divider being the source document's uid),
+its pairs are keyed `(scope, uid)`, and an `exchanged_for` entry stays SOURCE-relative,
+as every billing-line pointer does. So the rule runs once per scope over that scope's
+rows with the scope prefix stripped and that scope's pairs — the SAME rule, not a copy.
+
+⚠️ **One rule is deferred, never dropped:** an entry naming a leg this document does
+not carry may be a sibling exchange billed on another document, so it is the writer's
+to check against the source's pairs (`unknownLegs: "defer"`). The parent leg always
+resolves locally: it is named on the exchange pair itself (`exchange.uid_pair`).
+
+**Parameters**
+
+- `scopeKey` — the pair field naming the source document: `uid_order` on an
+invoice, `uid_purchase` on a bill or credit.
+
 ### `checkCollectionLegs(doc: typeLiteral, ctx: z.RefinementCtx): void`
 
 The ORDER's collection legs agree with themselves and with its items — the
@@ -26153,7 +26220,7 @@ documents used it in either project (measured 2026-09-28).
 
 A row with a non-string `uid` is skipped: the schema parse owns it.
 
-### `exchangedForViolations(doc: typeLiteral): ExchangedForViolation[]`
+### `exchangedForViolations(doc: typeLiteral, _: unknown): ExchangedForViolation[]`
 
 {@link checkExchangedFor}'s rules as DATA, so a writer or a client can ask the
 same question without a Zod context — the refinement is this function plus an
@@ -41178,6 +41245,7 @@ interface LineItem {
   path: string[];
   zero_priced?: boolean | null;
   quantity_per_parent?: number | null;
+  exchanged_for?: ExchangedForEntryType[];
   description?: string;
   order_number?: number;
   uid_order?: string | null;
@@ -44013,6 +44081,7 @@ interface LineItem {
   path: string[];
   zero_priced?: boolean | null;
   quantity_per_parent?: number | null;
+  exchanged_for?: ExchangedForEntryType[];
   description?: string;
   order_number?: number;
   uid_order?: string | null;
@@ -44799,7 +44868,7 @@ Every way an items array breaks the rules of its grain.
 | `path_fixed_point` | `validateItemPaths` / `validateInvoiceItemPaths` | all |
 | `zero_priced_non_component`, `zero_priced_unstated` | `zeroPricedFlaggedNonComponents`, `zeroPricedUnstatedComponents` | all |
 | `zero_quantity_component`, `mixed_booking_grain` | `zeroQuantityComponents`, `mixedBookingGrains` | order |
-| `exchanged_for` | `exchangedForViolations` | order, fulfillment (needs `destinations`) |
+| `exchanged_for` | `exchangedForViolations` (order, fulfillment); `billingExchangedForViolations` over `uid_order` (invoice) | order, fulfillment, invoice (needs `destinations`) |
 
 ⚠️ **(4) and (5) are asserted directly, beside the fixed point, on purpose.**
 A fixed-point check can only agree with its normalizer; these hold whatever
@@ -48413,6 +48482,7 @@ interface LineItem {
   path: string[];
   zero_priced?: boolean | null;
   quantity_per_parent?: number | null;
+  exchanged_for?: ExchangedForEntryType[];
   description?: string;
   order_number?: number;
   uid_order?: string | null;
@@ -53795,6 +53865,7 @@ interface LineItem {
   path: string[];
   zero_priced?: boolean | null;
   quantity_per_parent?: number | null;
+  exchanged_for?: ExchangedForEntryType[];
   description?: string;
   order_number?: number;
   uid_order?: string | null;

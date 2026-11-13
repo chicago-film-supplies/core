@@ -115,6 +115,7 @@ Deno.test("classifySharedFields: order → invoice, every shared key and its kin
     "propagated items[].uid_tracking_category",
     "propagated items[].uid_tax_class",
     "propagated items[].uid_tax_class_override",
+    "propagated items[].exchanged_for",
     "propagated tax_exempt",
     "propagated uid_store",
     "derived totals",

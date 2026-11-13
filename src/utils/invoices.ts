@@ -1064,6 +1064,11 @@ export function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: s
     // the order line's, never the value — the stamp is a snapshot, so the
     // statedness hazard the docblock names cannot arise.
     ...(item.quantity_per_parent !== undefined ? { quantity_per_parent: item.quantity_per_parent } : {}),
+    // An exchange line's take-back list (ruling 82 of the one-document-model plan),
+    // CONDITIONAL for `quantity_per_parent`'s reason, and presence-faithful: an order
+    // line's `[]` projects as `[]`. Entries stay ORDER-relative, as every billing
+    // pointer does, so nothing is re-pathed under `orderDividerUid`.
+    ...(item.exchanged_for !== undefined ? { exchanged_for: item.exchanged_for } : {}),
     // The account + tracking category (`LinePostingCore`) — shared fields that
     // propagate, so the projection carries the order line's and the three-way
     // merge decides whether an invoice override keeps its own.

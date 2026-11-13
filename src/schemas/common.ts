@@ -348,21 +348,32 @@ export function exchangedForKey(entry: { path: readonly string[]; reason: string
  * Trip facts (which leg it returns on, whether X comes back on it) stay on the
  * pair; line facts live here.
  */
-export const ExchangedForList: z.ZodType<ExchangedForEntryType[]> = z.array(ExchangedForEntry)
-  .superRefine((entries, ctx) => {
-    const seen = new Set<string>();
-    for (const [i, entry] of entries.entries()) {
-      const k = exchangedForKey(entry);
-      if (seen.has(k)) {
-        ctx.addIssue({
-          code: "custom",
-          path: [i, "path"],
-          message: "exchanged_for entries must be unique by path and reason; add to the existing entry's quantity",
-        });
-      }
-      seen.add(k);
+export const ExchangedForList: z.ZodType<ExchangedForEntryType[]> = z.array(ExchangedForEntry).superRefine(uniqueExchangedForKeys);
+
+function uniqueExchangedForKeys(entries: readonly ExchangedForEntryType[], ctx: z.RefinementCtx): void {
+  const seen = new Set<string>();
+  for (const [i, entry] of entries.entries()) {
+    const k = exchangedForKey(entry);
+    if (seen.has(k)) {
+      ctx.addIssue({
+        code: "custom",
+        path: [i, "path"],
+        message: "exchanged_for entries must be unique by path and reason; add to the existing entry's quantity",
+      });
     }
-  });
+    seen.add(k);
+  }
+}
+
+/**
+ * {@link ExchangedForList} as an input takes it: an extra key is stripped, as every input
+ * node's is (the {@link SubstitutedForListInput} pattern). The order and fulfillment inputs
+ * still take the strict list, which `tests/input-strictness.test.ts` freezes as debt; new
+ * inputs take this one.
+ */
+export const ExchangedForListInput: z.ZodType<ExchangedForEntryType[]> = z.array(
+  z.object({ path: z.array(ItemUid).min(1), quantity: z.int().positive(), reason: OOSReasonEnum }),
+).superRefine(uniqueExchangedForKeys);
 
 /**
  * A row's `exchanged_for` entries, with absent read as none.

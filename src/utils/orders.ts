@@ -11,6 +11,7 @@
 
 import type {
   COARevenueType,
+  ExchangedForEntryType,
   DiscountType,
   PriceModifierType,
   OrderDocTotalsType,
@@ -130,6 +131,11 @@ export interface LineItem {
   zero_priced?: boolean | null;
   /** @see `LineItemCore.quantity_per_parent` (`schemas/_items.ts`). */
   quantity_per_parent?: number | null;
+  /**
+   * An exchange line's take-back list (`OrderDocLineItemType.exchanged_for`), carried
+   * onto the invoice line by `projectOrderItemToInvoiceItem`. Source-relative.
+   */
+  exchanged_for?: ExchangedForEntryType[];
   description?: string;
   order_number?: number;
   uid_order?: string | null;

@@ -774,10 +774,24 @@ export function takeBackReasonsFor(disposition: ExchangeDispositionType): readon
  * {@link destinationJoinViolations}. Read {@link checkExchangedFor} for the three
  * rules and why existence is deliberately not one of them.
  */
-export function exchangedForViolations(doc: {
-  destinations: ReadonlyArray<{ uid: string; exchange?: DestinationExchangeType | null }>;
-  items: ReadonlyArray<{ path: readonly string[] }>;
-}): ExchangedForViolation[] {
+export function exchangedForViolations(
+  doc: {
+    destinations: ReadonlyArray<{ uid: string; exchange?: DestinationExchangeType | null }>;
+    items: ReadonlyArray<{ path: readonly string[] }>;
+  },
+  options: {
+    /**
+     * `refuse` (the default, a custody document's rule): an entry naming a leg this
+     * document does not carry is outside the exchange's family. `defer` (a billing
+     * document, {@link billingExchangedForViolations}): the leg may be a sibling
+     * exchange billed on ANOTHER document, which only the writer can see against the
+     * source's pairs, so it is left to the writer rather than refused here.
+     */
+    unknownLegs?: "refuse" | "defer";
+  } = {},
+): ExchangedForViolation[] {
+  const unknownLegs = options.unknownLegs ?? "refuse";
+  const pairUids = new Set(doc.destinations.map((p) => p.uid));
   const exchangeByPair = new Map(
     doc.destinations.filter((p) => p.exchange != null).map((p) => [p.uid, p.exchange!]),
   );
@@ -804,7 +818,8 @@ export function exchangedForViolations(doc: {
       // on the same parent — never this row's own leg.
       const onFamily = target === parentLeg ||
         (target !== leg && target !== undefined && exchangeByPair.get(target)?.uid_pair === parentLeg);
-      if (!onFamily) {
+      const deferred = unknownLegs === "defer" && target !== undefined && !pairUids.has(target);
+      if (!onFamily && !deferred) {
         out.push({
           index: i,
           entry: j,
@@ -823,6 +838,47 @@ export function exchangedForViolations(doc: {
       }
     });
   });
+  return out;
+}
+
+/**
+ * {@link exchangedForViolations} on a BILLING document (an invoice, a bill, a supplier
+ * credit; ruling 82 of the one-document-model plan). Its rows sit one level deeper than
+ * their source's (`[scope, leg, …]`, the scope divider being the source document's uid),
+ * its pairs are keyed `(scope, uid)`, and an `exchanged_for` entry stays SOURCE-relative,
+ * as every billing-line pointer does. So the rule runs once per scope over that scope's
+ * rows with the scope prefix stripped and that scope's pairs — the SAME rule, not a copy.
+ *
+ * ⚠️ **One rule is deferred, never dropped:** an entry naming a leg this document does
+ * not carry may be a sibling exchange billed on another document, so it is the writer's
+ * to check against the source's pairs (`unknownLegs: "defer"`). The parent leg always
+ * resolves locally: it is named on the exchange pair itself (`exchange.uid_pair`).
+ *
+ * @param scopeKey - the pair field naming the source document: `uid_order` on an
+ *   invoice, `uid_purchase` on a bill or credit.
+ */
+export function billingExchangedForViolations<K extends string>(
+  doc: {
+    destinations: ReadonlyArray<{ uid: string; exchange?: DestinationExchangeType | null } & { [key in K]: string }>;
+    items: ReadonlyArray<{ path: readonly string[] }>;
+  },
+  scopeKey: K,
+): ExchangedForViolation[] {
+  const scopes = new Map<string, number[]>();
+  doc.items.forEach((item, i) => {
+    if ((item as { exchanged_for?: unknown }).exchanged_for === undefined) return;
+    const scope = item.path[0];
+    if (scope === undefined) return;
+    scopes.set(scope, [...(scopes.get(scope) ?? []), i]);
+  });
+  const out: ExchangedForViolation[] = [];
+  for (const [scope, indices] of scopes) {
+    const items = indices.map((i) => ({ ...doc.items[i], path: doc.items[i].path.slice(1) }));
+    const destinations = doc.destinations.filter((p) => p[scopeKey] === scope);
+    for (const v of exchangedForViolations({ destinations, items }, { unknownLegs: "defer" })) {
+      out.push({ ...v, index: indices[v.index] });
+    }
+  }
   return out;
 }
 

@@ -2781,7 +2781,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocLineItemType",
-          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  xero_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  out_of_service?: OutOfServiceEntryType[];\n  path_order_item?: string[];\n}",
+          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  xero_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  out_of_service?: OutOfServiceEntryType[];\n  path_order_item?: string[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "A billable line item on an invoice."
         },
         {
@@ -2853,7 +2853,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  uid_tax_class_override?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_order_item?: string[];\n}",
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  uid_tax_class_override?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_order_item?: string[];\n}",
           "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItem`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
@@ -7657,6 +7657,19 @@
         },
         {
           "kind": "function",
+          "name": "billingExchangedForViolations",
+          "signature": "billingExchangedForViolations(doc: typeLiteral, scopeKey: K): ExchangedForViolation[]",
+          "doc": "{@link exchangedForViolations} on a BILLING document (an invoice, a bill, a supplier\ncredit; ruling 82 of the one-document-model plan). Its rows sit one level deeper than\ntheir source's (`[scope, leg, …]`, the scope divider being the source document's uid),\nits pairs are keyed `(scope, uid)`, and an `exchanged_for` entry stays SOURCE-relative,\nas every billing-line pointer does. So the rule runs once per scope over that scope's\nrows with the scope prefix stripped and that scope's pairs — the SAME rule, not a copy.\n\n⚠️ **One rule is deferred, never dropped:** an entry naming a leg this document does\nnot carry may be a sibling exchange billed on another document, so it is the writer's\nto check against the source's pairs (`unknownLegs: \"defer\"`). The parent leg always\nresolves locally: it is named on the exchange pair itself (`exchange.uid_pair`).",
+          "paramTags": [
+            {
+              "name": "scopeKey",
+              "doc": "the pair field naming the source document: `uid_order` on an\ninvoice, `uid_purchase` on a bill or credit."
+            }
+          ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "billsOutOfService",
           "signature": "billsOutOfService(line: OutOfServiceLinkCarrier): boolean",
           "doc": "Whether a line bills an out-of-service record at all.",
@@ -7700,6 +7713,14 @@
           "name": "checkDestinationJoin",
           "signature": "checkDestinationJoin(doc: typeLiteral, ctx: z.RefinementCtx): void",
           "doc": "{@link destinationJoinViolations} as a document-level refinement. Attached to\nthe ORDER and FULFILLMENT documents only.\n\n⚠️ **The INVOICE deliberately does not carry it**: an invoice is scoped to what\nit bills, so its dividers and pairs are whatever the billed lines need. The\nAPI's write guard still applies the same function to an invoice at write time.\n\n⚠️ **A document-level refinement, so a single-field PATCH does not see it** —\n`assertValidPatch` validates each key alone, and a writer patching only\n`items` or only `destinations` is checked when it supplies the merged document.\nIt is a REFINE, so under `z.strictObject` a stored violator becomes unwritable\nthe moment a consumer pins it: the corpus has to read 0 first.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "checkInvoiceExchangedFor",
+          "signature": "checkInvoiceExchangedFor(inv: typeLiteral, ctx: z.RefinementCtx): void",
+          "doc": "An invoice line's `exchanged_for` (ruling 82): the order's rules\n(`checkExchangedFor`) over each order block, through\n{@link billingExchangedForViolations}. An entry naming a leg this invoice does not\ncarry is left to the writer, which checks it against the ORDER's pairs.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -7962,7 +7983,7 @@
         {
           "kind": "function",
           "name": "exchangedForViolations",
-          "signature": "exchangedForViolations(doc: typeLiteral): ExchangedForViolation[]",
+          "signature": "exchangedForViolations(doc: typeLiteral, _: unknown): ExchangedForViolation[]",
           "doc": "{@link checkExchangedFor}'s rules as DATA, so a writer or a client can ask the\nsame question without a Zod context — the refinement is this function plus an\n`addIssue` per entry, as {@link checkDestinationJoin} is for\n{@link destinationJoinViolations}. Read {@link checkExchangedFor} for the three\nrules and why existence is deliberately not one of them.",
           "paramTags": [],
           "returnsTag": null
@@ -9177,6 +9198,12 @@
           "name": "ExchangedForList",
           "declaration": "const ExchangedForList: z.ZodType<ExchangedForEntryType[]>;",
           "doc": "`exchanged_for` on an exchange's replacement line: the rows this row is going out\nagainst, with how many units each and why they come back.\n\n⭐ **The shape of {@link SubstitutedForList} plus a `reason`, deliberately,\nand a different meaning.** Both say \"this row stands in relation to those\nrows, by this many units\", so every rule that reads a `{path, quantity}[]`\nreads both — the carry-forward across a rebuild, the row-identity rules, the\ndocument diff. What differs is the physical story, and it is the whole\ndistinction:\n\n| | `substituted_for` | `exchanged_for` |\n|---|---|---|\n| X went out | no — Y went instead | yes, and it is out NOW |\n| X's booking | cancelled by the netting | kept, and marked by `reason` |\n| why | the picker had no X on the shelf | X broke, got dirty or was lost mid-rental |\n\n🔴 **So they must never be conflated.** `itemsWithSubstitutions` NETS a\nsubstitution away — X's booking is cancelled and Y's inherits its custody —\nwhich is exactly the wrong answer for an exchange, where X is on set and its units\nare what the exchange takes back.\n\n⚠️ **It lives on the ROW rather than on the exchange PAIR**, because an exchange\nTRIP legitimately carries replacements for several damaged lines at once: one\nleg, one card, one drive. A pair-level field would force one leg per damaged\nline and put three trip cards on the dispatch board for one physical trip —\nand it would state \"what\" a level above the `quantity` that says \"how many\".\nTrip facts (which leg it returns on, whether X comes back on it) stay on the\npair; line facts live here."
+        },
+        {
+          "kind": "variable",
+          "name": "ExchangedForListInput",
+          "declaration": "const ExchangedForListInput: z.ZodType<ExchangedForEntryType[]>;",
+          "doc": "{@link ExchangedForList} as an input takes it: an extra key is stripped, as every input\nnode's is (the {@link SubstitutedForListInput} pattern). The order and fulfillment inputs\nstill take the strict list, which `tests/input-strictness.test.ts` freezes as debt; new\ninputs take this one."
         },
         {
           "kind": "variable",
@@ -11247,7 +11274,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocLineItemType",
-          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  xero_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  out_of_service?: OutOfServiceEntryType[];\n  path_order_item?: string[];\n}",
+          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  xero_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  out_of_service?: OutOfServiceEntryType[];\n  path_order_item?: string[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "A billable line item on an invoice."
         },
         {
@@ -11313,7 +11340,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  uid_tax_class_override?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_order_item?: string[];\n}",
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  uid_tax_class_override?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_order_item?: string[];\n}",
           "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItem`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
@@ -11393,6 +11420,14 @@
           "name": "canOperatorTransition",
           "signature": "canOperatorTransition(from: string, to: string): boolean",
           "doc": "May an operator move `from` to `to` via `PUT /invoices/{uid}`?\n\nRead this rather than the column, so the manager cannot offer a button the\nserver will 400 — and so a status outside the vocabulary answers `false`\ninstead of throwing on an undefined lookup.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "checkInvoiceExchangedFor",
+          "signature": "checkInvoiceExchangedFor(inv: typeLiteral, ctx: z.RefinementCtx): void",
+          "doc": "An invoice line's `exchanged_for` (ruling 82): the order's rules\n(`checkExchangedFor`) over each order block, through\n{@link billingExchangedForViolations}. An entry naming a leg this invoice does not\ncarry is left to the writer, which checks it against the ORDER's pairs.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -12174,6 +12209,19 @@
         },
         {
           "kind": "function",
+          "name": "billingExchangedForViolations",
+          "signature": "billingExchangedForViolations(doc: typeLiteral, scopeKey: K): ExchangedForViolation[]",
+          "doc": "{@link exchangedForViolations} on a BILLING document (an invoice, a bill, a supplier\ncredit; ruling 82 of the one-document-model plan). Its rows sit one level deeper than\ntheir source's (`[scope, leg, …]`, the scope divider being the source document's uid),\nits pairs are keyed `(scope, uid)`, and an `exchanged_for` entry stays SOURCE-relative,\nas every billing-line pointer does. So the rule runs once per scope over that scope's\nrows with the scope prefix stripped and that scope's pairs — the SAME rule, not a copy.\n\n⚠️ **One rule is deferred, never dropped:** an entry naming a leg this document does\nnot carry may be a sibling exchange billed on another document, so it is the writer's\nto check against the source's pairs (`unknownLegs: \"defer\"`). The parent leg always\nresolves locally: it is named on the exchange pair itself (`exchange.uid_pair`).",
+          "paramTags": [
+            {
+              "name": "scopeKey",
+              "doc": "the pair field naming the source document: `uid_order` on an\ninvoice, `uid_purchase` on a bill or credit."
+            }
+          ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "checkCollectionLegs",
           "signature": "checkCollectionLegs(doc: typeLiteral, ctx: z.RefinementCtx): void",
           "doc": "The ORDER's collection legs agree with themselves and with its items — the\nrule `normalizeCollectionLegs` (`@cfs/core/utils/orders`) writes, asserted on\nthe order only.\n\nPer pair:\n1. `customer_returning` is `null` exactly when `collection` is — the flag\n   describes the leg, so no leg means no flag;\n2. a `null` leg has no collection dates: `collection_start` / `collection_end`\n   (and their `_fs` mirrors) and `days_active` are `null`;\n3. an order holding a `rental` states charge windows on every pair — a rental\n   with no window has no days to bill;\n4. an order PAST DRAFT holding no `rental` has no leg and no windows on any\n   pair — nothing comes back and no day is billed. A draft keeps what the\n   operator set (the manager saves on blur, and legs are placed before items).\n\n🔴 **The ORDER only, never the fulfillment or the invoice.** Those follow the\norder through the three-way merge (`@cfs/core/utils/shared-fields`), which\nmerges `collection` whole but the flag and the dates per FIELD — so an invoice\nthat overrode its flag would keep it while its leg synced to `null`, and a\nstored refine there would turn that sync into a 500. The merge's post-step\nre-derives the three on a projection instead (`deriveProjectionCollection`),\nand an audit covers the rest.\n\n⚠️ **Clause 4 shipped a beta after the other three**, once the\napi-cloudrun#1154 Phase 4 backfill had nulled the 160 sales-only orders per\nproject that still stored a placed leg and windows. Whole-document order\nwriters other than `createOrder` / `updateOrder` (the tax recompute, the\nXero-quote writeback, the invoice mirror) do not normalize; they preserve the\nstored legs and items, so they stay legal only because the corpus already\nis. The only paths out of draft run through `updateOrder`, which normalizes.",
@@ -12239,7 +12287,7 @@
         {
           "kind": "function",
           "name": "exchangedForViolations",
-          "signature": "exchangedForViolations(doc: typeLiteral): ExchangedForViolation[]",
+          "signature": "exchangedForViolations(doc: typeLiteral, _: unknown): ExchangedForViolation[]",
           "doc": "{@link checkExchangedFor}'s rules as DATA, so a writer or a client can ask the\nsame question without a Zod context — the refinement is this function plus an\n`addIssue` per entry, as {@link checkDestinationJoin} is for\n{@link destinationJoinViolations}. Read {@link checkExchangedFor} for the three\nrules and why existence is deliberately not one of them.",
           "paramTags": [],
           "returnsTag": null
@@ -19347,7 +19395,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  amount_cents?: number | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  exchanged_for?: ExchangedForEntryType[];\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  amount_cents?: number | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {
@@ -20841,7 +20889,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  amount_cents?: number | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  exchanged_for?: ExchangedForEntryType[];\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  amount_cents?: number | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {
@@ -21239,7 +21287,7 @@
           "kind": "function",
           "name": "itemArrayIssues",
           "signature": "itemArrayIssues(doc: ItemArrayDoc, grain: ItemArrayGrain, _: unknown): ItemArrayIssue[]",
-          "doc": "Every way an items array breaks the rules of its grain.\n\n| rule | built from | grains |\n|---|---|---|\n| `leading_divider` | `leadingDividerViolations` (`linked` = `query_by_orders` / `query_by_purchases` non-empty, or `uid_purchase`) | all |\n| `destination_join` | `destinationJoinViolations` | all (needs `destinations`) |\n| `parentage` | `validateItemParentage` | all |\n| `uniqueness` | `validateItemUniqueness` / `validateInvoiceItemUniqueness` | all |\n| `path_empty`, `path_not_self` | asserted directly — invariants (4) and (5) | all |\n| `path_fixed_point` | `validateItemPaths` / `validateInvoiceItemPaths` | all |\n| `zero_priced_non_component`, `zero_priced_unstated` | `zeroPricedFlaggedNonComponents`, `zeroPricedUnstatedComponents` | all |\n| `zero_quantity_component`, `mixed_booking_grain` | `zeroQuantityComponents`, `mixedBookingGrains` | order |\n| `exchanged_for` | `exchangedForViolations` | order, fulfillment (needs `destinations`) |\n\n⚠️ **(4) and (5) are asserted directly, beside the fixed point, on purpose.**\nA fixed-point check can only agree with its normalizer; these hold whatever\nthe normalizer does (the `cfs-items` skill records the 79 items a fixed point\ncertified clean).\n\n**Deliberately OUT** — each needs context an items array does not carry:\n- `orderLineClaimIssues` — needs the OTHER orders' current items;\n- `chargeWindowPairViolations` — needs the pricing context;\n- the fulfillment's `uid_order` / `order_number` agreement — needs the\n  document's own identity;\n- a product's `components` — a different path convention; that is\n  `validateComponentUniqueness`;\n- credit notes — they carry no structural paths.\n\nReturns `[]` for a legal array.",
+          "doc": "Every way an items array breaks the rules of its grain.\n\n| rule | built from | grains |\n|---|---|---|\n| `leading_divider` | `leadingDividerViolations` (`linked` = `query_by_orders` / `query_by_purchases` non-empty, or `uid_purchase`) | all |\n| `destination_join` | `destinationJoinViolations` | all (needs `destinations`) |\n| `parentage` | `validateItemParentage` | all |\n| `uniqueness` | `validateItemUniqueness` / `validateInvoiceItemUniqueness` | all |\n| `path_empty`, `path_not_self` | asserted directly — invariants (4) and (5) | all |\n| `path_fixed_point` | `validateItemPaths` / `validateInvoiceItemPaths` | all |\n| `zero_priced_non_component`, `zero_priced_unstated` | `zeroPricedFlaggedNonComponents`, `zeroPricedUnstatedComponents` | all |\n| `zero_quantity_component`, `mixed_booking_grain` | `zeroQuantityComponents`, `mixedBookingGrains` | order |\n| `exchanged_for` | `exchangedForViolations` (order, fulfillment); `billingExchangedForViolations` over `uid_order` (invoice) | order, fulfillment, invoice (needs `destinations`) |\n\n⚠️ **(4) and (5) are asserted directly, beside the fixed point, on purpose.**\nA fixed-point check can only agree with its normalizer; these hold whatever\nthe normalizer does (the `cfs-items` skill records the 79 items a fixed point\ncertified clean).\n\n**Deliberately OUT** — each needs context an items array does not carry:\n- `orderLineClaimIssues` — needs the OTHER orders' current items;\n- `chargeWindowPairViolations` — needs the pricing context;\n- the fulfillment's `uid_order` / `order_number` agreement — needs the\n  document's own identity;\n- a product's `components` — a different path convention; that is\n  `validateComponentUniqueness`;\n- credit notes — they carry no structural paths.\n\nReturns `[]` for a legal array.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -23076,7 +23124,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  amount_cents?: number | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  exchanged_for?: ExchangedForEntryType[];\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  amount_cents?: number | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {
@@ -26005,7 +26053,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  amount_cents?: number | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  exchanged_for?: ExchangedForEntryType[];\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  amount_cents?: number | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {

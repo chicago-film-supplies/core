@@ -1497,7 +1497,11 @@ export function buildRemainingInvoice(
           quantity: entry ? entry.group.quantity : 0,
           price: { ...source.price, counts },
         } as LineItem, O);
-        items.push({ ...projected, path: scoped } as InvoiceDocItemType);
+        // An extension section bills more days of a leg; it is not an exchange, so a
+        // copied exchange line keeps no take-back list (its pair's `exchange` is
+        // nulled below, and `checkInvoiceExchangedFor` refuses the field off one).
+        const { exchanged_for: _notAnExchange, ...line } = projected as InvoiceDocItemType & { exchanged_for?: unknown };
+        items.push({ ...line, path: scoped } as InvoiceDocItemType);
       }
 
       const projectedPair = toInvoiceDestinationPair(O, orderPair);
@@ -1507,6 +1511,9 @@ export function buildRemainingInvoice(
       extensionPairs.push({
         ...projectedPair,
         uid: E,
+        // Spread from the projected pair, so an extension of an exchange leg would
+        // otherwise claim to BE an exchange (ruling 82): it bills days, it swaps nothing.
+        exchange: null,
         dates: { ...projectedPair.dates, charge_windows: [{ start, end }] },
       });
     }

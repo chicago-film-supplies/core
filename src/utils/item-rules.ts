@@ -20,6 +20,7 @@
  * @module
  */
 import {
+  billingExchangedForViolations,
   type DestinationExchangeType,
   type DestinationJoinViolation,
   destinationJoinViolations,
@@ -60,7 +61,7 @@ export type ItemArrayGrain = "order" | "invoice" | "fulfillment" | "purchase" | 
 export interface ItemArrayDoc {
   items: readonly LineItem[];
   /** The destination pairs. Absent ⇒ the `destination_join` and `exchanged_for` arms are skipped. */
-  destinations?: ReadonlyArray<{ uid: string; exchange?: DestinationExchangeType | null }>;
+  destinations?: ReadonlyArray<{ uid: string; exchange?: DestinationExchangeType | null; uid_order?: string }>;
   /** An invoice's source orders; non-empty ⇒ it must lead with an `order` divider. */
   query_by_orders?: readonly string[];
   /** A bill's purchases; non-empty ⇒ it must lead with a `purchase` divider. */
@@ -116,7 +117,7 @@ export type ItemArrayRule = ItemArrayIssue["rule"];
  * | `path_fixed_point` | `validateItemPaths` / `validateInvoiceItemPaths` | all |
  * | `zero_priced_non_component`, `zero_priced_unstated` | `zeroPricedFlaggedNonComponents`, `zeroPricedUnstatedComponents` | all |
  * | `zero_quantity_component`, `mixed_booking_grain` | `zeroQuantityComponents`, `mixedBookingGrains` | order |
- * | `exchanged_for` | `exchangedForViolations` | order, fulfillment (needs `destinations`) |
+ * | `exchanged_for` | `exchangedForViolations` (order, fulfillment); `billingExchangedForViolations` over `uid_order` (invoice) | order, fulfillment, invoice (needs `destinations`) |
  *
  * ⚠️ **(4) and (5) are asserted directly, beside the fixed point, on purpose.**
  * A fixed-point check can only agree with its normalizer; these hold whatever
@@ -182,9 +183,16 @@ export function itemArrayIssues(
     for (const v of zeroQuantityComponents(items)) issues.push({ rule: "zero_quantity_component", ...v });
     for (const v of mixedBookingGrains(items)) issues.push({ rule: "mixed_booking_grain", ...v });
   }
-  // Exchange legs are receivable-only (a payable pair carries no `exchange`).
+  // The custody documents run the rule as stated; a billing document runs it per
+  // source scope, deferring a leg it does not carry to the writer (ruling 82).
   if ((grain === "order" || grain === "fulfillment") && doc.destinations) {
     for (const v of exchangedForViolations({ destinations: doc.destinations, items })) {
+      issues.push({ rule: "exchanged_for", ...v });
+    }
+  }
+  if (grain === "invoice" && doc.destinations) {
+    const destinations = doc.destinations.map((p) => ({ ...p, uid_order: p.uid_order ?? "" }));
+    for (const v of billingExchangedForViolations({ destinations, items }, "uid_order")) {
       issues.push({ rule: "exchanged_for", ...v });
     }
   }

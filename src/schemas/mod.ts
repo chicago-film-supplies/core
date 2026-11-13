@@ -262,6 +262,7 @@ export {
   checkDestinationJoin,
   destinationJoinViolations,
   exchangedForViolations,
+  billingExchangedForViolations,
   takeBackReasonsFor,
   type ExchangedForViolation,
   type DestinationJoinViolation,
@@ -1105,6 +1106,7 @@ export {
 export {
   ACCEPTS_PAYMENT_STATUSES,
   canOperatorTransition,
+  checkInvoiceExchangedFor,
   CreateInvoiceInput,
   INVOICE_STATUS_CONTRACTS,
   type InvoiceStatusContract,

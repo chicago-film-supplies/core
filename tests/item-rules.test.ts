@@ -96,7 +96,7 @@ const RULES_BY_GRAIN: Record<ItemArrayGrain, ItemArrayRule[]> = {
   ],
   invoice: [
     "leading_divider", "destination_join", "parentage", "uniqueness", "path_empty", "path_not_self",
-    "path_fixed_point", "zero_priced_non_component", "zero_priced_unstated",
+    "path_fixed_point", "zero_priced_non_component", "zero_priced_unstated", "exchanged_for",
   ],
   // The payable grains (one-document-model Phase 3): a purchase at order depth, a
   // bill or credit at invoice depth under a `purchase` divider. A payable pair

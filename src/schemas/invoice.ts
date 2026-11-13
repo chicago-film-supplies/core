@@ -33,6 +33,9 @@ import {
   isLineItemType,
   SubstitutedForList,
   type SubstitutedForEntryType,
+  ExchangedForList,
+  ExchangedForListInput,
+  type ExchangedForEntryType,
   OutOfServiceList,
   OutOfServiceListInput,
   type OutOfServiceEntryType,
@@ -59,6 +62,7 @@ import type {
   PurchaseDocumentServiceItem,
 } from "./purchase-bill.ts";
 import {
+  billingExchangedForViolations,
   checkLeadingDivider,
   checkStoredEndpoints,
   DestinationPairCore,
@@ -647,6 +651,25 @@ export interface InvoiceDocLineItemType {
    * meaningful on a handful of rows only).
    */
   path_order_item?: string[];
+  /**
+   * An exchange line's take-back list, as the order line states it
+   * (`OrderDocLineItemType.exchanged_for`; ruling 82 of the one-document-model
+   * plan): the rows of the order this line goes out against, with how many units
+   * and why each comes back. **Order-relative** — no order-divider prefix — as
+   * {@link path_order_item} and `substituted_for` are, so an un-overridden line
+   * takes the order's own (already re-pointed) list through the three-way merge,
+   * and nothing re-paths it.
+   *
+   * A billing fact only: the invoice moves no custody, so it carries no quantity
+   * cap (that is the custody documents' authoring rule). The document refine
+   * ({@link checkInvoiceExchangedFor}) checks what this invoice can see; the
+   * writer checks the rest against the order's pairs.
+   *
+   * Plain `.optional()` for `substituted_for`'s reasons (array-member-uncensusable,
+   * meaningful on exchange lines only). Untagged: the order line's
+   * `shared: "value"` tag already classifies it, as the fulfillment line's is.
+   */
+  exchanged_for?: ExchangedForEntryType[];
 }
 
 /**
@@ -660,6 +683,28 @@ export interface InvoiceDocLineItemType {
  * the record's reason; the API's `assertOosLinePairing` does. Shared by the
  * stored line and the input line.
  */
+/**
+ * An invoice line's `exchanged_for` (ruling 82): the order's rules
+ * (`checkExchangedFor`) over each order block, through
+ * {@link billingExchangedForViolations}. An entry naming a leg this invoice does not
+ * carry is left to the writer, which checks it against the ORDER's pairs.
+ */
+export function checkInvoiceExchangedFor(
+  inv: {
+    destinations: ReadonlyArray<{ uid: string; uid_order: string; exchange?: DocDestinationType["exchange"] }>;
+    items: ReadonlyArray<{ path: readonly string[] }>;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  for (const v of billingExchangedForViolations(inv, "uid_order")) {
+    ctx.addIssue({
+      code: "custom",
+      path: v.entry === null ? ["items", v.index, "exchanged_for"] : ["items", v.index, "exchanged_for", v.entry, v.field],
+      message: v.message,
+    });
+  }
+}
+
 function checkOutOfServiceLineType(
   line: {
     type: string;
@@ -714,6 +759,11 @@ const InvoiceDocLineItemInner = z.strictObject({
   // `path_invoice_item` is its twin one grain down.
   // `seed: false`: `[]` fails `.min(1)`, so the form seed must omit the key.
   path_order_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
+  // See the interface docblock. Plain `.optional()`, as the fulfillment line's.
+  // `seed: false`, as `path_order_item`: a seeded `[]` claims the take-back list of
+  // an exchange line on a line under no exchange pair, which `checkInvoiceExchangedFor`
+  // refuses, so the form seed must omit the key.
+  exchanged_for: ExchangedForList.optional().meta({ seed: false }),
 }).superRefine(checkItemPriceFormula).superRefine(checkZeroPricedAmount)
   .superRefine(checkOutOfServiceLineType);
 
@@ -1381,6 +1431,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
 }).superRefine(checkStoredEndpoints).superRefine(checkLeadingDivider("invoice"))
+  .superRefine(checkInvoiceExchangedFor)
   // Line money is checked only while the invoice may still be repriced — see
   // `checkItemsLineMoney` for why a frozen invoice keeps money no counts reproduce.
   .superRefine((inv, ctx) => {
@@ -1519,6 +1570,12 @@ export interface InvoiceItemInputLineType {
    */
   substituted_for?: SubstitutedForEntryType[];
   /**
+   * @see `InvoiceDocLineItemType.exchanged_for`. Needs an input channel for the
+   * `substituted_for` reason above. A stripping list ({@link ExchangedForListInput}),
+   * so this input adds no strict node.
+   */
+  exchanged_for?: ExchangedForEntryType[];
+  /**
    * @see `InvoiceDocLineItemType.zero_priced`. NOT operator-authored — it is
    * projected from the order line — and it still needs an input channel, for
    * exactly the reason above: `buildInvoiceItems` rebuilds every stored line
@@ -1596,6 +1653,7 @@ const InvoiceItemInputLineInner = z.object({
   quantity_per_parent: z.number().min(0).nullable().optional(),
   out_of_service: OutOfServiceListInput.optional().meta({ seed: false }),
   path_order_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
+  exchanged_for: ExchangedForListInput.optional().meta({ seed: false }),
 }).superRefine(checkItemPriceFormula).superRefine(checkOutOfServiceLineType);
 
 /** Zod schema for a billable invoice line (input). */
