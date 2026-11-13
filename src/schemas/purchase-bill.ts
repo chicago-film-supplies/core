@@ -312,7 +312,7 @@ export interface PurchaseDocumentProductItem extends Omit<PurchaseDocumentLineBa
    * `uid_purchase`); the writer checks the rest against the purchase's pairs.
    * Untagged: the purchase line's `shared: "value"` tag classifies it. A
    * supplier credit refuses it (`checkPurchaseCredit`), as the AR credit note's
-   * line carries none.
+   * line carries none; a credit copied from a bill line strips it.
    */
   exchanged_for?: ExchangedForEntryType[];
 }
@@ -997,14 +997,16 @@ function checkPurchaseCredit(c: PurchaseCredit, ctx: z.RefinementCtx): void {
   // An empty credit (allowed at zero) has no rows to lead with.
   if (c.items.length > 0) checkLeadingDivider("purchase_document")({ items: c.items, query_by_purchases: uidPurchase ? [uidPurchase] : [] }, ctx);
   checkDestinationJoin(c, ctx);
-  // A credit credits money; it bills no substitute and takes nothing back. The
-  // shared row schema admits both keys for the bill, so the credit refuses them
-  // here, as the AR credit note's line schema carries neither (owner, 2026-11-12).
+  // A credit takes nothing back: the shared row schema admits `exchanged_for` for
+  // the bill, so the credit refuses it here, as the AR credit note's line carries
+  // none (owner, 2026-11-12). ⚠️ `substituted_for` is NOT refused, though the same
+  // ruling names it: a credit raised from a substitute's bill line carries a SLICE
+  // of it (`copiedBillRow`, ruling 23, api-cloudrun#1475), which is how the billed
+  // fold un-bills each X by the stand-in units credited. Refusing it would make
+  // such a credit unwritable; held for the owner (C16 build note).
   c.items.forEach((row, i) => {
-    for (const key of ["exchanged_for", "substituted_for"] as const) {
-      if ((row as Partial<Record<typeof key, unknown>>)[key] !== undefined) {
-        ctx.addIssue({ code: "custom", path: ["items", i, key], message: `a supplier credit line carries no ${key}` });
-      }
+    if ((row as { exchanged_for?: unknown }).exchanged_for !== undefined) {
+      ctx.addIssue({ code: "custom", path: ["items", i, "exchanged_for"], message: "a supplier credit line carries no exchanged_for" });
     }
   });
   if (c.origin === "linked" && c.xero_id === null) {

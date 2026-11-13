@@ -386,7 +386,14 @@ export function purchaseCardDue(
     return remainingToReturn(c) > 0 || c.received < i.quantity;
   });
   // The due-back is the hire window's end, on the line's PAIR (one-document-model Phase 3).
-  const pool = (open.length > 0 ? open : items).map((i) => purchaseHireWindow(purchase, i)?.end ?? null)
+  // An exchange leg's line is due with its PARENT leg (C16): a purchase has ONE
+  // card, and an exchange leg's own window never drives it.
+  const parentOf = new Map(purchase.destinations.flatMap((d) => (d.exchange ? [[d.uid, d.exchange.uid_pair] as const] : [])));
+  const atParent = (i: (typeof items)[number]) => {
+    const parent = parentOf.get(i.path[0]);
+    return parent === undefined ? i : { ...i, path: [parent, ...i.path.slice(1)] };
+  };
+  const pool = (open.length > 0 ? open : items).map((i) => purchaseHireWindow(purchase, atParent(i))?.end ?? null)
     .filter((d): d is string => d !== null);
   if (pool.length === 0) return null;
   return pool.reduce((a, b) => (Date.parse(b) < Date.parse(a) ? b : a));

@@ -97,7 +97,7 @@ Deno.test("isPurchaseReceiptLineItem: decided by the row's type", () => {
   assert(!isPurchaseReceiptLineItem(destination));
 });
 
-Deno.test("receiptRowSources: purchase, kept, receipt_extra and unexplained, in that precedence", () => {
+Deno.test("receiptRowSources: purchase, exchange, kept, receipt_extra and unexplained, in that precedence", () => {
   const atPurchase = line();
   // A purchase path wins whatever quantity_ordered says (the sync re-stamps it later).
   const atPurchaseStale = line({ uid: OTHER, path: [LEG, OTHER], quantity_ordered: null });
@@ -112,11 +112,25 @@ Deno.test("receiptRowSources: purchase, kept, receipt_extra and unexplained, in 
       // A charge line at the stale row's path moves no custody, so it explains nothing.
       { type: "service", path: [LEG, "EEEEEEEEEEEEEEEEEEEE"] },
     ],
+    destinations: [{ uid: LEG }],
   };
-  const sources = receiptRowSources({ items: [destination, atPurchase, atPurchaseStale, kept, extra, stale] }, purchase);
-  const got: ReceiptRowSource[] = [atPurchase, atPurchaseStale, kept, extra, stale].map((r) => sources.get(r)!);
-  assertEquals(got, ["purchase", "purchase", "kept", "receipt_extra", "unexplained"]);
-  assertEquals(sources.size, 5, "dividers are not classified");
+  // A receipt-staged exchange leg (ruling 82): a pair the purchase lacks, marked `exchange`.
+  const SWAP = "33333333-3333-4333-8333-333333333333";
+  const swap = line({ uid: OTHER, path: [SWAP, OTHER], quantity_ordered: null });
+  const receiptPairs = [{ uid: LEG, exchange: null }, { uid: SWAP, exchange: { uid_pair: LEG, disposition: "same_trip" } }];
+  const sources = receiptRowSources(
+    { items: [destination, atPurchase, atPurchaseStale, kept, extra, stale, swap], destinations: receiptPairs },
+    purchase,
+  );
+  const got: ReceiptRowSource[] = [atPurchase, atPurchaseStale, kept, extra, stale, swap].map((r) => sources.get(r)!);
+  assertEquals(got, ["purchase", "purchase", "kept", "receipt_extra", "unexplained", "exchange"]);
+  assertEquals(sources.size, 6, "dividers are not classified");
+  // Membership decides, never the field alone: the same leg on the PURCHASE is the purchase's.
+  const onPurchase = receiptRowSources(
+    { items: [swap], destinations: receiptPairs },
+    { ...purchase, destinations: [{ uid: LEG }, { uid: SWAP }] },
+  );
+  assertEquals(onPurchase.get(swap), "receipt_extra");
 });
 
 Deno.test("purchaseReceiptSharedFields: classified once, grouped by merge unit", () => {
@@ -216,6 +230,16 @@ Deno.test("deriveReceiptDueAt: the earliest open leg across pairs wins, its _fs 
   const dests = [pair(LEG, 20, 25), pair(LEG_B, 8, 14)];
   const got = deriveReceiptDueAt(active(dests), [booking("sale", LEG, { ordered: 1 }), booking("rental", LEG_B, { stocked: 1 })]);
   assertEquals(got, { iso: iso(14), fs: fsOf(14) });
+});
+
+Deno.test("deriveReceiptDueAt: an exchange leg's booking is dated by its PARENT leg (C16)", () => {
+  // LEG_B is an exchange on LEG; its own window (8 → 14) never drives the date.
+  const dests = [pair(LEG, 20, 25), { ...pair(LEG_B, 8, 14), exchange: { uid_pair: LEG } }];
+  assertEquals(deriveReceiptDueAt(active(dests), [booking("rental", LEG_B, { stocked: 1 })]).iso, iso(25));
+  assertEquals(deriveReceiptDueAt(active(dests), [booking("rental", LEG_B, { ordered: 1 })]).iso, iso(20));
+  // Without the pair passed, the booking names no pair and is dropped, which is
+  // why the writer passes the receipt-authored pairs alongside the purchase's.
+  assertEquals(deriveReceiptDueAt(active([pair(LEG, 20, 25)]), [booking("rental", LEG_B, { stocked: 1 })]).iso, null);
 });
 
 Deno.test("deriveReceiptDueAt: null when the purchase is closed, nothing is open, or the pair states no date", () => {

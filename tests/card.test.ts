@@ -555,3 +555,17 @@ Deno.test("purchaseCardDue: the earliest due-back among OPEN subrent items, else
   assertEquals(purchaseCardDue({ items: [pline(), bline], destinations: [purchasePair(PAIR, { start: early, end: null })] }, new Map()), null);
   assertEquals(purchaseCardDue({ items: [bline], destinations: [purchasePair(PAIR)] }, new Map()), null);
 });
+
+Deno.test("purchaseCardDue: an exchange leg's line is due with its PARENT leg, never its own window (C16)", () => {
+  const parentEnd = "2026-10-25T17:00:00.000-05:00";
+  const swapEnd = "2026-10-21T17:00:00.000-05:00";
+  const PA = "9a1b2c3d-0000-4000-8000-0000000000ea";
+  const PX = "9a1b2c3d-0000-4000-8000-0000000000eb";
+  const destinations = [
+    purchasePair(PA, { start: "2026-10-20T08:00:00.000-05:00", end: parentEnd }),
+    { ...purchasePair(PX, { start: "2026-10-20T08:00:00.000-05:00", end: swapEnd }), exchange: { uid_pair: PA, disposition: "same_trip" as const } },
+  ];
+  const y = pline({ uid: "9a1b2c3d-0000-4000-8000-00000000000c", path: [PX, "9a1b2c3d-0000-4000-8000-00000000000c"], quantity: 1 });
+  const custody = new Map([[y.path.join("/"), { received: 1, returned: 0 }]]);
+  assertEquals(purchaseCardDue({ items: [y], destinations }, custody), parentEnd);
+});

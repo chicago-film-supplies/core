@@ -53376,6 +53376,7 @@ The purchase pair fields {@link deriveReceiptDueAt} reads.
 ```ts
 interface ReceiptPairSource {
   readonly uid: string;
+  readonly exchange?: typeLiteral | null;
   readonly dates: Pick<OrderDocDatesType, "delivery_start" | "delivery_start_fs" | "collection_start" | "collection_start_fs" | "collection_end" | "collection_end_fs">;
 }
 ```
@@ -53387,17 +53388,20 @@ Why a stored receipt LINE row exists — {@link receiptRowSources}.
 | source | the row is | how it is told |
 |---|---|---|
 | `purchase` | the purchase's own custody line | a `sale` or `rental` purchase row is at its path |
+| `exchange` | a unit of a receiver-staged exchange (ruling 82) | under an exchange pair the PURCHASE does not carry |
 | `kept` | a line the purchase closed while its units were held (ruling 47) | `quantity_ordered: 0` |
 | `receipt_extra` | a line the supplier sent that the PO lacks (ruling 35) | `quantity_ordered: null` |
 | `unexplained` | none of these — a finding | — |
 
-The fulfillment's `substitution`, `exchange` and `invoice_projected` have no
-twin here: nothing substitutes on a receipt, an Exchange on a subrent is a
-PURCHASE-side operation (ruling 7), and no billing document projects onto the
-receipt.
+The fulfillment's `substitution` and `invoice_projected` have no twin here:
+nothing substitutes on a receipt, and no billing document projects onto it.
+An exchange authored on the PURCHASE is the purchase's own row; only a
+receipt-authored leg (a pair the purchase lacks) reads `exchange`, as on the
+fulfillment, so the discriminator is pair MEMBERSHIP, never the `exchange`
+field alone.
 
 ```ts
-type ReceiptRowSource = "purchase" | "kept" | "receipt_extra" | "unexplained";
+type ReceiptRowSource = "purchase" | "exchange" | "kept" | "receipt_extra" | "unexplained";
 ```
 
 ### `ReceiptRowSourcePurchase`
@@ -53407,6 +53411,7 @@ The purchase fields {@link receiptRowSources} reads.
 ```ts
 interface ReceiptRowSourcePurchase {
   items: ReadonlyArray<typeLiteral>;
+  destinations: ReadonlyArray<typeLiteral>;
 }
 ```
 
@@ -53417,6 +53422,7 @@ The receipt fields {@link receiptRowSources} reads.
 ```ts
 interface ReceiptRowSourceReceipt {
   items: ReadonlyArray<PurchaseReceiptItemType | T>;
+  destinations: ReadonlyArray<typeLiteral>;
 }
 ```
 
@@ -53440,6 +53446,11 @@ hire end; `collection_end` is where supply ends, the later bound.
 `{ iso: null, fs: null }` on a complete or canceled purchase, and when no
 open leg's pair states its date. The `_fs` is the winning pair's own, since
 this module cannot mint a `Timestamp`.
+
+⭐ **An exchange leg's booking is dated by its PARENT leg** (C16, ruling 82):
+pass the receipt-authored pairs alongside the purchase's, so a receipt-staged
+leg's units fold into the parent rather than being dropped as a booking with no
+pair; an exchange leg's own window never drives the date.
 
 ### `receiptQueryByUidStore(purchase: typeLiteral, bookings: readonly Pick<ReceiptBookingSource, "query_by_uid_store">[]): string[]`
 

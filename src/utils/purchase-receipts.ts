@@ -24,25 +24,30 @@ import { parseBookingId } from "./booking-id.ts";
  * | source | the row is | how it is told |
  * |---|---|---|
  * | `purchase` | the purchase's own custody line | a `sale` or `rental` purchase row is at its path |
+ * | `exchange` | a unit of a receiver-staged exchange (ruling 82) | under an exchange pair the PURCHASE does not carry |
  * | `kept` | a line the purchase closed while its units were held (ruling 47) | `quantity_ordered: 0` |
  * | `receipt_extra` | a line the supplier sent that the PO lacks (ruling 35) | `quantity_ordered: null` |
  * | `unexplained` | none of these — a finding | — |
  *
- * The fulfillment's `substitution`, `exchange` and `invoice_projected` have no
- * twin here: nothing substitutes on a receipt, an Exchange on a subrent is a
- * PURCHASE-side operation (ruling 7), and no billing document projects onto the
- * receipt.
+ * The fulfillment's `substitution` and `invoice_projected` have no twin here:
+ * nothing substitutes on a receipt, and no billing document projects onto it.
+ * An exchange authored on the PURCHASE is the purchase's own row; only a
+ * receipt-authored leg (a pair the purchase lacks) reads `exchange`, as on the
+ * fulfillment, so the discriminator is pair MEMBERSHIP, never the `exchange`
+ * field alone.
  */
-export type ReceiptRowSource = "purchase" | "kept" | "receipt_extra" | "unexplained";
+export type ReceiptRowSource = "purchase" | "exchange" | "kept" | "receipt_extra" | "unexplained";
 
 /** The purchase fields {@link receiptRowSources} reads. */
 export interface ReceiptRowSourcePurchase {
   items: ReadonlyArray<{ readonly type: string; readonly path: readonly string[] }>;
+  destinations: ReadonlyArray<{ readonly uid: string }>;
 }
 
 /** The receipt fields {@link receiptRowSources} reads. */
 export interface ReceiptRowSourceReceipt<T extends PurchaseReceiptLineItemType> {
   items: ReadonlyArray<PurchaseReceiptItemType | T>;
+  destinations: ReadonlyArray<{ readonly uid: string; readonly exchange?: unknown }>;
 }
 
 const CUSTODY_TYPES: ReadonlySet<string> = new Set(PURCHASE_PRODUCT_ITEM_TYPES);
@@ -79,6 +84,10 @@ export function receiptRowSources<T extends PurchaseReceiptLineItemType>(
   const purchasePaths = new Set(
     purchase.items.filter((i) => CUSTODY_TYPES.has(i.type)).map((i) => pathKey(i.path)),
   );
+  const purchasePairs = new Set(purchase.destinations.map((p) => p.uid));
+  const exchangeLegs = new Set(
+    receipt.destinations.filter((p) => p.exchange != null && !purchasePairs.has(p.uid)).map((p) => p.uid),
+  );
   const out = new Map<T, ReceiptRowSource>();
   for (const row of receipt.items) {
     if (!isPurchaseReceiptLineItem(row as PurchaseReceiptItemType)) continue;
@@ -86,6 +95,8 @@ export function receiptRowSources<T extends PurchaseReceiptLineItemType>(
     const q = line.quantity_ordered;
     const source: ReceiptRowSource = purchasePaths.has(pathKey(line.path))
       ? "purchase"
+      : line.path[0] !== undefined && exchangeLegs.has(line.path[0])
+      ? "exchange"
       : q === 0
       ? "kept"
       : q === null
@@ -109,6 +120,8 @@ export interface ReceiptBookingSource {
 /** The purchase pair fields {@link deriveReceiptDueAt} reads. */
 export interface ReceiptPairSource {
   readonly uid: string;
+  /** An exchange leg folds into its PARENT's dates (C16): a purchase has one card and one due date per leg family. */
+  readonly exchange?: { readonly uid_pair: string } | null;
   readonly dates: Pick<
     OrderDocDatesType,
     "delivery_start" | "delivery_start_fs" | "collection_start" | "collection_start_fs" | "collection_end" | "collection_end_fs"
@@ -134,13 +147,21 @@ export interface ReceiptPairSource {
  * `{ iso: null, fs: null }` on a complete or canceled purchase, and when no
  * open leg's pair states its date. The `_fs` is the winning pair's own, since
  * this module cannot mint a `Timestamp`.
+ *
+ * ⭐ **An exchange leg's booking is dated by its PARENT leg** (C16, ruling 82):
+ * pass the receipt-authored pairs alongside the purchase's, so a receipt-staged
+ * leg's units fold into the parent rather than being dropped as a booking with no
+ * pair; an exchange leg's own window never drives the date.
  */
 export function deriveReceiptDueAt(
   purchase: { readonly status: PurchaseStatusType; readonly destinations: readonly ReceiptPairSource[] },
   bookings: readonly ReceiptBookingSource[],
 ): { iso: string | null; fs: FirestoreTimestampType | null } {
   if (purchase.status !== "active") return { iso: null, fs: null };
-  const pairs = new Map(purchase.destinations.map((d) => [d.uid, d]));
+  const byUid = new Map(purchase.destinations.map((d) => [d.uid, d]));
+  const pairs = new Map(
+    purchase.destinations.map((d) => [d.uid, (d.exchange ? byUid.get(d.exchange.uid_pair) : undefined) ?? d]),
+  );
   let best: { t: number; iso: string; fs: FirestoreTimestampType | null } | null = null;
   const consider = (iso: string | null | undefined, fs: FirestoreTimestampType | null | undefined) => {
     if (!iso) return;

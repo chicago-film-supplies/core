@@ -25577,32 +25577,32 @@
         {
           "kind": "interface",
           "name": "ReceiptPairSource",
-          "declaration": "interface ReceiptPairSource {\n  readonly uid: string;\n  readonly dates: Pick<OrderDocDatesType, \"delivery_start\" | \"delivery_start_fs\" | \"collection_start\" | \"collection_start_fs\" | \"collection_end\" | \"collection_end_fs\">;\n}",
+          "declaration": "interface ReceiptPairSource {\n  readonly uid: string;\n  readonly exchange?: typeLiteral | null;\n  readonly dates: Pick<OrderDocDatesType, \"delivery_start\" | \"delivery_start_fs\" | \"collection_start\" | \"collection_start_fs\" | \"collection_end\" | \"collection_end_fs\">;\n}",
           "doc": "The purchase pair fields {@link deriveReceiptDueAt} reads."
         },
         {
           "kind": "typeAlias",
           "name": "ReceiptRowSource",
-          "declaration": "type ReceiptRowSource = \"purchase\" | \"kept\" | \"receipt_extra\" | \"unexplained\";",
-          "doc": "Why a stored receipt LINE row exists — {@link receiptRowSources}.\n\n| source | the row is | how it is told |\n|---|---|---|\n| `purchase` | the purchase's own custody line | a `sale` or `rental` purchase row is at its path |\n| `kept` | a line the purchase closed while its units were held (ruling 47) | `quantity_ordered: 0` |\n| `receipt_extra` | a line the supplier sent that the PO lacks (ruling 35) | `quantity_ordered: null` |\n| `unexplained` | none of these — a finding | — |\n\nThe fulfillment's `substitution`, `exchange` and `invoice_projected` have no\ntwin here: nothing substitutes on a receipt, an Exchange on a subrent is a\nPURCHASE-side operation (ruling 7), and no billing document projects onto the\nreceipt."
+          "declaration": "type ReceiptRowSource = \"purchase\" | \"exchange\" | \"kept\" | \"receipt_extra\" | \"unexplained\";",
+          "doc": "Why a stored receipt LINE row exists — {@link receiptRowSources}.\n\n| source | the row is | how it is told |\n|---|---|---|\n| `purchase` | the purchase's own custody line | a `sale` or `rental` purchase row is at its path |\n| `exchange` | a unit of a receiver-staged exchange (ruling 82) | under an exchange pair the PURCHASE does not carry |\n| `kept` | a line the purchase closed while its units were held (ruling 47) | `quantity_ordered: 0` |\n| `receipt_extra` | a line the supplier sent that the PO lacks (ruling 35) | `quantity_ordered: null` |\n| `unexplained` | none of these — a finding | — |\n\nThe fulfillment's `substitution` and `invoice_projected` have no twin here:\nnothing substitutes on a receipt, and no billing document projects onto it.\nAn exchange authored on the PURCHASE is the purchase's own row; only a\nreceipt-authored leg (a pair the purchase lacks) reads `exchange`, as on the\nfulfillment, so the discriminator is pair MEMBERSHIP, never the `exchange`\nfield alone."
         },
         {
           "kind": "interface",
           "name": "ReceiptRowSourcePurchase",
-          "declaration": "interface ReceiptRowSourcePurchase {\n  items: ReadonlyArray<typeLiteral>;\n}",
+          "declaration": "interface ReceiptRowSourcePurchase {\n  items: ReadonlyArray<typeLiteral>;\n  destinations: ReadonlyArray<typeLiteral>;\n}",
           "doc": "The purchase fields {@link receiptRowSources} reads."
         },
         {
           "kind": "interface",
           "name": "ReceiptRowSourceReceipt",
-          "declaration": "interface ReceiptRowSourceReceipt {\n  items: ReadonlyArray<PurchaseReceiptItemType | T>;\n}",
+          "declaration": "interface ReceiptRowSourceReceipt {\n  items: ReadonlyArray<PurchaseReceiptItemType | T>;\n  destinations: ReadonlyArray<typeLiteral>;\n}",
           "doc": "The receipt fields {@link receiptRowSources} reads."
         },
         {
           "kind": "function",
           "name": "deriveReceiptDueAt",
           "signature": "deriveReceiptDueAt(purchase: typeLiteral, bookings: readonly ReceiptBookingSource[]): typeLiteral",
-          "doc": "When a receipt is next due: the earliest open leg across its inbound\nbookings, read off each booking's own pair (the booking id's leg segment).\n\n| the booking holds | it is due | at |\n|---|---|---|\n| units `ordered` or `transit_inbound` | to ARRIVE | `delivery_start` |\n| a SUBRENT's units `received`, `stocked` or `transit_outbound` | to go BACK | `collection_start`, else `collection_end` |\n\nThe receipt's twin of `deriveNextEventDate` (`utils/orders.ts`), with one\ndeliberate difference: the leg is decided PER BOOKING, not from a summed\nbreakdown, because the inbound ladder reads one key two ways by type — a\nBuy's `stocked` is terminal, a Subrent's is held for return — so a purchase\nrollup cannot tell a send-back from a finished buy. `collection_start` is the\nhire end; `collection_end` is where supply ends, the later bound.\n\n`{ iso: null, fs: null }` on a complete or canceled purchase, and when no\nopen leg's pair states its date. The `_fs` is the winning pair's own, since\nthis module cannot mint a `Timestamp`.",
+          "doc": "When a receipt is next due: the earliest open leg across its inbound\nbookings, read off each booking's own pair (the booking id's leg segment).\n\n| the booking holds | it is due | at |\n|---|---|---|\n| units `ordered` or `transit_inbound` | to ARRIVE | `delivery_start` |\n| a SUBRENT's units `received`, `stocked` or `transit_outbound` | to go BACK | `collection_start`, else `collection_end` |\n\nThe receipt's twin of `deriveNextEventDate` (`utils/orders.ts`), with one\ndeliberate difference: the leg is decided PER BOOKING, not from a summed\nbreakdown, because the inbound ladder reads one key two ways by type — a\nBuy's `stocked` is terminal, a Subrent's is held for return — so a purchase\nrollup cannot tell a send-back from a finished buy. `collection_start` is the\nhire end; `collection_end` is where supply ends, the later bound.\n\n`{ iso: null, fs: null }` on a complete or canceled purchase, and when no\nopen leg's pair states its date. The `_fs` is the winning pair's own, since\nthis module cannot mint a `Timestamp`.\n\n⭐ **An exchange leg's booking is dated by its PARENT leg** (C16, ruling 82):\npass the receipt-authored pairs alongside the purchase's, so a receipt-staged\nleg's units fold into the parent rather than being dropped as a booking with no\npair; an exchange leg's own window never drives the date.",
           "paramTags": [],
           "returnsTag": null
         },

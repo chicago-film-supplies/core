@@ -63,7 +63,7 @@ import {
 } from "../schemas/mod.ts";
 import { cumulativeShareCents } from "./purchases.ts";
 import { fitOutOfServiceEntries } from "./replacements.ts";
-import type { OutOfServiceEntryType } from "../schemas/mod.ts";
+import type { ExchangedForEntryType, OutOfServiceEntryType } from "../schemas/mod.ts";
 import { roundDivHalfUp } from "./money.ts";
 import {
   collectSubstitutionAnchors,
@@ -706,7 +706,19 @@ function projectedLineHead(item: PurchaseItem, uidPurchase: string) {
     uid_tracking_category: item.uid_tracking_category,
     uid_tax_class: item.uid_tax_class,
     ...(item.uid_tax_class_override !== undefined ? { uid_tax_class_override: item.uid_tax_class_override } : {}),
+    ...exchangedForProjection(item),
   };
+}
+
+/**
+ * An exchange line's take-back list on its bill line (C16, ruling 82):
+ * purchase-relative, as on the purchase, and presence-faithful — a purchase `[]`
+ * stays `[]`, an absent key stays absent — so no stored bill key set moves.
+ */
+function exchangedForProjection(item: PurchaseItem): { exchanged_for?: ExchangedForEntryType[] } {
+  return item.type === "rental" && item.exchanged_for !== undefined
+    ? { exchanged_for: item.exchanged_for.map((e) => ({ ...e, path: [...e.path] })) }
+    : {};
 }
 
 /**
@@ -1069,6 +1081,7 @@ export function projectPurchaseLineForBill(item: PurchaseItem, quantity: number)
         : null,
     },
     ...attributionOf(item, quantity),
+    ...exchangedForProjection(item),
   };
 }
 
