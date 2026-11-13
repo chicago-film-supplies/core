@@ -47718,7 +47718,7 @@ The item's ARM decides the interval:
 with `/` (`custodyBySourceItem`, `@cfs/core/utils/bookings-inbound`, or the
 same numbers off the line's inbound booking when one line holds the grain).
 It replaced the line buckets `quantity_received` / `quantity_returned` with
-the arithmetic unchanged (C8, ruling 60), so `scripts/audit-stock.ts` reads
+the arithmetic unchanged (C8, ruling 60), so `api-cloudrun/scripts/audit-stock.ts` reads
 identical before and after. Required: an absent map would read every unit as
 still to come.
 | `service` / `replacement` | none — they bring no unit into custody | — |
