@@ -198,6 +198,7 @@ import {
   purchaseBillSharedDocFields,
   purchaseBillSharedLineFields,
   purchaseCreditIsLive,
+  purchaseCreditBilling,
   purchaseDocumentBilling,
   purchaseLineBilledNet,
   purchaseLineKey,
@@ -1594,8 +1595,10 @@ function payableQuantityEntry(
   const k = key(item.path);
   // A document names the line when it bills any of it, a substitute standing in for it included.
   const names = (rows: PurchaseBill["items"]) => purchaseDocumentBilling(rows, purchase.uid, purchase.items).has(k);
+  // A credit names it when it UN-bills any of it: an unmarked line reverses nothing (ruling 84).
+  const unbills = (rows: PurchaseCredit["items"]) => purchaseCreditBilling(rows, purchase.uid, purchase.items).has(k);
   const namingBills = bills.filter((b) => names(b.items));
-  const namingCredits = credits.filter((c) => names(c.items));
+  const namingCredits = credits.filter((c) => unbills(c.items));
   if (namingBills.length === 0 && namingCredits.length === 0) return null;
   const net = purchaseLineBilledNet(item.path, {
     uid_purchase: purchase.uid,
@@ -1721,12 +1724,12 @@ interface CreditKeys {
 /**
  * Key every issued/applied credit note line to the invoice row it credits.
  *
- * The keying is `billingReversals`' (`utils/quantityAccounting.ts`) WITHOUT its
- * `reverses_billing` filter: exactly one `invoices` source, and the row's
- * `path_invoice_item`. One fallback it does not take, because this only
- * DISPLAYS: a legacy line with no path keys by `uid_invoice_item` when that uid
- * is on exactly one line of the invoice. Netting never takes that fallback —
- * a guessed row is acceptable on screen and not in arithmetic.
+ * The keying is the one credit keyer's reversed view (`keyInvoiceCredits`,
+ * `utils/quantityAccounting.ts`) WITHOUT its `reverses_billing` filter: exactly
+ * one `invoices` source, and the row's `path_invoice_item`. One fallback it
+ * takes that netting does not, because this only DISPLAYS: a legacy line with
+ * no path keys by `uid_invoice_item` when that uid is on exactly one line of the
+ * invoice. A guessed row is acceptable on screen and not in arithmetic.
  */
 function creditKeys(notes: readonly DocumentDiffCreditNote[], invoices: readonly Invoice[], orders: readonly Order[]): CreditKeys {
   const invoiceByUid = new Map(invoices.map((i) => [i.uid, i]));

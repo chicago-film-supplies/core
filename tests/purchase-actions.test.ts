@@ -36,7 +36,7 @@ import {
 import { priceFormulaRefOf } from "../src/utils/price-formulas.ts";
 import { FIXED, VISION } from "./helpers/formulas.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
-import { payablePrice } from "./helpers/payable.ts";
+import { asCreditRows, payablePrice } from "./helpers/payable.ts";
 
 /** The purchase every fixture bill bills (one-document-model Phase 3). */
 const PU = "testpurch10000000000";
@@ -188,7 +188,7 @@ const voidBill = (
   } as PurchaseBill;
 };
 const voidCredit = (lines: [string, number][], status: PurchaseCredit["status"] = "issued") =>
-  ({ status, items: lines.map(([path, quantity]) => ({ type: "sale", path: [PU, path], quantity, amount_cents: 100 * quantity, price: FIXED_PRICE })) }) as unknown as PurchaseCredit;
+  ({ status, items: asCreditRows(lines.map(([path, quantity]) => ({ type: "sale", path: [PU, path], quantity, amount_cents: 100 * quantity, price: FIXED_PRICE }))) }) as unknown as PurchaseCredit;
 const noDocuments = { per_purchase: [{ uid_purchase: PU, purchase: { items: [] }, bills: [], credits: [] }] };
 const asLines = (...items: PurchaseActionItem[]) => items as PurchaseItem[];
 
@@ -368,7 +368,7 @@ const row = (rel: string[], quantity: number, o: Record<string, unknown> = {}) =
 const bill6d = (uid: string, items: PurchaseDocumentItem[], o: Partial<PurchaseBill> = {}) =>
   ({ ...voidBill(uid, []), items, ...o }) as PurchaseBill;
 const credit6d = (items: PurchaseDocumentItem[], status: PurchaseCredit["status"] = "issued") =>
-  ({ status, items }) as unknown as PurchaseCredit;
+  ({ status, items: asCreditRows(items) }) as unknown as PurchaseCredit;
 /** A credit line naming bill `uidBill`'s line at `[PU, ...rel]`, copying its path. */
 const named = (uidBill: string, rel: string[], quantity: number, o: Record<string, unknown> = {}) =>
   row(rel, quantity, { uid_purchase_bill: uidBill, path_bill_item: [PU, ...rel], ...o });

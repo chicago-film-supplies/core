@@ -70,7 +70,7 @@ import {
 import { apportionCents } from "../src/utils/money.ts";
 import { flatPurchaseLineMoney } from "../src/utils/purchases.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
-import { payablePrice, purchaseDivider, purchasePair, withPayableMoney } from "./helpers/payable.ts";
+import { asCreditRows, payablePrice, purchaseDivider, purchasePair, withPayableMoney } from "./helpers/payable.ts";
 
 /** The tax class every payable test line is stamped with: exempt on this side, so it prices nothing. */
 const TAX_CLASS = "TaxClassResale000000";
@@ -1349,7 +1349,7 @@ function credit(over: Record<string, unknown> = {}) {
     date: "2026-10-01T00:00:00.000-05:00",
     date_fs: mockTimestamp,
     reference: null,
-    items: lines.length === 0 ? [] : [scope, docDivider, ...lines],
+    items: lines.length === 0 ? [] : asCreditRows([scope, docDivider, ...lines] as { type: string }[]),
     destinations: lines.length === 0 ? [] : [docPair],
     total_cents: 46995,
     remaining_credit_cents: 46995,
@@ -1403,12 +1403,22 @@ Deno.test("PurchaseCreditSchema: sources are derived from the lines; a line name
   assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [named] })).includes("items"), true, "a bill line credits nothing");
 });
 
-Deno.test("reverses_billing: a supplier credit line may carry it either way; a bill line refuses it (ruling 84, beta A)", () => {
-  const creditLine = (v: boolean | undefined) => billItem({ quantity: 1, amount_cents: 46995, ...(v === undefined ? {} : { reverses_billing: v }) });
-  // On a credit it is optional while stored lines are backfilled: absent, true and false all parse.
-  assertEquals(issuePaths(PurchaseCreditSchema, credit({ items: [creditLine(undefined)] })), [], "control: absent");
-  assertEquals(issuePaths(PurchaseCreditSchema, credit({ items: [creditLine(true)] })), []);
-  assertEquals(issuePaths(PurchaseCreditSchema, credit({ items: [creditLine(false)] })), []);
+Deno.test("reverses_billing: every supplier credit LINE row states it; a bill line refuses it (ruling 84, beta B)", () => {
+  const creditLine = (v: boolean) => billItem({ quantity: 1, amount_cents: 46995, reverses_billing: v });
+  assertEquals(issuePaths(PurchaseCreditSchema, credit({ items: [creditLine(true)] })), [], "control: true");
+  assertEquals(issuePaths(PurchaseCreditSchema, credit({ items: [creditLine(false)] })), [], "control: false");
+  // Absent is refused at the row's own key — on the line only, never on a divider.
+  const absent = credit({ items: [creditLine(true)] });
+  const bare: Record<string, unknown> = { ...(absent.items[2] as Record<string, unknown>) };
+  delete bare.reverses_billing;
+  absent.items[2] = bare as unknown as typeof absent.items[2];
+  assertEquals(issuePaths(PurchaseCreditSchema, absent), ["items.2.reverses_billing"]);
+  // A kit header is a line row too: the writer stamps it, so the refine requires it.
+  const header = credit({ items: [creditLine(true)] });
+  const headerRow: Record<string, unknown> = { ...(header.items[2] as Record<string, unknown>), ledger_account: null };
+  delete headerRow.reverses_billing;
+  header.items[2] = headerRow as unknown as typeof header.items[2];
+  assertEquals(issuePaths(PurchaseCreditSchema, header).includes("items.2.reverses_billing"), true, "a bare kit header is refused");
   // Each line arm carries it, not just the product arm.
   const freight = billDirect({ name: "Freight credit", ledger_account: 5000, amount_cents: 2000, reverses_billing: false });
   assertEquals(issuePaths(PurchaseCreditSchema, credit({ items: [freight], total_cents: 2000, remaining_credit_cents: 2000 })), []);

@@ -18921,8 +18921,8 @@
         {
           "kind": "interface",
           "name": "AccountedCreditNoteItem",
-          "declaration": "interface AccountedCreditNoteItem {\n  quantity: number;\n  path_invoice_item?: readonly string[];\n  reverses_billing: boolean;\n}",
-          "doc": "One credit-note line, as {@link billingReversals} reads it."
+          "declaration": "interface AccountedCreditNoteItem {\n  quantity: number;\n  path_invoice_item?: readonly string[];\n  uid_invoice_item?: string | null;\n  reverses_billing?: boolean;\n  price?: typeLiteral;\n  substituted_for?: readonly typeLiteral[];\n}",
+          "doc": "One credit-note line, as quantity accounting reads it."
         },
         {
           "kind": "interface",
@@ -18941,12 +18941,6 @@
           "name": "BilledWindow",
           "declaration": "interface BilledWindow {\n  end: string;\n  windows: readonly WindowBounds[];\n}",
           "doc": "A pair's charge windows, as an extension compares them: where the last one ends, and each one's bounds."
-        },
-        {
-          "kind": "interface",
-          "name": "BillingReversals",
-          "declaration": "interface BillingReversals {\n  byRow: Map<string, number>;\n  unkeyed: string[];\n}",
-          "doc": ""
         },
         {
           "kind": "interface",
@@ -18969,7 +18963,7 @@
         {
           "kind": "interface",
           "name": "InvoicedAtPath",
-          "declaration": "interface InvoicedAtPath {\n  quantity: number;\n  rows: InvoicedRow[];\n}",
+          "declaration": "interface InvoicedAtPath {\n  quantity: number;\n  rows: InvoicedRow[];\n  time_credits?: TimeCredit[];\n}",
           "doc": "What the invoices bill at one order-relative path."
         },
         {
@@ -18983,6 +18977,24 @@
           "name": "InvoicedRow",
           "declaration": "interface InvoicedRow {\n  invoiceUid: string;\n  item: InvoiceItem;\n  via: \"direct\" | \"substitute\" | \"extension\";\n  quantity: number;\n  window: BilledWindow | null;\n}",
           "doc": "One invoice row that bills an order path."
+        },
+        {
+          "kind": "interface",
+          "name": "KeyableCreditLine",
+          "declaration": "interface KeyableCreditLine {\n  quantity: number;\n  path_invoice_item?: readonly string[];\n  uid_invoice_item?: string | null;\n  price?: typeLiteral;\n}",
+          "doc": "What {@link keyInvoiceCredits} reads of a credit-note line: the cap's lines and the fold's alike."
+        },
+        {
+          "kind": "interface",
+          "name": "KeyedInvoiceCredit",
+          "declaration": "interface KeyedInvoiceCredit {\n  line: L;\n  row: R;\n  kind: \"units\" | \"time\";\n  time: TimeAmount;\n}",
+          "doc": "One credit-note line matched to the invoice row it credits. @see {@link keyInvoiceCredits}"
+        },
+        {
+          "kind": "interface",
+          "name": "KeyedInvoiceRow",
+          "declaration": "interface KeyedInvoiceRow {\n  uid: string;\n  path: readonly string[];\n  quantity?: number;\n  price?: typeLiteral;\n}",
+          "doc": "The invoice row a keyed credit line credits: the fields the keyer reads."
         },
         {
           "kind": "interface",
@@ -19040,6 +19052,18 @@
         },
         {
           "kind": "interface",
+          "name": "TimeAmount",
+          "declaration": "interface TimeAmount {\n  num: number;\n  den: number;\n}",
+          "doc": "An exact, non-negative-denominator rational — a quantity of a formula's periods."
+        },
+        {
+          "kind": "interface",
+          "name": "TimeCredit",
+          "declaration": "interface TimeCredit {\n  invoiceUid: string;\n  path: readonly string[];\n  quantity: number;\n  counts: readonly TierCount[];\n}",
+          "doc": "One reversing TIME credit, netted against the extension group of the row it credits."
+        },
+        {
+          "kind": "interface",
           "name": "WindowBounds",
           "declaration": "interface WindowBounds {\n  start: string;\n  end: string;\n}",
           "doc": "One charge window's bounds, as the shortening gate compares them."
@@ -19075,9 +19099,9 @@
         },
         {
           "kind": "function",
-          "name": "billingReversals",
-          "signature": "billingReversals(creditNotes: readonly AccountedCreditNote[]): BillingReversals",
-          "doc": "The units each invoice row's billing has been REVERSED by, from credit notes.\n\nA line counts only when all four hold, and each one is load-bearing:\n\n- the note is `issued` or `applied` — a draft has not credited anything, and a\n  void one has been taken back;\n- the line sets `reverses_billing`. 🔴 **Never gate on `reason` instead**:\n  `bad_debt` is a write-off and `order_adjustment` covers loss-and-damage, so\n  netting by reason would make {@link remainingForOrder} offer to RE-BILL units\n  that were written off rather than returned;\n- the line names `path_invoice_item`, the invoice row it credits. `uid` alone\n  is not a row identity — it repeats within one document;\n- the note names exactly ONE invoice in `sources`. A path key is only unique\n  within one document, so without that the same path on two invoices is\n  indistinguishable and the credit could be subtracted from the wrong row.\n\nAnything else is reported in `unkeyed` rather than guessed at.",
+          "name": "addTime",
+          "signature": "addTime(a: TimeAmount, b: TimeAmount): TimeAmount",
+          "doc": "`a + b`, exact.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -19104,6 +19128,14 @@
         },
         {
           "kind": "function",
+          "name": "compareTime",
+          "signature": "compareTime(a: TimeAmount, b: TimeAmount): number",
+          "doc": "The sign of `a − b`, compared exactly by cross-multiplying.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "countsDirection",
           "signature": "countsDirection(item: LineItem, counts: readonly TierCount[]): -1 | 0 | 1",
           "doc": "The DIRECTION of a count delta: the sign of the money it prices to at the\nline's own rates, or — on a $0 line — the sign of its summed periods. `+1`\nis an extension still owed, `−1` a shortening, `0` nothing.",
@@ -19115,6 +19147,14 @@
           "name": "countsMagnitude",
           "signature": "countsMagnitude(item: LineItem, counts: readonly TierCount[]): TierCount[]",
           "doc": "The magnitude of a count delta — every tier's sign flipped when the direction is negative.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "countsTime",
+          "signature": "countsTime(counts: readonly typeLiteral[] | null | undefined): TimeAmount",
+          "doc": "**One unit's billed time**: Σ a line's `counts`, exact. A line with no counts\n(none stored) counts as one period, so the budget is exactly its unit count.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -19154,7 +19194,7 @@
             },
             {
               "name": "creditNotes",
-              "doc": "Credit notes on those invoices; a `reverses_billing` line nets its row"
+              "doc": "Credit notes on those invoices; a `reverses_billing` line nets its row ({@link invoicedByPath}'s rule; the summed quantity is floored here, where it acts)"
             }
           ],
           "returnsTag": null
@@ -19163,7 +19203,7 @@
           "kind": "function",
           "name": "invoicedByPath",
           "signature": "invoicedByPath(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[], _: unknown): InvoicedByPath",
-          "doc": "How much each order path is billed, summed across every non-void, aligned\ninvoice (D3).\n\n⚠️ **An unaligned scope is left out of the sum and named in `unaligned`**;\nthis does not fail closed on its own, because `computeDocumentDiffs`\nreports an unaligned scope as its own entry and still compares the aligned\nones. A caller about to ACT on the sum — {@link remainingForOrder} — must\nrefuse when `unaligned` is non-empty: an unaligned scope's lines are\nuncounted, so everything it bills reads unbilled.\n\nAn invoice line at a path the order does not carry is still keyed here; it is\nthe order's absence, not the sum's, that makes it unmatched.\n\n## Credit notes net the units they reverse (api-cloudrun#1028 phase 1b)\n\nA credit note this feature authored subtracts the units it reverses from the\nrow that billed them, so taking the over-billing offer CLEARS the offer rather\nthan leaving it standing for ever. {@link billingReversals} decides which lines\nqualify; `credits_unkeyed` names the notes it could not key.\n\n⚠️ **The subtraction happens on the ROW, before the substitution ratio walk** —\nnot on the path total afterwards. That ordering is what makes a credit against\na substitute Y reduce the units standing in for each X, and then flow down the\norder's own ratio to X's components. Netting the total afterwards would leave\nevery descendant crediting units their parent no longer bills.\n\n⚠️ **Units only. Days are NOT netted here** — a credited shortening is reported\nas a suppressed offer instead. `billed_counts` is derived inside\n{@link extensionGroups}, where extension rows split and merge groups, so a\n`(path, quantity, counts)` triple cannot say which group loses the time.",
+          "doc": "How much each order path is billed, summed across every non-void, aligned\ninvoice (D3).\n\n⚠️ **An unaligned scope is left out of the sum and named in `unaligned`**;\nthis does not fail closed on its own, because `computeDocumentDiffs`\nreports an unaligned scope as its own entry and still compares the aligned\nones. A caller about to ACT on the sum — {@link remainingForOrder} — must\nrefuse when `unaligned` is non-empty: an unaligned scope's lines are\nuncounted, so everything it bills reads unbilled.\n\nAn invoice line at a path the order does not carry is still keyed here; it is\nthe order's absence, not the sum's, that makes it unmatched.\n\n## A credit row is a billing row of sign −1 (ruling 84)\n\nA reversing credit-note line ({@link keyInvoiceCredits}' reversed view) enters\nthe fold at the PLACEMENT of the invoice row it credits, so taking the\nover-billing offer clears the offer rather than leaving it standing for ever:\n\n- **Root vs component is judged from the INVOICE's anchors, never the\n  credit's.** A note credits single lines with no kit copy, so judged alone a\n  credited component would read as a root and un-bill X itself (the\n  api-cloudrun#1475 class).\n- **On a substitute ROOT** each copied `substituted_for` entry takes its units\n  back from X, before the ratio walk, so X's components follow the order's own\n  ratio; the rest of the line takes units from Y's own path.\n- **On a COMPONENT** of a substitute, the copied entries are its stamped share\n  of the root's: they stand in for nothing on their own, so only the rest of\n  the line nets, at the component's path. X stays billed until the root is\n  credited (R5: AR accepts any subset of a kit).\n- **Unfloored (R2).** Over-crediting a row reads negative at its path and is\n  surfaced, never dropped. A caller that ACTS on the figure floors where it\n  acts.\n- **A time credit nets COUNTS, never units (R3).** It is carried to\n  {@link extensionGroups} in `time_credits`, which subtracts its counts from\n  the group of the row it credits.\n- A credit of an extension-section row nets nothing here: that row bills days\n  on units other rows billed, and no writer credits one.",
           "paramTags": [
             {
               "name": "orderUid",
@@ -19182,6 +19222,14 @@
               "doc": "Every credit note on those invoices. Omitted ⇒ nothing nets."
             }
           ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "keyInvoiceCredits",
+          "signature": "keyInvoiceCredits(rows: readonly R[], lines: readonly L[], opts: typeLiteral): typeLiteral",
+          "doc": "**The one AR credit keyer** (ruling 84): each line of `notes` matched to the\nrow of `rows` it credits, with its kind. Both views read it:\n\n- **credited** — the cap ({@link creditableLines}' budget,\n  {@link unitsCreditedBefore}): every non-void note, marker-free, with the\n  legacy `uid_invoice_item` fallback (`fallback: true`);\n- **reversed** — netting ({@link invoicedByPath}): issued or applied notes,\n  `reverses_billing === true` lines, by `path_invoice_item` only.\n\nThe caller has already chosen the notes of ONE invoice. A line it cannot\nmatch is returned in `unmatched`.",
+          "paramTags": [],
           "returnsTag": null
         },
         {
@@ -19235,6 +19283,14 @@
         },
         {
           "kind": "function",
+          "name": "scaleTime",
+          "signature": "scaleTime(t: TimeAmount, k: number): TimeAmount",
+          "doc": "`t × k`, exact.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "substitutionCredit",
           "signature": "substitutionCredit(orderItems: readonly CreditableRow[], direct: ReadonlyMap<string, number>): Map<string, number>",
           "doc": "Units of each order line that substitutes stand in for: what substitutes name\nit directly, plus its kit parent's credit scaled by the ORDER's own component\nratio (`credit × component quantity ÷ kit quantity`, rounded half-up once per\nlevel — never the catalog, D1/D2).\n\nThe one walk `invoicedByPath`, `computeDocumentDiffs`'s D2 quantity check and\nthe invoice sync (`syncOrderToInvoiceSelective`, `computeInvoiceSyncStatus`) read. A path under a credited kit is present even at 0.\n\nA path named directly that the order does not carry (a dangling anchor) keeps\nits direct credit; the walk only reaches paths the order has.",
@@ -19248,6 +19304,14 @@
               "doc": "Order path key → units substitutes name it for directly"
             }
           ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "unitsCreditedBefore",
+          "signature": "unitsCreditedBefore(rows: readonly KeyedInvoiceRow[], row: Pick<KeyedInvoiceRow, \"path\">, notes: readonly typeLiteral[]): number",
+          "doc": "**`c` — whole units of `row` the non-void `notes` already credited**, the\ncredited view (marker-free, the cap's liveness and matching). A credit line's\n`substituted_for` slice starts here (ruling 84): units `(c, c + n]`. Time\ncredits take no units (R3), so they do not advance it.",
+          "paramTags": [],
           "returnsTag": null
         }
       ]
@@ -20537,6 +20601,12 @@
           "doc": "A prior credit note, as the credit cap reads it. Void notes are skipped."
         },
         {
+          "kind": "interface",
+          "name": "CreditKitPart",
+          "declaration": "interface CreditKitPart {\n  path: string[];\n  uid: string;\n  quantity: number;\n}",
+          "doc": "One row a credit of a kit pre-fills: {@link creditKitParts}' element."
+        },
+        {
           "kind": "typeAlias",
           "name": "CreditNoteActionRequest",
           "declaration": "type CreditNoteActionRequest = typeLiteral | typeLiteral | typeLiteral;",
@@ -20665,6 +20735,14 @@
           "doc": "**One unit's billed time**: Σ a line's `counts`, exact. A line with no counts\n(none stored) counts as one period, so the budget is exactly its unit count.",
           "paramTags": [],
           "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "creditKitParts",
+          "signature": "creditKitParts(items: readonly InvoiceDocItemType[], path: readonly string[], n: number, priorNotes: readonly CappedNote[]): CreditKitPart[]",
+          "doc": "**The rows a credit of `n` units of the invoice line at `path` pre-fills**\n(R5, owner 2026-11-13): the line itself, then — when it is a KIT, ordinary or\nsubstitute — every line row below it at the INVOICE's own ratio. The AR twin\nof `billLineCreditParts` without its refusals: the operator may remove or\nchange any part and the API accepts any subset, because the fold judges root\nvs component from the invoice's anchors, never the credit's.\n\nThe ratio range is the root's: a row of `q` units under a root of `Q` takes\n`(⌊cq/Q⌉, ⌊(c + n)q/Q⌉]`, `c` the root's units already credited\n({@link unitsCreditedBefore}), rounded half-up, so credits that sum to the\nroot's quantity sum to each row's. A row the ratio gives no unit is left out.\n\nQuantities only: each line's money is `priceCreditNote`'s, and its\n`substituted_for` slice is the API writer's (it needs the orders' rows).",
+          "paramTags": [],
+          "returnsTag": "`[]` when no line row sits at `path`"
         },
         {
           "kind": "function",
@@ -24661,7 +24739,7 @@
           "kind": "function",
           "name": "billLineCredited",
           "signature": "billLineCredited(uidBill: string, path: readonly string[], credits: readonly Pick<PurchaseCredit, \"status\" | \"items\">[]): BillLineCredited",
-          "doc": "**What live credits have taken from the bill line at `path` on bill\n`uidBill`** — every live credit line naming that `(uid_purchase_bill,\npath_bill_item)`. The per-line half of the credit cap (one-document-model 6d),\nthe twin of AR's `creditableLines` prior-note sum.\n\n⚠️ Keyed on the pointer as written, which goes stale when the bill row moves\n(owner ruling 22, as `path_invoice_item` does on AR): a credit raised before a\nmove then no longer counts against the row. The pool cap\n(`purchaseLineBilledNet`) still sees it.",
+          "doc": "**What live credits have taken from the bill line at `path` on bill\n`uidBill`** — every live credit line naming that `(uid_purchase_bill,\npath_bill_item)`. The per-line half of the credit cap (one-document-model 6d),\nthe twin of AR's `creditableLines` prior-note sum.\n\n**The CREDITED view of the one credit fold** (ruling 84): marker-free, every\nnon-void credit — the same liveness the AR cap reads (`creditableLines`). The\nREVERSED view is {@link purchaseCreditBilling}, gated on `reverses_billing`.\nA supplier credit has no draft state, so non-void is \"issued or applied\",\nexactly AR's netting liveness.\n\n⚠️ Keyed on the pointer as written, which goes stale when the bill row moves\n(owner ruling 22, as `path_invoice_item` does on AR): a credit raised before a\nmove then no longer counts against the row. The pool cap\n(`purchaseLineBilledNet`) still sees it.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -24734,6 +24812,14 @@
           "name": "purchaseBillSharedPairFields",
           "signature": "purchaseBillSharedPairFields(): readonly SharedField[]",
           "doc": "The pair fields the purchase → bill merge follows, read off the two schemas.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "purchaseCreditBilling",
+          "signature": "purchaseCreditBilling(rows: readonly PurchaseDocumentRow[], uidPurchase: string, purchaseItems: readonly CreditableRow[]): Map<string, PurchaseLineBilling>",
+          "doc": "**What one supplier credit UN-bills of each line of purchase `uidPurchase`** —\n{@link purchaseDocumentBilling}'s fold over the credit's rows, read as rows of\nsign −1 (ruling 84). The caller subtracts it. Two differences, both the one\ncredit fold's rules on both sides:\n\n- **Only a `reverses_billing: true` line nets** (ruling 38). An unmarked line —\n  a goodwill or freight credit — is money given back, not billing reversed.\n- **A time credit nets COUNTS and money, never units** (R3): a line carrying\n  `counts` adds its parts and amount and no quantity.\n\nRoot vs component is the credit's own anchors, and that is the bill's by\nconstruction: a credit of a substitute kit copies its root WITH its subtree\nand refuses a bare component (`billLineCreditParts`, `creditableBillLines`),\nso the copied anchors are the bill's. No stored credit carries\n`substituted_for` (prod 2, dev 6 lines on 2026-11-13).",
           "paramTags": [],
           "returnsTag": null
         },

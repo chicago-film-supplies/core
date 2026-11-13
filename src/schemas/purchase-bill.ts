@@ -251,12 +251,10 @@ interface PurchaseDocumentLineBase {
    *
    * ⚠️ **The `?` is the SHARED GRAIN's, not the credit's.** Bills and credits
    * share these arms, and a bill line reverses nothing, so `checkPurchaseBill`
-   * refuses the key on a bill. On a credit the key is optional only while the
-   * stored lines are backfilled (`true` on every one: prod 2, dev 6, `test` 0 on
-   * 2026-11-13 — each is placed on a purchase line, so `true` is today's
-   * arithmetic, not a default). The next beta makes `checkPurchaseCredit`
-   * require it on every credit LINE row (dividers excluded), with no
-   * absent-means-a-value reading in between.
+   * refuses the key on a bill, and `checkPurchaseCredit` REQUIRES it on every
+   * credit line row (kit headers included, dividers excluded). The stored lines
+   * were backfilled `true` before the requirement landed (prod 2, dev 6, `test`
+   * 0 on 2026-11-13, each placed on a purchase line).
    */
   reverses_billing?: boolean;
 }
@@ -936,6 +934,14 @@ export function derivePurchaseCreditSources(
 
 function checkPurchaseCredit(c: PurchaseCredit, ctx: z.RefinementCtx): void {
   documentItemsIssues(c, c.total_cents, ["total_cents"], ctx);
+  // Every LINE row states whether it reverses billing (ruling 84, R1 beta B):
+  // kit headers included, as the writer stamps them (`stampReversesBilling`),
+  // dividers excluded. Absent never means a value: the fold reads `=== true`.
+  c.items.forEach((row, i) => {
+    if (isPurchaseLine(row) && typeof row.reverses_billing !== "boolean") {
+      ctx.addIssue({ code: "custom", path: ["items", i, "reverses_billing"], message: "a supplier credit line states reverses_billing" });
+    }
+  });
   const uidPurchase = purchaseCreditPurchaseUid(c);
   purchaseScopeIssues(c, ctx, uidPurchase);
   if (uidPurchase === undefined) {

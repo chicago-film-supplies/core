@@ -125,3 +125,16 @@ export function purchasePair(uid: string, window: { start: string; end: string |
 export function purchaseDivider(uid: string, name = "Chicago") {
   return { uid, type: "destination" as const, name, path: [uid], description: "" };
 }
+
+/**
+ * A supplier credit's rows as its writer stores them: every LINE row states
+ * `reverses_billing` (ruling 84, beta B), `true` unless the row already says
+ * otherwise — the writer's R4 answer for a line placed on a purchase line.
+ */
+export function asCreditRows<R extends { type: string }>(rows: readonly R[]): R[] {
+  return rows.map((r) =>
+    r.type === "purchase" || r.type === "destination" || r.type === "group" || "reverses_billing" in r
+      ? r
+      : { ...r, reverses_billing: true }
+  );
+}

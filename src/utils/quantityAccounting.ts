@@ -297,19 +297,85 @@ export interface InvoicedRow {
   window: BilledWindow | null;
 }
 
-/** One credit-note line, as {@link billingReversals} reads it. */
-export interface AccountedCreditNoteItem {
+// ── The one credit keyer (ruling 84) ──────────────────────────────
+
+/** An exact, non-negative-denominator rational — a quantity of a formula's periods. */
+export interface TimeAmount {
+  num: number;
+  den: number;
+}
+
+function gcd(a: number, b: number): number {
+  a = Math.abs(a);
+  b = Math.abs(b);
+  while (b) [a, b] = [b, a % b];
+  return a || 1;
+}
+
+function reduceTime(t: TimeAmount): TimeAmount {
+  const g = gcd(t.num, t.den);
+  return { num: t.num / g, den: t.den / g };
+}
+
+/** `a + b`, exact. */
+export function addTime(a: TimeAmount, b: TimeAmount): TimeAmount {
+  return reduceTime({ num: a.num * b.den + b.num * a.den, den: a.den * b.den });
+}
+
+/** `t × k`, exact. */
+export function scaleTime(t: TimeAmount, k: number): TimeAmount {
+  return reduceTime({ num: t.num * k, den: t.den });
+}
+
+/** The sign of `a − b`, compared exactly by cross-multiplying. */
+export function compareTime(a: TimeAmount, b: TimeAmount): number {
+  return a.num * b.den - b.num * a.den;
+}
+
+/**
+ * **One unit's billed time**: Σ a line's `counts`, exact. A line with no counts
+ * (none stored) counts as one period, so the budget is exactly its unit count.
+ */
+export function countsTime(counts: readonly { num: number; den: number }[] | null | undefined): TimeAmount {
+  if (!counts || counts.length === 0) return { num: 1, den: 1 };
+  return counts.reduce<TimeAmount>((acc, c) => addTime(acc, { num: c.num, den: c.den }), { num: 0, den: 1 });
+}
+
+/** What {@link keyInvoiceCredits} reads of a credit-note line: the cap's lines and the fold's alike. */
+export interface KeyableCreditLine {
+  quantity: number;
+  path_invoice_item?: readonly string[];
+  uid_invoice_item?: string | null;
+  price?: { counts?: readonly { num: number; den: number }[] };
+}
+
+/** One credit-note line, as quantity accounting reads it. */
+export interface AccountedCreditNoteItem extends KeyableCreditLine {
   quantity: number;
   /** The `path` of the invoice line credited — its row identity on that invoice. */
   path_invoice_item?: readonly string[];
   /**
-   * Stated by every line, and true only on one the over-billing offer wrote.
-   *
-   * ⚠️ Read with `=== true` rather than for truthiness: the reader is handed
-   * documents by consumers that may predate the migration, and a `false` and an
-   * absent must both mean "not netted".
+   * The credited row's uid, for a note stored before paths. Only the CREDITED
+   * view (the cap) falls back to it, and only to the first line carrying it;
+   * netting never guesses a row.
    */
-  reverses_billing: boolean;
+  uid_invoice_item?: string | null;
+  /**
+   * True only on a line that un-bills what it credits. Read with `=== true`: a
+   * `false` and an absent both mean "not netted".
+   */
+  reverses_billing?: boolean;
+  /**
+   * The line's stored counts and pre-tax money. A line whose counts give one
+   * unit LESS time than its invoice row's is a time credit (R3); absent counts
+   * read as a unit credit.
+   */
+  price?: { counts?: readonly TierCount[]; subtotal_discounted_cents?: number };
+  /**
+   * The invoice row's `substituted_for`, sliced to the units this line credits
+   * (ruling 84, `api-cloudrun/src/lib/creditNotePointers.ts`). ORDER-relative.
+   */
+  substituted_for?: readonly { path: readonly string[]; quantity: number }[];
 }
 
 /** A credit note as quantity accounting reads it. */
@@ -321,56 +387,156 @@ export interface AccountedCreditNote {
   sources?: readonly { collection: string; uid: string }[];
 }
 
-/** @see {@link billingReversals} */
-export interface BillingReversals {
-  /** `invoiceUid + "|" + invoice path key` → units whose billing is reversed. */
-  byRow: Map<string, number>;
+/** The invoice row a keyed credit line credits: the fields the keyer reads. */
+export interface KeyedInvoiceRow {
+  uid: string;
+  path: readonly string[];
+  quantity?: number;
+  price?: { counts?: readonly { num: number; den: number }[] };
+}
+
+/** One credit-note line matched to the invoice row it credits. @see {@link keyInvoiceCredits} */
+export interface KeyedInvoiceCredit<L extends KeyableCreditLine = KeyableCreditLine, R extends KeyedInvoiceRow = KeyedInvoiceRow> {
+  line: L;
+  /** The invoice row it credits. */
+  row: R;
   /**
-   * Notes carrying a `reverses_billing` line this cannot key — no
-   * `path_invoice_item`, or not exactly one `invoices` source.
-   *
-   * 🔴 **Surface this. "No credits found" must never read as "no credits."**
+   * `units` credits whole units of the row; `time` credits time on `quantity`
+   * units and NO units (R3). Read off the stored counts against the row's: a
+   * line whose counts give one unit the row's own time (or that stores none)
+   * credited units. A time credit of exactly the billed length reads as a unit
+   * credit, which is the same money and the same units.
    */
-  unkeyed: string[];
+  kind: "units" | "time";
+  /** One unit's credited time: the line's own counts, else (none stored) the row's. */
+  time: TimeAmount;
 }
 
 /**
- * The units each invoice row's billing has been REVERSED by, from credit notes.
+ * **The one AR credit keyer** (ruling 84): each line of `notes` matched to the
+ * row of `rows` it credits, with its kind. Both views read it:
  *
- * A line counts only when all four hold, and each one is load-bearing:
+ * - **credited** — the cap ({@link creditableLines}' budget,
+ *   {@link unitsCreditedBefore}): every non-void note, marker-free, with the
+ *   legacy `uid_invoice_item` fallback (`fallback: true`);
+ * - **reversed** — netting ({@link invoicedByPath}): issued or applied notes,
+ *   `reverses_billing === true` lines, by `path_invoice_item` only.
  *
- * - the note is `issued` or `applied` — a draft has not credited anything, and a
- *   void one has been taken back;
- * - the line sets `reverses_billing`. 🔴 **Never gate on `reason` instead**:
- *   `bad_debt` is a write-off and `order_adjustment` covers loss-and-damage, so
- *   netting by reason would make {@link remainingForOrder} offer to RE-BILL units
- *   that were written off rather than returned;
- * - the line names `path_invoice_item`, the invoice row it credits. `uid` alone
- *   is not a row identity — it repeats within one document;
- * - the note names exactly ONE invoice in `sources`. A path key is only unique
- *   within one document, so without that the same path on two invoices is
- *   indistinguishable and the credit could be subtracted from the wrong row.
- *
- * Anything else is reported in `unkeyed` rather than guessed at.
+ * The caller has already chosen the notes of ONE invoice. A line it cannot
+ * match is returned in `unmatched`.
  */
-export function billingReversals(creditNotes: readonly AccountedCreditNote[]): BillingReversals {
-  const byRow = new Map<string, number>();
-  const unkeyed: string[] = [];
-  for (const note of creditNotes) {
-    if (note.status !== "issued" && note.status !== "applied") continue;
-    const invoices = (note.sources ?? []).filter((s) => s.collection === "invoices");
-    for (const item of note.items) {
-      if (item.reverses_billing !== true) continue;
-      const path = item.path_invoice_item ?? [];
-      if (path.length === 0 || invoices.length !== 1) {
-        unkeyed.push(note.uid);
-        continue;
-      }
-      const k = `${invoices[0].uid}|${key(path)}`;
-      byRow.set(k, (byRow.get(k) ?? 0) + (item.quantity ?? 0));
+export function keyInvoiceCredits<L extends KeyableCreditLine, R extends KeyedInvoiceRow>(
+  rows: readonly R[],
+  lines: readonly L[],
+  opts: { fallback: boolean },
+): { keyed: KeyedInvoiceCredit<L, R>[]; unmatched: L[] } {
+  const byPath = new Map(rows.map((r) => [key(r.path), r] as const));
+  const keyed: KeyedInvoiceCredit<L, R>[] = [];
+  const unmatched: L[] = [];
+  for (const line of lines) {
+    let row: R | undefined;
+    if (line.path_invoice_item && line.path_invoice_item.length > 0) row = byPath.get(key(line.path_invoice_item));
+    else if (opts.fallback && line.uid_invoice_item) row = rows.find((r) => r.uid === line.uid_invoice_item);
+    if (row === undefined) {
+      unmatched.push(line);
+      continue;
+    }
+    const own = line.price?.counts ?? [];
+    const rowTime = countsTime(row.price?.counts);
+    const time = own.length > 0 ? countsTime(own) : rowTime;
+    keyed.push({ line, row, kind: compareTime(time, rowTime) === 0 ? "units" : "time", time });
+  }
+  return { keyed, unmatched };
+}
+
+/**
+ * **`c` — whole units of `row` the non-void `notes` already credited**, the
+ * credited view (marker-free, the cap's liveness and matching). A credit line's
+ * `substituted_for` slice starts here (ruling 84): units `(c, c + n]`. Time
+ * credits take no units (R3), so they do not advance it.
+ */
+export function unitsCreditedBefore(
+  rows: readonly KeyedInvoiceRow[],
+  row: Pick<KeyedInvoiceRow, "path">,
+  notes: readonly { status: string; items: readonly KeyableCreditLine[] }[],
+): number {
+  const k = key(row.path);
+  let c = 0;
+  for (const note of notes) {
+    if (note.status === "void") continue;
+    for (const credit of keyInvoiceCredits(rows, note.items, { fallback: true }).keyed) {
+      if (credit.kind === "units" && key(credit.row.path) === k) c += credit.line.quantity;
     }
   }
-  return { byRow, unkeyed: [...new Set(unkeyed)] };
+  return c;
+}
+
+/** One reversing TIME credit, netted against the extension group of the row it credits. */
+export interface TimeCredit {
+  invoiceUid: string;
+  /** The credited invoice row's path. */
+  path: readonly string[];
+  /** Units whose time it credits. */
+  quantity: number;
+  /** One unit's credited counts — subtracted from the group's billed counts. */
+  counts: readonly TierCount[];
+}
+
+/** What an invoice's reversing credits take back from one of its rows. */
+interface RowReversal {
+  /** Whole units credited (unit credits only). */
+  units: number;
+  /** Their sliced `substituted_for`, summed by X path key. */
+  standIn: Map<string, number>;
+  time: TimeCredit[];
+}
+
+/**
+ * The reversed view of {@link keyInvoiceCredits} for one invoice: its reversing
+ * lines by credited row. Liveness: `issued` or `applied` — a draft has credited
+ * nothing and a void one was taken back. A note names exactly one invoice in
+ * `sources`, or every reversing line of it is unkeyed: a path is unique only
+ * within one document.
+ *
+ * 🔴 **Never gate on `reason` instead**: `bad_debt` is a write-off and
+ * `order_adjustment` covers loss-and-damage, so netting by reason would re-offer
+ * units that were written off rather than returned.
+ */
+function invoiceReversals(
+  invoiceUid: string,
+  rows: readonly KeyedInvoiceRow[],
+  notes: readonly AccountedCreditNote[],
+  unkeyed: Set<string>,
+): Map<string, RowReversal> {
+  const out = new Map<string, RowReversal>();
+  for (const note of notes) {
+    if (note.status !== "issued" && note.status !== "applied") continue;
+    const reversing = note.items.filter((l) => l.reverses_billing === true);
+    if (reversing.length === 0) continue;
+    const invoices = (note.sources ?? []).filter((s) => s.collection === "invoices");
+    if (invoices.length !== 1) {
+      unkeyed.add(note.uid);
+      continue;
+    }
+    if (invoices[0].uid !== invoiceUid) continue;
+    const { keyed, unmatched } = keyInvoiceCredits(rows, reversing, { fallback: false });
+    if (unmatched.length > 0) unkeyed.add(note.uid);
+    for (const credit of keyed) {
+      const k = key(credit.row.path);
+      let r = out.get(k);
+      if (!r) out.set(k, r = { units: 0, standIn: new Map(), time: [] });
+      if (credit.kind === "time") {
+        r.time.push({ invoiceUid, path: credit.row.path, quantity: credit.line.quantity, counts: credit.line.price?.counts ?? [] });
+        continue;
+      }
+      r.units += credit.line.quantity;
+      for (const e of credit.line.substituted_for ?? []) {
+        const x = key(e.path);
+        r.standIn.set(x, (r.standIn.get(x) ?? 0) + e.quantity);
+      }
+    }
+  }
+  return out;
 }
 
 /** What the invoices bill at one order-relative path. */
@@ -379,6 +545,12 @@ export interface InvoicedAtPath {
   quantity: number;
   /** The rows that bill this path. Empty for a component credited only through its kit's substitute. */
   rows: InvoicedRow[];
+  /**
+   * Reversing TIME credits on rows billing this path (R3): they take no units,
+   * and {@link extensionGroups} subtracts their counts from the group of the
+   * row they credit. Absent when there are none.
+   */
+  time_credits?: TimeCredit[];
 }
 
 /** @see {@link invoicedByPath} */
@@ -391,12 +563,13 @@ export interface InvoicedByPath {
   unaligned: string[];
   /**
    * Credit notes carrying a `reverses_billing` line this could not attribute to
-   * an invoice row, so nothing was netted for them.
+   * an invoice row, so nothing was netted for them: no `path_invoice_item`, a
+   * path the invoice no longer carries, or not exactly one `invoices` source.
    *
    * 🔴 **A caller that reports credits MUST report this too.** Empty because
    * nothing credited and empty because nothing could be READ are the same number
    * otherwise, and the second one silently re-offers units that are already
-   * credited. See {@link billingReversals}.
+   * credited.
    */
   credits_unkeyed: string[];
 }
@@ -417,23 +590,31 @@ const key = (path: readonly string[]): string => path.join("/");
  * An invoice line at a path the order does not carry is still keyed here; it is
  * the order's absence, not the sum's, that makes it unmatched.
  *
- * ## Credit notes net the units they reverse (api-cloudrun#1028 phase 1b)
+ * ## A credit row is a billing row of sign −1 (ruling 84)
  *
- * A credit note this feature authored subtracts the units it reverses from the
- * row that billed them, so taking the over-billing offer CLEARS the offer rather
- * than leaving it standing for ever. {@link billingReversals} decides which lines
- * qualify; `credits_unkeyed` names the notes it could not key.
+ * A reversing credit-note line ({@link keyInvoiceCredits}' reversed view) enters
+ * the fold at the PLACEMENT of the invoice row it credits, so taking the
+ * over-billing offer clears the offer rather than leaving it standing for ever:
  *
- * ⚠️ **The subtraction happens on the ROW, before the substitution ratio walk** —
- * not on the path total afterwards. That ordering is what makes a credit against
- * a substitute Y reduce the units standing in for each X, and then flow down the
- * order's own ratio to X's components. Netting the total afterwards would leave
- * every descendant crediting units their parent no longer bills.
- *
- * ⚠️ **Units only. Days are NOT netted here** — a credited shortening is reported
- * as a suppressed offer instead. `billed_counts` is derived inside
- * {@link extensionGroups}, where extension rows split and merge groups, so a
- * `(path, quantity, counts)` triple cannot say which group loses the time.
+ * - **Root vs component is judged from the INVOICE's anchors, never the
+ *   credit's.** A note credits single lines with no kit copy, so judged alone a
+ *   credited component would read as a root and un-bill X itself (the
+ *   api-cloudrun#1475 class).
+ * - **On a substitute ROOT** each copied `substituted_for` entry takes its units
+ *   back from X, before the ratio walk, so X's components follow the order's own
+ *   ratio; the rest of the line takes units from Y's own path.
+ * - **On a COMPONENT** of a substitute, the copied entries are its stamped share
+ *   of the root's: they stand in for nothing on their own, so only the rest of
+ *   the line nets, at the component's path. X stays billed until the root is
+ *   credited (R5: AR accepts any subset of a kit).
+ * - **Unfloored (R2).** Over-crediting a row reads negative at its path and is
+ *   surfaced, never dropped. A caller that ACTS on the figure floors where it
+ *   acts.
+ * - **A time credit nets COUNTS, never units (R3).** It is carried to
+ *   {@link extensionGroups} in `time_credits`, which subtracts its counts from
+ *   the group of the row it credits.
+ * - A credit of an extension-section row nets nothing here: that row bills days
+ *   on units other rows billed, and no writer credits one.
  *
  * @param orderUid - The order's uid, which is its divider's uid on every invoice
  * @param orderItems - The order's CURRENT `items`, dividers included
@@ -449,11 +630,23 @@ export function invoicedByPath(
   const byPath = new Map<string, InvoicedAtPath>();
   const compared: string[] = [];
   const unaligned: string[] = [];
-  const reversals = billingReversals(creditNotes);
+  const unkeyed = new Set<string>();
   const at = (k: string): InvoicedAtPath => {
     let entry = byPath.get(k);
     if (!entry) byPath.set(k, entry = { quantity: 0, rows: [] });
     return entry;
+  };
+  /** Add `units` (signed, unfloored) at `k`, with the row when it still bills a positive count. */
+  const add = (k: string, units: number, row: Omit<InvoicedRow, "quantity">) => {
+    if (units === 0) return;
+    const entry = at(k);
+    entry.quantity += units;
+    if (units > 0) entry.rows.push({ ...row, quantity: units });
+  };
+  const addTimeCredits = (k: string, credits: readonly TimeCredit[]) => {
+    if (credits.length === 0) return;
+    const entry = at(k);
+    entry.time_credits = [...(entry.time_credits ?? []), ...credits];
   };
 
   /** Units credited to an order path through a substitute, before the ratio walk. */
@@ -467,6 +660,12 @@ export function invoicedByPath(
       continue;
     }
     compared.push(invoice.uid);
+    const reversals = invoiceReversals(
+      invoice.uid,
+      (invoice.items ?? []).filter((it) => isLineItemType(it.type)) as KeyedInvoiceRow[],
+      creditNotes,
+      unkeyed,
+    );
     const anchors = liveInvoiceAnchors(scoped, orderItems, orderUid);
     const extensionTargets = extensionSectionTargets(scoped, orderUid);
     const authored = invoiceAuthoredSubtrees(scoped, orderItems as LineItem[], orderUid);
@@ -475,17 +674,15 @@ export function invoicedByPath(
       pairWindow(invoice.destinations?.find((pair) => pair.uid === (item.path ?? [])[1] && pair.uid_order === orderUid));
     for (const item of scoped) {
       if (!isLineItemType(item.type)) continue;
+      const reversal = reversals.get(key(item.path ?? []));
       // A moved line (core#125) IS order line X at another position — inside an
       // order group or one the invoice authored (a split's new group) alike — so
       // it bills X directly, at X's terms. Checked before the authored skip below.
       const claim = claims.get(key((item.path ?? []).slice(1)));
       if (claim !== undefined) {
-        const reversed = reversals.byRow.get(`${invoice.uid}|${key(item.path ?? [])}`) ?? 0;
-        const left = (item.quantity ?? 0) - Math.min(reversed, Math.max(item.quantity ?? 0, 0));
-        if (left <= 0) continue;
-        const entry = at(key(claim));
-        entry.rows.push({ invoiceUid: invoice.uid, item, via: "direct", quantity: left, window: windowOf(item) });
-        entry.quantity += left;
+        const window = windowOf(item);
+        add(key(claim), (item.quantity ?? 0) - (reversal?.units ?? 0), { invoiceUid: invoice.uid, item, via: "direct", window });
+        addTimeCredits(key(claim), reversal?.time ?? []);
         continue;
       }
       // A line in a group or destination the invoice authored bills no order
@@ -503,48 +700,38 @@ export function invoicedByPath(
         continue;
       }
       const rel = (item.path ?? []).slice(1);
+      addTimeCredits(key(rel), reversal?.time ?? []);
       const enclosing = anchors.filter((a) => isAtOrBelow(rel, a.path));
-      // Units of THIS row whose billing a credit note has reversed, spent below
-      // against the anchors first and then against the row's own bill.
-      let reversed = reversals.byRow.get(`${invoice.uid}|${key(item.path ?? [])}`) ?? 0;
-      /** Take up to `units` from the reversal budget. */
-      const netted = (units: number): number => {
-        const taken = Math.min(reversed, Math.max(units, 0));
-        reversed -= taken;
-        return units - taken;
-      };
-      const bill = (units: number) => {
-        const left = netted(units);
-        if (left <= 0) return;
-        const entry = at(key(rel));
-        entry.rows.push({ invoiceUid: invoice.uid, item, via: "direct", quantity: left, window });
-        entry.quantity += left;
-      };
       if (enclosing.length === 0) {
-        bill(item.quantity ?? 0);
+        add(key(rel), (item.quantity ?? 0) - (reversal?.units ?? 0), { invoiceUid: invoice.uid, item, via: "direct", window });
         continue;
       }
-      // Y itself: each anchor at this row credits its X by the units standing in.
-      // A reversal is spent HERE first, so `substituteCredit` — and therefore the
-      // ratio walk below — sees the reduced stand-in rather than the billed one.
-      for (const anchor of enclosing) {
-        if (key(anchor.path) !== key(rel) || anchor.quantity <= 0) continue;
-        const standIn = netted(anchor.quantity);
-        if (standIn <= 0) continue;
-        const x = key(anchor.substitutedFor);
-        at(x).rows.push({ invoiceUid: invoice.uid, item, via: "substitute", quantity: standIn, window });
-        substituteCredit.set(x, (substituteCredit.get(x) ?? 0) + standIn);
-      }
-      // D2: what does not stand in for a live X is the
-      // order's own quantity at this path — a merge into a Y the order carries.
+      // Judged from the INVOICE's anchors: the X this row stands in for live, and
+      // the ones it is the ROOT for.
       const liveX = new Set(enclosing.map((a) => key(a.substitutedFor)));
-      bill((item.quantity ?? 0) - standInUnits(item, liveX));
+      /** The credit's stand-in units for live Xs: they never net at the row's own path. */
+      let creditedStandIn = 0;
+      for (const [x, units] of reversal?.standIn ?? []) if (liveX.has(x)) creditedStandIn += units;
+      // Y itself: each anchor at this row credits its X by the units standing in,
+      // less what the credits took back of it — before the ratio walk, so X's
+      // components follow.
+      for (const anchor of enclosing) {
+        if (key(anchor.path) !== key(rel)) continue;
+        const x = key(anchor.substitutedFor);
+        const standIn = anchor.quantity - (reversal?.standIn.get(x) ?? 0);
+        if (standIn > 0) at(x).rows.push({ invoiceUid: invoice.uid, item, via: "substitute", quantity: standIn, window });
+        if (standIn !== 0) substituteCredit.set(x, (substituteCredit.get(x) ?? 0) + standIn);
+      }
+      // D2: what does not stand in for a live X is the order's own quantity at
+      // this path — a merge into a Y the order already carries.
+      const own = (item.quantity ?? 0) - standInUnits(item, liveX);
+      add(key(rel), own - ((reversal?.units ?? 0) - creditedStandIn), { invoiceUid: invoice.uid, item, via: "direct", window });
     }
   }
 
   for (const [k, units] of substitutionCredit(orderItems, substituteCredit)) at(k).quantity += units;
 
-  return { byPath, compared, unaligned, credits_unkeyed: reversals.unkeyed };
+  return { byPath, compared, unaligned, credits_unkeyed: [...unkeyed] };
 }
 
 /** Why {@link invoiceOnlyLines} could not place an invoice line on the order's legs. */
@@ -579,7 +766,7 @@ export interface InvoiceOnlyLines {
   unaligned: string[];
   /** Rows no leg could be named for. Never dropped silently. */
   skipped: InvoiceOnlySkip[];
-  /** Credit notes this could not key, so nothing was netted for them. See {@link billingReversals}. */
+  /** Credit notes this could not key, so nothing was netted for them. See {@link InvoicedByPath.credits_unkeyed}. */
   credits_unkeyed: string[];
 }
 
@@ -624,7 +811,7 @@ const INVOICE_ONLY_TYPES: ReadonlySet<string> = new Set(["rental", "sale", "serv
  * @param orderUid - The order's uid, which is its divider's uid on every invoice that bills it
  * @param orderItems - The order's `items`, dividers included
  * @param invoices - Every invoice linked to the order, live or void
- * @param creditNotes - Credit notes on those invoices; a `reverses_billing` line nets its row
+ * @param creditNotes - Credit notes on those invoices; a `reverses_billing` line nets its row ({@link invoicedByPath}'s rule; the summed quantity is floored here, where it acts)
  */
 export function invoiceOnlyLines(
   orderUid: string,
@@ -638,7 +825,7 @@ export function invoiceOnlyLines(
     orderPaths.add(key(it.path ?? []));
     if (it.type === "destination") orderDestinations.push(it.uid);
   }
-  const reversals = billingReversals(creditNotes);
+  const unkeyed = new Set<string>();
 
   const compared: string[] = [];
   const unaligned: string[] = [];
@@ -654,6 +841,12 @@ export function invoiceOnlyLines(
       continue;
     }
     compared.push(invoice.uid);
+    const reversals = invoiceReversals(
+      invoice.uid,
+      (invoice.items ?? []).filter((it) => isLineItemType(it.type)) as KeyedInvoiceRow[],
+      creditNotes,
+      unkeyed,
+    );
     const anchors = liveInvoiceAnchors(scoped, orderItems, orderUid);
     const extensionTargets = extensionSectionTargets(scoped, orderUid);
     const claims = orderLineClaims(scoped, orderUid);
@@ -682,9 +875,8 @@ export function invoiceOnlyLines(
       }
       if (orderPaths.has(key(placed))) continue;
 
-      const reversed = reversals.byRow.get(`${invoice.uid}|${key(path)}`) ?? 0;
-      const quantity = (item.quantity ?? 0) - Math.min(reversed, Math.max(item.quantity ?? 0, 0));
-      if (quantity <= 0) continue;
+      // Unfloored per row (R2); the projection floors the SUM below, where it acts.
+      const quantity = (item.quantity ?? 0) - (reversals.get(key(path))?.units ?? 0);
 
       const k = key(placed);
       const entry = summed.get(k);
@@ -707,14 +899,19 @@ export function invoiceOnlyLines(
     }
   }
 
+  // A fulfillment cannot hold a non-positive line: a fully credited (or
+  // over-credited) one projects nothing, and neither does a divider left with
+  // nothing under it.
+  const kept = [...summed].filter(([, e]) => e.quantity > 0);
+  const keptKeys = kept.map(([k]) => k);
   return {
-    lines: [...summed.values()].map((e) => ({ ...e.line, quantity: e.quantity })),
-    dividers: [...dividers.values()],
-    invoiceUids: new Map([...summed].map(([k, e]) => [k, e.invoices] as const)),
+    lines: kept.map(([, e]) => ({ ...e.line, quantity: e.quantity })),
+    dividers: [...dividers].filter(([dk]) => keptKeys.some((k) => k.startsWith(`${dk}/`))).map(([, d]) => d),
+    invoiceUids: new Map(kept.map(([k, e]) => [k, e.invoices] as const)),
     compared,
     unaligned,
     skipped,
-    credits_unkeyed: reversals.unkeyed,
+    credits_unkeyed: [...unkeyed],
   };
 }
 
@@ -997,6 +1194,20 @@ export function extensionGroups(
       }
     }
   }
+  // A reversing TIME credit (R3) takes counts back from the group of the row it
+  // credits — the row that last billed those units — on up to its quantity, and
+  // moves no window: what was credited is time, not a different window.
+  for (const credit of billed?.time_credits ?? []) {
+    let left = credit.quantity;
+    for (const g of [...groups]) {
+      if (left <= 0) break;
+      if (g.quantity <= 0 || g.last_billed.invoiceUid !== credit.invoiceUid || key(g.last_billed.path) !== key(credit.path)) continue;
+      const moved = Math.min(left, g.quantity);
+      g.quantity -= moved;
+      left -= moved;
+      groups.push({ ...g, quantity: moved, billed_counts: combineTierCounts(g.billed_counts, credit.counts, -1) });
+    }
+  }
   const out: ExtensionGroup[] = [];
   for (const g of groups) {
     if (g.quantity <= 0) continue;
@@ -1010,6 +1221,16 @@ export function extensionGroups(
     out.push({ ...g, extension_counts: extension, extension_direction: direction });
   }
   return out;
+}
+
+/**
+ * A path's billing as a caller that ACTS on it reads it (R2): an over-credited
+ * path (a negative billed count) bills nothing, so the remainder offers and
+ * builds the order's units, never more. {@link invoicedByPath} itself stays
+ * unfloored, so the diff still surfaces the over-credit.
+ */
+function flooredForAction(at: InvoicedAtPath | undefined): InvoicedAtPath | undefined {
+  return at === undefined || at.quantity >= 0 ? at : { ...at, quantity: 0 };
 }
 
 /** One order line with something left to bill, or billed beyond the order. */
@@ -1096,7 +1317,7 @@ export function remainingForOrder(
   for (const item of orderItems) {
     if (!isLineItemType(item.type)) continue;
     const path = item.path ?? [];
-    const at = billed.byPath.get(key(path));
+    const at = flooredForAction(billed.byPath.get(key(path)));
     const window = orderLineWindow(orderDestinations, path);
     const account = accountLine(item, at, window, ctx);
     const bills = account.quantity > 0 || extensionGroups(item, at, window, ctx).some((g) => g.extension_direction > 0);
@@ -1396,7 +1617,7 @@ export function buildRemainingInvoice(
 
   for (const line of orderLines) {
     const path = line.path ?? [];
-    const at = billed.byPath.get(key(path));
+    const at = flooredForAction(billed.byPath.get(key(path)));
     const quantity = (line.quantity ?? 0) - (at?.quantity ?? 0);
     if (quantity > 0) units.set(key(path), quantity);
     if (quantity < 0) overbilled.push({ path: [...path], quantity, extension_counts: [] });

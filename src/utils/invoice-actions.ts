@@ -90,10 +90,19 @@ import {
   type AccountedCreditNote,
   type AccountingContext,
   type AccountedInvoice,
+  addTime,
   buildOverbillingCredits,
+  compareTime,
+  countsTime,
+  keyInvoiceCredits,
   type OverbillingCredits,
   remainingForOrder,
+  scaleTime,
+  type TimeAmount,
+  unitsCreditedBefore,
 } from "./quantityAccounting.ts";
+
+export { countsTime, type TimeAmount };
 
 // ── refusal ──────────────────────────────────────────────────────────
 
@@ -132,46 +141,6 @@ export interface CreditableLine {
   unit_time: TimeAmount;
   /** Whole units still creditable at the line's full time: `⌊unit_time ÷ billed_time⌋`. */
   units: number;
-}
-
-/** An exact, non-negative-denominator rational — a quantity of a formula's periods. */
-export interface TimeAmount {
-  num: number;
-  den: number;
-}
-
-function gcd(a: number, b: number): number {
-  a = Math.abs(a);
-  b = Math.abs(b);
-  while (b) [a, b] = [b, a % b];
-  return a || 1;
-}
-
-function reduceTime(t: TimeAmount): TimeAmount {
-  const g = gcd(t.num, t.den);
-  return { num: t.num / g, den: t.den / g };
-}
-
-function addTime(a: TimeAmount, b: TimeAmount): TimeAmount {
-  return reduceTime({ num: a.num * b.den + b.num * a.den, den: a.den * b.den });
-}
-
-function scaleTime(t: TimeAmount, k: number): TimeAmount {
-  return reduceTime({ num: t.num * k, den: t.den });
-}
-
-/** `a − b ≥ 0`? and `a < b`? — compared exactly by cross-multiplying. */
-function compareTime(a: TimeAmount, b: TimeAmount): number {
-  return a.num * b.den - b.num * a.den;
-}
-
-/**
- * **One unit's billed time**: Σ a line's `counts`, exact. A line with no counts
- * (none stored) counts as one period, so the budget is exactly its unit count.
- */
-export function countsTime(counts: readonly { num: number; den: number }[] | null | undefined): TimeAmount {
-  if (!counts || counts.length === 0) return { num: 1, den: 1 };
-  return counts.reduce<TimeAmount>((acc, c) => addTime(acc, { num: c.num, den: c.den }), { num: 0, den: 1 });
 }
 
 /** A time amount for a message: `2`, or `3/2`. */
@@ -294,12 +263,10 @@ export function creditableLines(
   const credited = new Map<string, TimeAmount>();
   for (const note of priorNotes) {
     if (note.status === "void") continue;
-    for (const line of note.items) {
-      const target = creditedLine(lines, line);
-      if (!target) continue;
-      const k = pathKey(target.path);
-      const spent = scaleTime(noteLineTime(line, target), line.quantity);
-      credited.set(k, addTime(credited.get(k) ?? { num: 0, den: 1 }, spent));
+    // The credited view of the one keyer: marker-free, legacy uid fallback.
+    for (const { line, row, time } of keyInvoiceCredits(lines, note.items, { fallback: true }).keyed) {
+      const k = pathKey(row.path);
+      credited.set(k, addTime(credited.get(k) ?? { num: 0, den: 1 }, scaleTime(time, line.quantity)));
     }
   }
   return lines.map((line) => {
@@ -319,25 +286,53 @@ export function creditableLines(
   });
 }
 
-/** The time one unit of a note line credited: its own counts, else (none stored) the invoice line's. */
-function noteLineTime(
-  line: CappedCreditLine,
-  target: { price: { counts?: readonly { num: number; den: number }[] } },
-): TimeAmount {
-  return line.price.counts && line.price.counts.length > 0 ? countsTime(line.price.counts) : countsTime(target.price.counts);
+/** One row a credit of a kit pre-fills: {@link creditKitParts}' element. */
+export interface CreditKitPart {
+  /** The invoice row's `path` — its identity on the invoice. */
+  path: string[];
+  uid: string;
+  /** Units pre-filled for this row. */
+  quantity: number;
 }
 
-/** The invoice line a note line credits: by path, or — for a note stored before paths — the first line with its uid. */
-function creditedLine<T extends { uid: string; path: readonly string[] }>(
-  lines: readonly T[],
-  line: CappedCreditLine,
-): T | undefined {
-  if (line.path_invoice_item) {
-    const k = pathKey(line.path_invoice_item);
-    return lines.find((item) => pathKey(item.path) === k);
+/**
+ * **The rows a credit of `n` units of the invoice line at `path` pre-fills**
+ * (R5, owner 2026-11-13): the line itself, then — when it is a KIT, ordinary or
+ * substitute — every line row below it at the INVOICE's own ratio. The AR twin
+ * of `billLineCreditParts` without its refusals: the operator may remove or
+ * change any part and the API accepts any subset, because the fold judges root
+ * vs component from the invoice's anchors, never the credit's.
+ *
+ * The ratio range is the root's: a row of `q` units under a root of `Q` takes
+ * `(⌊cq/Q⌉, ⌊(c + n)q/Q⌉]`, `c` the root's units already credited
+ * ({@link unitsCreditedBefore}), rounded half-up, so credits that sum to the
+ * root's quantity sum to each row's. A row the ratio gives no unit is left out.
+ *
+ * Quantities only: each line's money is `priceCreditNote`'s, and its
+ * `substituted_for` slice is the API writer's (it needs the orders' rows).
+ *
+ * @returns `[]` when no line row sits at `path`
+ */
+export function creditKitParts(
+  items: readonly InvoiceDocItemType[],
+  path: readonly string[],
+  n: number,
+  priorNotes: readonly CappedNote[],
+): CreditKitPart[] {
+  const lines = items.filter(isInvoiceLineItem);
+  const k = pathKey(path);
+  const root = lines.find((l) => pathKey(l.path) === k);
+  if (root === undefined || n <= 0) return [];
+  const c = unitsCreditedBefore(lines, root, priorNotes);
+  const out: CreditKitPart[] = [{ path: [...root.path], uid: root.uid, quantity: n }];
+  if (root.quantity <= 0) return out;
+  const at = (units: number, q: number) => Math.floor((2 * units * q + root.quantity) / (2 * root.quantity));
+  for (const line of lines) {
+    if (line.path.length <= root.path.length || !root.path.every((p, i) => line.path[i] === p)) continue;
+    const quantity = at(c + n, line.quantity) - at(c, line.quantity);
+    if (quantity > 0) out.push({ path: [...line.path], uid: line.uid, quantity });
   }
-  if (line.uid_invoice_item === null) return undefined;
-  return lines.find((item) => item.uid === line.uid_invoice_item);
+  return out;
 }
 
 /**
@@ -357,17 +352,18 @@ export function creditNoteOverCredit(
   const lines = items.filter(isInvoiceLineItem);
   const left = new Map(creditableLines(items, priorNotes).map((l) => [pathKey(l.path), l]));
   for (const line of requested) {
-    const target = creditedLine(lines, line);
+    const keyed = keyInvoiceCredits(lines, [line], { fallback: true }).keyed[0];
+    const target = keyed?.row;
     const billed = target?.quantity ?? 0;
     if (line.quantity > billed) {
       return `crediting ${line.quantity} of "${line.name}" exceeds what invoice ${invoiceNumber} billed (${billed})`;
     }
-    if (!target) continue;
+    if (!keyed || !target) continue;
     const billedTime = countsTime(target.price.counts);
     const capacity = scaleTime(billedTime, billed);
     const remaining = left.get(pathKey(target.path))?.unit_time ?? { num: 0, den: 1 };
     const already = addTime(capacity, scaleTime(remaining, -1));
-    const lineTime = noteLineTime(line, target);
+    const lineTime = keyed.time;
     const consumed = scaleTime(lineTime, line.quantity);
     if (compareTime(consumed, remaining) > 0) {
       // A row billing one whole period per unit (a sale, a flat line) keeps the

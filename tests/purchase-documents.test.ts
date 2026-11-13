@@ -21,6 +21,7 @@ import {
   purchaseBillSharedLineFields,
   purchaseCreditIsLive,
   purchaseDocumentScope,
+  purchaseCreditBilling,
   purchaseLineBilledNet,
   purchaseLineCreditCents,
   billLineCreditCents,
@@ -31,7 +32,7 @@ import {
 import { chargeWindowContext, priceDocument, PriceRefusalError } from "../src/utils/price-document.ts";
 import type { PricingFormulas } from "../src/utils/price-formulas.ts";
 import type { TaxCatalog } from "../src/utils/tax-classes.ts";
-import { hireDates, payablePrice, purchaseDivider, purchasePair, withPayableMoney } from "./helpers/payable.ts";
+import { asCreditRows, hireDates, payablePrice, purchaseDivider, purchasePair, withPayableMoney } from "./helpers/payable.ts";
 import { computeDocumentDiffs, type DocumentDiffContext, type DocumentQuantityEntry } from "../src/utils/documentDiff.ts";
 import { priceFormulaRefOf } from "../src/utils/price-formulas.ts";
 import { cumulativeShareCents } from "../src/utils/purchases.ts";
@@ -829,7 +830,7 @@ const credit = (items: PurchaseDocumentItem[], status: PurchaseCredit["status"] 
     number: 1,
     version: 0,
     status,
-    items,
+    items: asCreditRows(items),
     sources: [{ collection: "purchases", uid: PURCHASE }],
     query_by_sources: [`purchases:${PURCHASE}`],
   }) as unknown as PurchaseCredit;
@@ -979,6 +980,37 @@ Deno.test("purchaseLineBilledNet: the count the recount floors, and the money be
     credits: [credit([docLine(item, 2, 2000)])],
   };
   assertEquals(purchaseLineBilledNet(item.path, documents), { quantity: -2, amount_cents: -2000 });
+});
+
+Deno.test("one credit fold (AP): only a reverses_billing line un-bills — a goodwill line is money given back, not billing reversed (ruling 38)", () => {
+  const item = buyLine({ quantity: 10, amount_cents: 10000 });
+  const bills = [billDoc(1, [docLine(item, 5, 5000)])];
+  const net = (reverses: boolean) =>
+    purchaseLineBilledNet(item.path, {
+      uid_purchase: PURCHASE,
+      purchase_items: [],
+      bills,
+      credits: [credit([{ ...docLine(item, 2, 2000), reverses_billing: reverses }])],
+    });
+  assertEquals(net(true), { quantity: 3, amount_cents: 3000 }, "control: a reversing line nets units and money");
+  assertEquals(net(false), { quantity: 5, amount_cents: 5000 }, "an unmarked line nets nothing");
+  // The diff's naming follows the same rule: an unmarked credit names no line.
+  assertEquals(purchaseCreditBilling([{ ...docLine(item, 2, 2000), reverses_billing: false }], PURCHASE, []).size, 0);
+});
+
+Deno.test("one credit fold (AP): a TIME credit un-bills counts and money, never units (R3)", () => {
+  const purchase = { uid: PURCHASE, destinations: [chargedPair()] };
+  const documents = {
+    uid_purchase: PURCHASE,
+    purchase_items: [],
+    bills: [billDoc(1, [{ ...timeBillLine(WEEK_2), amount_cents: 18000 }])],
+    credits: [credit([{ ...timeBillLine(WEEK_1), amount_cents: 9000 }])],
+  };
+  const path = visionLine().path;
+  // Units: the bill's, untouched. Money: net of the credit.
+  assertEquals(purchaseLineBilledNet(path, documents), { quantity: timeBillLine(WEEK_2).quantity, amount_cents: 9000 });
+  // Counts: the credited week comes back to bill.
+  assertEquals(remainingTimeCounts({ purchase, item: visionLine(), documents, formulas: FORMULAS, holidays: [] }), WEEK_1);
 });
 
 Deno.test("purchaseBillIsLive reads the status; purchaseCreditIsLive reads the status", () => {

@@ -205,6 +205,40 @@ export function purchaseDocumentBilling(
   uidPurchase: string,
   purchaseItems: readonly CreditableRow[],
 ): Map<string, PurchaseLineBilling> {
+  return foldPurchaseDocument(rows, uidPurchase, purchaseItems, "bill");
+}
+
+/**
+ * **What one supplier credit UN-bills of each line of purchase `uidPurchase`** —
+ * {@link purchaseDocumentBilling}'s fold over the credit's rows, read as rows of
+ * sign −1 (ruling 84). The caller subtracts it. Two differences, both the one
+ * credit fold's rules on both sides:
+ *
+ * - **Only a `reverses_billing: true` line nets** (ruling 38). An unmarked line —
+ *   a goodwill or freight credit — is money given back, not billing reversed.
+ * - **A time credit nets COUNTS and money, never units** (R3): a line carrying
+ *   `counts` adds its parts and amount and no quantity.
+ *
+ * Root vs component is the credit's own anchors, and that is the bill's by
+ * construction: a credit of a substitute kit copies its root WITH its subtree
+ * and refuses a bare component (`billLineCreditParts`, `creditableBillLines`),
+ * so the copied anchors are the bill's. No stored credit carries
+ * `substituted_for` (prod 2, dev 6 lines on 2026-11-13).
+ */
+export function purchaseCreditBilling(
+  rows: readonly PurchaseDocumentRow[],
+  uidPurchase: string,
+  purchaseItems: readonly CreditableRow[],
+): Map<string, PurchaseLineBilling> {
+  return foldPurchaseDocument(rows, uidPurchase, purchaseItems, "credit");
+}
+
+function foldPurchaseDocument(
+  rows: readonly PurchaseDocumentRow[],
+  uidPurchase: string,
+  purchaseItems: readonly CreditableRow[],
+  role: "bill" | "credit",
+): Map<string, PurchaseLineBilling> {
   const out = new Map<string, PurchaseLineBilling>();
   const at = (k: string): PurchaseLineBilling => {
     let entry = out.get(k);
@@ -215,8 +249,12 @@ export function purchaseDocumentBilling(
   const lines: PurchaseDocumentItem[] = [];
   for (const row of rows) {
     if (row.type === "purchase" || row.type === "destination" || row.type === "group") continue;
+    if (role === "credit" && row.reverses_billing !== true) continue;
     if (row.path[0] === uidPurchase) lines.push(row);
   }
+  /** A time credit (R3) moves counts and money, never units. */
+  const unitsOf = (line: PurchaseDocumentItem, units: number): number =>
+    role === "credit" && (line.price?.counts?.length ?? 0) > 0 ? 0 : units;
   const anchors = liveSubstitutionAnchors(
     purchaseItems,
     collectSubstitutionAnchors(lines.map((l) => ({ path: l.path.slice(1), substituted_for: substitutedForOf(l) }))),
@@ -239,9 +277,9 @@ export function purchaseDocumentBilling(
       entry.amount_cents += share;
       if (anchorAt.has(`${rel}\x1e${x}`)) {
         // A root: its entry bills X's units, and its counts.
-        entry.quantity += e.quantity;
+        entry.quantity += unitsOf(line, e.quantity);
         entry.parts.push({ quantity: e.quantity, counts: line.price.counts });
-        direct.set(x, (direct.get(x) ?? 0) + e.quantity);
+        if (unitsOf(line, e.quantity) > 0) direct.set(x, (direct.get(x) ?? 0) + e.quantity);
       }
       // A component's stamped entry is its share of its root's. Its UNITS reach X's
       // components through the ratio walk below. Its MONEY lands on X, as the root's
@@ -252,7 +290,7 @@ export function purchaseDocumentBilling(
     }
     const own = line.quantity - standInUnits({ path: line.path, substituted_for: substitutedForOf(line) }, liveX);
     const entry = at(join.slice(prefix.length));
-    entry.quantity += own;
+    entry.quantity += unitsOf(line, own);
     entry.amount_cents += line.amount_cents - cents;
     if (own > 0) entry.parts.push({ quantity: own, counts: line.price.counts });
   }
@@ -291,7 +329,8 @@ export function purchaseLineBilledNet(path: readonly string[], documents: Purcha
   const key = path.join("/");
   const net: PurchaseLineBilledNet = { quantity: 0, amount_cents: 0 };
   const add = (rows: readonly PurchaseDocumentRow[], sign: 1 | -1) => {
-    const billed = purchaseDocumentBilling(rows, documents.uid_purchase, documents.purchase_items).get(key);
+    const fold = sign === 1 ? purchaseDocumentBilling : purchaseCreditBilling;
+    const billed = fold(rows, documents.uid_purchase, documents.purchase_items).get(key);
     if (billed === undefined) return;
     net.quantity += sign * billed.quantity;
     net.amount_cents += sign * billed.amount_cents;
@@ -316,7 +355,8 @@ export function purchaseLineBilledCounts(path: readonly string[], documents: Pur
   const key = path.join("/");
   let net: TierCount[] = [];
   const add = (rows: readonly PurchaseDocumentRow[], sign: 1 | -1) => {
-    const parts = purchaseDocumentBilling(rows, documents.uid_purchase, documents.purchase_items).get(key)?.parts ?? [];
+    const fold = sign === 1 ? purchaseDocumentBilling : purchaseCreditBilling;
+    const parts = fold(rows, documents.uid_purchase, documents.purchase_items).get(key)?.parts ?? [];
     net = combineTierCounts(net, meanTierCounts(parts), sign);
   };
   for (const bill of documents.bills) if (purchaseBillIsLive(bill)) add(bill.items, 1);
@@ -464,6 +504,12 @@ export interface BillLineCredited {
  * `uidBill`** — every live credit line naming that `(uid_purchase_bill,
  * path_bill_item)`. The per-line half of the credit cap (one-document-model 6d),
  * the twin of AR's `creditableLines` prior-note sum.
+ *
+ * **The CREDITED view of the one credit fold** (ruling 84): marker-free, every
+ * non-void credit — the same liveness the AR cap reads (`creditableLines`). The
+ * REVERSED view is {@link purchaseCreditBilling}, gated on `reverses_billing`.
+ * A supplier credit has no draft state, so non-void is "issued or applied",
+ * exactly AR's netting liveness.
  *
  * ⚠️ Keyed on the pointer as written, which goes stale when the bill row moves
  * (owner ruling 22, as `path_invoice_item` does on AR): a credit raised before a

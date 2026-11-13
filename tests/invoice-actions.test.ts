@@ -29,6 +29,7 @@ import {
   assertOrderInvoiceAction,
   type CappedNote,
   creditableLines,
+  creditKitParts,
   creditNoteActionsFor,
   creditNoteOverCredit,
   type InvoiceActionOffer,
@@ -257,6 +258,26 @@ const credit = (uid: string, quantity: number, days: number | null = null) => ({
   path_invoice_item: ["ord", "dest", uid],
   // A days credit STATES the time it gave back, unfloored; a whole-unit credit carries none of its own.
   price: { ...fdwPrice(0), counts: days === null ? [] : fdwCounts(days, { stated: true }) },
+});
+
+Deno.test("R5 creditKitParts: a kit pre-fills its components at the INVOICE's ratio, first-come after prior credits", () => {
+  // Kit 3 with 6 stakes (2 each) and 3 cables (1 each); a plain light beside it.
+  const at = (uid: string, path: string[], qty: number) => ({ ...line(uid, qty, null), path }) as InvoiceDocItemType;
+  const items = [
+    DIVIDER,
+    at("kit", ["ord", "dest", "kit"], 3),
+    at("stake", ["ord", "dest", "kit", "stake"], 6),
+    at("cable", ["ord", "dest", "kit", "cable"], 3),
+    at("light", ["ord", "dest", "light"], 4),
+  ];
+  const parts = (n: number, prior: CappedNote[] = []) => creditKitParts(items, ["ord", "dest", "kit"], n, prior).map((p) => [p.uid, p.quantity]);
+  assertEquals(parts(1), [["kit", 1], ["stake", 2], ["cable", 1]]);
+  // After 1 kit already credited, the next 2 take the rows' next units, and the three credits sum to each row.
+  const prior = [note("issued", { name: "kit", quantity: 1, uid_invoice_item: "kit", path_invoice_item: ["ord", "dest", "kit"], price: { counts: [] } })];
+  assertEquals(parts(2, prior), [["kit", 2], ["stake", 4], ["cable", 2]]);
+  // A plain line is itself alone; a path with no line pre-fills nothing.
+  assertEquals(creditKitParts(items, ["ord", "dest", "light"], 2, []).map((p) => [p.uid, p.quantity]), [["light", 2]]);
+  assertEquals(creditKitParts(items, ["ord", "dest", "nothing"], 1, []), []);
 });
 
 Deno.test("D3 creditableLines nets prior notes in unit-TIME, exactly; void notes and dividers are skipped", () => {

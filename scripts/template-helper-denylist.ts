@@ -646,10 +646,18 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // (api-cloudrun#1188) — the input to a fulfillment projection, which a
     // template never performs.
     "invoiceOnlyLines",
-    // Needs the order's CREDIT NOTES, which a render context holds even less
-    // often than it holds the sibling invoices — and its whole output is a
-    // key into `invoicedByPath`'s sum, which is denied directly above.
-    "billingReversals",
+    // The one credit keyer (ruling 84) and its credited-units view: they need
+    // the invoice's CREDIT NOTES, which a render context holds even less often
+    // than the sibling invoices, and their output feeds the credit cap and
+    // `invoicedByPath`'s sum, both denied here.
+    "keyInvoiceCredits",
+    "unitsCreditedBefore",
+    // Exact rational arithmetic over a credit budget's unit-time. A template
+    // renders stored counts; it never computes a cap.
+    "addTime",
+    "compareTime",
+    "countsTime",
+    "scaleTime",
     "remainingForOrder",
     "substitutionCredit",
   ],
@@ -673,6 +681,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "creditNoteActionsFor",
     "creditNoteOverCredit",
     "creditableLines",
+    "creditKitParts",
     "invoiceActionSubject",
     "invoiceActionsFor",
     "orderInvoiceActionsFor",

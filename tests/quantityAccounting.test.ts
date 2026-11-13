@@ -28,6 +28,7 @@ import {
   crmsAuthoredInvoices,
   remainingForOrder,
   type RemainingInvoiceSource,
+  unitsCreditedBefore,
 } from "../src/utils/quantityAccounting.ts";
 
 const O = "order-1";
@@ -799,11 +800,14 @@ Deno.test("quantityAccounting: a reversal is keyed to ONE invoice — the same p
   assertEquals(remainingForOrder(O, order, invoices, pairs(), CTX, [reversal("cn1", "b", 3)]).lines.map((l) => l.quantity), [-3]);
 });
 
-Deno.test("quantityAccounting: netting is capped at the row — a credit beyond what it billed does not go negative", () => {
+Deno.test("quantityAccounting: an over-credit reads NEGATIVE in the fold and is floored only where a caller acts on it (R2)", () => {
   const order = lightOrder(2);
   const invoices = [invoice("a", lightOrder(5), "issued")];
-  // Reversing 99 of a 5-unit row bills 0, never −94.
-  const { lines } = remainingForOrder(O, order, invoices, pairs(), CTX, [reversal("cn1", "a", 99)]);
+  const notes = [reversal("cn1", "a", 99)];
+  // The fold surfaces it: reversing 99 of a 5-unit row bills −94, never a silent 0.
+  assertEquals(invoicedByPath(O, order, invoices, notes).byPath.get(lightKey)?.quantity, -94);
+  // The remainder ACTS on the figure, so it floors there: it offers the 2 ordered, never 96.
+  const { lines } = remainingForOrder(O, order, invoices, pairs(), CTX, notes);
   assertEquals(lines.map((l) => [l.invoiced, l.quantity]), [[0, 2]]);
 });
 
@@ -970,6 +974,108 @@ Deno.test("quantityAccounting: merging a kit into a kit the order carries bills 
   assertEquals(remainingForOrder(O, order, [inv], pairs(), CTX).lines, []);
 });
 
+
+// ── The one credit fold (ruling 84, beta B) ──────────────────────────────────
+
+/** A reversing note on invoice `inv`: one line per `[path, quantity, extra]`. */
+const creditOn = (uid: string, inv: string, lines: Array<[string[], number, Record<string, unknown>?]>): AccountedCreditNote => ({
+  uid,
+  status: "issued",
+  sources: [{ collection: "invoices", uid: inv }],
+  items: lines.map(([path, quantity, extra]) => ({ quantity, path_invoice_item: [O, ...path], reverses_billing: true, ...extra })),
+});
+
+Deno.test("one credit fold: a TIME credit nets counts, never units, and clears the shortening it answers (R3)", () => {
+  // Ordered 3 at 5 days, billed 3 at 10: one week over-billed on each unit.
+  const order = lightOrder(3, 5);
+  const invoices = [invoice("a", lightOrder(3, 10), "issued")];
+  const before = remainingForOrder(O, order, invoices, pairs(5), CTX).lines.map((l) => [l.invoiced, l.quantity, l.extension_cents]);
+  assertEquals(before, [[3, 0, -3000]], "control: the shortening stands");
+  // The offer's own credit: 3 units, one week each — what `buildOverbillingCredits` raises.
+  const offered = buildOverbillingCredits(src(order), invoices.map((i) => ({ ...i, number: 1, amount_due_cents: 1 })), CTX).notes[0].lines[0];
+  assertEquals([offered.quantity, offered.credited_counts], [3, fdwCounts(5)]);
+  const note = creditOn("cn1", "a", [[[D, G, LIGHT], 3, { price: { counts: fdwCounts(5) } }]]);
+  // Units stay billed (the defect read the 3 as whole units and offered to bill them again)…
+  assertEquals(invoicedByPath(O, order, invoices, [note]).byPath.get(lightKey)?.quantity, 3);
+  // …and the week comes off the group: nothing is left either way.
+  assertEquals(remainingForOrder(O, order, invoices, pairs(5), CTX, [note]).lines, []);
+  // A credit of the row's whole billed time is a UNIT credit — same units, same money.
+  const whole = creditOn("cn2", "a", [[[D, G, LIGHT], 1, { price: { counts: fdwCounts(10) } }]]);
+  assertEquals(invoicedByPath(O, order, invoices, [whole]).byPath.get(lightKey)?.quantity, 2);
+});
+
+/** The partial kit swap of `kitOrder`: 2 kits as themselves, 2 swapped for ALT whose 6 pegs stand in too. */
+const ALT = "prod-alt-kit";
+const PEG = "prod-peg";
+const swapInvoice = () =>
+  stamped("a", [
+    DEST_ITEM,
+    line(KIT, [D, KIT], 2, 5000),
+    line(STAKE, [D, KIT, STAKE], 4, 0),
+    line(ALT, [D, ALT], 2, 5000),
+    line(PEG, [D, ALT, PEG], 6, 0),
+  ], { [`${D}/${ALT}`]: [{ path: [D, KIT], quantity: 2 }], [`${D}/${ALT}/${PEG}`]: [{ path: [D, KIT], quantity: 6 }] });
+const kitAndStakes = (notes: AccountedCreditNote[]) => {
+  const billed = invoicedByPath(O, kitOrder(), [{ ...swapInvoice(), status: "issued" }], notes);
+  return [`${D}/${KIT}`, `${D}/${KIT}/${STAKE}`].map((k) => billed.byPath.get(k)?.quantity);
+};
+
+Deno.test("one credit fold: a credit of a substitute ROOT takes its slice back from X, and X's components follow the order's ratio", () => {
+  assertEquals(kitAndStakes([]), [4, 8], "control");
+  // 1 of ALT, its slice [KIT:1]: KIT 4 → 3; stakes 4 + (2 − 1) × 8 ÷ 4 = 6.
+  assertEquals(kitAndStakes([creditOn("cn1", "a", [[[D, ALT], 1, { substituted_for: [{ path: [D, KIT], quantity: 1 }] }]])]), [3, 6]);
+});
+
+Deno.test("one credit fold: a credit of a COMPONENT alone is judged by the INVOICE's anchors and does not un-bill X (api-cloudrun#1475)", () => {
+  // 3 pegs, their stamped slice [KIT:3]. On the invoice PEG is a component: its
+  // entries anchor nothing, so KIT and its stakes stay billed (R5: AR accepts any subset).
+  const pegs = creditOn("cn1", "a", [[[D, ALT, PEG], 3, { substituted_for: [{ path: [D, KIT], quantity: 3 }] }]]);
+  assertEquals(kitAndStakes([pegs]), [4, 8]);
+  // …and its stand-in units net nowhere: PEG's own path bills nothing either way.
+  const pegKey = `${D}/${ALT}/${PEG}`;
+  assertEquals(invoicedByPath(O, kitOrder(), [{ ...swapInvoice(), status: "issued" }], [pegs]).byPath.has(pegKey), false);
+  // Companion: judged by the CREDIT's own anchors — the row alone, so a root — the
+  // same credit would take 3 units from KIT. The invoice's anchors are what refuse that.
+  const ownAnchors = invoicedByPath(O, kitOrder(), [{
+    ...swapInvoice(),
+    status: "issued",
+    items: swapInvoice().items.filter((it) => it.path.join("/") !== `${O}/${D}/${ALT}`),
+  }], [pegs]).byPath.get(`${D}/${KIT}`)?.quantity;
+  assertEquals(ownAnchors, 2 + 6 - 3, "with PEG as the root, the credit DOES un-bill KIT");
+});
+
+Deno.test("one credit fold: Y [X1:2, X2:2] credited 3, then X1 leaves — X2 reads 1 and Y's own 1 (the ruling's answer)", () => {
+  const X1 = "prod-x1", X2 = "prod-x2", Y = "prod-y";
+  const inv = stamped("a", [DEST_ITEM, GROUP_ITEM, line(Y, [D, G, Y], 5, 1000)], {
+    [`${D}/${G}/${Y}`]: [{ path: [D, G, X1], quantity: 2 }, { path: [D, G, X2], quantity: 2 }],
+  });
+  // Sliced while X1 was live: the first 3 units are [X1:2, X2:1].
+  const note = creditOn("cn1", "a", [[[D, G, Y], 3, { substituted_for: [{ path: [D, G, X1], quantity: 2 }, { path: [D, G, X2], quantity: 1 }] }]]);
+  const order = [DEST_ITEM, GROUP_ITEM, line(X2, [D, G, X2], 2, 1000)];
+  const billed = invoicedByPath(O, order, [{ ...inv, status: "issued" }], [note]);
+  // X1's entry is spent: its 2 units, and the 2 the credit took of it, both count at Y's own path.
+  assertEquals([billed.byPath.get(`${D}/${G}/${X2}`)?.quantity, billed.byPath.get(`${D}/${G}/${Y}`)?.quantity], [1, 1]);
+});
+
+Deno.test("one credit fold: an unplaceable reversing line is named in credits_unkeyed — a path the invoice no longer carries", () => {
+  const { order, invoices } = overBilled();
+  const stale = creditOn("cn1", "a", [[[D, G, "gone"], 3]]);
+  const out = invoicedByPath(O, order, invoices, [stale]);
+  assertEquals([out.byPath.get(lightKey)?.quantity, out.credits_unkeyed], [5, ["cn1"]]);
+});
+
+Deno.test("unitsCreditedBefore: the CREDITED view — marker-free, non-void, unit credits only, legacy uid fallback", () => {
+  const rows = invoice("a", lightOrder(5, 10)).items.filter((it) => it.type === "rental");
+  const row = rows[0];
+  const n = (quantity: number, extra: Record<string, unknown> = {}) => ({ quantity, path_invoice_item: row.path, ...extra });
+  assertEquals(unitsCreditedBefore(rows, row, [
+    { status: "issued", items: [n(1), n(1, { reverses_billing: true })] }, // marker-free: both count
+    { status: "draft", items: [n(1)] }, // a draft is non-void: the cap counts it
+    { status: "void", items: [n(5)] }, // void: nothing
+    { status: "issued", items: [n(2, { price: { counts: fdwCounts(5) } })] }, // a time credit: no units (R3)
+    { status: "issued", items: [{ quantity: 1, uid_invoice_item: row.uid }] }, // stored before paths
+  ]), 4);
+});
 
 // ── invoiceOnlyLines (api-cloudrun#1188) ──
 //
