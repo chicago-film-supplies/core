@@ -236,7 +236,16 @@ Deno.test("deriveReceiptDueAt: an exchange leg's booking is dated by its PARENT 
   // LEG_B is an exchange on LEG; its own window (8 → 14) never drives the date.
   const dests = [pair(LEG, 20, 25), { ...pair(LEG_B, 8, 14), exchange: { uid_pair: LEG } }];
   assertEquals(deriveReceiptDueAt(active(dests), [booking("rental", LEG_B, { stocked: 1 })]).iso, iso(25));
-  assertEquals(deriveReceiptDueAt(active(dests), [booking("rental", LEG_B, { ordered: 1 })]).iso, iso(20));
+  // A swap unit still to arrive reads the parent's COLLECTION, never its past
+  // delivery (owner, 2026-11-13): one due date per leg family.
+  assertEquals(deriveReceiptDueAt(active(dests), [booking("rental", LEG_B, { ordered: 1 })]).iso, iso(25));
+  assertEquals(
+    deriveReceiptDueAt(active(dests), [booking("rental", LEG, { stocked: 2 }), booking("rental", LEG_B, { ordered: 1 })]).iso,
+    iso(25),
+    "staging a swap does not move the family's due date",
+  );
+  // A non-exchange leg's to-arrive units still read its own delivery.
+  assertEquals(deriveReceiptDueAt(active(dests), [booking("rental", LEG, { ordered: 1 })]).iso, iso(20));
   // Without the pair passed, the booking names no pair and is dropped, which is
   // why the writer passes the receipt-authored pairs alongside the purchase's.
   assertEquals(deriveReceiptDueAt(active([pair(LEG, 20, 25)]), [booking("rental", LEG_B, { stocked: 1 })]).iso, null);

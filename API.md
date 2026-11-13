@@ -13305,8 +13305,13 @@ supplier.
 The ONE list: the schema's purchase-source rule and the ledger fold both read
 it, so a type added here reaches both.
 
+⚠️ **The typed undos (7a C3) are members too.** A rewind is a new movement of
+its own type, never a `reverses` reversal, so a list naming only the forwards
+let `subrent_out_undo` bring units back into `quantity_held` while
+`quantity_rented_in` stayed at 0 — rented units read as OWNED.
+
 ```ts
-const SUBRENT_MOVEMENT_TYPES: "subrent_in" | "subrent_out" | "return_to_supplier"[];
+const SUBRENT_MOVEMENT_TYPES: "subrent_in" | "subrent_out" | "return_to_supplier" | "subrent_in_undo" | "subrent_out_undo" | "return_to_supplier_undo"[];
 ```
 
 ### `SUBSTITUTABLE_ITEM_TYPES`
@@ -33056,8 +33061,13 @@ supplier.
 The ONE list: the schema's purchase-source rule and the ledger fold both read
 it, so a type added here reaches both.
 
+⚠️ **The typed undos (7a C3) are members too.** A rewind is a new movement of
+its own type, never a `reverses` reversal, so a list naming only the forwards
+let `subrent_out_undo` bring units back into `quantity_held` while
+`quantity_rented_in` stayed at 0 — rented units read as OWNED.
+
 ```ts
-const SUBRENT_MOVEMENT_TYPES: "subrent_in" | "subrent_out" | "return_to_supplier"[];
+const SUBRENT_MOVEMENT_TYPES: "subrent_in" | "subrent_out" | "return_to_supplier" | "subrent_in_undo" | "subrent_out_undo" | "return_to_supplier_undo"[];
 ```
 
 ### `StoreTransferLineInput`
@@ -48915,8 +48925,9 @@ impossible rather than gated: a transfer has no cost object to mis-gate.
 which is `held − quantity_rented_in`. So the weighted-average share and the
 average itself are taken over OWNED units, before and after. Every
 `SUBRENT_MOVEMENT_TYPES` member — `subrent_in`, `subrent_out`,
-`return_to_supplier` — moves held and `quantity_rented_in` together (by its
-lines' net, so a reversal moves both back), which leaves owned, the basis
+`return_to_supplier` and their typed undos — moves held and
+`quantity_rented_in` together (by its lines' net, so a reversal or an undo
+moves both back), which leaves owned, the basis
 and the average exactly where they were — a $0 receipt of 10 rented units
 cannot dilute the average, and neither their return nor settling a lost one
 to the supplier can relieve owned basis. A cost-bearing decrease beyond
@@ -53485,7 +53496,10 @@ this module cannot mint a `Timestamp`.
 ⭐ **An exchange leg's booking is dated by its PARENT leg** (C16, ruling 82):
 pass the receipt-authored pairs alongside the purchase's, so a receipt-staged
 leg's units fold into the parent rather than being dropped as a booking with no
-pair; an exchange leg's own window never drives the date.
+pair; an exchange leg's own window never drives the date. A swap unit still to
+ARRIVE reads the parent's COLLECTION, not its delivery: the parent's arrival is
+history, so it would pull the family's due date into the past (owner,
+2026-11-13).
 
 ### `receiptQueryByUidStore(purchase: typeLiteral, bookings: readonly Pick<ReceiptBookingSource, "query_by_uid_store">[]): string[]`
 

@@ -515,11 +515,19 @@ export const MovementTypeEnum: z.ZodType<MovementTypeType> = z.enum(MOVEMENT_TYP
  *
  * The ONE list: the schema's purchase-source rule and the ledger fold both read
  * it, so a type added here reaches both.
+ *
+ * ⚠️ **The typed undos (7a C3) are members too.** A rewind is a new movement of
+ * its own type, never a `reverses` reversal, so a list naming only the forwards
+ * let `subrent_out_undo` bring units back into `quantity_held` while
+ * `quantity_rented_in` stayed at 0 — rented units read as OWNED.
  */
 export const SUBRENT_MOVEMENT_TYPES = [
   "subrent_in",
   "subrent_out",
   "return_to_supplier",
+  "subrent_in_undo",
+  "subrent_out_undo",
+  "return_to_supplier_undo",
 ] as const;
 /** One {@link SUBRENT_MOVEMENT_TYPES} member. */
 export type SubrentMovementTypeType = typeof SUBRENT_MOVEMENT_TYPES[number];

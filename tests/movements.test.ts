@@ -1753,6 +1753,29 @@ const writeOff = (q: number): FoldMovement => ({
 
 const steamer = () => ledgerAtShelfA(10, { total_cost_basis_cents: 262627, average_unit_cost: 262.627, quantity_rented_in: 0 });
 
+Deno.test("subrent: every typed undo (7a C3) moves quantity_rented_in with held, so owned and basis stay put", () => {
+  // An undo is its own type (the forward's lines, reversed in direction), never a
+  // `reverses` reversal. Before the undos joined SUBRENT_MOVEMENT_TYPES a
+  // send-back's undo restored held to 20 and left rented_in at 0.
+  const undoOf = (m: FoldMovement, type: FoldMovement["type"]): FoldMovement => ({
+    ...m,
+    type,
+    lines: m.lines.map((l) => ({ ...l, location: { from: l.location.to, to: l.location.from } })),
+    service: m.service === null ? null : { from: m.service.to, to: m.service.from },
+  });
+  const inn = applyMovementToLedger(steamer(), hireIn(10), placements, mockTimestamp).ledger;
+  const out = applyMovementToLedger(inn, hireOut(10), placements, mockTimestamp).ledger;
+  const outUndone = applyMovementToLedger(out, undoOf(hireOut(10), "subrent_out_undo"), placements, mockTimestamp).ledger;
+  assertEquals([outUndone.quantity_held, outUndone.quantity_rented_in], [20, 10], "the send-back's undo brings RENTED units back");
+  assertEquals([outUndone.total_cost_basis_cents, outUndone.average_unit_cost], [262627, 262.627]);
+  const inUndone = applyMovementToLedger(inn, undoOf(hireIn(10), "subrent_in_undo"), placements, mockTimestamp).ledger;
+  assertEquals([inUndone.quantity_held, inUndone.quantity_rented_in], [10, 0]);
+  assertEquals([inUndone.total_cost_basis_cents, inUndone.average_unit_cost], [262627, 262.627]);
+  const settled = applyMovementToLedger(inn, settleFlagged(1), placements, mockTimestamp).ledger;
+  const settleUndone = applyMovementToLedger(settled, undoOf(settleFlagged(1), "return_to_supplier_undo"), placements, mockTimestamp).ledger;
+  assertEquals([settleUndone.quantity_held, settleUndone.quantity_rented_in], [20, 10]);
+});
+
 Deno.test("subrent: the steamer — hire 10 in, hire 10 out, and basis and average never move", () => {
   const a = applyMovementToLedger(steamer(), hireIn(10), placements, mockTimestamp);
   assertEquals([a.ledger.quantity_held, a.ledger.quantity_rented_in], [20, 10]);

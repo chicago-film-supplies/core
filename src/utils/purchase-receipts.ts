@@ -151,7 +151,10 @@ export interface ReceiptPairSource {
  * ⭐ **An exchange leg's booking is dated by its PARENT leg** (C16, ruling 82):
  * pass the receipt-authored pairs alongside the purchase's, so a receipt-staged
  * leg's units fold into the parent rather than being dropped as a booking with no
- * pair; an exchange leg's own window never drives the date.
+ * pair; an exchange leg's own window never drives the date. A swap unit still to
+ * ARRIVE reads the parent's COLLECTION, not its delivery: the parent's arrival is
+ * history, so it would pull the family's due date into the past (owner,
+ * 2026-11-13).
  */
 export function deriveReceiptDueAt(
   purchase: { readonly status: PurchaseStatusType; readonly destinations: readonly ReceiptPairSource[] },
@@ -174,11 +177,16 @@ export function deriveReceiptDueAt(
     const pair = leg === undefined ? undefined : pairs.get(leg);
     if (!pair) continue;
     const d = pair.dates;
-    if (b.breakdown.ordered + b.breakdown.transit_inbound > 0) consider(d.delivery_start, d.delivery_start_fs);
-    if (b.type === "rental" && b.breakdown.received + b.breakdown.stocked + b.breakdown.transit_outbound > 0) {
-      if (d.collection_start) consider(d.collection_start, d.collection_start_fs);
-      else consider(d.collection_end, d.collection_end_fs);
+    const back = () => (d.collection_start ? consider(d.collection_start, d.collection_start_fs) : consider(d.collection_end, d.collection_end_fs));
+    // A swap unit still to arrive on an exchange leg is not the family's next
+    // event: its parent's arrival is history, and the family is due back at the
+    // parent's collection (owner, 2026-11-13).
+    const swap = leg !== undefined && byUid.get(leg)?.exchange != null;
+    if (b.breakdown.ordered + b.breakdown.transit_inbound > 0) {
+      if (swap) back();
+      else consider(d.delivery_start, d.delivery_start_fs);
     }
+    if (b.type === "rental" && b.breakdown.received + b.breakdown.stocked + b.breakdown.transit_outbound > 0) back();
   }
   const won = best as { iso: string; fs: FirestoreTimestampType | null } | null;
   return won === null ? { iso: null, fs: null } : { iso: won.iso, fs: won.fs };

@@ -605,8 +605,9 @@ export interface LocationPlacement {
  * which is `held − quantity_rented_in`. So the weighted-average share and the
  * average itself are taken over OWNED units, before and after. Every
  * `SUBRENT_MOVEMENT_TYPES` member — `subrent_in`, `subrent_out`,
- * `return_to_supplier` — moves held and `quantity_rented_in` together (by its
- * lines' net, so a reversal moves both back), which leaves owned, the basis
+ * `return_to_supplier` and their typed undos — moves held and
+ * `quantity_rented_in` together (by its lines' net, so a reversal or an undo
+ * moves both back), which leaves owned, the basis
  * and the average exactly where they were — a $0 receipt of 10 rented units
  * cannot dilute the average, and neither their return nor settling a lost one
  * to the supplier can relieve owned basis. A cost-bearing decrease beyond
