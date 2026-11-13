@@ -39247,6 +39247,15 @@ and once closed, a purchase of only kept bookings books nothing.
 The status reads ANOTHER collection, so the writer that finalizes the
 purchase's bookings writes it, as `finalizeOrderBookings` writes an order's.
 
+### `inboundBookingIdFor(purchaseUid: string, row: typeLiteral): string`
+
+The inbound booking a purchase row books into: `{purchase}:{product}:{leg}[:{sig}]`.
+The leg is the row's destination divider (`path[0]`), never an address; the
+product is the row's uid (ruling 12: a payable catalog line's uid is its
+product's). The ONE author of that mapping, read by the api's reconcile and
+by the manager's receipt actions, so the two cannot address different grains.
+Two rows of one product, leg and component ancestry share a booking (ruling 65).
+
 ### `inboundCancelRefusal(bookings: ReadonlyArray<Pick<InboundBooking, "uid" | "type" | "breakdown">>): typeLiteral | null`
 
 Why a purchase may not be canceled yet, or `null` when it may — the twin of
@@ -53833,6 +53842,15 @@ of it.
 ### `lineCustodyAt(custody: ReadonlyMap<string, PurchaseLineCustody>, path: readonly string[]): PurchaseLineCustody`
 
 One row's custody from a {@link custodyBySourceItem} map — none when no movement names it.
+
+### `lineProductUid(line: typeLiteral): string | undefined`
+
+The product a payable line NAMES, read off its uid (one-document-model ruling
+67): a buy or subrent line's product, a charge's catalog `service` product, a
+replacement's twin — or `undefined` for a `custom-` line, which names none. No
+payable line carries `uid_product`; the uid is the whole answer, as on an order
+line. The product a charge COSTS is a different question, read off its
+placement ({@link costedProductUid}). One author for the api and the manager.
 
 ### `payableInputUidIssue(line: typeLiteral): string | null`
 

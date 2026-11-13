@@ -38,12 +38,25 @@ import {
   type PurchaseStatusType,
 } from "../schemas/mod.ts";
 import { CustodyRefusal } from "./custody.ts";
+import { buildBookingIdFromSignature, componentSignatureHash } from "./booking-id.ts";
 
 /** Σ of an inbound breakdown, over every key — never spelled key by key. */
 export function sumInboundBreakdown(b: InboundBreakdown): number {
   let n = 0;
   for (const key of INBOUND_BREAKDOWN_KEYS) n += b[key];
   return n;
+}
+
+/**
+ * The inbound booking a purchase row books into: `{purchase}:{product}:{leg}[:{sig}]`.
+ * The leg is the row's destination divider (`path[0]`), never an address; the
+ * product is the row's uid (ruling 12: a payable catalog line's uid is its
+ * product's). The ONE author of that mapping, read by the api's reconcile and
+ * by the manager's receipt actions, so the two cannot address different grains.
+ * Two rows of one product, leg and component ancestry share a booking (ruling 65).
+ */
+export function inboundBookingIdFor(purchaseUid: string, row: { uid: string; path: readonly string[] }): string {
+  return buildBookingIdFromSignature(purchaseUid, row.uid, row.path[0], componentSignatureHash(row.path));
 }
 
 function sumKeys(b: InboundBreakdown, keys: readonly InboundBreakdownKeyType[]): number {

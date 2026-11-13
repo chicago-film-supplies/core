@@ -64,7 +64,7 @@ import {
   NO_LINE_CUSTODY,
 } from "../src/utils/purchases.ts";
 import { apportionCents } from "../src/utils/money.ts";
-import { costedProductUid, flatPurchaseLineMoney } from "../src/utils/purchases.ts";
+import { costedProductUid, flatPurchaseLineMoney, lineProductUid } from "../src/utils/purchases.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 import { asCreditRows, payablePrice, purchaseDivider, purchasePair, payableLine, withPayableMoney } from "./helpers/payable.ts";
 
@@ -1901,4 +1901,9 @@ Deno.test("PurchaseCreditSchema: a credit row carries substituted_for and exchan
     issuePaths(PurchaseCreditSchema, credit({ items: [row] })).filter((p) => p.endsWith("substituted_for") || p.endsWith("exchanged_for")),
     [],
   );
+});
+
+Deno.test("lineProductUid — the product a payable line names is its uid, and a custom- line names none (ruling 67)", () => {
+  assertEquals(lineProductUid({ uid: "prodA" }), "prodA");
+  assertEquals(lineProductUid({ uid: "custom-0b2a6f1e-6a7d-4e8b-9c1d-2f3a4b5c6d7e" }), undefined);
 });

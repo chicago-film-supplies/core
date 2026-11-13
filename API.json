@@ -18108,6 +18108,14 @@
         },
         {
           "kind": "function",
+          "name": "inboundBookingIdFor",
+          "signature": "inboundBookingIdFor(purchaseUid: string, row: typeLiteral): string",
+          "doc": "The inbound booking a purchase row books into: `{purchase}:{product}:{leg}[:{sig}]`.\nThe leg is the row's destination divider (`path[0]`), never an address; the\nproduct is the row's uid (ruling 12: a payable catalog line's uid is its\nproduct's). The ONE author of that mapping, read by the api's reconcile and\nby the manager's receipt actions, so the two cannot address different grains.\nTwo rows of one product, leg and component ancestry share a booking (ruling 65).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "inboundCancelRefusal",
           "signature": "inboundCancelRefusal(bookings: ReadonlyArray<Pick<InboundBooking, \"uid\" | \"type\" | \"breakdown\">>): typeLiteral | null",
           "doc": "Why a purchase may not be canceled yet, or `null` when it may — the twin of\n`cancelRefusal`. Refused while any inbound booking holds LIVE custody\n(`inboundLiveCustody`): a Buy's units arriving or in receiving, and a\nSubrent's anywhere in CFS's hands, rented units on a shelf included. They go\nback to the supplier, or the receipt is undone, first, each an ordinary\ncustody step with its movement.",
@@ -25840,6 +25848,14 @@
           "name": "lineCustodyAt",
           "signature": "lineCustodyAt(custody: ReadonlyMap<string, PurchaseLineCustody>, path: readonly string[]): PurchaseLineCustody",
           "doc": "One row's custody from a {@link custodyBySourceItem} map — none when no movement names it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "lineProductUid",
+          "signature": "lineProductUid(line: typeLiteral): string | undefined",
+          "doc": "The product a payable line NAMES, read off its uid (one-document-model ruling\n67): a buy or subrent line's product, a charge's catalog `service` product, a\nreplacement's twin — or `undefined` for a `custom-` line, which names none. No\npayable line carries `uid_product`; the uid is the whole answer, as on an order\nline. The product a charge COSTS is a different question, read off its\nplacement ({@link costedProductUid}). One author for the api and the manager.",
           "paramTags": [],
           "returnsTag": null
         },

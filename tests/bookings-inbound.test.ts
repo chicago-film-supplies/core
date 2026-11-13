@@ -18,6 +18,7 @@ import {
   applyInboundCustodyActions,
   calculateInboundBreakdown,
   custodyBySourceItem,
+  inboundBookingIdFor,
   deriveInboundBookingStatus,
   derivePurchaseStatus,
   inboundCancelRefusal,
@@ -276,4 +277,23 @@ Deno.test("firstNegativePrefix: a step dated before the step that filled its sou
   assertEquals(firstNegativePrefix([receive, putAway("2026-11-09T09:00:00.000-06:00")], "inbound"), true);
   // One instant folds as one step, so the same timestamp is never negative.
   assertEquals(firstNegativePrefix([receive, putAway(receive.date)], "inbound"), false);
+});
+
+Deno.test("inboundBookingIdFor — a row books into {purchase}:{product}:{leg}[:{sig}]", async (t) => {
+  // Dividers are bare UUIDs: a non-UUID segment reads as a product in the ancestry.
+  const LEG = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  await t.step("a top-level row's grain is three segments: the leg is path[0], the product the row's uid", () => {
+    assertEquals(inboundBookingIdFor("po1", { uid: "prodA", path: [LEG, "prodA"] }), `po1:prodA:${LEG}`);
+  });
+  await t.step("a group does not enter the grain: two groups on one leg share a booking (ruling 65)", () => {
+    assertEquals(
+      inboundBookingIdFor("po1", { uid: "prodA", path: [LEG, "11111111-1111-4111-8111-111111111111", "prodA"] }),
+      inboundBookingIdFor("po1", { uid: "prodA", path: [LEG, "prodA"] }),
+    );
+  });
+  await t.step("a kit component carries its ancestry as a fourth segment, so it is not its standalone twin's grain", () => {
+    const component = inboundBookingIdFor("po1", { uid: "prodA", path: [LEG, "kitK", "prodA"] });
+    assertEquals(component.split(":").length, 4);
+    assert(component !== inboundBookingIdFor("po1", { uid: "prodA", path: [LEG, "prodA"] }));
+  });
 });

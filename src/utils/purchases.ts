@@ -354,6 +354,18 @@ export function remainingToReturn(custody: PurchaseLineCustody): number {
 
 // ── Cost attribution (C15, rulings 70–73) ─────────────────────────
 
+/**
+ * The product a payable line NAMES, read off its uid (one-document-model ruling
+ * 67): a buy or subrent line's product, a charge's catalog `service` product, a
+ * replacement's twin — or `undefined` for a `custom-` line, which names none. No
+ * payable line carries `uid_product`; the uid is the whole answer, as on an order
+ * line. The product a charge COSTS is a different question, read off its
+ * placement ({@link costedProductUid}). One author for the api and the manager.
+ */
+export function lineProductUid(line: { uid: string }): string | undefined {
+  return line.uid.startsWith("custom-") ? undefined : line.uid;
+}
+
 /** The row shape {@link costedProductUid} reads: any purchase, bill or credit row. */
 export interface CostedProductRow {
   type: string;
