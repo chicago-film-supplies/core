@@ -14,8 +14,10 @@ import { fixedPrice } from "./helpers/formulas.ts";
 import {
   COA_BAD_DEBT,
   CREDIT_NOTE_REASONS,
+  CreditNoteDocLineItem,
   CreditNoteSchema,
   deriveCreditNoteSources,
+  getInitialValues,
   deriveCreditPostingAccount,
   SETTLEMENT_CONTRACTS,
 } from "../src/schemas/mod.ts";
@@ -284,4 +286,21 @@ Deno.test("deriveCreditNoteSources: an unpointed line names every order its invo
 
 Deno.test("deriveCreditNoteSources: no billing document names nothing (a historic note with no allocation)", () => {
   assertEquals(deriveCreditNoteSources([], [{}]), { sources: [], query_by_sources: [] });
+});
+
+Deno.test("a credit line carries its invoice row's substituted_for and exchanged_for, both optional (ruling 84, beta A)", () => {
+  const line = (makeCreditNote().items as Record<string, unknown>[])[0];
+  const parse = (over: Record<string, unknown>) => CreditNoteDocLineItem.safeParse({ ...line, ...over });
+  const X = ["testdest100000000000", "testitemx10000000000"];
+  const W = ["testdest100000000000", "testitemw10000000000"];
+  assertEquals(parse({}).success, true, "control: absent on both, as on every historic line");
+  assertEquals(parse({ substituted_for: [{ path: X, quantity: 2 }] }).success, true);
+  assertEquals(parse({ exchanged_for: [{ path: X, quantity: 1, reason: "damaged" }] }).success, true);
+  assertEquals(parse({ substituted_for: [], exchanged_for: [] }).success, true, "an empty list is stated, not refused");
+  // The shared lists' own rules reach this grain — proof the field is the list, not a loose array.
+  assertEquals(parse({ substituted_for: [{ path: X, quantity: 1 }, { path: X, quantity: 1 }] }).success, false, "one entry per path");
+  assertEquals(parse({ exchanged_for: [{ path: W, quantity: 1 }] }).success, false, "an exchange entry states its reason");
+  assertEquals(parse({ substituted_for: [{ path: X, quantity: 1, extra: true }] }).success, false, "strict entries");
+  // The form seed omits the take-back list, exactly as the invoice line's.
+  assertEquals("exchanged_for" in (getInitialValues(CreditNoteDocLineItem) as object), false);
 });

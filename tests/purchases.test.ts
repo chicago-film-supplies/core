@@ -28,8 +28,10 @@ import {
   PurchaseItemInput,
   PurchaseRowInput,
   type PurchaseLandedCost,
+  getInitialValues,
   PurchaseBillSchema,
   PurchaseCreditSchema,
+  PurchaseDocumentProductItemSchema,
   PurchaseSchema,
   purchaseHireWindow,
   ReceivePurchaseInput,
@@ -1399,6 +1401,25 @@ Deno.test("PurchaseCreditSchema: sources are derived from the lines; a line name
   assertEquals(issuePaths(PurchaseCreditSchema, credit({ items: [half], ...sources })).some((p) => p.endsWith("path_bill_item")), true);
   assertEquals(issuePaths(PurchaseCreditSchema, credit({ sources: [], query_by_sources: [] })).includes("sources"), true);
   assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [named] })).includes("items"), true, "a bill line credits nothing");
+});
+
+Deno.test("reverses_billing: a supplier credit line may carry it either way; a bill line refuses it (ruling 84, beta A)", () => {
+  const creditLine = (v: boolean | undefined) => billItem({ quantity: 1, amount_cents: 46995, ...(v === undefined ? {} : { reverses_billing: v }) });
+  // On a credit it is optional while stored lines are backfilled: absent, true and false all parse.
+  assertEquals(issuePaths(PurchaseCreditSchema, credit({ items: [creditLine(undefined)] })), [], "control: absent");
+  assertEquals(issuePaths(PurchaseCreditSchema, credit({ items: [creditLine(true)] })), []);
+  assertEquals(issuePaths(PurchaseCreditSchema, credit({ items: [creditLine(false)] })), []);
+  // Each line arm carries it, not just the product arm.
+  const freight = billDirect({ name: "Freight credit", ledger_account: 5000, amount_cents: 2000, reverses_billing: false });
+  assertEquals(issuePaths(PurchaseCreditSchema, credit({ items: [freight], total_cents: 2000, remaining_credit_cents: 2000 })), []);
+  // A bill line refuses it either way, at the row's own key; `false` is refused too.
+  assertEquals(issuePaths(PurchaseBillSchema, bill()), [], "control");
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [billItem({ reverses_billing: true })] })), ["items.2.reverses_billing"]);
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [billItem({ reverses_billing: false })] })), ["items.2.reverses_billing"]);
+  // A non-boolean is a type error on either document.
+  assertEquals(issuePaths(PurchaseCreditSchema, credit({ items: [billItem({ quantity: 1, amount_cents: 46995, reverses_billing: "yes" })] })).length > 0, true);
+  // The form seed omits it, so a seeded bill line is not born refused.
+  assertEquals("reverses_billing" in (getInitialValues(PurchaseDocumentProductItemSchema) as object), false);
 });
 
 Deno.test("W4K contract: every stored payable line is keyed by its product, or custom- — on a purchase, a bill and a credit", () => {

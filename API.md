@@ -3785,6 +3785,8 @@ interface CreditNoteDocLineItem {
   uid_invoice_item: string | null;
   path_invoice_item?: string[];
   reverses_billing: boolean;
+  substituted_for?: SubstitutedForEntryType[];
+  exchanged_for?: ExchangedForEntryType[];
 }
 ```
 
@@ -30711,6 +30713,8 @@ interface CreditNoteDocLineItem {
   uid_invoice_item: string | null;
   path_invoice_item?: string[];
   reverses_billing: boolean;
+  substituted_for?: SubstitutedForEntryType[];
+  exchanged_for?: ExchangedForEntryType[];
 }
 ```
 

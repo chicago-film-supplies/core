@@ -238,6 +238,27 @@ interface PurchaseDocumentLineBase {
   uid_purchase_bill?: string;
   /** The `path` of the bill line credited — the AR credit note's `path_invoice_item`. */
   path_bill_item?: string[];
+  /**
+   * On a supplier CREDIT line only: this line reverses BILLING — it un-bills the
+   * units (or money, or counts) it credits, so the purchase stops counting them
+   * as billed. The AR credit note's `reverses_billing`, one grain over (ruling 84
+   * of the one-document-model plan, api-cloudrun#1455): a credit row nets iff
+   * it is marked, on both sides, and never by inference from `reason`.
+   *
+   * The writer derives it (ruling R4): a line placed on a purchase line — a bill
+   * row, a `path_purchase_item`, or its own path under the purchase — is `true`;
+   * a document-only charge line (a goodwill or freight credit) is `false`.
+   *
+   * ⚠️ **The `?` is the SHARED GRAIN's, not the credit's.** Bills and credits
+   * share these arms, and a bill line reverses nothing, so `checkPurchaseBill`
+   * refuses the key on a bill. On a credit the key is optional only while the
+   * stored lines are backfilled (`true` on every one: prod 2, dev 6, `test` 0 on
+   * 2026-11-13 — each is placed on a purchase line, so `true` is today's
+   * arithmetic, not a default). The next beta makes `checkPurchaseCredit`
+   * require it on every credit LINE row (dividers excluded), with no
+   * absent-means-a-value reading in between.
+   */
+  reverses_billing?: boolean;
 }
 
 /**
@@ -420,6 +441,9 @@ const docItemShape = {
   uid_purchase_bill: FirestoreId.optional().meta({ seed: false }),
   // `seed: false`: `[]` fails `.min(1)`, exactly as `path_invoice_item`.
   path_bill_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
+  // A credit line's billing-reversal marker (the docblock above). `seed: false`:
+  // a seeded `false` would put the key on a bill line, which the bill refuses.
+  reverses_billing: z.boolean().optional().meta({ seed: false }),
 };
 
 /**
@@ -732,6 +756,13 @@ function checkPurchaseBill(b: PurchaseBill, ctx: z.RefinementCtx): void {
   purchaseDocumentLines(b.items).forEach((l) => {
     if (l.uid_purchase_bill !== undefined || l.path_bill_item !== undefined) {
       ctx.addIssue({ code: "custom", path: ["items"], message: "a bill line credits nothing; only a supplier credit line names a bill line" });
+    }
+  });
+  // Every row, not `purchaseDocumentLines`: that drops kit headers, and a kit
+  // header reverses nothing either.
+  b.items.forEach((row, i) => {
+    if ("reverses_billing" in row && row.reverses_billing !== undefined) {
+      ctx.addIssue({ code: "custom", path: ["items", i, "reverses_billing"], message: "a bill line reverses no billing; only a supplier credit line carries reverses_billing" });
     }
   });
 }

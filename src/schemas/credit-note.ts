@@ -46,10 +46,14 @@ import {
   type DocLineItemTypeType,
   DocSource,
   type DocSourceType,
+  ExchangedForList,
+  type ExchangedForEntryType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
   SETTLEMENT_CONTRACTS,
   type SettlementReasonType,
+  type SubstitutedForEntryType,
+  SubstitutedForList,
   TimestampFields,
 } from "./common.ts";
 import {
@@ -329,6 +333,36 @@ export interface CreditNoteDocLineItem {
    * (api-cloudrun#1045).
    */
   reverses_billing: boolean;
+  /**
+   * The invoice row's `substituted_for` (`InvoiceDocLineItemType.substituted_for`),
+   * SLICED to the units this line credits — the order lines the credited units
+   * stood in for (ruling 84 of the one-document-model plan, api-cloudrun#1455).
+   * A credit row is a billing row of sign −1, so it carries the pointers its
+   * source row bills under, and one fold reads both.
+   *
+   * ⚠️ **Entries stay ORDER-relative**, exactly as on the invoice line: a credit
+   * line has no dividers, so they resolve through the order its
+   * {@link path_invoice_item} leads with (`path_invoice_item[0]`, an order
+   * divider's uid), never through a path of this document.
+   *
+   * **Optional FOREVER, not mid-expand.** The 146 lines stored before this field
+   * name no invoice row ({@link path_invoice_item} is absent, ruling 53), so
+   * there is no source row to copy from and no value to backfill. The invoice's
+   * spelling — plain `.optional()`, array-member-uncensusable — so a copy and its
+   * source agree on what absence means. Untagged: `CreditNoteSchema` is in none of
+   * `classifySharedFields`' pairs.
+   */
+  substituted_for?: SubstitutedForEntryType[];
+  /**
+   * The invoice row's `exchanged_for` (`InvoiceDocLineItemType.exchanged_for`),
+   * copied AS STATED — never sliced: it names the rows an exchange line goes out
+   * against, which a credit of some of its units does not change (ruling 84).
+   * ORDER-relative and optional forever, for {@link substituted_for}'s reasons.
+   *
+   * No document refine checks it: the invoice's `checkInvoiceExchangedFor` reads
+   * the order block the line sits in, and a credit line sits in none.
+   */
+  exchanged_for?: ExchangedForEntryType[];
 }
 
 const CreditNoteDocLineItemInner = z.strictObject({
@@ -355,6 +389,12 @@ const CreditNoteDocLineItemInner = z.strictObject({
   // `seed: false`: `[]` fails `.min(1)`, so the form seed must omit the key (core#125).
   path_invoice_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
   reverses_billing: z.boolean(),
+  // See the interface docblock. The invoice line's spelling, field for field:
+  // `substituted_for` plain `.optional()`; `exchanged_for` `seed: false`, so a form
+  // seed omits the key rather than stating an empty take-back list its source
+  // row never stated.
+  substituted_for: SubstitutedForList.optional(),
+  exchanged_for: ExchangedForList.optional().meta({ seed: false }),
 }).superRefine(checkItemPriceFormula);
 
 /** Zod schema for a credit-note line item. */
