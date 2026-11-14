@@ -80,6 +80,7 @@ import {
   kitHeaderIssues,
   zeroPricedMoneyIssues,
   PayablePriceMoneyCore,
+  PayableStatedCore,
   payablePostingIssues,
   PURCHASE_PRODUCT_ITEM_TYPES,
   type PurchaseLinePrice,
@@ -87,6 +88,7 @@ import {
   type PurchaseProductItemTypeType,
   type PurchaseDestinationInputType,
   purchaseDestinationInputIssues,
+  payableInputStatedIssues,
   payableInputUidIssue,
   payableLineUidIssue,
 } from "./purchase.ts";
@@ -187,6 +189,7 @@ export const PurchaseDocumentLinePriceSchema: z.ZodType<PurchaseDocumentLinePric
   taxes: z.array(PriceModifier).meta({ label: "Tax", derived: true }),
   taxes_base: z.array(TaxRef).optional().meta({ label: "Base Tax", derived: true }),
   counts: z.array(TierCountSchema).meta({ derived: true }),
+  ...PayableStatedCore,
   ...PayablePriceMoneyCore,
 });
 
@@ -485,7 +488,10 @@ function documentLineIssues(
   item: PurchaseDocumentItem,
   origin: PurchaseDocumentOriginType,
 ): { path: (string | number)[]; message: string }[] {
-  const issues = purchaseLineMoneyIssues({ price: item.price, amount_cents: item.amount_cents }, "document");
+  const issues = purchaseLineMoneyIssues(
+    { price: item.price, amount_cents: item.amount_cents, quantity: item.quantity },
+    "document",
+  );
   issues.push(...payablePostingIssues(item.type, item.ledger_account), ...kitHeaderIssues(item), ...zeroPricedMoneyIssues(item));
   const counts = item.price?.counts.length ?? 0;
   const time = item.price?.price_formula.basis === "time";
@@ -1404,6 +1410,8 @@ export interface PurchaseBillLineInputType {
     uid_price_formula?: string;
     rates?: { rate_key: string; amount_cents: number }[];
     discount?: DiscountInputType | null;
+    /** The row's GROSS (ruling 39); until core beta B `amount_cents` may state it instead, and both sent must agree. */
+    stated_cents?: number | null;
   };
 }
 
@@ -1471,13 +1479,21 @@ const billLineShape = (type: SharedLineType) => ({
     uid_price_formula: FirestoreId.optional(),
     rates: z.array(z.object({ rate_key: RateKey, amount_cents: z.int() })).optional(),
     discount: DiscountInput.nullable().optional(),
+    stated_cents: z.int().min(0).nullable().optional(),
   }).optional(),
 });
 
-function billLineIssues(row: { type: string; uid: string } & OutOfServiceLinkCarrier, ctx: z.RefinementCtx): void {
+function billLineIssues(
+  row:
+    & { type: string; uid: string; amount_cents?: number | null; price?: { stated_cents?: number | null } }
+    & OutOfServiceLinkCarrier,
+  ctx: z.RefinementCtx,
+): void {
   // A sale or rental row names its product by its uid (W4K, 7a), as a purchase line input does.
   const message = payableInputUidIssue(row);
   if (message !== null) ctx.addIssue({ code: "custom", path: ["uid"], message });
+  // An omitted amount keeps the stored one, so a row may state neither.
+  for (const issue of payableInputStatedIssues(row, false)) ctx.addIssue({ code: "custom", ...issue });
   for (const [path, msg] of outOfServiceLinkIssues(row)) ctx.addIssue({ code: "custom", path, message: msg });
 }
 

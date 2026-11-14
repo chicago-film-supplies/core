@@ -12065,6 +12065,7 @@ interface PurchaseLinePrice {
   taxes: PriceModifierType[];
   taxes_base?: TaxRefType[];
   replacement_cents?: number | null;
+  stated_cents?: number | null;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   total_cents: number;
@@ -12090,6 +12091,7 @@ interface PurchaseLinePriceInputType {
   rates?: RateSnapshotType[];
   discount?: DiscountInputType | null;
   replacement_cents?: number | null;
+  stated_cents?: number | null;
 }
 ```
 
@@ -12385,7 +12387,7 @@ A sale (Buy) item as an operator orders it — the buckets are the server's.
 interface PurchaseSaleItemInputType {
   type: "sale";
   quantity: number;
-  amount_cents: number;
+  amount_cents?: number;
   ledger_account?: COACodeType | null;
   landed_costs?: PurchaseLandedCostInputType[];
 }
@@ -29351,6 +29353,39 @@ assembles a price from parts.
 const PayablePriceMoneyCore: typeLiteral;
 ```
 
+### `PayableStatedCore`
+
+**`price.stated_cents` — a payable line's stated GROSS, the input its money is
+derived from** (one-document-model ruling 39, 6e-0b1 S2). ONE instance, spread
+by the purchase line and the bill/credit line alike, like
+{@link PayablePriceMoneyCore}, which it is deliberately not part of: every key
+there is derived, and this one is the input.
+
+Set, the line's money is the one line-money function's (`lineMoneyAtCents`,
+`schemas/_line-money.ts`): `subtotal_cents` is `stated_cents`, the line's
+`amount_cents` (the net) is `lineMoneyAtCents(quantity)`, and
+`discount.amount_cents` is `lineDiscountAtCents(quantity)`. A stated total
+governs a line that also carries rates (a LINKED time line: Xero's money).
+
+In the `flat_money` merge group with `quantity` and `amount_cents`: it is
+what they are derived from, so it follows or is kept with them as one unit.
+
+⚠️ **Optional and nullable in core beta A, by design** (the plan's staging,
+2026-11-13): stored lines predate it and the backfill runs after the deploy
+that declares it (`cfs-release-order`: under `z.strictObject` the deploy
+precedes the backfill). Beta B requires it on a flat line through the money
+refine; the key itself stays nullable, because the price schema is shared
+with time lines.
+
+⚠️ Receivable lines do not carry it until 6e-0b2 (D2): there an invoice or
+credit-note line is priced from its rates.
+
+Not on the `@cfs/core/schemas` barrel, like {@link PayablePriceMoneyCore}.
+
+```ts
+const PayableStatedCore: typeLiteral;
+```
+
 ### `Purchase`
 
 A purchase order placed with a supplier.
@@ -29680,6 +29715,7 @@ interface PurchaseLinePrice {
   taxes: PriceModifierType[];
   taxes_base?: TaxRefType[];
   replacement_cents?: number | null;
+  stated_cents?: number | null;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   total_cents: number;
@@ -29705,6 +29741,7 @@ interface PurchaseLinePriceInputType {
   rates?: RateSnapshotType[];
   discount?: DiscountInputType | null;
   replacement_cents?: number | null;
+  stated_cents?: number | null;
 }
 ```
 
@@ -29899,7 +29936,7 @@ A sale (Buy) item as an operator orders it — the buckets are the server's.
 interface PurchaseSaleItemInputType {
   type: "sale";
   quantity: number;
-  amount_cents: number;
+  amount_cents?: number;
   ledger_account?: COACodeType | null;
   landed_costs?: PurchaseLandedCostInputType[];
 }
@@ -30080,6 +30117,15 @@ Is this row a line (not a divider)?
 ### `kitHeaderIssues(item: typeLiteral): typeLiteral[]`
 
 A kit header holds no money: a `null` account requires a flat line stating $0.
+
+### `payableInputStatedIssues(item: typeLiteral, _: unknown): typeLiteral[]`
+
+A line input's gross, stated once (ruling 39, core beta A): as the item's
+`amount_cents` (its name until beta B) or as `price.stated_cents`. Both may be
+sent while clients move over, and then they must agree, since both mean the
+GROSS. On a purchase a sale states one of them (`requireOnSale`); the other
+arms, and every bill row (whose omitted amount keeps the stored one), may
+state neither.
 
 ### `payableInputUidIssue(line: typeLiteral): string | null`
 
@@ -51773,6 +51819,7 @@ interface FlatPayablePrice {
   price_formula: PriceFormulaRef;
   rates: never[];
   discount: DiscountType | null;
+  stated_cents?: number | null;
   taxes: PriceModifierType[];
   taxes_base?: TaxRefType[];
   subtotal_cents: number;
@@ -52024,6 +52071,9 @@ purchase-line writer, the bill-line projector, a bill's charge line, a credit
 line. A hand-spelled declared literal per builder is how a key gets dropped
 from one of them (`ORDER_DECLARED_PRICE_KEYS`' docblock, api-cloudrun#984).
 
+The line's net is the returned `subtotal_discounted_cents`: a caller that
+states `stated_cents` writes it to the line's `amount_cents`.
+
 A FLAT line only (`rates: []`); a time line's price is built by
 `projectTimeLine` (`@cfs/core/utils/purchase-documents`) and priced by the
 document pricer.
@@ -52127,9 +52177,20 @@ the minimum skipped — only a flat tax reads it, and is refused.
 
 **The stated-total arm: a payable line's money is its stated amount.**
 
-- `subtotal_discounted_cents` = `amount_cents`, the net CFS pays;
-- `subtotal_cents` = net + `discount.amount_cents` — the operator's gross, the
-  discount being DECLARED on a payable line (what came off), not derived;
+Two inputs, by what the line states:
+
+- **`price.stated_cents` set** (one-document-model ruling 39): the GROSS.
+  `subtotal_cents` = `stated_cents`; the net is `lineMoneyAtCents(quantity)`
+  and `discount.amount_cents` is `lineDiscountAtCents(quantity)` — the one
+  line-money function, so the whole line and every part of it come from one
+  author. `amount_cents` is ignored here and re-derived by the caller.
+- **absent or `null`** (a line written before the backfill): the declared net
+  `amount_cents`, and `subtotal_cents` = net + `discount.amount_cents`, the
+  discount record being DECLARED (what came off).
+
+Either way:
+
+- `subtotal_discounted_cents` = the net CFS pays;
 - `taxes` re-amounted on the net from each tax's own rate and type
   (`computeItemTaxAmountCents`, the one tax-amount author) — `[]` on an exempt
   side;

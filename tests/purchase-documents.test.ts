@@ -29,7 +29,7 @@ import {
   recomputePurchaseQuantityBilled,
   syncPurchaseToBills,
 } from "../src/utils/purchase-documents.ts";
-import { chargeWindowContext, priceDocument, PriceRefusalError } from "../src/utils/price-document.ts";
+import { chargeWindowContext, flatPayablePrice, priceDocument, PriceRefusalError } from "../src/utils/price-document.ts";
 import type { PricingFormulas } from "../src/utils/price-formulas.ts";
 import type { TaxCatalog } from "../src/utils/tax-classes.ts";
 import { asCreditRows, hireDates, payablePrice, purchaseDivider, purchasePair, payableLine, withPayableMoney } from "./helpers/payable.ts";
@@ -57,6 +57,7 @@ import {
   isPurchaseLine,
 } from "../src/schemas/mod.ts";
 import { computeItemPaths } from "../src/utils/orders.ts";
+import { purchaseLineMoneyIssues } from "../src/schemas/purchase.ts";
 import { applyDateEdit } from "../src/utils/dates.ts";
 import { orderLineClaimIssues } from "../src/utils/invoices.ts";
 import { purchaseActionsFor } from "../src/utils/purchase-actions.ts";
@@ -399,7 +400,7 @@ function purchaseDoc(items: PurchaseItem[]): Purchase {
   };
 }
 
-Deno.test("purchaseBillSharedLineFields: price follows as formula ATOM + rates VALUE + discount terms; quantity, amount and the out-of-service link as ONE group", () => {
+Deno.test("purchaseBillSharedLineFields: price follows as formula ATOM + rates VALUE + discount terms; quantity, amount, the stated gross and the out-of-service link as ONE group", () => {
   const fields = purchaseBillSharedLineFields();
   const kinds = Object.fromEntries(fields.map((f) => [f.path, f.kind]));
   assertEquals(kinds["price.price_formula"], "atom");
@@ -410,7 +411,11 @@ Deno.test("purchaseBillSharedLineFields: price follows as formula ATOM + rates V
   assertEquals(kinds["amount_cents"], "propagated");
   // A replacement line's shares sum to its quantity, so the list moves with it
   // (W4R): a whole VALUE inside the group, which the classifier now reads.
-  assertEquals(fields.filter((f) => f.group === "flat_money").map((f) => f.path).sort(), ["amount_cents", "out_of_service", "quantity"]);
+  // `price.stated_cents` is the gross they derive from (ruling 39), so it moves with them.
+  assertEquals(
+    fields.filter((f) => f.group === "flat_money").map((f) => f.path).sort(),
+    ["amount_cents", "out_of_service", "price.stated_cents", "quantity"],
+  );
   assertEquals(kinds["out_of_service"], "propagated");
   assertEquals(kinds["dates"], undefined);
   assertEquals(kinds["units"], undefined);
@@ -1675,4 +1680,83 @@ Deno.test("W4R syncPurchaseToBills: a bill whose AMOUNT was edited keeps its rec
   // Without the group the records would follow alone: 5 shares on a 4-unit line.
   assertEquals([held.quantity, held.amount_cents, held.out_of_service], [4, 39000, [{ uid: OOS_A, quantity: 2 }, { uid: OOS_B, quantity: 2 }]]);
   parses(out.bill);
+});
+
+// ── price.stated_cents: the stated GROSS is the input (one-document-model 6e-0b1 S2) ──
+
+// Expected values are hand-computed from the exact rational, not from the code:
+// 100,001 × (100 − 33.3333) ÷ 100 = 66,667.33… → 66,667; a flat $0.07/unit
+// over 3 units is 21¢ off 100,001.
+const PERCENT_THIRD = { rate: 33.3333, type: "percent" as const, amount_cents: 0 };
+const FLAT_7C = { rate: 0.07, type: "flat" as const, amount_cents: 0 };
+const statedLine = (discount: typeof PERCENT_THIRD | typeof FLAT_7C | null, kind: "purchase" | "bill") => {
+  const base = kind === "purchase" ? buyLine() : project(buyLine(), 10, 3);
+  // A stale net and a stale discount record: the pricer must derive both.
+  return { ...base, amount_cents: 1, price: { ...base.price, discount, stated_cents: 100_001 } } as PurchaseItem;
+};
+
+Deno.test("priceDocument (payable): a line stating `stated_cents` derives its net, discount record and amount_cents from the one function", () => {
+  for (const kind of ["purchase", "bill"] as const) {
+    const ctx = payableCtx(kind === "purchase" ? "purchase" : "purchase_bill");
+    for (const [discount, net] of [[PERCENT_THIRD, 66_667], [FLAT_7C, 99_980], [null, 100_001]] as const) {
+      const [priced] = priceDocument([statedLine(discount, kind)], ctx).items as PurchaseItem[];
+      const label = `${kind} ${discount?.type ?? "undiscounted"}`;
+      assertEquals(priced.price.subtotal_cents, 100_001, `${label}: the gross is the stated total`);
+      assertEquals(priced.price.subtotal_discounted_cents, net, label);
+      assertEquals(priced.amount_cents, net, `${label}: amount_cents is written back as the derived net`);
+      assertEquals(priced.price.discount?.amount_cents ?? null, discount === null ? null : 100_001 - net, label);
+      assertEquals((priced.price as { stated_cents?: number }).stated_cents, 100_001, `${label}: the input is kept`);
+    }
+  }
+});
+
+Deno.test("priceDocument (payable): a stated line parses through the stored schemas; a stale net beside it does not", () => {
+  const [purchaseLine] = priceDocument([statedLine(PERCENT_THIRD, "purchase")], payableCtx("purchase")).items as PurchaseItem[];
+  assert(PurchaseSaleItemSchema.safeParse(purchaseLine).success, "the priced purchase line parses");
+  const stale = { ...purchaseLine, amount_cents: 66_668, price: { ...purchaseLine.price, subtotal_discounted_cents: 66_668, total_cents: 66_668 } };
+  const r = PurchaseSaleItemSchema.safeParse(stale);
+  assert(!r.success);
+  assertEquals(r.error.issues.map((i) => i.path.join(".")), ["amount_cents"], "one wrong net is one issue, on the derived key");
+  const wrongOff = { ...purchaseLine, price: { ...purchaseLine.price, discount: { ...PERCENT_THIRD, amount_cents: 33_335 } } };
+  const w = PurchaseSaleItemSchema.safeParse(wrongOff);
+  assert(!w.success);
+  // The gross is the stated total, not net + record, so a wrong record is ONE issue.
+  assertEquals(w.error.issues.map((i) => i.path.join(".")), ["price.discount.amount_cents"]);
+
+  const [billLine] = priceDocument([statedLine(FLAT_7C, "bill")], payableCtx("purchase_bill")).items as unknown as PurchaseDocumentItem[];
+  const bill = PurchaseBillSchema.safeParse(billDoc(1, [billLine]));
+  assert(bill.success, JSON.stringify(bill.error?.issues));
+});
+
+Deno.test("priceDocument (payable): a line stating NO total keeps today's arm — the declared net and discount record", () => {
+  const discount = { rate: 10, type: "percent" as const, amount_cents: 5222 };
+  const base = project(buyLine(), 10, 1);
+  const [priced] = priceDocument([{ ...base, price: { ...base.price, discount, stated_cents: null } }], payableCtx("purchase_bill"))
+    .items;
+  assertEquals(priced.amount_cents, base.amount_cents, "a null total derives nothing");
+  assertEquals(priced.price.discount, discount);
+  assertEquals(priced.price.subtotal_cents, base.amount_cents + 5222);
+});
+
+Deno.test("purchaseLineMoneyIssues: a TIME line on a purchase states no total; on a bill a linked one may", () => {
+  const price = { ...payablePrice(0, { formula: { ...FIXED_REF, basis: "time" as const } }), rates: [{ rate_key: "week", amount_cents: 500 }], stated_cents: 500 };
+  const onPurchase = purchaseLineMoneyIssues({ price, amount_cents: null, quantity_billed: null, quantity: 1 });
+  assertEquals(onPurchase.map((i) => i.path.join(".")), ["price.stated_cents"]);
+  const control = purchaseLineMoneyIssues({ price: { ...price, stated_cents: null }, amount_cents: null, quantity_billed: null, quantity: 1 });
+  assertEquals(control, [], "control: the same line stating no total");
+  // A LINKED time bill line's money is Xero's, which it may state as a total.
+  const linked = { ...price, subtotal_cents: 500, subtotal_discounted_cents: 500, total_cents: 500 };
+  assertEquals(purchaseLineMoneyIssues({ price: linked, amount_cents: 500, quantity: 1 }, "document"), []);
+});
+
+Deno.test("flatPayablePrice: given a stated total it stores the input and derives the money; without one the key set is unchanged", () => {
+  const args = { uid: lid(2), quantity: 3, amount_cents: null, price_formula: FIXED_REF, discount: PERCENT_THIRD, counts: true } as const;
+  const stated = flatPayablePrice({ ...args, stated_cents: 100_001 });
+  assertEquals(stated.stated_cents, 100_001);
+  assertEquals(stated.subtotal_cents, 100_001);
+  assertEquals(stated.subtotal_discounted_cents, 66_667);
+  assertEquals(stated.discount?.amount_cents, 33_334, "the derived record, not the caller's 0");
+  const legacy = flatPayablePrice({ ...args, amount_cents: 66_667, discount: { ...PERCENT_THIRD, amount_cents: 33_334 } });
+  assertEquals("stated_cents" in legacy, false, "a writer that states no total does not widen its key set");
+  assertEquals(legacy.subtotal_cents, 100_001);
 });

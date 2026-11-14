@@ -5343,13 +5343,13 @@
         {
           "kind": "interface",
           "name": "PurchaseLinePrice",
-          "declaration": "interface PurchaseLinePrice {\n  price_formula: PriceFormulaRef;\n  rates: RateSnapshotType[];\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  replacement_cents?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  total_cents: number;\n}",
+          "declaration": "interface PurchaseLinePrice {\n  price_formula: PriceFormulaRef;\n  rates: RateSnapshotType[];\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  replacement_cents?: number | null;\n  stated_cents?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  total_cents: number;\n}",
           "doc": "How a purchase line is priced (purchases-as-documents Phase 2 rulings 1, 2,\n7): the formula it is priced by, the rates it snapshots, a supplier\ndiscount, and the money `priceDocument` computes from them.\n\n- A line states its WHOLE net cost in the line's `amount_cents` (the DECLARED\n  stated total: a buy, a fixed-cost subrent, freight or a fee) and carries\n  `rates: []`. Measured: most stored buys cost a total that does not divide\n  by their quantity, and every reader slices the total with\n  `cumulativeShareCents`, so no per-unit rate is stored.\n- The COMPUTED half is the receivable line's money (`subtotal_cents`,\n  `subtotal_discounted_cents`, `taxes`, `total_cents`), written by\n  `priceDocument`'s stated-total arm (one-document-model Phase 2): subtotal =\n  `amount_cents + discount.amount_cents` (the operator's gross),\n  discounted = `amount_cents`, total = discounted + Σ taxes. Every money\n  reader reads it, as on an order line; `amount_cents` is the input.\n\n⚠️ **A TIME line** commits nothing here: its money is zero and its rates are\nthe formula's; its bills price it from their pair's windows\n(`priceDocument`'s time arms, one-document-model Phase 3).\n\n`discount` is core's `Discount`. On a payable line it records what came off\nthe operator's GROSS, so `discount.amount_cents` is declared, not derived;\n`amount_cents` is the NET — what CFS pays, which receipts, basis and bills\nslice.\n\n**Tax is EXEMPTION, not absence** (api-cloudrun's `one-document-model` plan):\na payable line is stamped with its type's default tax class like any other\npriced line (`LineTaxCore`), and the payable side resolves it exempt, so\n`taxes` is `[]`. `taxes_base` is the class's rates BEFORE the exemption, as\non an order line, so an exempt line records a non-empty base. A taxable\npurchase later (consumables, use tax) then needs no new path. Neither key\nreaches a Xero body or the bill's projection hash."
         },
         {
           "kind": "interface",
           "name": "PurchaseLinePriceInputType",
-          "declaration": "interface PurchaseLinePriceInputType {\n  uid_price_formula?: string;\n  rates?: RateSnapshotType[];\n  discount?: DiscountInputType | null;\n  replacement_cents?: number | null;\n}",
+          "declaration": "interface PurchaseLinePriceInputType {\n  uid_price_formula?: string;\n  rates?: RateSnapshotType[];\n  discount?: DiscountInputType | null;\n  replacement_cents?: number | null;\n  stated_cents?: number | null;\n}",
           "doc": "How an operator prices an item input (ruling 1, 7). `uid_price_formula`\nnames the formula; absent takes the writer's default (a buy and a flat charge\nFixed; a subrent or a time charge the product's `cogs` activation entry's\nformula, else Fixed). The writer snapshots the formula's name and basis.\n\n- `rates` — a time line's rates; absent takes the rates in force today on\n  the product's activation entry. Refused on a flat line.\n- `discount` — a supplier discount, `{ rate, type }`; the writer computes its\n  `amount_cents`. On a flat line `amount_cents` is then the GROSS the\n  operator states, and the stored amount is net of the discount."
         },
         {
@@ -5499,7 +5499,7 @@
         {
           "kind": "interface",
           "name": "PurchaseSaleItemInputType",
-          "declaration": "interface PurchaseSaleItemInputType {\n  type: \"sale\";\n  quantity: number;\n  amount_cents: number;\n  ledger_account?: COACodeType | null;\n  landed_costs?: PurchaseLandedCostInputType[];\n}",
+          "declaration": "interface PurchaseSaleItemInputType {\n  type: \"sale\";\n  quantity: number;\n  amount_cents?: number;\n  ledger_account?: COACodeType | null;\n  landed_costs?: PurchaseLandedCostInputType[];\n}",
           "doc": "A sale (Buy) item as an operator orders it — the buckets are the server's."
         },
         {
@@ -13726,6 +13726,12 @@
           "doc": "The computed money keys every payable line price carries — ONE instance per\nkey, spread by the purchase line and the bill/credit line alike, so the two\ncannot drift (`tests/item-shape-parity.test.ts` asserts the identity).\nDerived, so the purchase → bill merge never carries them: the pricer\nre-derives them on every grain.\n\n⚠️ Not on the `@cfs/core/schemas` barrel, like `TotalsCore`: no consumer\nassembles a price from parts."
         },
         {
+          "kind": "variable",
+          "name": "PayableStatedCore",
+          "declaration": "const PayableStatedCore: typeLiteral;",
+          "doc": "**`price.stated_cents` — a payable line's stated GROSS, the input its money is\nderived from** (one-document-model ruling 39, 6e-0b1 S2). ONE instance, spread\nby the purchase line and the bill/credit line alike, like\n{@link PayablePriceMoneyCore}, which it is deliberately not part of: every key\nthere is derived, and this one is the input.\n\nSet, the line's money is the one line-money function's (`lineMoneyAtCents`,\n`schemas/_line-money.ts`): `subtotal_cents` is `stated_cents`, the line's\n`amount_cents` (the net) is `lineMoneyAtCents(quantity)`, and\n`discount.amount_cents` is `lineDiscountAtCents(quantity)`. A stated total\ngoverns a line that also carries rates (a LINKED time line: Xero's money).\n\nIn the `flat_money` merge group with `quantity` and `amount_cents`: it is\nwhat they are derived from, so it follows or is kept with them as one unit.\n\n⚠️ **Optional and nullable in core beta A, by design** (the plan's staging,\n2026-11-13): stored lines predate it and the backfill runs after the deploy\nthat declares it (`cfs-release-order`: under `z.strictObject` the deploy\nprecedes the backfill). Beta B requires it on a flat line through the money\nrefine; the key itself stays nullable, because the price schema is shared\nwith time lines.\n\n⚠️ Receivable lines do not carry it until 6e-0b2 (D2): there an invoice or\ncredit-note line is priced from its rates.\n\nNot on the `@cfs/core/schemas` barrel, like {@link PayablePriceMoneyCore}."
+        },
+        {
           "kind": "interface",
           "name": "Purchase",
           "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  uid_store: string;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseRow[];\n  destinations: PurchaseDestination[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  bills: Array<typeLiteral>;\n  credits: Array<typeLiteral>;\n  query_by_credits: string[];\n  bookings_breakdown: InboundBreakdown;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
@@ -13842,13 +13848,13 @@
         {
           "kind": "interface",
           "name": "PurchaseLinePrice",
-          "declaration": "interface PurchaseLinePrice {\n  price_formula: PriceFormulaRef;\n  rates: RateSnapshotType[];\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  replacement_cents?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  total_cents: number;\n}",
+          "declaration": "interface PurchaseLinePrice {\n  price_formula: PriceFormulaRef;\n  rates: RateSnapshotType[];\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  replacement_cents?: number | null;\n  stated_cents?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  total_cents: number;\n}",
           "doc": "How a purchase line is priced (purchases-as-documents Phase 2 rulings 1, 2,\n7): the formula it is priced by, the rates it snapshots, a supplier\ndiscount, and the money `priceDocument` computes from them.\n\n- A line states its WHOLE net cost in the line's `amount_cents` (the DECLARED\n  stated total: a buy, a fixed-cost subrent, freight or a fee) and carries\n  `rates: []`. Measured: most stored buys cost a total that does not divide\n  by their quantity, and every reader slices the total with\n  `cumulativeShareCents`, so no per-unit rate is stored.\n- The COMPUTED half is the receivable line's money (`subtotal_cents`,\n  `subtotal_discounted_cents`, `taxes`, `total_cents`), written by\n  `priceDocument`'s stated-total arm (one-document-model Phase 2): subtotal =\n  `amount_cents + discount.amount_cents` (the operator's gross),\n  discounted = `amount_cents`, total = discounted + Σ taxes. Every money\n  reader reads it, as on an order line; `amount_cents` is the input.\n\n⚠️ **A TIME line** commits nothing here: its money is zero and its rates are\nthe formula's; its bills price it from their pair's windows\n(`priceDocument`'s time arms, one-document-model Phase 3).\n\n`discount` is core's `Discount`. On a payable line it records what came off\nthe operator's GROSS, so `discount.amount_cents` is declared, not derived;\n`amount_cents` is the NET — what CFS pays, which receipts, basis and bills\nslice.\n\n**Tax is EXEMPTION, not absence** (api-cloudrun's `one-document-model` plan):\na payable line is stamped with its type's default tax class like any other\npriced line (`LineTaxCore`), and the payable side resolves it exempt, so\n`taxes` is `[]`. `taxes_base` is the class's rates BEFORE the exemption, as\non an order line, so an exempt line records a non-empty base. A taxable\npurchase later (consumables, use tax) then needs no new path. Neither key\nreaches a Xero body or the bill's projection hash."
         },
         {
           "kind": "interface",
           "name": "PurchaseLinePriceInputType",
-          "declaration": "interface PurchaseLinePriceInputType {\n  uid_price_formula?: string;\n  rates?: RateSnapshotType[];\n  discount?: DiscountInputType | null;\n  replacement_cents?: number | null;\n}",
+          "declaration": "interface PurchaseLinePriceInputType {\n  uid_price_formula?: string;\n  rates?: RateSnapshotType[];\n  discount?: DiscountInputType | null;\n  replacement_cents?: number | null;\n  stated_cents?: number | null;\n}",
           "doc": "How an operator prices an item input (ruling 1, 7). `uid_price_formula`\nnames the formula; absent takes the writer's default (a buy and a flat charge\nFixed; a subrent or a time charge the product's `cogs` activation entry's\nformula, else Fixed). The writer snapshots the formula's name and basis.\n\n- `rates` — a time line's rates; absent takes the rates in force today on\n  the product's activation entry. Refused on a flat line.\n- `discount` — a supplier discount, `{ rate, type }`; the writer computes its\n  `amount_cents`. On a flat line `amount_cents` is then the GROSS the\n  operator states, and the stored amount is net of the discount."
         },
         {
@@ -13950,7 +13956,7 @@
         {
           "kind": "interface",
           "name": "PurchaseSaleItemInputType",
-          "declaration": "interface PurchaseSaleItemInputType {\n  type: \"sale\";\n  quantity: number;\n  amount_cents: number;\n  ledger_account?: COACodeType | null;\n  landed_costs?: PurchaseLandedCostInputType[];\n}",
+          "declaration": "interface PurchaseSaleItemInputType {\n  type: \"sale\";\n  quantity: number;\n  amount_cents?: number;\n  ledger_account?: COACodeType | null;\n  landed_costs?: PurchaseLandedCostInputType[];\n}",
           "doc": "A sale (Buy) item as an operator orders it — the buckets are the server's."
         },
         {
@@ -14058,6 +14064,14 @@
           "name": "kitHeaderIssues",
           "signature": "kitHeaderIssues(item: typeLiteral): typeLiteral[]",
           "doc": "A kit header holds no money: a `null` account requires a flat line stating $0.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "payableInputStatedIssues",
+          "signature": "payableInputStatedIssues(item: typeLiteral, _: unknown): typeLiteral[]",
+          "doc": "A line input's gross, stated once (ruling 39, core beta A): as the item's\n`amount_cents` (its name until beta B) or as `price.stated_cents`. Both may be\nsent while clients move over, and then they must agree, since both mean the\nGROSS. On a purchase a sale states one of them (`requireOnSale`); the other\narms, and every bill row (whose omitted amount keeps the stored one), may\nstate neither.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -24605,7 +24619,7 @@
         {
           "kind": "interface",
           "name": "FlatPayablePrice",
-          "declaration": "interface FlatPayablePrice {\n  price_formula: PriceFormulaRef;\n  rates: never[];\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  total_cents: number;\n}",
+          "declaration": "interface FlatPayablePrice {\n  price_formula: PriceFormulaRef;\n  rates: never[];\n  discount: DiscountType | null;\n  stated_cents?: number | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  total_cents: number;\n}",
           "doc": "What {@link flatPayablePrice} returns: a flat payable line price, money stated."
         },
         {
@@ -24726,7 +24740,7 @@
           "kind": "function",
           "name": "flatPayablePrice",
           "signature": "flatPayablePrice(args: typeLiteral): FlatPayablePrice & parenthesized",
-          "doc": "**The one builder of a FLAT payable line's price** — the declared half\n(`price_formula`, `rates: []`, the discount record, the tax modifiers, and\n`counts: []` on a bill or credit line) plus the stated-total money\n({@link withStatedTotalMoney}). Every payable line builder calls it: the\npurchase-line writer, the bill-line projector, a bill's charge line, a credit\nline. A hand-spelled declared literal per builder is how a key gets dropped\nfrom one of them (`ORDER_DECLARED_PRICE_KEYS`' docblock, api-cloudrun#984).\n\nA FLAT line only (`rates: []`); a time line's price is built by\n`projectTimeLine` (`@cfs/core/utils/purchase-documents`) and priced by the\ndocument pricer.",
+          "doc": "**The one builder of a FLAT payable line's price** — the declared half\n(`price_formula`, `rates: []`, the discount record, the tax modifiers, and\n`counts: []` on a bill or credit line) plus the stated-total money\n({@link withStatedTotalMoney}). Every payable line builder calls it: the\npurchase-line writer, the bill-line projector, a bill's charge line, a credit\nline. A hand-spelled declared literal per builder is how a key gets dropped\nfrom one of them (`ORDER_DECLARED_PRICE_KEYS`' docblock, api-cloudrun#984).\n\nThe line's net is the returned `subtotal_discounted_cents`: a caller that\nstates `stated_cents` writes it to the line's `amount_cents`.\n\nA FLAT line only (`rates: []`); a time line's price is built by\n`projectTimeLine` (`@cfs/core/utils/purchase-documents`) and priced by the\ndocument pricer.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -24822,7 +24836,7 @@
           "kind": "function",
           "name": "priceStatedTotalLine",
           "signature": "priceStatedTotalLine(line: StatedTotalLine): LinePriceMoney",
-          "doc": "**The stated-total arm: a payable line's money is its stated amount.**\n\n- `subtotal_discounted_cents` = `amount_cents`, the net CFS pays;\n- `subtotal_cents` = net + `discount.amount_cents` — the operator's gross, the\n  discount being DECLARED on a payable line (what came off), not derived;\n- `taxes` re-amounted on the net from each tax's own rate and type\n  (`computeItemTaxAmountCents`, the one tax-amount author) — `[]` on an exempt\n  side;\n- `total_cents` = net + Σ taxes.\n\nThe twin of stage 4's fee arm: a declared amount stored as the line's money,\nnot re-derived from rates. Exported for the projectors that default a bill\nor credit line from its purchase line before the writer prices the document.\n\nBasis-blind: a LINKED time line's stated amount is Xero's money and prices\nthrough here too.",
+          "doc": "**The stated-total arm: a payable line's money is its stated amount.**\n\nTwo inputs, by what the line states:\n\n- **`price.stated_cents` set** (one-document-model ruling 39): the GROSS.\n  `subtotal_cents` = `stated_cents`; the net is `lineMoneyAtCents(quantity)`\n  and `discount.amount_cents` is `lineDiscountAtCents(quantity)` — the one\n  line-money function, so the whole line and every part of it come from one\n  author. `amount_cents` is ignored here and re-derived by the caller.\n- **absent or `null`** (a line written before the backfill): the declared net\n  `amount_cents`, and `subtotal_cents` = net + `discount.amount_cents`, the\n  discount record being DECLARED (what came off).\n\nEither way:\n\n- `subtotal_discounted_cents` = the net CFS pays;\n- `taxes` re-amounted on the net from each tax's own rate and type\n  (`computeItemTaxAmountCents`, the one tax-amount author) — `[]` on an exempt\n  side;\n- `total_cents` = net + Σ taxes.\n\nThe twin of stage 4's fee arm: a declared amount stored as the line's money,\nnot re-derived from rates. Exported for the projectors that default a bill\nor credit line from its purchase line before the writer prices the document.\n\nBasis-blind: a LINKED time line's stated amount is Xero's money and prices\nthrough here too.",
           "paramTags": [],
           "returnsTag": null
         },

@@ -25,6 +25,7 @@ import {
   PURCHASE_ITEM_TYPES,
   type PurchaseItem,
   PurchaseDestinationInput,
+  PurchaseBillRowInput,
   PurchaseItemInput,
   PurchaseRowInput,
   type PurchaseLandedCost,
@@ -1906,4 +1907,28 @@ Deno.test("PurchaseCreditSchema: a credit row carries substituted_for and exchan
 Deno.test("lineProductUid — the product a payable line names is its uid, and a custom- line names none (ruling 67)", () => {
   assertEquals(lineProductUid({ uid: "prodA" }), "prodA");
   assertEquals(lineProductUid({ uid: "custom-0b2a6f1e-6a7d-4e8b-9c1d-2f3a4b5c6d7e" }), undefined);
+});
+
+// ── price.stated_cents on the inputs (one-document-model 6e-0b1 S2, core beta A) ──
+
+Deno.test("PurchaseItemInput: a Buy states its gross as amount_cents OR price.stated_cents; both sent must agree", () => {
+  const { amount_cents: _a, ...bare } = buyInput;
+  assertEquals(issuePaths(PurchaseItemInput, buyInput), [], "control: today's amount_cents");
+  assertEquals(issuePaths(PurchaseItemInput, { ...bare, price: { stated_cents: 100 } }), [], "the stated gross alone");
+  assertEquals(issuePaths(PurchaseItemInput, { ...buyInput, price: { stated_cents: 100 } }), [], "both, agreeing");
+  assertEquals(issuePaths(PurchaseItemInput, { ...buyInput, price: { stated_cents: 101 } }), ["price.stated_cents"]);
+  assertEquals(issuePaths(PurchaseItemInput, bare), ["amount_cents"], "a Buy states its gross one way or the other");
+  assertEquals(issuePaths(PurchaseItemInput, { ...bare, price: { stated_cents: null } }), ["amount_cents"]);
+  // A charge may state neither (an amend keeps the stored amount).
+  const charge = { type: "service", ...lineHead(5), name: "Freight", ledger_account: 5100 };
+  assertEquals(issuePaths(PurchaseItemInput, charge), []);
+  assertEquals(issuePaths(PurchaseItemInput, { ...charge, amount_cents: 5, price: { stated_cents: 6 } }), ["price.stated_cents"]);
+});
+
+Deno.test("PurchaseBillRowInput: a row may state its gross as price.stated_cents; sent beside amount_cents the two must agree", () => {
+  const row = { type: "sale", ...keyedHead(1) };
+  assertEquals(issuePaths(PurchaseBillRowInput, row), [], "a row stating neither keeps the stored amount");
+  assertEquals(issuePaths(PurchaseBillRowInput, { ...row, price: { stated_cents: 100 } }), []);
+  assertEquals(issuePaths(PurchaseBillRowInput, { ...row, amount_cents: 100, price: { stated_cents: 100 } }), []);
+  assertEquals(issuePaths(PurchaseBillRowInput, { ...row, amount_cents: 100, price: { stated_cents: 99 } }), ["price.stated_cents"]);
 });

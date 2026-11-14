@@ -93,6 +93,14 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   //    null = a bill with no due date, a value = the mirror. Tighten to bare
   //    `.nullable()` once the dev and prod backfills have run.
   ["purchase-bills.due_date_fs", "mid-expand"],
+  // ── mid-expand — one-document-model 6e-0b1 S2 (core beta A). Absent = a line
+  //    written before the backfill; null = a time line or one stating no total;
+  //    a value = the line's stated gross. The backfill stamps the key on every
+  //    payable line (a full scan, not `orderBy`: these are array members); then
+  //    tighten to bare `.nullable()` in beta B.
+  ["purchases.items[].price.stated_cents", "mid-expand"],
+  ["purchase-bills.items[].price.stated_cents", "mid-expand"],
+  ["purchase-credits.items[].price.stated_cents", "mid-expand"],
   // ── pending-census — measurable with `orderBy`, awaiting the both-environment
   //    census before any of them is tightened. The directly actionable set.
   ["bookings.destinations.collection.address.address_coordinates", "pending-census"],

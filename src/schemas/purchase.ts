@@ -184,6 +184,7 @@ import {
   type RateSnapshotType,
   RateSnapshotSchema,
 } from "./price-formula.ts";
+import { lineDiscountAtCents, lineMoneyAtCents } from "./_line-money.ts";
 
 // ── Status ───────────────────────────────────────────────────────
 
@@ -298,6 +299,17 @@ export const PurchaseItemDatesSchema: z.ZodType<PurchaseItemDates> = z.strictObj
   end: chicagoInstant().nullable().meta({ column: true, label: "End" }),
 });
 
+// `quantity`, `amount_cents` and `price.stated_cents` follow the purchase onto
+// its bills by the full three-way rule, as an order line's do onto its invoices
+// (owner, 2026-11-07), and as ONE unit (`shared_group`): a flat line's amount is
+// a stated TOTAL, so an untouched bill line follows them all, and a line where
+// any was edited keeps them all (one-document-model Phase 3). A partial bill
+// differs from its purchase line on them, so it keeps them and a purchase edit
+// never re-bills it. The co-written `quantity_billed` has no counterpart on a
+// bill at all. Declared here, above the price schema, because
+// {@link PayableStatedCore} spreads it at module evaluation.
+const flatMoney = { propagate: true, shared_group: "flat_money" } as const;
+
 /**
  * How a purchase line is priced (purchases-as-documents Phase 2 rulings 1, 2,
  * 7): the formula it is priced by, the rates it snapshots, a supplier
@@ -342,6 +354,14 @@ export interface PurchaseLinePrice {
   taxes_base?: TaxRefType[];
   /** What this supplier charges CFS for a lost unit. A subrent line only; `null` when none was stated. */
   replacement_cents?: number | null;
+  /**
+   * The line's stated GROSS over its `quantity`, before `discount` — the input
+   * its money is derived from (one-document-model ruling 39, {@link PayableStatedCore}).
+   * Absent or `null` on a line that states none: a time line, and every line
+   * written before the backfill, whose gross is still `amount_cents +
+   * discount.amount_cents`.
+   */
+  stated_cents?: number | null;
   /** The gross: `amount_cents + discount.amount_cents`. Computed by `priceDocument`. */
   subtotal_cents: number;
   /** The net: equal to the line's `amount_cents`. Computed by `priceDocument`. */
@@ -370,6 +390,38 @@ export const PayablePriceMoneyCore: {
   total_cents: z.int().meta({ derived: true }),
 };
 
+/**
+ * **`price.stated_cents` — a payable line's stated GROSS, the input its money is
+ * derived from** (one-document-model ruling 39, 6e-0b1 S2). ONE instance, spread
+ * by the purchase line and the bill/credit line alike, like
+ * {@link PayablePriceMoneyCore}, which it is deliberately not part of: every key
+ * there is derived, and this one is the input.
+ *
+ * Set, the line's money is the one line-money function's (`lineMoneyAtCents`,
+ * `schemas/_line-money.ts`): `subtotal_cents` is `stated_cents`, the line's
+ * `amount_cents` (the net) is `lineMoneyAtCents(quantity)`, and
+ * `discount.amount_cents` is `lineDiscountAtCents(quantity)`. A stated total
+ * governs a line that also carries rates (a LINKED time line: Xero's money).
+ *
+ * In the `flat_money` merge group with `quantity` and `amount_cents`: it is
+ * what they are derived from, so it follows or is kept with them as one unit.
+ *
+ * ⚠️ **Optional and nullable in core beta A, by design** (the plan's staging,
+ * 2026-11-13): stored lines predate it and the backfill runs after the deploy
+ * that declares it (`cfs-release-order`: under `z.strictObject` the deploy
+ * precedes the backfill). Beta B requires it on a flat line through the money
+ * refine; the key itself stays nullable, because the price schema is shared
+ * with time lines.
+ *
+ * ⚠️ Receivable lines do not carry it until 6e-0b2 (D2): there an invoice or
+ * credit-note line is priced from its rates.
+ *
+ * Not on the `@cfs/core/schemas` barrel, like {@link PayablePriceMoneyCore}.
+ */
+export const PayableStatedCore: { stated_cents: z.ZodType<number | null | undefined> } = {
+  stated_cents: z.int().min(0).nullable().optional().meta({ column: true, label: "Stated", ...flatMoney }),
+};
+
 /** Zod schema for {@link PurchaseLinePrice}. */
 export const PurchaseLinePriceSchema: z.ZodType<PurchaseLinePrice> = z.strictObject({
   price_formula: PriceFormulaRefSchema.meta({ propagate: true }),
@@ -385,6 +437,7 @@ export const PurchaseLinePriceSchema: z.ZodType<PurchaseLinePrice> = z.strictObj
   // order line's declaration (`schemas/order.ts`, `ItemPrice`). A bill's price
   // has none, as an invoice's has none.
   replacement_cents: z.int().nullable().optional().meta({ column: true, label: "Replacement" }),
+  ...PayableStatedCore,
   ...PayablePriceMoneyCore,
 });
 
@@ -403,12 +456,19 @@ export const PurchaseLinePriceSchema: z.ZodType<PurchaseLinePrice> = z.strictObj
  *   money follows from that amount as a flat line's does.
  */
 export function purchaseLineMoneyIssues(
-  item: { price?: PurchaseLinePrice; amount_cents: number | null; quantity_billed?: number | null },
+  item: {
+    price?: PurchaseLinePrice;
+    amount_cents: number | null;
+    quantity_billed?: number | null;
+    /** The line's quantity, which a stated line's money is derived over. */
+    quantity?: number;
+  },
   grain: "purchase" | "document" = "purchase",
 ): { path: (string | number)[]; message: string }[] {
   const issues: { path: (string | number)[]; message: string }[] = [];
   const basis = item.price?.price_formula.basis ?? "flat";
   const rates = item.price?.rates ?? [];
+  const stated = item.price?.stated_cents ?? null;
   if (basis === "time") {
     if (rates.length === 0) issues.push({ path: ["price", "rates"], message: "a time line carries its formula's rates" });
     if (grain === "purchase") {
@@ -418,11 +478,15 @@ export function purchaseLineMoneyIssues(
       if (item.quantity_billed != null) {
         issues.push({ path: ["quantity_billed"], message: "a time line counts nothing billed; it resolves on custody" });
       }
-      if (item.price) issues.push(...statedTotalMoneyIssues(item.price, 0));
+      if (stated !== null) {
+        issues.push({ path: ["price", "stated_cents"], message: "a time line states no total; its bills decide its cost" });
+      }
+      // Its money is zero whatever it states; a stated total is reported once, above.
+      if (item.price) issues.push(...statedTotalMoneyIssues({ ...item.price, stated_cents: null }, 0, null));
       return issues;
     }
     if (item.amount_cents === null) issues.push({ path: ["amount_cents"], message: "a bill or credit line states its amount" });
-    else if (item.price) issues.push(...statedTotalMoneyIssues(item.price, item.amount_cents));
+    else if (item.price) issues.push(...statedTotalMoneyIssues(item.price, item.amount_cents, item.quantity ?? null));
     return issues;
   }
   if (item.amount_cents === null) issues.push({ path: ["amount_cents"], message: "a flat line states its amount" });
@@ -430,21 +494,57 @@ export function purchaseLineMoneyIssues(
   if (item.quantity_billed === null) {
     issues.push({ path: ["quantity_billed"], message: "a flat line counts what is billed" });
   }
-  if (item.price && item.amount_cents !== null) issues.push(...statedTotalMoneyIssues(item.price, item.amount_cents));
+  if (item.price && item.amount_cents !== null) {
+    issues.push(...statedTotalMoneyIssues(item.price, item.amount_cents, item.quantity ?? null));
+  }
   return issues;
 }
 
 /**
  * The stated-total identities: the computed money is exactly what the declared
- * amount and discount give (`priceDocument`'s stated-total arm is the author;
- * this is the value assertion beside it).
+ * input gives (`priceDocument`'s stated-total arm is the author; this is the
+ * value assertion beside it).
+ *
+ * - **`price.stated_cents` set** (ruling 39): the gross is `stated_cents`, and
+ *   the net (`amountCents`) and the discount record are the one line-money
+ *   function's at the line's `quantity` (`lineMoneyAtCents`,
+ *   `lineDiscountAtCents`). A line that states a total but no `quantity` is
+ *   refused: there is nothing to derive over.
+ * - **absent or `null`** (every line written before the backfill): the gross is
+ *   `amountCents + discount.amount_cents`, the declared discount record. Beta B
+ *   retires this arm on a flat line.
  */
 function statedTotalMoneyIssues(
   price: PurchaseLinePrice,
   amountCents: number,
+  quantity: number | null,
 ): { path: (string | number)[]; message: string }[] {
   const issues: { path: (string | number)[]; message: string }[] = [];
-  const gross = amountCents + (price.discount?.amount_cents ?? 0);
+  const stated = price.stated_cents ?? null;
+  let gross = amountCents + (price.discount?.amount_cents ?? 0);
+  if (stated !== null) {
+    if (quantity === null) {
+      return [{ path: ["price", "stated_cents"], message: "a stated total is derived over the line's quantity, and none is stated" }];
+    }
+    gross = stated;
+    const line = { quantity, price: { rates: price.rates, counts: [], discount: price.discount, stated_cents: stated } };
+    const net = lineMoneyAtCents(line, quantity);
+    if (amountCents !== net) {
+      issues.push({
+        path: ["amount_cents"],
+        message: `amount_cents ${amountCents} must equal the stated total's money over ${quantity} unit(s): ${net}`,
+      });
+    }
+    if (price.discount !== null) {
+      const off = lineDiscountAtCents(line, quantity);
+      if (price.discount.amount_cents !== off) {
+        issues.push({
+          path: ["price", "discount", "amount_cents"],
+          message: `price.discount.amount_cents ${price.discount.amount_cents} must equal the stated total's discount: ${off}`,
+        });
+      }
+    }
+  }
   if (price.subtotal_discounted_cents !== amountCents) {
     issues.push({
       path: ["price", "subtotal_discounted_cents"],
@@ -454,7 +554,9 @@ function statedTotalMoneyIssues(
   if (price.subtotal_cents !== gross) {
     issues.push({
       path: ["price", "subtotal_cents"],
-      message: `price.subtotal_cents ${price.subtotal_cents} must equal amount + discount: ${gross}`,
+      message: stated !== null
+        ? `price.subtotal_cents ${price.subtotal_cents} must equal the stated total ${gross}`
+        : `price.subtotal_cents ${price.subtotal_cents} must equal amount + discount: ${gross}`,
     });
   }
   // From the DECLARED amount, like the two above, so one wrong key is one issue.
@@ -754,14 +856,8 @@ const itemShape = {
   ...LineTaxCore,
 } as const;
 
-// `quantity` and `amount_cents` follow the purchase onto its bills by the full
-// three-way rule, as an order line's do onto its invoices (owner, 2026-11-07),
-// and as ONE unit (`shared_group`): a flat line's amount is a stated TOTAL, so
-// an untouched bill line follows both, and a line where either was edited
-// keeps both (one-document-model Phase 3). A partial bill differs from its
-// purchase line on both, so it keeps both and a purchase edit never re-bills it.
-// The co-written `quantity_billed` has no counterpart on a bill at all.
-const flatMoney = { propagate: true, shared_group: "flat_money" } as const;
+// `quantity`, `amount_cents` and `price.stated_cents` are the `flat_money`
+// group ({@link flatMoney}, declared above the price schema that spreads it).
 // `≥ 1`: a line closed to 0 is removed (ruling 47), never stored at 0.
 const quantityKey = z.int().min(1).meta({ column: true, label: "Quantity", ...flatMoney });
 const amountKey = z.int().min(0).meta({ column: true, label: "Amount", ...flatMoney });
@@ -818,10 +914,18 @@ export function kitHeaderIssues(
  * `rates`, which a flat payable line does not have, so it would pass vacuously here.
  */
 export function zeroPricedMoneyIssues(
-  item: { zero_priced: boolean | null; amount_cents: number | null; price: { rates: readonly { amount_cents: number }[] } },
+  item: {
+    zero_priced: boolean | null;
+    amount_cents: number | null;
+    price: { rates: readonly { amount_cents: number }[]; stated_cents?: number | null };
+  },
 ): { path: (string | number)[]; message: string }[] {
   if (item.zero_priced !== true) return [];
-  if (item.price.rates.some((r) => r.amount_cents !== 0) || (item.amount_cents !== null && item.amount_cents !== 0)) {
+  const stated = item.price.stated_cents ?? null;
+  if (
+    item.price.rates.some((r) => r.amount_cents !== 0) || (item.amount_cents !== null && item.amount_cents !== 0) ||
+    (stated !== null && stated !== 0)
+  ) {
     return [{ path: ["amount_cents"], message: "a zero-priced line carries no charge" }];
   }
   return [];
@@ -1482,6 +1586,12 @@ export interface PurchaseLinePriceInputType {
   discount?: DiscountInputType | null;
   /** What this supplier charges CFS for a lost unit. A subrent line only. */
   replacement_cents?: number | null;
+  /**
+   * The line's GROSS over its quantity (ruling 39): the input its stored money
+   * is derived from. Until core beta B the item's `amount_cents` may state it
+   * instead; sent together, the two must agree.
+   */
+  stated_cents?: number | null;
 }
 
 /**
@@ -1526,8 +1636,11 @@ interface PurchaseItemInputBase {
 export interface PurchaseSaleItemInputType extends PurchaseItemInputBase {
   type: "sale";
   quantity: number;
-  /** The whole cost — GROSS when `price.discount` is set. */
-  amount_cents: number;
+  /**
+   * The whole cost — GROSS when `price.discount` is set. Absent when
+   * `price.stated_cents` states it (core beta A; retired in beta B).
+   */
+  amount_cents?: number;
   /** `null` is a stored kit header echoed back; the writer decides what a `none` product holds. */
   ledger_account?: COACodeType | null;
   /**
@@ -1598,6 +1711,7 @@ const PurchaseLinePriceInput: z.ZodType<PurchaseLinePriceInputType> = z.object({
   rates: z.array(z.object({ rate_key: RateKey, amount_cents: z.int().min(0) })).optional(),
   discount: DiscountInput.nullable().optional(),
   replacement_cents: z.int().nullable().optional(),
+  stated_cents: z.int().min(0).nullable().optional(),
 });
 const inputHead = {
   uid: ItemUid,
@@ -1610,10 +1724,42 @@ const inputHead = {
   price: PurchaseLinePriceInput.optional(),
 };
 
+/**
+ * A line input's gross, stated once (ruling 39, core beta A): as the item's
+ * `amount_cents` (its name until beta B) or as `price.stated_cents`. Both may be
+ * sent while clients move over, and then they must agree, since both mean the
+ * GROSS. On a purchase a sale states one of them (`requireOnSale`); the other
+ * arms, and every bill row (whose omitted amount keeps the stored one), may
+ * state neither.
+ */
+export function payableInputStatedIssues(
+  item: { type: string; amount_cents?: number | null; price?: { stated_cents?: number | null } },
+  requireOnSale = true,
+): { path: (string | number)[]; message: string }[] {
+  const amount = item.amount_cents ?? null;
+  const stated = item.price?.stated_cents ?? null;
+  if (amount !== null && stated !== null && amount !== stated) {
+    return [{
+      path: ["price", "stated_cents"],
+      message: `price.stated_cents ${stated} and amount_cents ${amount} both state the gross and disagree`,
+    }];
+  }
+  if (requireOnSale && item.type === "sale" && amount === null && stated === null) {
+    return [{ path: ["amount_cents"], message: "a Buy line states its gross, as amount_cents or price.stated_cents" }];
+  }
+  return [];
+}
+
 function inputPostingIssue(
-  item: { type: SharedLineType; ledger_account?: number | null; price?: PurchaseLinePriceInputType },
+  item: {
+    type: SharedLineType;
+    ledger_account?: number | null;
+    amount_cents?: number | null;
+    price?: PurchaseLinePriceInputType;
+  },
   ctx: z.RefinementCtx,
 ): void {
+  addIssues(payableInputStatedIssues(item), ctx);
   if (item.ledger_account !== undefined) addIssues(payablePostingIssues(item.type, item.ledger_account), ctx);
   if (item.type !== "rental" && item.price?.replacement_cents != null) {
     ctx.addIssue({ code: "custom", path: ["price", "replacement_cents"], message: "only a subrent line states a replacement" });
@@ -1666,7 +1812,9 @@ const saleItemInputArm = z.object({
   type: z.literal("sale"),
   ...inputHead,
   quantity: z.int().min(1),
-  amount_cents: z.int().min(0),
+  // Optional beside `price.stated_cents` (core beta A); one of them is required
+  // (`payableInputStatedIssues`).
+  amount_cents: z.int().min(0).optional(),
   ledger_account: COACode.nullable().optional(),
   landed_costs: z.array(PurchaseLandedCostInput).optional(),
 }).superRefine((item, ctx) => {

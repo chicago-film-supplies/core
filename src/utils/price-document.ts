@@ -92,6 +92,8 @@ import {
   type Tax,
 } from "./orders.ts";
 import {
+  lineDiscountAtCents,
+  lineMoneyAtCents,
   meterUnits,
   type MeterRate,
   type PricingFormula,
@@ -663,15 +665,28 @@ export interface StatedTotalLine {
     price_formula: { basis: string; name: string };
     discount: DiscountType | null;
     taxes: readonly PriceModifierType[];
+    /** The stated GROSS (ruling 39). Set, the net and the discount record are derived from it. */
+    stated_cents?: number | null;
   };
 }
 
 /**
  * **The stated-total arm: a payable line's money is its stated amount.**
  *
- * - `subtotal_discounted_cents` = `amount_cents`, the net CFS pays;
- * - `subtotal_cents` = net + `discount.amount_cents` — the operator's gross, the
- *   discount being DECLARED on a payable line (what came off), not derived;
+ * Two inputs, by what the line states:
+ *
+ * - **`price.stated_cents` set** (one-document-model ruling 39): the GROSS.
+ *   `subtotal_cents` = `stated_cents`; the net is `lineMoneyAtCents(quantity)`
+ *   and `discount.amount_cents` is `lineDiscountAtCents(quantity)` — the one
+ *   line-money function, so the whole line and every part of it come from one
+ *   author. `amount_cents` is ignored here and re-derived by the caller.
+ * - **absent or `null`** (a line written before the backfill): the declared net
+ *   `amount_cents`, and `subtotal_cents` = net + `discount.amount_cents`, the
+ *   discount record being DECLARED (what came off).
+ *
+ * Either way:
+ *
+ * - `subtotal_discounted_cents` = the net CFS pays;
  * - `taxes` re-amounted on the net from each tax's own rate and type
  *   (`computeItemTaxAmountCents`, the one tax-amount author) — `[]` on an exempt
  *   side;
@@ -684,12 +699,25 @@ export interface StatedTotalLine {
  * Basis-blind: a LINKED time line's stated amount is Xero's money and prices
  * through here too.
  *
- * @throws PriceRefusalError on a line that states no amount.
+ * @throws PriceRefusalError on a line that states neither a total nor an amount.
  */
 export function priceStatedTotalLine(line: StatedTotalLine): LinePriceMoney {
-  const amount = line.amount_cents;
+  const stated = line.price.stated_cents ?? null;
+  let amount = line.amount_cents;
+  let discount = line.price.discount === null ? null : { ...line.price.discount };
+  let gross: number | null = null;
+  if (stated !== null) {
+    // Ruling 39: the stated GROSS is the input, and the net and the discount
+    // record are the one line-money function's at the line's quantity.
+    const money = {
+      quantity: line.quantity,
+      price: { rates: [], counts: [], discount: line.price.discount, stated_cents: stated },
+    };
+    amount = lineMoneyAtCents(money, line.quantity);
+    gross = stated;
+    if (discount !== null) discount = { ...discount, amount_cents: lineDiscountAtCents(money, line.quantity) };
+  }
   if (amount === null) throw new PriceRefusalError(`Line ${line.uid} states no amount`);
-  const discount = line.price.discount === null ? null : { ...line.price.discount };
   const taxes = line.price.taxes.map((t) => ({
     uid: t.uid,
     name: t.name,
@@ -700,7 +728,7 @@ export function priceStatedTotalLine(line: StatedTotalLine): LinePriceMoney {
   let taxSum = 0;
   for (const t of taxes) taxSum += t.amount_cents;
   return {
-    subtotal_cents: amount + (discount?.amount_cents ?? 0),
+    subtotal_cents: gross ?? amount + (discount?.amount_cents ?? 0),
     subtotal_discounted_cents: amount,
     discount,
     taxes,
@@ -725,6 +753,9 @@ export function withStatedTotalMoney<P extends StatedTotalLine["price"]>(
   const money = priceStatedTotalLine({ ...line, price: declared });
   return {
     ...declared,
+    // The pricer's record: on a stated line its `amount_cents` is derived
+    // (ruling 39); otherwise it is the declared one, copied.
+    discount: money.discount as P["discount"],
     taxes: money.taxes,
     subtotal_cents: money.subtotal_cents,
     subtotal_discounted_cents: money.subtotal_discounted_cents,
@@ -741,6 +772,9 @@ export function withStatedTotalMoney<P extends StatedTotalLine["price"]>(
  * line. A hand-spelled declared literal per builder is how a key gets dropped
  * from one of them (`ORDER_DECLARED_PRICE_KEYS`' docblock, api-cloudrun#984).
  *
+ * The line's net is the returned `subtotal_discounted_cents`: a caller that
+ * states `stated_cents` writes it to the line's `amount_cents`.
+ *
  * A FLAT line only (`rates: []`); a time line's price is built by
  * `projectTimeLine` (`@cfs/core/utils/purchase-documents`) and priced by the
  * document pricer.
@@ -748,7 +782,17 @@ export function withStatedTotalMoney<P extends StatedTotalLine["price"]>(
 export function flatPayablePrice<C extends boolean>(args: {
   uid: string;
   quantity: number;
-  amount_cents: number;
+  /**
+   * The line's NET, the input on a line that states no total. Ignored when
+   * `stated_cents` is given: the net is then derived (ruling 39).
+   */
+  amount_cents: number | null;
+  /**
+   * The line's stated GROSS (ruling 39). Given, it is stored on the price and the
+   * net and the discount record are derived from it; absent, the price carries
+   * no `stated_cents` key, so a writer that does not state one keeps its key set.
+   */
+  stated_cents?: number | null;
   price_formula: PriceFormulaRef;
   discount: DiscountType | null;
   /** The purchase line's tax modifiers, re-amounted on the net — `[]` on the exempt side. */
@@ -765,6 +809,7 @@ export function flatPayablePrice<C extends boolean>(args: {
     taxes: (args.taxes ?? []).map((t) => ({ ...t })),
     ...(args.taxes_base !== undefined ? { taxes_base: args.taxes_base.map((t) => ({ ...t })) } : {}),
     ...(args.counts ? { counts: [] as never[] } : {}),
+    ...(args.stated_cents !== undefined ? { stated_cents: args.stated_cents } : {}),
   };
   return withStatedTotalMoney(declared, { uid: args.uid, quantity: args.quantity, amount_cents: args.amount_cents }) as
     & FlatPayablePrice
@@ -776,6 +821,8 @@ export interface FlatPayablePrice {
   price_formula: PriceFormulaRef;
   rates: never[];
   discount: DiscountType | null;
+  /** Present only when the builder was given one. */
+  stated_cents?: number | null;
   taxes: PriceModifierType[];
   taxes_base?: TaxRefType[];
   subtotal_cents: number;
@@ -799,12 +846,12 @@ export interface FlatPayablePrice {
  */
 function payableLineMoney(item: LineItem, ctx: PayablePriceDocumentContext, pricing: Tax[]): LinePriceMoney {
   const price = item.price;
-  if (!price || price.price_formula?.basis !== "time") return priceStatedTotalLine(statedLineOf(item));
+  if (!price || price.price_formula?.basis !== "time") return statedLineMoney(item);
   if (ctx.document.kind === "purchase") {
     const discount = price.discount ? { ...price.discount, amount_cents: 0 } : null;
     return { subtotal_cents: 0, subtotal_discounted_cents: 0, discount, taxes: [], total_cents: 0 };
   }
-  if ((ctx.document.origin ?? "pushed") === "linked") return priceStatedTotalLine(statedLineOf(item));
+  if ((ctx.document.origin ?? "pushed") === "linked") return statedLineMoney(item);
   const stated = (price.counts ?? []) as TierCount[];
   let counts: TierCount[] | null = stated.length > 0 ? [...stated] : null;
   if (counts === null) {
@@ -825,15 +872,34 @@ function payableLineMoney(item: LineItem, ctx: PayablePriceDocumentContext, pric
   return money;
 }
 
+/**
+ * A stated line's money, and its `amount_cents` re-derived onto the line when it
+ * states a total: `amount_cents` is then an OUTPUT (ruling 39), written here as
+ * the pushed time arm writes its net, so the stored line states the money it
+ * carries.
+ */
+function statedLineMoney(item: LineItem): LinePriceMoney {
+  const line = statedLineOf(item);
+  const money = priceStatedTotalLine(line);
+  if ((line.price.stated_cents ?? null) !== null) item.amount_cents = money.subtotal_discounted_cents;
+  return money;
+}
+
 /** A payable line as {@link priceStatedTotalLine} reads it — its own fields, picked. */
 function statedLineOf(item: LineItem): StatedTotalLine {
   const price = item.price;
   if (!price?.price_formula) throw new PriceRefusalError(`Line ${item.uid} carries no price formula`);
+  const stated = (price as { stated_cents?: number | null }).stated_cents;
   return {
     uid: item.uid,
     quantity: item.quantity ?? 0,
     amount_cents: item.amount_cents ?? null,
-    price: { price_formula: price.price_formula, discount: price.discount ?? null, taxes: price.taxes ?? [] },
+    price: {
+      price_formula: price.price_formula,
+      discount: price.discount ?? null,
+      taxes: price.taxes ?? [],
+      ...(stated !== undefined ? { stated_cents: stated } : {}),
+    },
   };
 }
 
