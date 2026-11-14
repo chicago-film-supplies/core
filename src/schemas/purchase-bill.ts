@@ -88,7 +88,6 @@ import {
   type PurchaseProductItemTypeType,
   type PurchaseDestinationInputType,
   purchaseDestinationInputIssues,
-  payableInputStatedIssues,
   payableInputUidIssue,
   payableLineUidIssue,
 } from "./purchase.ts";
@@ -1105,8 +1104,7 @@ export const PurchaseDocumentItemInput: z.ZodType<PurchaseDocumentItemInputType>
  *   memo, capped at what is left of it. The units are capped per bill line and
  *   by the pools behind them (`creditableBillLines`).
  * - **the memo** (6e-0b1 D4) is the credit line's own `price.stated_cents`, net
- *   by nature, so the line stores `discount: null`. Until core beta B it may be
- *   sent as `amount_cents` instead; sent together the two must agree.
+ *   by nature, so the line stores `discount: null`.
  * - **time** — credited by COUNTS, as an AR credit note is (0b ruling 3):
  *   `quantity` units over `counts`, priced `rates × counts` like the bill line
  *   it reverses. Absent `counts`, the writer credits everything the line is
@@ -1133,8 +1131,6 @@ export interface PurchaseCreditItemInputType extends Omit<PurchaseDocumentItemIn
    */
   uid_purchase_bill?: string;
   path_bill_item?: string[];
-  /** The supplier's memo, as `price.stated_cents` names it; retired in core beta B. */
-  amount_cents?: number;
   /** The supplier's memo for a pushed flat line: the credit line's own stated total (D4), capped at what it credits. */
   price?: { stated_cents?: number | null };
 }
@@ -1147,20 +1143,16 @@ export const PurchaseCreditItemInput: z.ZodType<PurchaseCreditItemInputType> = z
   counts: z.array(z.object({ rate_key: RateKey, num: z.int().min(0), den: z.int().min(1) })).min(1).optional(),
   uid_purchase_bill: FirestoreId.optional(),
   path_bill_item: z.array(ItemUid).min(1).optional(),
-  amount_cents: z.int().min(0).optional(),
   price: z.object({ stated_cents: z.int().min(0).nullable().optional() }).optional(),
-}).superRefine((item, ctx) => {
-  // Both name the memo while clients move over (D4); sent together they must agree.
-  for (const issue of payableInputStatedIssues({ type: "credit", ...item }, false)) ctx.addIssue({ code: "custom", ...issue });
 });
 
 /**
  * The supplier's memo a credit item input states (6e-0b1 D4): its
- * `price.stated_cents`, or `amount_cents` until core beta B. `undefined` when it
- * states none, so the line is priced by its default partition.
+ * `price.stated_cents`. `undefined` when it states none, so the line is priced
+ * by its default partition.
  */
-export function creditItemMemoCents(item: Pick<PurchaseCreditItemInputType, "amount_cents" | "price">): number | undefined {
-  return item.price?.stated_cents ?? item.amount_cents ?? undefined;
+export function creditItemMemoCents(item: Pick<PurchaseCreditItemInputType, "price">): number | undefined {
+  return item.price?.stated_cents ?? undefined;
 }
 
 /**
@@ -1402,8 +1394,9 @@ export interface PurchaseBillDividerInputType {
  * named by its path; or a line the bill itself authors, which states its name,
  * account, quantity and money; a sale or rental names its product by its uid.
  *
- * On a TIME line `price.rates` restates each unit rate; a flat line's
- * `amount_cents` is stated directly (gross when a discount is set).
+ * On a TIME line `price.rates` restates each unit rate; a flat line states its
+ * GROSS as `price.stated_cents` (ruling 39, core beta B), and its stored
+ * `amount_cents` is derived from it.
  *
  * `path_purchase_item` absent keeps the stored pointer, and there is no `null`
  * form: the writer stamps every moved row's pointer and clears one a move back
@@ -1417,7 +1410,6 @@ export interface PurchaseBillLineInputType {
   name?: string;
   description?: string;
   quantity?: number;
-  amount_cents?: number;
   /** `null` is a stored kit header echoed back; the writer decides what a `none` product holds. */
   ledger_account?: COACodeType | null;
   /** A kit component's flag, as on an order line's input. */
@@ -1441,7 +1433,11 @@ export interface PurchaseBillLineInputType {
     uid_price_formula?: string;
     rates?: { rate_key: string; amount_cents: number }[];
     discount?: DiscountInputType | null;
-    /** The row's GROSS (ruling 39); until core beta B `amount_cents` may state it instead, and both sent must agree. */
+    /**
+     * The row's GROSS (ruling 39): the one money input of a flat row. Absent
+     * keeps the stored gross. A stored row's `amount_cents` echoed back is
+     * stripped: it is derived.
+     */
     stated_cents?: number | null;
   };
 }
@@ -1496,7 +1492,6 @@ const billLineShape = (type: SharedLineType) => ({
   name: LineItemCore.name.optional(),
   description: LineItemCore.description.optional(),
   quantity: z.int().min(1).optional(),
-  amount_cents: z.int().min(0).optional(),
   ledger_account: COACode.nullable().optional(),
   zero_priced: z.boolean().nullable().optional(),
   quantity_per_parent: z.number().min(0).nullable().optional(),
@@ -1516,15 +1511,13 @@ const billLineShape = (type: SharedLineType) => ({
 
 function billLineIssues(
   row:
-    & { type: string; uid: string; amount_cents?: number | null; price?: { stated_cents?: number | null } }
+    & { type: string; uid: string }
     & OutOfServiceLinkCarrier,
   ctx: z.RefinementCtx,
 ): void {
   // A sale or rental row names its product by its uid (W4K, 7a), as a purchase line input does.
   const message = payableInputUidIssue(row);
   if (message !== null) ctx.addIssue({ code: "custom", path: ["uid"], message });
-  // An omitted amount keeps the stored one, so a row may state neither.
-  for (const issue of payableInputStatedIssues(row, false)) ctx.addIssue({ code: "custom", ...issue });
   for (const [path, msg] of outOfServiceLinkIssues(row)) ctx.addIssue({ code: "custom", path, message: msg });
 }
 

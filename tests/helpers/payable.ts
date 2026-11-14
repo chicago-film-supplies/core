@@ -1,10 +1,12 @@
 /**
  * Payable line prices for fixtures (api-cloudrun `one-document-model` Phase 2).
  *
- * A payable line states its net in `amount_cents`, and its `price` carries the
- * money `priceDocument`'s stated-total arm derives from it. Built here from the
- * amount so a fixture cannot state money its own amount disagrees with — the
- * schema refuses that, and a hand-spelled triple per fixture is how one would.
+ * A flat payable line states its GROSS in `price.stated_cents` (required since
+ * core beta B) and its net in `amount_cents`, and its `price` carries the money
+ * `priceDocument`'s stated-total arm derives from them. Built here from the net
+ * and the discount cents so a fixture cannot state money its own amount
+ * disagrees with — the schema refuses that, and a hand-spelled set per fixture
+ * is how one would.
  *
  * ⚠️ The money is computed by the rule, not by `priceStatedTotalLine`, so a
  * fixture built here can still catch a regression in the pricer.
@@ -36,11 +38,13 @@ export function payablePrice(
 ) {
   const discount = opts.discount ?? null;
   const taxes = opts.taxes ?? [];
+  const formula = opts.formula ?? FIXED_REF;
   return {
-    price_formula: opts.formula ?? FIXED_REF,
+    price_formula: formula,
     rates: [] as never[],
     discount,
     taxes,
+    ...(formula.basis === "time" ? {} : { stated_cents: amountCents + (discount?.amount_cents ?? 0) }),
     subtotal_cents: amountCents + (discount?.amount_cents ?? 0),
     subtotal_discounted_cents: amountCents,
     total_cents: amountCents + taxes.reduce((sum, t) => sum + t.amount_cents, 0),
@@ -66,11 +70,13 @@ export function withPayableMoney<T>(line: T): T {
   if (!l.price) return line;
   const discount = (l.price.discount ?? null) as DiscountType | null;
   const taxes = (l.price.taxes ?? []) as PriceModifierType[];
-  const money = payablePrice(l.amount_cents ?? 0, { discount, taxes });
+  const formula = (l.price.price_formula ?? FIXED_REF) as PriceFormulaRef;
+  const money = payablePrice(l.amount_cents ?? 0, { discount, taxes, formula });
   return {
     ...line,
     price: {
       ...l.price,
+      ...(formula.basis === "time" ? {} : { stated_cents: money.stated_cents }),
       subtotal_cents: money.subtotal_cents,
       subtotal_discounted_cents: money.subtotal_discounted_cents,
       total_cents: money.total_cents,

@@ -258,18 +258,21 @@ export interface MoneySlice {
 
 /**
  * A stored payable line's money as a part slices it (D7): its stated GROSS
- * (`price.stated_cents`, or — before the backfill — its net plus its discount
- * record) and its discount in cents. A TIME line slices its stored net with no
- * discount: its money is its counts priced (or Xero's, linked), so what a part
- * takes of it is a share of that.
+ * (`price.stated_cents`, required on a flat line since core beta B) and its
+ * discount in cents. A TIME line slices its stored net with no discount: its
+ * money is its counts priced (or Xero's, linked), so what a part takes of it is
+ * a share of that.
+ *
+ * @throws Error on a flat line that states no gross: there is nothing to slice,
+ * and reading its net as the gross would slice a discounted line's money wrong.
  */
 export function payableStoredMoney(line: PayableMoneyLineLike): StoredLineMoney {
   if (line.price.price_formula?.basis === "time") {
     return { quantity: line.quantity, gross_cents: line.amount_cents ?? 0, discount_cents: 0 };
   }
-  const discount = line.price.discount?.amount_cents ?? 0;
-  const gross = line.price.stated_cents ?? (line.amount_cents ?? 0) + discount;
-  return { quantity: line.quantity, gross_cents: gross, discount_cents: discount };
+  const gross = line.price.stated_cents ?? null;
+  if (gross === null) throw new Error("a flat payable line states its gross (price.stated_cents)");
+  return { quantity: line.quantity, gross_cents: gross, discount_cents: line.price.discount?.amount_cents ?? 0 };
 }
 
 /**

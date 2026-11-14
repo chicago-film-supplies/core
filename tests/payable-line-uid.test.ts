@@ -58,7 +58,7 @@ Deno.test("payableInputUidIssue: a sale or rental names its product by its uid; 
 // ── the input refines ──────────────────────────────────────────────
 
 Deno.test("PurchaseItemInput: a catalog line names its product by its uid, and a custom- uid is refused at `uid`", () => {
-  const line = { type: "sale", uid: VEST, path: [PAIR_A, VEST], quantity: 1, amount_cents: 100 };
+  const line = { type: "sale", uid: VEST, path: [PAIR_A, VEST], quantity: 1, price: { stated_cents: 100 } };
   assert(PurchaseItemInput.safeParse(line).success, "control");
   const custom = PurchaseItemInput.safeParse({ ...line, uid: `custom-${old(1)}`, path: [PAIR_A, `custom-${old(1)}`] });
   assertEquals(custom.error?.issues.map((i) => i.path.join(".")), ["uid"]);

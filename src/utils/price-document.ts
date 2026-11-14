@@ -678,9 +678,11 @@ export interface StatedTotalLine {
  *   discount.amount_cents`, the declared discount CENTS, so a rate is never
  *   re-applied to a line — a part's cents are its slice of its source's.
  *   `amount_cents` is ignored here and re-derived by the caller.
- * - **absent or `null`** (a line written before the backfill): the declared net
- *   `amount_cents`, and `subtotal_cents` = net + `discount.amount_cents`, the
- *   discount record being DECLARED (what came off).
+ * - **absent or `null`**, on a TIME line only (a linked bill's time line, whose
+ *   `amount_cents` is Xero's net): `subtotal_cents` = net +
+ *   `discount.amount_cents`, the discount record being DECLARED (what came off).
+ *   A FLAT line that states no gross is refused (core beta B): its gross is its
+ *   one money input.
  *
  * Either way:
  *
@@ -697,10 +699,14 @@ export interface StatedTotalLine {
  * Basis-blind: a LINKED time line's stated amount is Xero's money and prices
  * through here too.
  *
- * @throws PriceRefusalError on a line that states neither a total nor an amount.
+ * @throws PriceRefusalError on a flat line that states no gross, and on a time
+ * line that states neither a total nor an amount.
  */
 export function priceStatedTotalLine(line: StatedTotalLine): LinePriceMoney {
   const stated = line.price.stated_cents ?? null;
+  if (stated === null && line.price.price_formula.basis !== "time") {
+    throw new PriceRefusalError(`Line ${line.uid} is flat and states no gross (price.stated_cents)`);
+  }
   let amount = line.amount_cents;
   const discount = line.price.discount === null ? null : { ...line.price.discount };
   let gross: number | null = null;
@@ -766,8 +772,8 @@ export function withStatedTotalMoney<P extends StatedTotalLine["price"]>(
  * line. A hand-spelled declared literal per builder is how a key gets dropped
  * from one of them (`ORDER_DECLARED_PRICE_KEYS`' docblock, api-cloudrun#984).
  *
- * The line's net is the returned `subtotal_discounted_cents`: a caller that
- * states `stated_cents` writes it to the line's `amount_cents`.
+ * The line's net is the returned `subtotal_discounted_cents`, which the caller
+ * writes to the line's `amount_cents`.
  *
  * A FLAT line only (`rates: []`); a time line's price is built by
  * `projectTimeLine` (`@cfs/core/utils/purchase-documents`) and priced by the
@@ -777,16 +783,10 @@ export function flatPayablePrice<C extends boolean>(args: {
   uid: string;
   quantity: number;
   /**
-   * The line's NET, the input on a line that states no total. Ignored when
-   * `stated_cents` is given: the net is then derived (ruling 39).
+   * The line's stated GROSS (ruling 39), its one money input: stored on the
+   * price, and the net is derived from it less the discount's cents.
    */
-  amount_cents: number | null;
-  /**
-   * The line's stated GROSS (ruling 39). Given, it is stored on the price and the
-   * net and the discount record are derived from it; absent, the price carries
-   * no `stated_cents` key, so a writer that does not state one keeps its key set.
-   */
-  stated_cents?: number | null;
+  stated_cents: number;
   price_formula: PriceFormulaRef;
   discount: DiscountType | null;
   /** The purchase line's tax modifiers, re-amounted on the net — `[]` on the exempt side. */
@@ -803,9 +803,9 @@ export function flatPayablePrice<C extends boolean>(args: {
     taxes: (args.taxes ?? []).map((t) => ({ ...t })),
     ...(args.taxes_base !== undefined ? { taxes_base: args.taxes_base.map((t) => ({ ...t })) } : {}),
     ...(args.counts ? { counts: [] as never[] } : {}),
-    ...(args.stated_cents !== undefined ? { stated_cents: args.stated_cents } : {}),
+    stated_cents: args.stated_cents,
   };
-  return withStatedTotalMoney(declared, { uid: args.uid, quantity: args.quantity, amount_cents: args.amount_cents }) as
+  return withStatedTotalMoney(declared, { uid: args.uid, quantity: args.quantity, amount_cents: null }) as
     & FlatPayablePrice
     & (C extends true ? { counts: never[] } : unknown);
 }
@@ -815,8 +815,8 @@ export interface FlatPayablePrice {
   price_formula: PriceFormulaRef;
   rates: never[];
   discount: DiscountType | null;
-  /** Present only when the builder was given one. */
-  stated_cents?: number | null;
+  /** The stated gross. */
+  stated_cents: number;
   taxes: PriceModifierType[];
   taxes_base?: TaxRefType[];
   subtotal_cents: number;
@@ -830,7 +830,7 @@ export interface FlatPayablePrice {
  *
  * | line | money |
  * |---|---|
- * | flat, anywhere | its stated `amount_cents` ({@link priceStatedTotalLine}) |
+ * | flat, anywhere | its stated gross less its discount cents ({@link priceStatedTotalLine}) |
  * | time, on a PURCHASE | zero: a time line commits nothing up front; its bills decide its cost |
  * | time, on a LINKED bill or credit | the amount Xero holds, as a stated total |
  * | time, on a PUSHED bill or credit | `rates × counts`, the order line's rule (`priceLine`), where `counts` are the line's own when it states them (the count-based remaining a writer seeds, 0b ruling 3) and otherwise metered from its pair's windows |

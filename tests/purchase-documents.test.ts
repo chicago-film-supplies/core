@@ -237,8 +237,14 @@ Deno.test("projected flat lines parse inside a PUSHED bill, and in a LINKED one"
 Deno.test("priceDocument (payable): the stated amount IS the money, the discount the gross on top; totals are the Σ", () => {
   const discount = { rate: 10, type: "percent" as const, amount_cents: 5222 };
   const base = project(buyLine(), 10, 1);
-  // A line written before the backfill states no gross: the declared net and record (the absent arm).
-  const stale = { ...base, price: { ...base.price, discount, stated_cents: null, subtotal_cents: 1, subtotal_discounted_cents: 1, total_cents: 1 } };
+  // A line whose stored money is stale: the pricer derives it from the stated gross less the declared cents.
+  const stale = { ...base, price: { ...base.price, discount, stated_cents: 46995 + 5222, subtotal_cents: 1, subtotal_discounted_cents: 1, total_cents: 1 } };
+  // A FLAT line stating no gross is refused (core beta B): the gross is its one money input.
+  assertThrows(
+    () => priceDocument([{ ...stale, price: { ...stale.price, stated_cents: null } }], payableCtx("purchase_bill")),
+    PriceRefusalError,
+    "states no gross",
+  );
   const freight = restated(project(buyLine({ uid: lid(5), path: [DIV, lid(5)] }), 11, 1), 1500);
   const priced = priceDocument([stale, freight], payableCtx("purchase_bill"));
   assertEquals(priced.items[0].price.subtotal_cents, 46995 + 5222);
@@ -473,7 +479,12 @@ Deno.test("syncPurchaseToBills: a name and a discount reach a PARTIAL bill line;
   const prevItem = buyLine();
   const line = project(prevItem, 10, 1);
   const discount = { rate: 10, type: "percent" as const, amount_cents: 15665 };
-  const nextItem = { ...prevItem, name: "Walkie (UHF)", price: { ...prevItem.price, discount } } as PurchaseItem;
+  // The operator added the discount on top of the net: the stated gross grows by it (D7).
+  const nextItem = {
+    ...prevItem,
+    name: "Walkie (UHF)",
+    price: { ...prevItem.price, discount, stated_cents: prevItem.amount_cents! + 15665 },
+  } as PurchaseItem;
   const [out] = sync(prevItem, nextItem, [billDoc(1, [line])]);
   assert(out.changed);
   const [synced] = linesOf(out.bill);
@@ -487,7 +498,7 @@ Deno.test("syncPurchaseToBills: a name and a discount reach a PARTIAL bill line;
 
 Deno.test("syncPurchaseToBills: {quantity, amount_cents} follow TOGETHER onto an untouched line, and neither follows onto a partial one", () => {
   const prevItem = buyLine();
-  const nextItem = { ...prevItem, quantity: 4, amount_cents: 187980 } as PurchaseItem;
+  const nextItem = { ...prevItem, quantity: 4, amount_cents: 187980, price: { ...prevItem.price, stated_cents: 187980 } } as PurchaseItem;
   const whole = project(prevItem, 10, 3);
   const partial = project(prevItem, 10, 1);
   const [a, b] = sync(prevItem, nextItem, [billDoc(1, [whole]), billDoc(2, [partial])]);
@@ -750,7 +761,7 @@ Deno.test("lineUnitsCents (a stated line): past `quantity` it keeps the per-unit
 
 /** A bill row as the credit pricer reads it. */
 const billRow = (quantity: number, amount_cents: number, discount: PurchaseDocumentItem["price"]["discount"] = null) =>
-  ({ quantity, amount_cents, price: { discount } });
+  ({ quantity, amount_cents, price: { discount, stated_cents: amount_cents + (discount?.amount_cents ?? 0) } });
 
 Deno.test("billedPoolCreditMoney: hand-stated cases, from the pool, never the PO line", () => {
   const pool = { quantity: 14, amount_cents: 55958 };
@@ -1155,13 +1166,13 @@ Deno.test("replacement_cents: only a subrent line states one", () => {
   assert(!PurchaseSaleItemSchema.safeParse(withReplacement(buyLine())).success);
   assert(PurchaseSaleItemSchema.safeParse(buyLine()).success, "control");
   const keyed = { uid: PRODUCT, path: [DIV, PRODUCT] };
-  const sale = PurchaseItemInput.safeParse({ type: "sale", ...keyed, quantity: 1, amount_cents: 0, price: { replacement_cents: 1 } });
+  const sale = PurchaseItemInput.safeParse({ type: "sale", ...keyed, quantity: 1, price: { stated_cents: 0, replacement_cents: 1 } });
   assertEquals(sale.error?.issues.map((i) => i.path.join(".")), ["price.replacement_cents"]);
-  assert(PurchaseItemInput.safeParse({ type: "rental", ...keyed, quantity: 1, amount_cents: 0, price: { replacement_cents: 1 } }).success);
+  assert(PurchaseItemInput.safeParse({ type: "rental", ...keyed, quantity: 1, price: { stated_cents: 0, replacement_cents: 1 } }).success);
 });
 
 Deno.test("line input: a stored header echoes its null account, and a component states its kit keys", () => {
-  const out = PurchaseItemInput.parse({ type: "sale", uid: PRODUCT, path: [DIV, KIT, PRODUCT], quantity: 1, amount_cents: 0, ledger_account: null, zero_priced: true, quantity_per_parent: 50 });
+  const out = PurchaseItemInput.parse({ type: "sale", uid: PRODUCT, path: [DIV, KIT, PRODUCT], quantity: 1, price: { stated_cents: 0 }, ledger_account: null, zero_priced: true, quantity_per_parent: 50 });
   assertEquals([out.ledger_account, out.zero_priced, out.quantity_per_parent], [null, true, 50]);
 });
 
@@ -1559,7 +1570,7 @@ Deno.test("W5 billing: substituting a kit credits its components by the PURCHASE
 
 Deno.test("W5 sync: a PO quantity edit re-offsets a partly substituted X at its share; Y keeps its units and money", () => {
   const x = subX();
-  const next = { ...x, quantity: 6, amount_cents: 60000 } as PurchaseItem;
+  const next = { ...x, quantity: 6, amount_cents: 60000, price: { ...x.price, stated_cents: 60000 } } as PurchaseItem;
   const y = subY(x, 2, 30000, 2);
   const [out] = sync(x, next, [billDoc(1, [project(x, 10, 3), y])]);
   assert(out.changed);
@@ -1796,16 +1807,22 @@ Deno.test("priceDocument (payable): a stated line parses through the stored sche
   assert(bill.success, JSON.stringify(bill.error?.issues));
 });
 
-Deno.test("priceDocument (payable): a line stating NO total keeps today's arm — the declared net and discount record", () => {
+Deno.test("priceDocument (payable): a FLAT line stating no gross is refused — the absent arm is retired (core beta B)", () => {
   const discount = { rate: 10, type: "percent" as const, amount_cents: 5222 };
   const base = project(buyLine(), 10, 1);
-  const [priced] = priceDocument([{ ...base, price: { ...base.price, discount, stated_cents: null } }], payableCtx("purchase_bill"))
+  for (const stated_cents of [null, undefined]) {
+    assertThrows(
+      () => priceDocument([{ ...base, price: { ...base.price, discount, stated_cents } }], payableCtx("purchase_bill")),
+      PriceRefusalError,
+      "states no gross",
+    );
+  }
+  // Control: the same line stating its gross prices.
+  const [priced] = priceDocument([{ ...base, price: { ...base.price, discount, stated_cents: base.amount_cents + 5222 } }], payableCtx("purchase_bill"))
     .items;
-  assertEquals(priced.amount_cents, base.amount_cents, "a null total derives nothing");
-  assertEquals(priced.price.discount, discount);
+  assertEquals(priced.amount_cents, base.amount_cents);
   assertEquals(priced.price.subtotal_cents, base.amount_cents + 5222);
 });
-
 Deno.test("purchaseLineMoneyIssues: a TIME line on a purchase states no total; on a bill a linked one may", () => {
   const price = { ...payablePrice(0, { formula: { ...FIXED_REF, basis: "time" as const } }), rates: [{ rate_key: "week", amount_cents: 500 }], stated_cents: 500 };
   const onPurchase = purchaseLineMoneyIssues({ price, amount_cents: null, quantity_billed: null, quantity: 1 });
@@ -1817,18 +1834,14 @@ Deno.test("purchaseLineMoneyIssues: a TIME line on a purchase states no total; o
   assertEquals(purchaseLineMoneyIssues({ price: linked, amount_cents: 500, quantity: 1 }, "document"), []);
 });
 
-Deno.test("flatPayablePrice: given a stated total it stores the input and the net is the gross less the cents; without one the key set is unchanged", () => {
-  const args = { uid: lid(2), quantity: 3, amount_cents: null, price_formula: FIXED_REF, discount: { ...PERCENT_THIRD, amount_cents: 33_334 }, counts: true } as const;
+Deno.test("flatPayablePrice: it stores the stated gross, and the net is the gross less the discount cents", () => {
+  const args = { uid: lid(2), quantity: 3, price_formula: FIXED_REF, discount: { ...PERCENT_THIRD, amount_cents: 33_334 }, counts: true } as const;
   const stated = flatPayablePrice({ ...args, stated_cents: 100_001 });
   assertEquals(stated.stated_cents, 100_001);
   assertEquals(stated.subtotal_cents, 100_001);
   assertEquals(stated.subtotal_discounted_cents, 66_667);
   assertEquals(stated.discount?.amount_cents, 33_334, "the caller's cents, kept");
-  const legacy = flatPayablePrice({ ...args, amount_cents: 66_667, discount: { ...PERCENT_THIRD, amount_cents: 33_334 } });
-  assertEquals("stated_cents" in legacy, false, "a writer that states no total does not widen its key set");
-  assertEquals(legacy.subtotal_cents, 100_001);
 });
-
 // ── D7: the merge rule applied to a PART ─────────────────────────────
 
 Deno.test("syncPurchaseToBills (D7): an untouched PART follows a purchase discount edit as its slice; an overridden part stays", () => {

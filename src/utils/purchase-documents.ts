@@ -840,7 +840,6 @@ export function projectPurchaseLineToBillLine(
   const price: PurchaseDocumentLinePrice = flatPayablePrice({
     uid: item.uid,
     quantity: opts.quantity,
-    amount_cents,
     stated_cents: part.stated_cents,
     price_formula: item.price.price_formula,
     discount: part.discount,

@@ -39,7 +39,7 @@ import {
 import { priceFormulaRefOf } from "../src/utils/price-formulas.ts";
 import { FIXED, VISION } from "./helpers/formulas.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
-import { asCreditRows, payablePrice } from "./helpers/payable.ts";
+import { asCreditRows, payablePrice, withPayableMoney } from "./helpers/payable.ts";
 
 /** The purchase every fixture bill bills (one-document-model Phase 3). */
 const PU = "testpurch10000000000";
@@ -391,7 +391,7 @@ Deno.test("assertPurchaseCreditAction and assertPurchaseAction refuse what is no
 
 /** A bill line or a credit line at `[PU, ...rel]`, $1.00 a unit unless told otherwise. */
 const row = (rel: string[], quantity: number, o: Record<string, unknown> = {}) =>
-  ({ type: "sale", uid: rel.at(-1), path: [PU, ...rel], quantity, amount_cents: 100 * quantity, price: FIXED_PRICE, ledger_account: 1400, ...o }) as unknown as PurchaseDocumentItem;
+  withPayableMoney({ type: "sale", uid: rel.at(-1), path: [PU, ...rel], quantity, amount_cents: 100 * quantity, price: FIXED_PRICE, ledger_account: 1400, ...o }) as unknown as PurchaseDocumentItem;
 const bill6d = (uid: string, items: PurchaseDocumentItem[], o: Partial<PurchaseBill> = {}) =>
   ({ ...voidBill(uid, []), items, ...o }) as PurchaseBill;
 const credit6d = (items: PurchaseDocumentItem[], status: PurchaseCredit["status"] = "issued") =>
@@ -584,7 +584,7 @@ Deno.test("creditableBillLines: crediting a substitute segment by segment nets e
     const [line] = creditableBillLines(bill, { per_purchase: [{ uid_purchase: PU, purchase: { items }, bills: [bill], credits }] });
     assert(line.units >= 1, `units ${taken + 1}.. are offered`);
     const n = line.units;
-    const cents = billLineCreditMoney({ line: { quantity: 7, amount_cents: 101, price: { discount: null } }, credited: { quantity: taken, amount_cents: taken_cents }, n }).amount_cents;
+    const cents = billLineCreditMoney({ line: { quantity: 7, amount_cents: 101, price: { discount: null, stated_cents: 101 } }, credited: { quantity: taken, amount_cents: taken_cents }, n }).amount_cents;
     const slice = sliceSubstitutedFor(entries, taken, taken + n);
     credits.push(credit6d([named("A", ["y"], n, { amount_cents: cents, ...(slice.length > 0 ? { substituted_for: slice } : {}) })]));
     runs.push(n);

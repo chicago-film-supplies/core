@@ -119,7 +119,7 @@ Deno.test("one credit fold sweep: AP — a substitute root credit's shares sum t
     const slice = sliceSubstitutedFor([{ path: [D, "x"], quantity: s }], c, c + n);
     const row = {
       type: "sale", uid: "y", path: [PU, D, "y"], quantity: n, amount_cents: amount,
-      price: { counts: [] }, reverses_billing: true, ...(slice.length ? { substituted_for: slice } : {}),
+      price: { counts: [], stated_cents: amount }, reverses_billing: true, ...(slice.length ? { substituted_for: slice } : {}),
     } as unknown as PurchaseDocumentRow;
     const purchaseItems = [{ type: "sale", path: [D, "x"], quantity: Q }, { type: "sale", path: [D, "y"], quantity: Q }];
     const folded = purchaseCreditBilling([row], PU, purchaseItems);

@@ -315,17 +315,17 @@ const flatMoney = { propagate: true, shared_group: "flat_money" } as const;
  * 7): the formula it is priced by, the rates it snapshots, a supplier
  * discount, and the money `priceDocument` computes from them.
  *
- * - A line states its WHOLE net cost in the line's `amount_cents` (the DECLARED
- *   stated total: a buy, a fixed-cost subrent, freight or a fee) and carries
- *   `rates: []`. Measured: most stored buys cost a total that does not divide
- *   by their quantity, and every reader slices the total with the one
- *   line-money function (`lineUnitsCents`), so no per-unit rate is stored.
+ * - A flat line states its WHOLE gross cost in `price.stated_cents` (the
+ *   DECLARED stated total: a buy, a fixed-cost subrent, freight or a fee) and
+ *   carries `rates: []`. Measured: most stored buys cost a total that does not
+ *   divide by their quantity, and every reader slices the total
+ *   (`sliceStoredMoney`), so no per-unit rate is stored.
  * - The COMPUTED half is the receivable line's money (`subtotal_cents`,
- *   `subtotal_discounted_cents`, `taxes`, `total_cents`), written by
- *   `priceDocument`'s stated-total arm (one-document-model Phase 2): subtotal =
- *   `amount_cents + discount.amount_cents` (the operator's gross),
- *   discounted = `amount_cents`, total = discounted + Σ taxes. Every money
- *   reader reads it, as on an order line; `amount_cents` is the input.
+ *   `subtotal_discounted_cents`, `taxes`, `total_cents`) and the line's
+ *   `amount_cents`, written by `priceDocument`'s stated-total arm (ruling 39,
+ *   D7): subtotal = `stated_cents`, discounted = `amount_cents` =
+ *   `stated_cents − discount.amount_cents`, total = discounted + Σ taxes. Every
+ *   money reader reads it, as on an order line; `stated_cents` is the input.
  *
  * ⚠️ **A TIME line** commits nothing here: its money is zero and its rates are
  * the formula's; its bills price it from their pair's windows
@@ -357,9 +357,8 @@ export interface PurchaseLinePrice {
   /**
    * The line's stated GROSS over its `quantity`, before `discount` — the input
    * its money is derived from (one-document-model ruling 39, {@link PayableStatedCore}).
-   * Absent or `null` on a line that states none: a time line, and every line
-   * written before the backfill, whose gross is still `amount_cents +
-   * discount.amount_cents`.
+   * REQUIRED on a flat line ({@link purchaseLineMoneyIssues}, core beta B);
+   * absent or `null` on a time line, whose money its rates and counts decide.
    */
   stated_cents?: number | null;
   /** The gross: `amount_cents + discount.amount_cents`. Computed by `priceDocument`. */
@@ -408,12 +407,10 @@ export const PayablePriceMoneyCore: {
  * In the `flat_money` merge group with `quantity` and `amount_cents`: it is
  * what they are derived from, so it follows or is kept with them as one unit.
  *
- * ⚠️ **Optional and nullable in core beta A, by design** (the plan's staging,
- * 2026-11-13): stored lines predate it and the backfill runs after the deploy
- * that declares it (`cfs-release-order`: under `z.strictObject` the deploy
- * precedes the backfill). Beta B requires it on a flat line through the money
- * refine; the key itself stays nullable, because the price schema is shared
- * with time lines.
+ * ⚠️ **Required on a FLAT line by the money refine, not by the key**
+ * ({@link purchaseLineMoneyIssues}, core beta B, after the 2026-11-14 backfill:
+ * prod 976 flat lines, `test` 808). The key stays nullable and optional because
+ * the price schema is shared with time lines, which state none.
  *
  * ⚠️ Receivable lines do not carry it until 6e-0b2 (D2): there an invoice or
  * credit-note line is priced from its rates.
@@ -448,8 +445,9 @@ export const PurchaseLinePriceSchema: z.ZodType<PurchaseLinePrice> = z.strictObj
  * bill line. A refine rather than a union arm because it cuts across all four
  * line types.
  *
- * - **flat** — states its amount and no rates; its computed money is what
- *   `priceDocument`'s stated-total arm derives from that amount.
+ * - **flat** — states its GROSS (`price.stated_cents`, required since core
+ *   beta B) and no rates; its `amount_cents` and computed money are what
+ *   `priceDocument`'s stated-total arm derives from it.
  * - **time** (one-document-model Phase 3) — carries its formula's `rates`.
  *   On a PURCHASE (`grain: "purchase"`) it commits nothing: `amount_cents` and
  *   `quantity_billed` are null and its money is zero. On a BILL or CREDIT line
@@ -492,6 +490,9 @@ export function purchaseLineMoneyIssues(
     return issues;
   }
   if (item.amount_cents === null) issues.push({ path: ["amount_cents"], message: "a flat line states its amount" });
+  if (item.price && stated === null) {
+    issues.push({ path: ["price", "stated_cents"], message: "a flat line states its gross" });
+  }
   if (rates.length > 0) issues.push({ path: ["price", "rates"], message: "a flat line carries no rates" });
   if (item.quantity_billed === null) {
     issues.push({ path: ["quantity_billed"], message: "a flat line counts what is billed" });
@@ -513,9 +514,10 @@ export function purchaseLineMoneyIssues(
  *   re-applied here: it becomes cents once, when an operator states the price
  *   (`applyDiscountTerms`), and a part slices the cents (`sliceStoredMoney`), so
  *   a part of a percent-discounted line is not 1¢ off its own re-derivation.
- * - **absent or `null`** (every line written before the backfill): the gross is
- *   `amountCents + discount.amount_cents`, the declared discount record. Beta B
- *   retires this arm on a flat line.
+ * - **absent or `null`** (a TIME line, which states no gross: its money is its
+ *   rates and counts, or Xero's on a linked bill): the gross is `amountCents +
+ *   discount.amount_cents`, the priced discount record. A flat line reaches here
+ *   only to report its own absent gross ({@link purchaseLineMoneyIssues}).
  */
 function statedTotalMoneyIssues(
   price: PurchaseLinePrice,
@@ -1576,9 +1578,10 @@ export interface PurchaseLinePriceInputType {
   /** What this supplier charges CFS for a lost unit. A subrent line only. */
   replacement_cents?: number | null;
   /**
-   * The line's GROSS over its quantity (ruling 39): the input its stored money
-   * is derived from. Until core beta B the item's `amount_cents` may state it
-   * instead; sent together, the two must agree.
+   * The line's GROSS over its quantity (ruling 39): the one money input of a
+   * flat line, its stored `amount_cents` derived from it. `null` states none (a
+   * time line); absent on an amend keeps the stored gross. A stored line's
+   * `amount_cents` echoed back is stripped: it is derived.
    */
   stated_cents?: number | null;
 }
@@ -1625,11 +1628,6 @@ interface PurchaseItemInputBase {
 export interface PurchaseSaleItemInputType extends PurchaseItemInputBase {
   type: "sale";
   quantity: number;
-  /**
-   * The whole cost — GROSS when `price.discount` is set. Absent when
-   * `price.stated_cents` states it (core beta A; retired in beta B).
-   */
-  amount_cents?: number;
   /** `null` is a stored kit header echoed back; the writer decides what a `none` product holds. */
   ledger_account?: COACodeType | null;
   /**
@@ -1643,14 +1641,13 @@ export interface PurchaseSaleItemInputType extends PurchaseItemInputBase {
 }
 
 /**
- * A rental (Subrent) item as an operator orders it. `amount_cents` on a flat line
- * only (gross when discounted). Its hire window is its pair's dates, stated on
+ * A rental (Subrent) item as an operator orders it. A flat line states its gross
+ * as `price.stated_cents`; a time line states `null`. Its hire window is its pair's dates, stated on
  * `destinations[]`, never on the line (one-document-model Phase 5b).
  */
 export interface PurchaseRentalItemInputType extends PurchaseItemInputBase {
   type: "rental";
   quantity: number;
-  amount_cents?: number | null;
   /** `null` is a stored kit header echoed back; the writer decides what a `none` product holds. */
   ledger_account?: COACodeType | null;
   /** The orders the item was raised for. Absent is `[]`: the writer states it. */
@@ -1670,7 +1667,6 @@ export interface PurchaseServiceItemInputType extends PurchaseItemInputBase {
   type: "service";
   name: string;
   quantity?: number;
-  amount_cents?: number | null;
   /** Absent KEEPS on an amend; on a new item the writer's default, which only a placed charge has. */
   ledger_account?: COACodeType;
   /** Retired — see `retiredUnitsKey`. Present is a 400. */
@@ -1714,27 +1710,16 @@ const inputHead = {
 };
 
 /**
- * A line input's gross, stated once (ruling 39, core beta A): as the item's
- * `amount_cents` (its name until beta B) or as `price.stated_cents`. Both may be
- * sent while clients move over, and then they must agree, since both mean the
- * GROSS. On a purchase a sale states one of them (`requireOnSale`); the other
- * arms, and every bill row (whose omitted amount keeps the stored one), may
- * state neither.
+ * A purchase line input's gross (ruling 39, core beta B): `price.stated_cents`,
+ * the one money input. A Buy line states it, since a sale is always flat; the
+ * other arms may state `null` (a time line) or omit it (an amend keeps the
+ * stored gross).
  */
 export function payableInputStatedIssues(
-  item: { type: string; amount_cents?: number | null; price?: { stated_cents?: number | null } },
-  requireOnSale = true,
+  item: { type: string; price?: { stated_cents?: number | null } },
 ): { path: (string | number)[]; message: string }[] {
-  const amount = item.amount_cents ?? null;
-  const stated = item.price?.stated_cents ?? null;
-  if (amount !== null && stated !== null && amount !== stated) {
-    return [{
-      path: ["price", "stated_cents"],
-      message: `price.stated_cents ${stated} and amount_cents ${amount} both state the gross and disagree`,
-    }];
-  }
-  if (requireOnSale && item.type === "sale" && amount === null && stated === null) {
-    return [{ path: ["amount_cents"], message: "a Buy line states its gross, as amount_cents or price.stated_cents" }];
+  if (item.type === "sale" && (item.price?.stated_cents ?? null) === null) {
+    return [{ path: ["price", "stated_cents"], message: "a Buy line states its gross" }];
   }
   return [];
 }
@@ -1743,7 +1728,6 @@ function inputPostingIssue(
   item: {
     type: SharedLineType;
     ledger_account?: number | null;
-    amount_cents?: number | null;
     price?: PurchaseLinePriceInputType;
   },
   ctx: z.RefinementCtx,
@@ -1775,7 +1759,6 @@ const noCustodyInput = {
   ...inputHead,
   name: LineItemCore.name,
   quantity: z.int().min(1).optional(),
-  amount_cents: z.int().min(0).nullable().optional(),
   // Optional, not nullable: `null` is a kit header's, and a charge is never one.
   ledger_account: COACode.optional(),
   uid_units: retiredUnitsKey("a charge names no units; place it under the product row it costs"),
@@ -1801,9 +1784,6 @@ const saleItemInputArm = z.object({
   type: z.literal("sale"),
   ...inputHead,
   quantity: z.int().min(1),
-  // Optional beside `price.stated_cents` (core beta A); one of them is required
-  // (`payableInputStatedIssues`).
-  amount_cents: z.int().min(0).optional(),
   ledger_account: COACode.nullable().optional(),
   landed_costs: z.array(PurchaseLandedCostInput).optional(),
 }).superRefine((item, ctx) => {
@@ -1823,7 +1803,6 @@ const rentalItemInputArm = z.object({
   type: z.literal("rental"),
   ...inputHead,
   quantity: z.int().min(1),
-  amount_cents: z.int().min(0).nullable().optional(),
   ledger_account: COACode.nullable().optional(),
   uid_orders: z.array(FirestoreId).optional(),
   exchanged_for: ExchangedForListInput.optional().meta({ seed: false }),

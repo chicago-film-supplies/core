@@ -649,7 +649,7 @@ const lineHead = (n: number, pair = PAIR_A) => ({ uid: iuid(n), path: [pair, iui
 const pid = (n: number) => `testprod${String(n).padStart(12, "0")}`;
 /** A catalog line's head, keyed by its product (W4K): the uid and the path leaf ARE the product (7a). */
 const keyedHead = (n: number, pair = PAIR_A) => ({ uid: pid(n), path: [pair, pid(n)] });
-const buyInput = { type: "sale", ...keyedHead(1), quantity: 1, amount_cents: 100 };
+const buyInput = { type: "sale", ...keyedHead(1), quantity: 1, price: { stated_cents: 100 } };
 const nullDates = { delivery_start: null, delivery_end: null, collection_start: null, collection_end: null, charge_windows: null };
 /** A hire in the order's shape (api-cloudrun#1469): possession to `collection_start`, `collection_end` following it. */
 const hireDates = {
@@ -1926,38 +1926,41 @@ Deno.test("lineProductUid — the product a payable line names is its uid, and a
   assertEquals(lineProductUid({ uid: "custom-0b2a6f1e-6a7d-4e8b-9c1d-2f3a4b5c6d7e" }), undefined);
 });
 
-// ── price.stated_cents on the inputs (one-document-model 6e-0b1 S2, core beta A) ──
+// ── price.stated_cents on the inputs (one-document-model 6e-0b1, core beta B) ──
 
-Deno.test("PurchaseItemInput: a Buy states its gross as amount_cents OR price.stated_cents; both sent must agree", () => {
-  const { amount_cents: _a, ...bare } = buyInput;
-  assertEquals(issuePaths(PurchaseItemInput, buyInput), [], "control: today's amount_cents");
-  assertEquals(issuePaths(PurchaseItemInput, { ...bare, price: { stated_cents: 100 } }), [], "the stated gross alone");
-  assertEquals(issuePaths(PurchaseItemInput, { ...buyInput, price: { stated_cents: 100 } }), [], "both, agreeing");
-  assertEquals(issuePaths(PurchaseItemInput, { ...buyInput, price: { stated_cents: 101 } }), ["price.stated_cents"]);
-  assertEquals(issuePaths(PurchaseItemInput, bare), ["amount_cents"], "a Buy states its gross one way or the other");
-  assertEquals(issuePaths(PurchaseItemInput, { ...bare, price: { stated_cents: null } }), ["amount_cents"]);
-  // A charge may state neither (an amend keeps the stored amount).
+Deno.test("PurchaseItemInput: a Buy states its gross as price.stated_cents, and an echoed amount_cents is stripped", () => {
+  const { price: _p, ...bare } = buyInput;
+  assertEquals(issuePaths(PurchaseItemInput, buyInput), [], "control: the stated gross");
+  assertEquals(issuePaths(PurchaseItemInput, bare), ["price.stated_cents"], "a Buy states its gross");
+  assertEquals(issuePaths(PurchaseItemInput, { ...bare, price: { stated_cents: null } }), ["price.stated_cents"]);
+  // The retired input: a stored line's derived `amount_cents` echoed back is
+  // stripped, never read as the gross, so it cannot stand in for one.
+  assertEquals(issuePaths(PurchaseItemInput, { ...bare, amount_cents: 100 }), ["price.stated_cents"]);
+  const parsed = PurchaseItemInput.parse({ ...buyInput, amount_cents: 999 });
+  assertEquals("amount_cents" in parsed, false, "stripped");
+  assertEquals(parsed.price?.stated_cents, 100);
+  // A charge may state none (an amend keeps the stored gross).
   const charge = { type: "service", ...lineHead(5), name: "Freight", ledger_account: 5100 };
   assertEquals(issuePaths(PurchaseItemInput, charge), []);
-  assertEquals(issuePaths(PurchaseItemInput, { ...charge, amount_cents: 5, price: { stated_cents: 6 } }), ["price.stated_cents"]);
+  assertEquals(issuePaths(PurchaseItemInput, { ...charge, price: { stated_cents: 6 } }), []);
 });
 
-Deno.test("PurchaseBillRowInput: a row may state its gross as price.stated_cents; sent beside amount_cents the two must agree", () => {
+Deno.test("PurchaseBillRowInput: a row's gross is price.stated_cents, and an echoed amount_cents is stripped", () => {
   const row = { type: "sale", ...keyedHead(1) };
-  assertEquals(issuePaths(PurchaseBillRowInput, row), [], "a row stating neither keeps the stored amount");
+  assertEquals(issuePaths(PurchaseBillRowInput, row), [], "a row stating none keeps the stored gross");
   assertEquals(issuePaths(PurchaseBillRowInput, { ...row, price: { stated_cents: 100 } }), []);
-  assertEquals(issuePaths(PurchaseBillRowInput, { ...row, amount_cents: 100, price: { stated_cents: 100 } }), []);
-  assertEquals(issuePaths(PurchaseBillRowInput, { ...row, amount_cents: 100, price: { stated_cents: 99 } }), ["price.stated_cents"]);
+  const parsed = PurchaseBillRowInput.parse({ ...row, amount_cents: 100, price: { stated_cents: 99 } });
+  assertEquals("amount_cents" in parsed, false, "stripped");
 });
 
-Deno.test("PurchaseCreditItemInput: the memo is price.stated_cents, or amount_cents until beta B; both sent must agree (6e-0b1 D4)", () => {
+Deno.test("PurchaseCreditItemInput: the memo is price.stated_cents, and amount_cents is stripped (6e-0b1 D4)", () => {
   const credit = { path_purchase_item: ["abcdefghij0123456789"], quantity: 1 };
   assertEquals(issuePaths(PurchaseCreditItemInput, credit), [], "no memo: the default partition");
   assertEquals(issuePaths(PurchaseCreditItemInput, { ...credit, price: { stated_cents: 700 } }), []);
-  assertEquals(issuePaths(PurchaseCreditItemInput, { ...credit, amount_cents: 700, price: { stated_cents: 700 } }), []);
-  assertEquals(issuePaths(PurchaseCreditItemInput, { ...credit, amount_cents: 700, price: { stated_cents: 701 } }), ["price.stated_cents"]);
+  const parsed = PurchaseCreditItemInput.parse({ ...credit, amount_cents: 700 });
+  assertEquals("amount_cents" in parsed, false, "stripped");
+  assertEquals(creditItemMemoCents(parsed), undefined, "a stripped amount states no memo");
   assertEquals(creditItemMemoCents({ price: { stated_cents: 700 } }), 700);
-  assertEquals(creditItemMemoCents({ amount_cents: 700 }), 700);
   assertEquals(creditItemMemoCents({ price: { stated_cents: null } }), undefined);
   assertEquals(creditItemMemoCents({}), undefined);
 });

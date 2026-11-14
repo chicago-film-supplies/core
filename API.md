@@ -11301,8 +11301,9 @@ split's clone if it states {@link path_purchase_item}; a line of the purchase
 named by its path; or a line the bill itself authors, which states its name,
 account, quantity and money; a sale or rental names its product by its uid.
 
-On a TIME line `price.rates` restates each unit rate; a flat line's
-`amount_cents` is stated directly (gross when a discount is set).
+On a TIME line `price.rates` restates each unit rate; a flat line states its
+GROSS as `price.stated_cents` (ruling 39, core beta B), and its stored
+`amount_cents` is derived from it.
 
 `path_purchase_item` absent keeps the stored pointer, and there is no `null`
 form: the writer stamps every moved row's pointer and clears one a move back
@@ -11317,7 +11318,6 @@ interface PurchaseBillLineInputType {
   name?: string;
   description?: string;
   quantity?: number;
-  amount_cents?: number;
   ledger_account?: COACodeType | null;
   zero_priced?: boolean | null;
   quantity_per_parent?: number | null;
@@ -11455,8 +11455,7 @@ bill line (one-document-model 6d), and what it un-bills.
   memo, capped at what is left of it. The units are capped per bill line and
   by the pools behind them (`creditableBillLines`).
 - **the memo** (6e-0b1 D4) is the credit line's own `price.stated_cents`, net
-  by nature, so the line stores `discount: null`. Until core beta B it may be
-  sent as `amount_cents` instead; sent together the two must agree.
+  by nature, so the line stores `discount: null`.
 - **time** — credited by COUNTS, as an AR credit note is (0b ruling 3):
   `quantity` units over `counts`, priced `rates × counts` like the bill line
   it reverses. Absent `counts`, the writer credits everything the line is
@@ -11470,7 +11469,6 @@ interface PurchaseCreditItemInputType {
   counts?: TierCountType[];
   uid_purchase_bill?: string;
   path_bill_item?: string[];
-  amount_cents?: number;
   price?: typeLiteral;
 }
 ```
@@ -12032,17 +12030,17 @@ How a purchase line is priced (purchases-as-documents Phase 2 rulings 1, 2,
 7): the formula it is priced by, the rates it snapshots, a supplier
 discount, and the money `priceDocument` computes from them.
 
-- A line states its WHOLE net cost in the line's `amount_cents` (the DECLARED
-  stated total: a buy, a fixed-cost subrent, freight or a fee) and carries
-  `rates: []`. Measured: most stored buys cost a total that does not divide
-  by their quantity, and every reader slices the total with the one
-  line-money function (`lineUnitsCents`), so no per-unit rate is stored.
+- A flat line states its WHOLE gross cost in `price.stated_cents` (the
+  DECLARED stated total: a buy, a fixed-cost subrent, freight or a fee) and
+  carries `rates: []`. Measured: most stored buys cost a total that does not
+  divide by their quantity, and every reader slices the total
+  (`sliceStoredMoney`), so no per-unit rate is stored.
 - The COMPUTED half is the receivable line's money (`subtotal_cents`,
-  `subtotal_discounted_cents`, `taxes`, `total_cents`), written by
-  `priceDocument`'s stated-total arm (one-document-model Phase 2): subtotal =
-  `amount_cents + discount.amount_cents` (the operator's gross),
-  discounted = `amount_cents`, total = discounted + Σ taxes. Every money
-  reader reads it, as on an order line; `amount_cents` is the input.
+  `subtotal_discounted_cents`, `taxes`, `total_cents`) and the line's
+  `amount_cents`, written by `priceDocument`'s stated-total arm (ruling 39,
+  D7): subtotal = `stated_cents`, discounted = `amount_cents` =
+  `stated_cents − discount.amount_cents`, total = discounted + Σ taxes. Every
+  money reader reads it, as on an order line; `stated_cents` is the input.
 
 ⚠️ **A TIME line** commits nothing here: its money is zero and its rates are
 the formula's; its bills price it from their pair's windows
@@ -12263,15 +12261,14 @@ interface PurchaseRentalItem {
 
 ### `PurchaseRentalItemInputType`
 
-A rental (Subrent) item as an operator orders it. `amount_cents` on a flat line
-only (gross when discounted). Its hire window is its pair's dates, stated on
+A rental (Subrent) item as an operator orders it. A flat line states its gross
+as `price.stated_cents`; a time line states `null`. Its hire window is its pair's dates, stated on
 `destinations[]`, never on the line (one-document-model Phase 5b).
 
 ```ts
 interface PurchaseRentalItemInputType {
   type: "rental";
   quantity: number;
-  amount_cents?: number | null;
   ledger_account?: COACodeType | null;
   uid_orders?: string[];
   exchanged_for?: ExchangedForEntryType[];
@@ -12391,7 +12388,6 @@ A sale (Buy) item as an operator orders it — the buckets are the server's.
 interface PurchaseSaleItemInputType {
   type: "sale";
   quantity: number;
-  amount_cents?: number;
   ledger_account?: COACodeType | null;
   landed_costs?: PurchaseLandedCostInputType[];
 }
@@ -12449,7 +12445,6 @@ interface PurchaseServiceItemInputType {
   type: "service";
   name: string;
   quantity?: number;
-  amount_cents?: number | null;
   ledger_account?: COACodeType;
   uid_units?: never;
 }
@@ -17770,11 +17765,11 @@ This is what keeps the search and filter surfaces from shrinking to the column
 surface. Gating them on exact column membership alone lost contact-name search
 on organizations, orders and fulfillments, and the created-by facet everywhere.
 
-### `creditItemMemoCents(item: Pick<PurchaseCreditItemInputType, "amount_cents" | "price">): number | undefined`
+### `creditItemMemoCents(item: Pick<PurchaseCreditItemInputType, "price">): number | undefined`
 
 The supplier's memo a credit item input states (6e-0b1 D4): its
-`price.stated_cents`, or `amount_cents` until core beta B. `undefined` when it
-states none, so the line is priced by its default partition.
+`price.stated_cents`. `undefined` when it states none, so the line is priced
+by its default partition.
 
 ### `custodyMovementSlot(rule: CustodyRule, bookingType: "rental" | "sale"): string | null`
 
@@ -18827,8 +18822,9 @@ The single-document money rule (ruling 1), shared by every arm and by the
 bill line. A refine rather than a union arm because it cuts across all four
 line types.
 
-- **flat** — states its amount and no rates; its computed money is what
-  `priceDocument`'s stated-total arm derives from that amount.
+- **flat** — states its GROSS (`price.stated_cents`, required since core
+  beta B) and no rates; its `amount_cents` and computed money are what
+  `priceDocument`'s stated-total arm derives from it.
 - **time** (one-document-model Phase 3) — carries its formula's `rates`.
   On a PURCHASE (`grain: "purchase"`) it commits nothing: `amount_cents` and
   `quantity_billed` are null and its money is zero. On a BILL or CREDIT line
@@ -29383,12 +29379,10 @@ rates (a LINKED time line: Xero's money).
 In the `flat_money` merge group with `quantity` and `amount_cents`: it is
 what they are derived from, so it follows or is kept with them as one unit.
 
-⚠️ **Optional and nullable in core beta A, by design** (the plan's staging,
-2026-11-13): stored lines predate it and the backfill runs after the deploy
-that declares it (`cfs-release-order`: under `z.strictObject` the deploy
-precedes the backfill). Beta B requires it on a flat line through the money
-refine; the key itself stays nullable, because the price schema is shared
-with time lines.
+⚠️ **Required on a FLAT line by the money refine, not by the key**
+({@link purchaseLineMoneyIssues}, core beta B, after the 2026-11-14 backfill:
+prod 976 flat lines, `test` 808). The key stays nullable and optional because
+the price schema is shared with time lines, which state none.
 
 ⚠️ Receivable lines do not carry it until 6e-0b2 (D2): there an invoice or
 credit-note line is priced from its rates.
@@ -29691,17 +29685,17 @@ How a purchase line is priced (purchases-as-documents Phase 2 rulings 1, 2,
 7): the formula it is priced by, the rates it snapshots, a supplier
 discount, and the money `priceDocument` computes from them.
 
-- A line states its WHOLE net cost in the line's `amount_cents` (the DECLARED
-  stated total: a buy, a fixed-cost subrent, freight or a fee) and carries
-  `rates: []`. Measured: most stored buys cost a total that does not divide
-  by their quantity, and every reader slices the total with the one
-  line-money function (`lineUnitsCents`), so no per-unit rate is stored.
+- A flat line states its WHOLE gross cost in `price.stated_cents` (the
+  DECLARED stated total: a buy, a fixed-cost subrent, freight or a fee) and
+  carries `rates: []`. Measured: most stored buys cost a total that does not
+  divide by their quantity, and every reader slices the total
+  (`sliceStoredMoney`), so no per-unit rate is stored.
 - The COMPUTED half is the receivable line's money (`subtotal_cents`,
-  `subtotal_discounted_cents`, `taxes`, `total_cents`), written by
-  `priceDocument`'s stated-total arm (one-document-model Phase 2): subtotal =
-  `amount_cents + discount.amount_cents` (the operator's gross),
-  discounted = `amount_cents`, total = discounted + Σ taxes. Every money
-  reader reads it, as on an order line; `amount_cents` is the input.
+  `subtotal_discounted_cents`, `taxes`, `total_cents`) and the line's
+  `amount_cents`, written by `priceDocument`'s stated-total arm (ruling 39,
+  D7): subtotal = `stated_cents`, discounted = `amount_cents` =
+  `stated_cents − discount.amount_cents`, total = discounted + Σ taxes. Every
+  money reader reads it, as on an order line; `stated_cents` is the input.
 
 ⚠️ **A TIME line** commits nothing here: its money is zero and its rates are
 the formula's; its bills price it from their pair's windows
@@ -29821,15 +29815,14 @@ interface PurchaseRentalItem {
 
 ### `PurchaseRentalItemInputType`
 
-A rental (Subrent) item as an operator orders it. `amount_cents` on a flat line
-only (gross when discounted). Its hire window is its pair's dates, stated on
+A rental (Subrent) item as an operator orders it. A flat line states its gross
+as `price.stated_cents`; a time line states `null`. Its hire window is its pair's dates, stated on
 `destinations[]`, never on the line (one-document-model Phase 5b).
 
 ```ts
 interface PurchaseRentalItemInputType {
   type: "rental";
   quantity: number;
-  amount_cents?: number | null;
   ledger_account?: COACodeType | null;
   uid_orders?: string[];
   exchanged_for?: ExchangedForEntryType[];
@@ -29949,7 +29942,6 @@ A sale (Buy) item as an operator orders it — the buckets are the server's.
 interface PurchaseSaleItemInputType {
   type: "sale";
   quantity: number;
-  amount_cents?: number;
   ledger_account?: COACodeType | null;
   landed_costs?: PurchaseLandedCostInputType[];
 }
@@ -30007,7 +29999,6 @@ interface PurchaseServiceItemInputType {
   type: "service";
   name: string;
   quantity?: number;
-  amount_cents?: number | null;
   ledger_account?: COACodeType;
   uid_units?: never;
 }
@@ -30131,14 +30122,12 @@ Is this row a line (not a divider)?
 
 A kit header holds no money: a `null` account requires a flat line stating $0.
 
-### `payableInputStatedIssues(item: typeLiteral, _: unknown): typeLiteral[]`
+### `payableInputStatedIssues(item: typeLiteral): typeLiteral[]`
 
-A line input's gross, stated once (ruling 39, core beta A): as the item's
-`amount_cents` (its name until beta B) or as `price.stated_cents`. Both may be
-sent while clients move over, and then they must agree, since both mean the
-GROSS. On a purchase a sale states one of them (`requireOnSale`); the other
-arms, and every bill row (whose omitted amount keeps the stored one), may
-state neither.
+A purchase line input's gross (ruling 39, core beta B): `price.stated_cents`,
+the one money input. A Buy line states it, since a sale is always flat; the
+other arms may state `null` (a time line) or omit it (an amend keeps the
+stored gross).
 
 ### `payableInputUidIssue(line: typeLiteral): string | null`
 
@@ -30222,8 +30211,9 @@ The single-document money rule (ruling 1), shared by every arm and by the
 bill line. A refine rather than a union arm because it cuts across all four
 line types.
 
-- **flat** — states its amount and no rates; its computed money is what
-  `priceDocument`'s stated-total arm derives from that amount.
+- **flat** — states its GROSS (`price.stated_cents`, required since core
+  beta B) and no rates; its `amount_cents` and computed money are what
+  `priceDocument`'s stated-total arm derives from it.
 - **time** (one-document-model Phase 3) — carries its formula's `rates`.
   On a PURCHASE (`grain: "purchase"`) it commits nothing: `amount_cents` and
   `quantity_billed` are null and its money is zero. On a BILL or CREDIT line
@@ -30529,8 +30519,9 @@ split's clone if it states {@link path_purchase_item}; a line of the purchase
 named by its path; or a line the bill itself authors, which states its name,
 account, quantity and money; a sale or rental names its product by its uid.
 
-On a TIME line `price.rates` restates each unit rate; a flat line's
-`amount_cents` is stated directly (gross when a discount is set).
+On a TIME line `price.rates` restates each unit rate; a flat line states its
+GROSS as `price.stated_cents` (ruling 39, core beta B), and its stored
+`amount_cents` is derived from it.
 
 `path_purchase_item` absent keeps the stored pointer, and there is no `null`
 form: the writer stamps every moved row's pointer and clears one a move back
@@ -30545,7 +30536,6 @@ interface PurchaseBillLineInputType {
   name?: string;
   description?: string;
   quantity?: number;
-  amount_cents?: number;
   ledger_account?: COACodeType | null;
   zero_priced?: boolean | null;
   quantity_per_parent?: number | null;
@@ -30675,8 +30665,7 @@ bill line (one-document-model 6d), and what it un-bills.
   memo, capped at what is left of it. The units are capped per bill line and
   by the pools behind them (`creditableBillLines`).
 - **the memo** (6e-0b1 D4) is the credit line's own `price.stated_cents`, net
-  by nature, so the line stores `discount: null`. Until core beta B it may be
-  sent as `amount_cents` instead; sent together the two must agree.
+  by nature, so the line stores `discount: null`.
 - **time** — credited by COUNTS, as an AR credit note is (0b ruling 3):
   `quantity` units over `counts`, priced `rates × counts` like the bill line
   it reverses. Absent `counts`, the writer credits everything the line is
@@ -30690,7 +30679,6 @@ interface PurchaseCreditItemInputType {
   counts?: TierCountType[];
   uid_purchase_bill?: string;
   path_bill_item?: string[];
-  amount_cents?: number;
   price?: typeLiteral;
 }
 ```
@@ -31088,11 +31076,11 @@ interface VoidPurchaseCreditInputType {
 }
 ```
 
-### `creditItemMemoCents(item: Pick<PurchaseCreditItemInputType, "amount_cents" | "price">): number | undefined`
+### `creditItemMemoCents(item: Pick<PurchaseCreditItemInputType, "price">): number | undefined`
 
 The supplier's memo a credit item input states (6e-0b1 D4): its
-`price.stated_cents`, or `amount_cents` until core beta B. `undefined` when it
-states none, so the line is priced by its default partition.
+`price.stated_cents`. `undefined` when it states none, so the line is priced
+by its default partition.
 
 ### `derivePurchaseCreditSources(uidPurchase: string, rows: readonly PurchaseDocumentRow[]): Pick<PurchaseCredit, "sources" | "query_by_sources">`
 
@@ -51842,7 +51830,7 @@ interface FlatPayablePrice {
   price_formula: PriceFormulaRef;
   rates: never[];
   discount: DiscountType | null;
-  stated_cents?: number | null;
+  stated_cents: number;
   taxes: PriceModifierType[];
   taxes_base?: TaxRefType[];
   subtotal_cents: number;
@@ -52094,8 +52082,8 @@ purchase-line writer, the bill-line projector, a bill's charge line, a credit
 line. A hand-spelled declared literal per builder is how a key gets dropped
 from one of them (`ORDER_DECLARED_PRICE_KEYS`' docblock, api-cloudrun#984).
 
-The line's net is the returned `subtotal_discounted_cents`: a caller that
-states `stated_cents` writes it to the line's `amount_cents`.
+The line's net is the returned `subtotal_discounted_cents`, which the caller
+writes to the line's `amount_cents`.
 
 A FLAT line only (`rates: []`); a time line's price is built by
 `projectTimeLine` (`@cfs/core/utils/purchase-documents`) and priced by the
@@ -52207,9 +52195,11 @@ Two inputs, by what the line states:
   discount.amount_cents`, the declared discount CENTS, so a rate is never
   re-applied to a line — a part's cents are its slice of its source's.
   `amount_cents` is ignored here and re-derived by the caller.
-- **absent or `null`** (a line written before the backfill): the declared net
-  `amount_cents`, and `subtotal_cents` = net + `discount.amount_cents`, the
-  discount record being DECLARED (what came off).
+- **absent or `null`**, on a TIME line only (a linked bill's time line, whose
+  `amount_cents` is Xero's net): `subtotal_cents` = net +
+  `discount.amount_cents`, the discount record being DECLARED (what came off).
+  A FLAT line that states no gross is refused (core beta B): its gross is its
+  one money input.
 
 Either way:
 
@@ -52620,10 +52610,10 @@ The amount of `rateKey`'s OPEN row (`applied_to: null`), or `null` when the key 
 ### `payableStoredMoney(line: PayableMoneyLineLike): StoredLineMoney`
 
 A stored payable line's money as a part slices it (D7): its stated GROSS
-(`price.stated_cents`, or — before the backfill — its net plus its discount
-record) and its discount in cents. A TIME line slices its stored net with no
-discount: its money is its counts priced (or Xero's, linked), so what a part
-takes of it is a share of that.
+(`price.stated_cents`, required on a flat line since core beta B) and its
+discount in cents. A TIME line slices its stored net with no discount: its
+money is its counts priced (or Xero's, linked), so what a part takes of it is
+a share of that.
 
 ### `priceFormulaRefOf(formula: PricingFormula): PriceFormulaRef`
 
