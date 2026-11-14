@@ -29,7 +29,7 @@ import {
   recomputePurchaseQuantityBilled,
   syncPurchaseToBills,
 } from "../src/utils/purchase-documents.ts";
-import { chargeWindowContext, flatPayablePrice, priceDocument, PriceRefusalError } from "../src/utils/price-document.ts";
+import { chargeWindowContext, flatPayablePrice, priceDocument, PriceRefusalError, purchaseTotals } from "../src/utils/price-document.ts";
 import type { PricingFormulas } from "../src/utils/price-formulas.ts";
 import type { TaxCatalog } from "../src/utils/tax-classes.ts";
 import { asCreditRows, hireDates, payablePrice, purchaseDivider, purchasePair, payableLine, withPayableMoney } from "./helpers/payable.ts";
@@ -58,7 +58,7 @@ import {
   isPurchaseLine,
 } from "../src/schemas/mod.ts";
 import { computeItemPaths } from "../src/utils/orders.ts";
-import { purchaseLineMoneyIssues } from "../src/schemas/purchase.ts";
+import { purchaseLineMoneyIssues, purchaseTotalsIssues } from "../src/schemas/purchase.ts";
 import { applyDateEdit } from "../src/utils/dates.ts";
 import { orderLineClaimIssues } from "../src/utils/invoices.ts";
 import { purchaseActionsFor } from "../src/utils/purchase-actions.ts";
@@ -272,6 +272,31 @@ Deno.test("priceDocument (payable): prices a PURCHASE line, which carries no cou
   const priced = priceDocument([buyLine()], payableCtx("purchase"));
   assertEquals(priced.items[0].price.total_cents, 140985);
   assertEquals("counts" in priced.items[0].price, false, "no key the purchase price does not declare");
+});
+
+Deno.test("priceDocument (payable): a PURCHASE's totals are the initiator's — the Σ of its lines, a time line 0, and its subrent replacement (D5)", () => {
+  // $1,409.85 of radios, a time subrent of 2 hotspots (commits nothing) stating
+  // a $45 replacement each, and a $15 freight charge. Stated by hand.
+  const hotspots = visionLine({ price: { ...visionLine().price, replacement_cents: 4500 } });
+  const freight = buyLine({ uid: lid(5), path: [DIV, lid(5)], name: "Freight", quantity: 1, amount_cents: 1_500 });
+  const priced = priceDocument([buyLine(), hotspots, freight], payableCtx("purchase"));
+  const want = {
+    discount_amount_cents: 0,
+    subtotal_cents: 142_485,
+    subtotal_discounted_cents: 142_485,
+    taxes: [],
+    transaction_fees: [],
+    total_cents: 142_485,
+  };
+  assertEquals(priced.totals, want);
+  assertEquals(priced.replacement_total_cents, 9_000);
+  // What the writer stores satisfies the document refine, which re-sums the stored lines.
+  const totals = { ...priced.totals, replacement_total_cents: priced.replacement_total_cents! };
+  assertEquals(purchaseTotalsIssues([purchaseDivider(DIV), ...priced.items], totals), []);
+  // The writers' stage-5 fold over the stored rows is the same figure.
+  assertEquals(purchaseTotals([purchaseDivider(DIV), ...priced.items] as PurchaseItem[]), totals);
+  // A bill is not an initiator: no replacement total.
+  assertEquals(priceDocument([restated(project(buyLine(), 10, 3), 140985)], payableCtx("purchase_bill")).replacement_total_cents, null);
 });
 
 // ── Time lines (one-document-model Phase 3, item 10) ────────────────

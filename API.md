@@ -6302,6 +6302,17 @@ Allowed values for component inclusion type.
 type InclusionTypeType = indexedAccess;
 ```
 
+### `InitiatorTotalsType`
+
+The initiator's totals, one shape on both sides (one-document-model ruling 33,
+D5): the order's and the purchase's `totals`. On a purchase `taxes` and
+`transaction_fees` are always `[]` (the payable side is exempt and has no fee
+line) and `replacement_total_cents` sums its subrent lines' replacements.
+
+```ts
+type InitiatorTotalsType = OrderDocTotalsType;
+```
+
 ### `InventoryLedger`
 
 An inventory ledger document tracking stock quantities and costs per product.
@@ -11153,6 +11164,7 @@ interface Purchase {
   items: PurchaseRow[];
   destinations: PurchaseDestination[];
   total_cents: number;
+  totals?: InitiatorTotalsType;
   query_by_products: string[];
   query_by_orders: string[];
   query_by_item_types: PurchaseItemTypeType[];
@@ -25963,6 +25975,25 @@ interface GroupPathType {
 }
 ```
 
+### `InitiatorTotals`
+
+Zod schema for {@link InitiatorTotalsType}; not on the barrel, as `TotalsCore` is not.
+
+```ts
+const InitiatorTotals: z.ZodType<InitiatorTotalsType>;
+```
+
+### `InitiatorTotalsType`
+
+The initiator's totals, one shape on both sides (one-document-model ruling 33,
+D5): the order's and the purchase's `totals`. On a purchase `taxes` and
+`transaction_fees` are always `[]` (the payable side is exempt and has no fee
+line) and `replacement_total_cents` sums its subrent lines' replacements.
+
+```ts
+type InitiatorTotalsType = OrderDocTotalsType;
+```
+
 ### `ItemPrice`
 
 Zod schema for item price breakdown (input).
@@ -26745,9 +26776,10 @@ NOT do — `z.globalRegistry` is keyed on the instance, so a separately-declared
 twin carries none of these `.meta()` annotations and every heading below would
 silently vanish from the tables.
 
-⚠️ **`replacement_total_cents` being order-only is correct, not a gap.** An
-invoice price has no `replacement_cents`, so an invoice structurally cannot
-compute one. Written down because it reads like an omission.
+⚠️ **`replacement_total_cents` being INITIATOR-only is correct, not a gap.**
+An invoice price has no `replacement_cents`, so an invoice structurally cannot
+compute one; an order line and a purchase's subrent line both state one. Written
+down because it reads like an omission.
 
 ⚠️ **Not on the `@cfs/core/schemas` barrel**, for the same reason as
 `DestinationPairCore`: no consumer assembles a totals object from parts, and
@@ -29412,6 +29444,7 @@ interface Purchase {
   items: PurchaseRow[];
   destinations: PurchaseDestination[];
   total_cents: number;
+  totals?: InitiatorTotalsType;
   query_by_products: string[];
   query_by_orders: string[];
   query_by_item_types: PurchaseItemTypeType[];
@@ -30229,6 +30262,14 @@ The pair a purchase line sits under — the destination divider at `path[0]`
 ### `purchaseLines(rows: readonly PurchaseRow[]): PurchasePostedItem[]`
 
 The lines of a purchase's rows, with dividers and kit headers dropped.
+
+### `purchaseTotalsIssues(items: readonly PurchaseRow[], totals: InitiatorTotalsType): typeLiteral[]`
+
+Where a purchase's `totals` disagree with its lines (D5): each figure is the
+sum of the lines' STORED money, as `priceDocument`'s stage 5 sums it — never a
+re-price. Schema-side because the document refine calls it and `schemas/`
+cannot import `sumPricedLines`; every step is a sum or an integer product, so
+nothing rounds. `taxes` and `transaction_fees` are `[]` on the payable side.
 
 ### `zeroPricedMoneyIssues(item: typeLiteral): typeLiteral[]`
 
@@ -34539,6 +34580,7 @@ interface PurchaseDocument {
   credits?: Array<typeLiteral>;
   total_cents?: number;
   total_cents_str?: string;
+  totals?: typeLiteral;
   created_by?: TypesenseActorRef;
   updated_by?: TypesenseActorRef;
   date_fs: number;
@@ -35437,6 +35479,12 @@ booking. `total_cents` stays until 6e-0b1 (ruling 62). It also gains `subject`,
 the order's field on the payable side (owner, 2026-11-11), declared as the
 order's and invoice's are; and `items.uid_product` becomes `items.uid`, the
 one key a line names its product by (owner, 2026-11-11).
+
+v6 (one-document-model D5, ruling 62): the initiator's `totals`, declared as
+the invoice's and bill's are, BESIDE the kept `total_cents` pair. Both pairs
+stay through the expand so every step is manager-first: the default column
+moves to `totals.total_cents` in beta D, once this index is live, and v7 drops
+the old pair with the stored key.
 
 ```ts
 const purchases: TypesenseCollectionConfig;
@@ -52215,6 +52263,18 @@ or credit line from its purchase line before the writer prices the document.
 
 Basis-blind: a LINKED time line's stated amount is Xero's money and prices
 through here too.
+
+### `purchaseTotals(items: readonly PurchaseRow[]): InitiatorTotalsType`
+
+**Stage 5 for a PURCHASE, on its own: its `totals`** (one-document-model D5,
+ruling 62) — the initiator's shape, folded from the STORED lines and never a
+re-price, as {@link sumPricedLines} folds an order's. The purchase writers call
+it on the lines `priceDocument` has just priced.
+
+Over `purchaseLines` (a kit header carries no money of its own, ruling 3), as
+the document refine sums them, so the stored totals satisfy it by
+construction. `replacement_total_cents` is the subrent lines' replacements,
+untaxed: the payable side charges no tax.
 
 ### `seedLineCounts(items: readonly StructuralItem[], destinations: readonly ChargeWindowPair[], dividerUid: string, formula: PricingFormula, holidays: readonly string[], rates?: readonly MeterRate[] | null): TierCount[] | null`
 

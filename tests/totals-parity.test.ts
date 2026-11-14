@@ -32,8 +32,8 @@
  * line item's `name` and `quantity` drifted before core#97. Only `===` sees it.
  */
 import { assertEquals } from "@std/assert";
-import { TotalsCore } from "../src/schemas/order.ts";
-import { InvoiceSchema, OrderSchema } from "../src/schemas/mod.ts";
+import { InitiatorTotals, TotalsCore } from "../src/schemas/order.ts";
+import { InvoiceSchema, OrderSchema, PurchaseSchema } from "../src/schemas/mod.ts";
 
 /** The `z.strictObject` shape behind an annotated `z.ZodType<T>` schema. */
 // deno-lint-ignore no-explicit-any
@@ -46,12 +46,20 @@ function shapeOf(schema: unknown, label: string): Record<string, any> {
 
 /** Reached through the PUBLIC document schemas, so what is checked is what a consumer parses with. */
 function totalsShapeOf(schema: unknown, label: string): Record<string, unknown> {
-  return shapeOf(shapeOf(schema, label).totals, `${label}.totals`);
+  return shapeOf(unwrapOptional(shapeOf(schema, label).totals), `${label}.totals`);
+}
+
+/** The node under an `.optional()` — the purchase's `totals` through D5's expand. */
+function unwrapOptional(node: unknown): unknown {
+  // deno-lint-ignore no-explicit-any
+  const def = (node as any)?._zod?.def;
+  return def?.type === "optional" ? def.innerType : node;
 }
 
 const GRAINS = [
   ["OrderSchema", OrderSchema],
   ["InvoiceSchema", InvoiceSchema],
+  ["PurchaseSchema", PurchaseSchema],
 ] as const;
 
 Deno.test("totals parity: every TotalsCore field is the SAME INSTANCE on both grains", () => {
@@ -108,10 +116,21 @@ Deno.test("totals parity: each grain's own key ORDER is unchanged by the sharing
   );
 });
 
-Deno.test("totals parity: replacement_total_cents is ORDER-ONLY, deliberately", () => {
+Deno.test("totals parity: the two initiators share ONE totals node (one-document-model D5)", () => {
+  // Not merely the same keys: the same instance, so a column or label added to
+  // the order's totals reaches the purchase's with nothing to keep in step.
+  const order = unwrapOptional(shapeOf(OrderSchema, "OrderSchema").totals);
+  const purchase = unwrapOptional(shapeOf(PurchaseSchema, "PurchaseSchema").totals);
+  // `.meta()` clones, so the identity is checked on the shape the clone shares.
+  assertEquals(shapeOf(purchase, "purchase.totals") === shapeOf(InitiatorTotals, "InitiatorTotals"), true);
+  assertEquals(shapeOf(order, "order.totals") === shapeOf(InitiatorTotals, "InitiatorTotals"), true);
+});
+
+Deno.test("totals parity: replacement_total_cents is INITIATOR-ONLY, deliberately", () => {
   // An invoice price has no `replacement_cents`, so an invoice structurally
   // cannot compute one. Asserted so it is never "fixed" into TotalsCore.
   assertEquals("replacement_total_cents" in totalsShapeOf(OrderSchema, "OrderSchema"), true);
+  assertEquals("replacement_total_cents" in totalsShapeOf(PurchaseSchema, "PurchaseSchema"), true);
   assertEquals("replacement_total_cents" in totalsShapeOf(InvoiceSchema, "InvoiceSchema"), false);
   assertEquals("replacement_total_cents" in TotalsCore, false);
 });

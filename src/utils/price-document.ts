@@ -61,6 +61,7 @@
  */
 import {
   type DiscountType,
+  type InitiatorTotalsType,
   type InvoiceStatusType,
   type JurisdictionType,
   type OrderStatusType,
@@ -68,6 +69,7 @@ import {
   type PriceModifierType,
   type PurchaseDocumentRow,
   type PurchaseRow,
+  purchaseLines,
   SIDE_CONTRACTS,
   type TaxRefType,
   TERMINAL_ORDER_STATUSES,
@@ -350,8 +352,9 @@ export interface PricedDocument<T> {
   /** The six totals fields orders and invoices share, as a sum of `items`. */
   totals: DocumentTotalsCore;
   /**
-   * An order's replacement cost, or `null` for any other document. Order-only,
-   * like the `replacement_total_cents` it fills.
+   * An initiator's replacement cost (an order's or a purchase's), or `null` for
+   * any other document: initiator-only, like the `replacement_total_cents` it
+   * fills (D5). Untaxed on a purchase, whose lines charge no tax.
    */
   replacement_total_cents: number | null;
   /** Rates that priced on a lapsed review. A dropped value makes the lapse invisible. */
@@ -1034,7 +1037,7 @@ export function priceDocument<T extends LineItem | PayableLine>(
   return {
     items: out as unknown as T[],
     totals: sumPricedLines(out),
-    replacement_total_cents: ctx.document.kind === "order"
+    replacement_total_cents: ctx.document.kind === "order" || ctx.document.kind === "purchase"
       ? calculateReplacementTotals(out, pricing).total_cents
       : null,
     warnings,
@@ -1205,6 +1208,27 @@ export function priceCreditNote(
  * the amount (api-cloudrun#997 step 7 re-prices the two live ones).
  */
 export function sumPricedLines(items: readonly LineItem[]): DocumentTotalsCore {
+  return sumPricedLinesOf(items);
+}
+
+/**
+ * **Stage 5 for a PURCHASE, on its own: its `totals`** (one-document-model D5,
+ * ruling 62) — the initiator's shape, folded from the STORED lines and never a
+ * re-price, as {@link sumPricedLines} folds an order's. The purchase writers call
+ * it on the lines `priceDocument` has just priced.
+ *
+ * Over `purchaseLines` (a kit header carries no money of its own, ruling 3), as
+ * the document refine sums them, so the stored totals satisfy it by
+ * construction. `replacement_total_cents` is the subrent lines' replacements,
+ * untaxed: the payable side charges no tax.
+ */
+export function purchaseTotals(items: readonly PurchaseRow[]): InitiatorTotalsType {
+  // A payable line enters the shared fold as a line item, as in `priceDocument`.
+  const lines = purchaseLines(items) as unknown as LineItem[];
+  return { ...sumPricedLinesOf(lines), replacement_total_cents: calculateReplacementTotals(lines, []).total_cents };
+}
+
+function sumPricedLinesOf(items: readonly LineItem[]): DocumentTotalsCore {
   let subtotalCents = 0;
   let subtotalDiscountedCents = 0;
   const taxTotals = new Map<string, PriceModifier>();

@@ -910,6 +910,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // Stage 5 alone: totals as a sum of stored lines. A template already holds
     // the stored `totals` this would reproduce.
     "sumPricedLines",
+    // Stage 5 for a purchase (D5), the same fold: a template holds the stored `totals`.
+    "purchaseTotals",
   ],
   "tax-classes": [
     "deriveLineTaxClass",

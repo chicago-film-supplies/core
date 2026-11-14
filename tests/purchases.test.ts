@@ -416,6 +416,52 @@ Deno.test("PurchaseSchema: one product may sit on two items (D2), in two groups 
   assertEquals(issuePaths(PurchaseSchema, grouped), [], "one uid under two parents is two rows");
 });
 
+// ── totals: the initiator's shape (one-document-model D5, ruling 62) ──
+// Expected values are stated by hand: $1,409.85 + $15.00 freight + a $500 subrent
+// of 10 at a $45 replacement each, and a weekly hire that commits nothing.
+
+/** Totals for `subtotal` with no discount, as the payable side states them. */
+const flatTotals = (subtotal: number, replacement = 0) => ({
+  discount_amount_cents: 0,
+  subtotal_cents: subtotal,
+  subtotal_discounted_cents: subtotal,
+  taxes: [],
+  transaction_fees: [],
+  total_cents: subtotal,
+  replacement_total_cents: replacement,
+});
+
+Deno.test("PurchaseSchema: totals is the Σ of the lines' stored money, and absent through the expand (D5)", () => {
+  const items = [line(), freight(), hireLine({ price: { ...flatPrice, replacement_cents: 4500 } }), timeHire({ path: [D, lid(9)], uid: lid(9) })];
+  const total = 140985 + 1_500 + 50_000;
+  const base = withItems(items, { total_cents: total });
+  assertEquals(issuePaths(PurchaseSchema, base), [], "absent: a purchase stored before the backfill");
+  assertEquals(issuePaths(PurchaseSchema, { ...base, totals: flatTotals(total, 45_000) }), []);
+  // Each figure is refused alone, at its own key.
+  for (
+    const [key, value] of [
+      ["subtotal_cents", total + 1],
+      ["subtotal_discounted_cents", total - 1],
+      ["discount_amount_cents", 1],
+      ["replacement_total_cents", 0],
+    ] as const
+  ) {
+    assertEquals(issuePaths(PurchaseSchema, { ...base, totals: { ...flatTotals(total, 45_000), [key]: value } }), [`totals.${key}`], key);
+  }
+  // total_cents disagrees with the lines AND with the old key.
+  assertEquals(issuePaths(PurchaseSchema, { ...base, totals: { ...flatTotals(total, 45_000), total_cents: total + 1 } }), [
+    "totals.total_cents",
+    "totals.total_cents",
+  ]);
+  const tax = { uid: "testtax1000000000000", name: "Sales Tax", rate: 10, type: "percent" as const, amount_cents: 1 };
+  assertEquals(issuePaths(PurchaseSchema, { ...base, totals: { ...flatTotals(total, 45_000), taxes: [tax] } }), ["totals.taxes"]);
+  assertEquals(issuePaths(PurchaseSchema, { ...base, totals: { ...flatTotals(total, 45_000), transaction_fees: [tax] } }), [
+    "totals.transaction_fees",
+  ]);
+  // The node is strict: the bill's settlement keys are not the initiator's.
+  assertEquals(issuePaths(PurchaseSchema, { ...base, totals: { ...flatTotals(total, 45_000), amount_due_cents: 0 } }), ["totals"]);
+});
+
 Deno.test("PurchaseSchema: total_cents is the Σ of the COMMITTED amounts", () => {
   assertEquals(issuePaths(PurchaseSchema, purchase({ total_cents: 140984 })), ["total_cents"]);
   // A time line commits nothing (owner, 2026-10-30): its bills decide its cost.

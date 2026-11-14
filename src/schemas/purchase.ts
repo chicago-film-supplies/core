@@ -165,6 +165,8 @@ import {
   DestinationPairCore,
   DestinationPairInputCore,
   type DestinationEndpointType,
+  InitiatorTotals,
+  type InitiatorTotalsType,
   leadingDividerViolations,
   type OrderDatesType,
   PairInputCore,
@@ -1348,8 +1350,21 @@ export interface Purchase {
    * divider, joined by `uid`.
    */
   destinations: PurchaseDestination[];
-  /** Σ {@link purchaseItemCommittedCents} — refined. */
+  /** Σ {@link purchaseItemCommittedCents} — refined; equal to `totals.total_cents` while both exist. */
   total_cents: number;
+  /**
+   * The order's `totals`, one initiator shape on both sides (one-document-model
+   * ruling 62, D5): the sum of the lines' stored money, as `priceDocument`'s
+   * stage 5 writes it. `taxes` and `transaction_fees` are always `[]` (the side is
+   * exempt, and a purchase has no fee line); `replacement_total_cents` sums the
+   * subrent lines' `replacement_cents × quantity`. A time line contributes 0, so
+   * `total_cents` here is the committed amount `total_cents` above has always
+   * been. Refined against the lines ({@link purchaseTotalsIssues}).
+   *
+   * Optional through D5's expand (beta C): absent on a purchase stored before the
+   * backfill; required in beta D, when `total_cents` goes.
+   */
+  totals?: InitiatorTotalsType;
   /**
    * Mirror of the products the items order ({@link deriveQueryByProducts}), for
    * "which purchases name this product" as one `array-contains` — the stock
@@ -1461,6 +1476,56 @@ function checkPurchase(p: Purchase, ctx: z.RefinementCtx): void {
       message: `total_cents ${p.total_cents} must equal the items' committed ${total}`,
     });
   }
+  if (p.totals !== undefined) {
+    for (const issue of purchaseTotalsIssues(p.items, p.totals)) ctx.addIssue({ code: "custom", ...issue });
+    if (p.totals.total_cents !== p.total_cents) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["totals", "total_cents"],
+        message: `totals.total_cents ${p.totals.total_cents} must equal total_cents ${p.total_cents}`,
+      });
+    }
+  }
+}
+
+/**
+ * Where a purchase's `totals` disagree with its lines (D5): each figure is the
+ * sum of the lines' STORED money, as `priceDocument`'s stage 5 sums it — never a
+ * re-price. Schema-side because the document refine calls it and `schemas/`
+ * cannot import `sumPricedLines`; every step is a sum or an integer product, so
+ * nothing rounds. `taxes` and `transaction_fees` are `[]` on the payable side.
+ */
+export function purchaseTotalsIssues(
+  items: readonly PurchaseRow[],
+  totals: InitiatorTotalsType,
+): { path: (string | number)[]; message: string }[] {
+  let subtotal = 0;
+  let discounted = 0;
+  let replacement = 0;
+  for (const line of purchaseLines(items)) {
+    subtotal += line.price.subtotal_cents;
+    discounted += line.price.subtotal_discounted_cents;
+    replacement += (line.price.replacement_cents ?? 0) * line.quantity;
+  }
+  const want: [keyof InitiatorTotalsType, number][] = [
+    ["subtotal_cents", subtotal],
+    ["subtotal_discounted_cents", discounted],
+    ["discount_amount_cents", subtotal - discounted],
+    ["total_cents", discounted],
+    ["replacement_total_cents", replacement],
+  ];
+  const issues: { path: (string | number)[]; message: string }[] = [];
+  for (const [key, value] of want) {
+    if (totals[key] !== value) {
+      issues.push({ path: ["totals", key], message: `totals.${key} ${String(totals[key])} must equal the lines' ${value}` });
+    }
+  }
+  for (const key of ["taxes", "transaction_fees"] as const) {
+    if (totals[key].length > 0) {
+      issues.push({ path: ["totals", key], message: `totals.${key} is empty on a purchase: the payable side is exempt and has no fee line` });
+    }
+  }
+  return issues;
 }
 
 // Root keys a bill or credit shares by NAME with the purchase, each a homonym:
@@ -1488,7 +1553,13 @@ export const PurchaseSchema: z.ZodType<Purchase> = z.strictObject({
   // before; this is what lets a corpus re-parse see a stored violation.
   items: z.array(PurchaseRowSchema).min(1).meta({ label: "Item" }).superRefine(checkZeroPricedComponents),
   destinations: z.array(PurchaseDestinationSchema).min(1).superRefine(checkExchangePairs).meta({ label: "Destination" }),
-  total_cents: z.int().min(0).meta({ column: true, label: "Total", ...homonym }),
+  // "Committed Total" through D5's expand only: `totals.total_cents` beside it is
+  // "Total", and two columns on one surface may not share a heading (T9). The
+  // key goes in beta E.
+  total_cents: z.int().min(0).meta({ column: true, label: "Committed Total", ...homonym }),
+  // D5 expand: the initiator's totals, `derived` as the order's are (which also
+  // tags the key the bill shares by name). Optional until the backfill.
+  totals: InitiatorTotals.optional().meta({ derived: true }),
   query_by_products: z.array(FirestoreId).meta({ derived: true }),
   query_by_orders: z.array(FirestoreId).meta({ derived: true }),
   query_by_item_types: z.array(PurchaseItemTypeEnum).meta({ derived: true }),

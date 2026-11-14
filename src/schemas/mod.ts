@@ -226,6 +226,7 @@ export {
   type TaxRefType,
   type DiscountType,
   type DiscountInputType,
+  type InitiatorTotalsType,
   type OrderDocTotalsType,
   OrderDocDates,
   OrderDocItem,

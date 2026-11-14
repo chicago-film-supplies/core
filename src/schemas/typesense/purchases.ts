@@ -44,15 +44,21 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  * the order's field on the payable side (owner, 2026-11-11), declared as the
  * order's and invoice's are; and `items.uid_product` becomes `items.uid`, the
  * one key a line names its product by (owner, 2026-11-11).
+ *
+ * v6 (one-document-model D5, ruling 62): the initiator's `totals`, declared as
+ * the invoice's and bill's are, BESIDE the kept `total_cents` pair. Both pairs
+ * stay through the expand so every step is manager-first: the default column
+ * moves to `totals.total_cents` in beta D, once this index is live, and v7 drops
+ * the old pair with the stored key.
  */
 export const purchases: TypesenseCollectionConfig = {
   alias: "purchases",
-  version: 5,
+  version: 6,
   firestoreCollection: "purchases",
-  collectionName: "purchases_v5",
+  collectionName: "purchases_v6",
   enabled: true,
   schema: {
-    name: "purchases_v5",
+    name: "purchases_v6",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -81,6 +87,10 @@ export const purchases: TypesenseCollectionConfig = {
       { name: "credits.status", type: "string[]", facet: true, optional: true },
       { name: "total_cents", type: "int64", sort: true, optional: true, money: true },
       { name: "total_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
+      // D5: optional, as every field is through an expand.
+      { name: "totals", type: "object", optional: true },
+      { name: "totals.total_cents", type: "int64", sort: true, optional: true, money: true },
+      { name: "totals.total_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "created_by", type: "object", optional: true },
       { name: "created_by.uid", type: "string", facet: true, optional: true },
       { name: "created_by.name", type: "string", sort: true, stem: true, facet: true, optional: true },

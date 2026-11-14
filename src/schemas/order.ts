@@ -2719,9 +2719,10 @@ const OrderDocOrganization = DocumentOrganizationSnapshot;
  * twin carries none of these `.meta()` annotations and every heading below would
  * silently vanish from the tables.
  *
- * ⚠️ **`replacement_total_cents` being order-only is correct, not a gap.** An
- * invoice price has no `replacement_cents`, so an invoice structurally cannot
- * compute one. Written down because it reads like an omission.
+ * ⚠️ **`replacement_total_cents` being INITIATOR-only is correct, not a gap.**
+ * An invoice price has no `replacement_cents`, so an invoice structurally cannot
+ * compute one; an order line and a purchase's subrent line both state one. Written
+ * down because it reads like an omission.
  *
  * ⚠️ **Not on the `@cfs/core/schemas` barrel**, for the same reason as
  * `DestinationPairCore`: no consumer assembles a totals object from parts, and
@@ -2753,15 +2754,24 @@ export interface OrderDocTotalsType {
   replacement_total_cents: number;
 }
 
+/**
+ * The initiator's totals, one shape on both sides (one-document-model ruling 33,
+ * D5): the order's and the purchase's `totals`. On a purchase `taxes` and
+ * `transaction_fees` are always `[]` (the payable side is exempt and has no fee
+ * line) and `replacement_total_cents` sums its subrent lines' replacements.
+ */
+export type InitiatorTotalsType = OrderDocTotalsType;
+
 // Key order is this grain's own and is preserved exactly — see `TotalsCore`.
-const OrderDocTotals: z.ZodType<OrderDocTotalsType> = z.strictObject({
+/** Zod schema for {@link InitiatorTotalsType}; not on the barrel, as `TotalsCore` is not. */
+export const InitiatorTotals: z.ZodType<InitiatorTotalsType> = z.strictObject({
   discount_amount_cents: TotalsCore.discount_amount_cents,
   subtotal_cents: TotalsCore.subtotal_cents,
   subtotal_discounted_cents: TotalsCore.subtotal_discounted_cents,
   taxes: TotalsCore.taxes,
   transaction_fees: TotalsCore.transaction_fees,
   total_cents: TotalsCore.total_cents,
-  // Order-only, and correctly so: an invoice price has no `replacement_cents`.
+  // Initiator-only, and correctly so: an invoice price has no `replacement_cents`.
   replacement_total_cents: z.int().meta({ column: true, label: "Replacement Total" }),
 });
 
@@ -3029,7 +3039,7 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   // not dead. `null`/absent already means the default store, and
   // `api-cloudrun/src/lib/locationIntegrity.ts` reasons about exactly that.
   uid_store: FirestoreId.nullable().optional().meta({ propagate: true }),
-  totals: OrderDocTotals.meta({ derived: true }),
+  totals: InitiatorTotals.meta({ derived: true }),
   invoices: z.array(z.strictObject({
     uid: FirestoreId,
     number: z.int().meta({ column: true, label: "#" }),

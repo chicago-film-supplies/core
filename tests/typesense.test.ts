@@ -240,6 +240,7 @@ Deno.test("the money marker names exactly the amount fields — pinned, not scat
     "purchase-credits:remaining_credit_cents",
     "purchase-credits:total_cents",
     "purchases:total_cents",
+    "purchases:totals.total_cents",
     "webshop-products:component_of.price.rates.amount_cents",
     "webshop-products:component_of.price.replacement_cents",
     "webshop-products:components.price.rates.amount_cents",
@@ -330,10 +331,11 @@ Deno.test("every declared money _str mirror has a money-marked source", () => {
 
   assertEquals(
     checked,
-    16,
-    `expected exactly 16 money _str mirrors (orders totals.total_cents; invoices total_cents + ` +
+    17,
+    `expected exactly 17 money _str mirrors (orders totals.total_cents; invoices total_cents + ` +
       `amount_paid_cents + amount_credited_cents + amount_void_cents + amount_due_cents; ` +
-      `credit-notes total_cents + remaining_credit_cents; purchases total_cents; ` +
+      `credit-notes total_cents + remaining_credit_cents; purchases total_cents + ` +
+      `totals.total_cents (both through D5's expand; v7 drops the first); ` +
       `purchase-bills total_cents + amount_paid_cents + amount_credited_cents + ` +
       `amount_void_cents + amount_due_cents; purchase-credits total_cents + ` +
       `remaining_credit_cents) but walked ${checked}. A LOWER number means a mirror was dropped ` +

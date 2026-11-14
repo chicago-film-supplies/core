@@ -2827,6 +2827,12 @@
           "doc": "Allowed values for component inclusion type."
         },
         {
+          "kind": "typeAlias",
+          "name": "InitiatorTotalsType",
+          "declaration": "type InitiatorTotalsType = OrderDocTotalsType;",
+          "doc": "The initiator's totals, one shape on both sides (one-document-model ruling 33,\nD5): the order's and the purchase's `totals`. On a purchase `taxes` and\n`transaction_fees` are always `[]` (the payable side is exempt and has no fee\nline) and `replacement_total_cents` sums its subrent lines' replacements."
+        },
+        {
           "kind": "interface",
           "name": "InventoryLedger",
           "declaration": "interface InventoryLedger {\n  uid: string;\n  uid_product: string;\n  type: ProductTypeType;\n  stock_method: InventoryStockMethodType;\n  quantity_held: number | null;\n  quantity_in_service: number | null;\n  quantity_rented_in: number;\n  quantity_out_of_service: number;\n  average_unit_cost: number;\n  total_cost_basis_cents: number;\n  out_of_service_breakdown: typeLiteral;\n  store_breakdown: StoreBreakdownEntry[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
@@ -4935,7 +4941,7 @@
         {
           "kind": "interface",
           "name": "Purchase",
-          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  uid_store: string;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseRow[];\n  destinations: PurchaseDestination[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  bills: Array<typeLiteral>;\n  credits: Array<typeLiteral>;\n  query_by_credits: string[];\n  bookings_breakdown: InboundBreakdown;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  uid_store: string;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseRow[];\n  destinations: PurchaseDestination[];\n  total_cents: number;\n  totals?: InitiatorTotalsType;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  bills: Array<typeLiteral>;\n  credits: Array<typeLiteral>;\n  query_by_credits: string[];\n  bookings_breakdown: InboundBreakdown;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A purchase order placed with a supplier."
         },
         {
@@ -12203,6 +12209,18 @@
         },
         {
           "kind": "variable",
+          "name": "InitiatorTotals",
+          "declaration": "const InitiatorTotals: z.ZodType<InitiatorTotalsType>;",
+          "doc": "Zod schema for {@link InitiatorTotalsType}; not on the barrel, as `TotalsCore` is not."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InitiatorTotalsType",
+          "declaration": "type InitiatorTotalsType = OrderDocTotalsType;",
+          "doc": "The initiator's totals, one shape on both sides (one-document-model ruling 33,\nD5): the order's and the purchase's `totals`. On a purchase `taxes` and\n`transaction_fees` are always `[]` (the payable side is exempt and has no fee\nline) and `replacement_total_cents` sums its subrent lines' replacements."
+        },
+        {
+          "kind": "variable",
           "name": "ItemPrice",
           "declaration": "const ItemPrice: z.ZodType<ItemPriceType>;",
           "doc": "Zod schema for item price breakdown (input)."
@@ -12505,7 +12523,7 @@
           "kind": "variable",
           "name": "TotalsCore",
           "declaration": "const TotalsCore: typeLiteral;",
-          "doc": "The six totals fields an order and an invoice declare identically.\n\n⭐ **Referenced PER KEY, not spread — and unlike `DestinationPairCore` above,\nthat was forced.** The shared fields are contiguous in both grains, but their\ninternal order differs: `discount_amount_cents` is FIRST on the order and\nTHIRD on the invoice. A schema's key order is its Firestore-surface column\norder (`getFirestoreColumns` walks the shape), so `{ ...TotalsCore, … }` would\nmove that column on whichever grain did not supply the ordering — an\noperator-visible change wearing a refactor's clothes. Same answer as the line\nitem in `_items.ts`, same reason, and the opposite answer to the destination\npair. **Contiguity is not the test; agreement on ORDER is.**\n\n🔴 **So the anti-drift guarantee lives in `tests/totals-parity.test.ts`, not in\nthe syntax.** A per-key reference cannot stop a grain re-declaring a field\ninline any more than a spread can stop one shadowing it; only instance\nidentity (`shape[k] === TotalsCore[k]`) sees either. Structural equality would\nNOT do — `z.globalRegistry` is keyed on the instance, so a separately-declared\ntwin carries none of these `.meta()` annotations and every heading below would\nsilently vanish from the tables.\n\n⚠️ **`replacement_total_cents` being order-only is correct, not a gap.** An\ninvoice price has no `replacement_cents`, so an invoice structurally cannot\ncompute one. Written down because it reads like an omission.\n\n⚠️ **Not on the `@cfs/core/schemas` barrel**, for the same reason as\n`DestinationPairCore`: no consumer assembles a totals object from parts, and\npublishing the parts publishes a second way to spell one."
+          "doc": "The six totals fields an order and an invoice declare identically.\n\n⭐ **Referenced PER KEY, not spread — and unlike `DestinationPairCore` above,\nthat was forced.** The shared fields are contiguous in both grains, but their\ninternal order differs: `discount_amount_cents` is FIRST on the order and\nTHIRD on the invoice. A schema's key order is its Firestore-surface column\norder (`getFirestoreColumns` walks the shape), so `{ ...TotalsCore, … }` would\nmove that column on whichever grain did not supply the ordering — an\noperator-visible change wearing a refactor's clothes. Same answer as the line\nitem in `_items.ts`, same reason, and the opposite answer to the destination\npair. **Contiguity is not the test; agreement on ORDER is.**\n\n🔴 **So the anti-drift guarantee lives in `tests/totals-parity.test.ts`, not in\nthe syntax.** A per-key reference cannot stop a grain re-declaring a field\ninline any more than a spread can stop one shadowing it; only instance\nidentity (`shape[k] === TotalsCore[k]`) sees either. Structural equality would\nNOT do — `z.globalRegistry` is keyed on the instance, so a separately-declared\ntwin carries none of these `.meta()` annotations and every heading below would\nsilently vanish from the tables.\n\n⚠️ **`replacement_total_cents` being INITIATOR-only is correct, not a gap.**\nAn invoice price has no `replacement_cents`, so an invoice structurally cannot\ncompute one; an order line and a purchase's subrent line both state one. Written\ndown because it reads like an omission.\n\n⚠️ **Not on the `@cfs/core/schemas` barrel**, for the same reason as\n`DestinationPairCore`: no consumer assembles a totals object from parts, and\npublishing the parts publishes a second way to spell one."
         },
         {
           "kind": "variable",
@@ -13742,7 +13760,7 @@
         {
           "kind": "interface",
           "name": "Purchase",
-          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  uid_store: string;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseRow[];\n  destinations: PurchaseDestination[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  bills: Array<typeLiteral>;\n  credits: Array<typeLiteral>;\n  query_by_credits: string[];\n  bookings_breakdown: InboundBreakdown;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  uid_store: string;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseRow[];\n  destinations: PurchaseDestination[];\n  total_cents: number;\n  totals?: InitiatorTotalsType;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  bills: Array<typeLiteral>;\n  credits: Array<typeLiteral>;\n  query_by_credits: string[];\n  bookings_breakdown: InboundBreakdown;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A purchase order placed with a supplier."
         },
         {
@@ -14176,6 +14194,14 @@
           "name": "purchaseLines",
           "signature": "purchaseLines(rows: readonly PurchaseRow[]): PurchasePostedItem[]",
           "doc": "The lines of a purchase's rows, with dividers and kit headers dropped.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "purchaseTotalsIssues",
+          "signature": "purchaseTotalsIssues(items: readonly PurchaseRow[], totals: InitiatorTotalsType): typeLiteral[]",
+          "doc": "Where a purchase's `totals` disagree with its lines (D5): each figure is the\nsum of the lines' STORED money, as `priceDocument`'s stage 5 sums it — never a\nre-price. Schema-side because the document refine calls it and `schemas/`\ncannot import `sumPricedLines`; every step is a sum or an integer product, so\nnothing rounds. `taxes` and `transaction_fees` are `[]` on the payable side.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -16028,7 +16054,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocument",
-          "declaration": "interface PurchaseDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  status: string;\n  supplier: typeLiteral;\n  uid_store: string;\n  subject?: string;\n  reference?: string;\n  items?: Array<typeLiteral>;\n  bills?: Array<typeLiteral>;\n  credits?: Array<typeLiteral>;\n  total_cents?: number;\n  total_cents_str?: string;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  created_at?: number;\n  updated_at?: number;\n}",
+          "declaration": "interface PurchaseDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  status: string;\n  supplier: typeLiteral;\n  uid_store: string;\n  subject?: string;\n  reference?: string;\n  items?: Array<typeLiteral>;\n  bills?: Array<typeLiteral>;\n  credits?: Array<typeLiteral>;\n  total_cents?: number;\n  total_cents_str?: string;\n  totals?: typeLiteral;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  created_at?: number;\n  updated_at?: number;\n}",
           "doc": "A purchase as indexed in Typesense (api-cloudrun#1220). `reference` is\noptional here and `string | null` on the stored document: the translate path\nomits a null rather than sending one."
         },
         {
@@ -16415,7 +16441,7 @@
           "kind": "variable",
           "name": "purchases",
           "declaration": "const purchases: TypesenseCollectionConfig;",
-          "doc": "Typesense collection config for purchases (api-cloudrun#1220).\n\nThe index behind manager's `/purchases` list: what CFS ORDERED from a\nsupplier. `number` is the `default_sorting_field` and is stored bare, as on\n`credit-notes` — a prefixed display label would turn the sort field into a\nstring.\n\n🔴 **`supplier.name` MUST stay `facet: false`.** manager's\n`getQueryByStringFields` builds `query_by` from string fields that are\n`!f.facet` and covered by a declared display column, so a faceted name drops\nout of `query_by` and every search returns zero rows with no error. The same\nline in `typesense/suppliers.ts` carries the full argument.\n\n`items.name` is indexed so \"which PO has product X\" is one query. `notes` is\ndeliberately NOT declared — free text no list column needs; add it when\nsomeone wants to search on it.\n\n⚠️ `reference` is `optional: true` because its Zod leaf is `.nullable()`:\nthe translate path omits a null rather than sending one, and a non-optional\ndeclaration over a nullable leaf is a permanent, invisible sync 400.\n\nv2 (subrent purchase orders) added a `kind` facet and\n`lines.quantity_returned`.\n\nv3 (api-cloudrun#1407, the invoice shape): `lines` → `items` and the document\n`kind` is retired. The buy/subrent split is now the `items.type` facet — the\ninvoice's `items.type`, nested rather than a top-level mirror, so there is no\nderived Typesense field to declare. Every `items.*` field is `optional: true`\nbecause the arms disagree: a direct item names no product (and, until v5,\nonly a subrent item carried `quantity_returned`).\n\nv4 (one-document-model 6e-0a, ruling 32): the `bills[]` and `credits[]`\ndiscovery mirrors, `{ uid, number, status }` each, status faceted. Every field\nis `optional: true` through the expand, so a purchase stored before the\nbackfill still indexes.\n\nv5 (one-document-model 7a, C8): the `store` snapshot becomes `uid_store`, a\nfacet the manager labels from its stores cache (the order's key), and\n`items.quantity_returned` goes: a line's custody lives on its inbound\nbooking. `total_cents` stays until 6e-0b1 (ruling 62). It also gains `subject`,\nthe order's field on the payable side (owner, 2026-11-11), declared as the\norder's and invoice's are; and `items.uid_product` becomes `items.uid`, the\none key a line names its product by (owner, 2026-11-11)."
+          "doc": "Typesense collection config for purchases (api-cloudrun#1220).\n\nThe index behind manager's `/purchases` list: what CFS ORDERED from a\nsupplier. `number` is the `default_sorting_field` and is stored bare, as on\n`credit-notes` — a prefixed display label would turn the sort field into a\nstring.\n\n🔴 **`supplier.name` MUST stay `facet: false`.** manager's\n`getQueryByStringFields` builds `query_by` from string fields that are\n`!f.facet` and covered by a declared display column, so a faceted name drops\nout of `query_by` and every search returns zero rows with no error. The same\nline in `typesense/suppliers.ts` carries the full argument.\n\n`items.name` is indexed so \"which PO has product X\" is one query. `notes` is\ndeliberately NOT declared — free text no list column needs; add it when\nsomeone wants to search on it.\n\n⚠️ `reference` is `optional: true` because its Zod leaf is `.nullable()`:\nthe translate path omits a null rather than sending one, and a non-optional\ndeclaration over a nullable leaf is a permanent, invisible sync 400.\n\nv2 (subrent purchase orders) added a `kind` facet and\n`lines.quantity_returned`.\n\nv3 (api-cloudrun#1407, the invoice shape): `lines` → `items` and the document\n`kind` is retired. The buy/subrent split is now the `items.type` facet — the\ninvoice's `items.type`, nested rather than a top-level mirror, so there is no\nderived Typesense field to declare. Every `items.*` field is `optional: true`\nbecause the arms disagree: a direct item names no product (and, until v5,\nonly a subrent item carried `quantity_returned`).\n\nv4 (one-document-model 6e-0a, ruling 32): the `bills[]` and `credits[]`\ndiscovery mirrors, `{ uid, number, status }` each, status faceted. Every field\nis `optional: true` through the expand, so a purchase stored before the\nbackfill still indexes.\n\nv5 (one-document-model 7a, C8): the `store` snapshot becomes `uid_store`, a\nfacet the manager labels from its stores cache (the order's key), and\n`items.quantity_returned` goes: a line's custody lives on its inbound\nbooking. `total_cents` stays until 6e-0b1 (ruling 62). It also gains `subject`,\nthe order's field on the payable side (owner, 2026-11-11), declared as the\norder's and invoice's are; and `items.uid_product` becomes `items.uid`, the\none key a line names its product by (owner, 2026-11-11).\n\nv6 (one-document-model D5, ruling 62): the initiator's `totals`, declared as\nthe invoice's and bill's are, BESIDE the kept `total_cents` pair. Both pairs\nstay through the expand so every step is manager-first: the default column\nmoves to `totals.total_cents` in beta D, once this index is live, and v7 drops\nthe old pair with the stored key."
         },
         {
           "kind": "variable",
@@ -24853,6 +24879,14 @@
           "name": "priceStatedTotalLine",
           "signature": "priceStatedTotalLine(line: StatedTotalLine): LinePriceMoney",
           "doc": "**The stated-total arm: a payable line's money is its stated amount.**\n\nTwo inputs, by what the line states:\n\n- **`price.stated_cents` set** (one-document-model ruling 39, D7): the GROSS.\n  `subtotal_cents` = `stated_cents`; the net is `stated_cents −\n  discount.amount_cents`, the declared discount CENTS, so a rate is never\n  re-applied to a line — a part's cents are its slice of its source's.\n  `amount_cents` is ignored here and re-derived by the caller.\n- **absent or `null`**, on a TIME line only (a linked bill's time line, whose\n  `amount_cents` is Xero's net): `subtotal_cents` = net +\n  `discount.amount_cents`, the discount record being DECLARED (what came off).\n  A FLAT line that states no gross is refused (core beta B): its gross is its\n  one money input.\n\nEither way:\n\n- `subtotal_discounted_cents` = the net CFS pays;\n- `taxes` re-amounted on the net from each tax's own rate and type\n  (`computeItemTaxAmountCents`, the one tax-amount author) — `[]` on an exempt\n  side;\n- `total_cents` = net + Σ taxes.\n\nThe twin of stage 4's fee arm: a declared amount stored as the line's money,\nnot re-derived from rates. Exported for the projectors that default a bill\nor credit line from its purchase line before the writer prices the document.\n\nBasis-blind: a LINKED time line's stated amount is Xero's money and prices\nthrough here too.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "purchaseTotals",
+          "signature": "purchaseTotals(items: readonly PurchaseRow[]): InitiatorTotalsType",
+          "doc": "**Stage 5 for a PURCHASE, on its own: its `totals`** (one-document-model D5,\nruling 62) — the initiator's shape, folded from the STORED lines and never a\nre-price, as {@link sumPricedLines} folds an order's. The purchase writers call\nit on the lines `priceDocument` has just priced.\n\nOver `purchaseLines` (a kit header carries no money of its own, ruling 3), as\nthe document refine sums them, so the stored totals satisfy it by\nconstruction. `replacement_total_cents` is the subrent lines' replacements,\nuntaxed: the payable side charges no tax.",
           "paramTags": [],
           "returnsTag": null
         },

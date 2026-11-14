@@ -415,6 +415,8 @@ Deno.test("T14: the discriminated rate columns are the ones that exist", () => {
     "purchase:items.price.discount.rate",
     "purchase:items.price.taxes.rate",
     "purchase:items.price.taxes_base.rate",
+    "purchase:totals.taxes.rate",
+    "purchase:totals.transaction_fees.rate",
     "taxes-rates:rate",
   ]);
 });

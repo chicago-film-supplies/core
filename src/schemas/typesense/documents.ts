@@ -1176,6 +1176,8 @@ export interface PurchaseDocument {
   credits?: Array<{ uid: string; number: number; status: string }>;
   total_cents?: number;
   total_cents_str?: string;
+  /** v6 (one-document-model D5): the initiator's totals; the old pair above goes in v7. */
+  totals?: { total_cents?: number; total_cents_str?: string };
   created_by?: TypesenseActorRef;
   updated_by?: TypesenseActorRef;
   date_fs: number;
