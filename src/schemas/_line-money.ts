@@ -226,7 +226,7 @@ export function statedLine(statedCents: number, quantity: number): LineMoneyLike
   return { quantity, price: { rates: [], counts: [], discount: null, stated_cents: statedCents } };
 }
 
-/** The stored payable-line surface {@link payableMoneyLine} reads. */
+/** The stored payable-line surface {@link payableStoredMoney} reads. */
 export interface PayableMoneyLineLike {
   quantity: number;
   /** The stored NET; `null` on a purchase time line. */
@@ -239,29 +239,79 @@ export interface PayableMoneyLineLike {
 }
 
 /**
- * **A stored FLAT payable line as the one function reads it** (ruling 39, S3):
- * its stated GROSS is `price.stated_cents`, or — on a line written before the
- * backfill — the declared net plus its declared discount record, the gross the
- * schema's absent arm reads (`statedTotalMoneyIssues`). Retired with that arm in
- * core beta B, when every flat payable line states `stated_cents`.
- *
- * A TIME line partitions its stored NET, undiscounted ({@link statedLine}): its
- * money is its counts priced (or Xero's, linked), and its discount's pricing
- * factor is its counted periods, which a stated line's factor of 1 cannot read.
+ * **A line's STORED money, as a part slices it** (one-document-model D7): its
+ * gross and its discount in cents over its quantity. Net is their difference.
  */
-export function payableMoneyLine(line: PayableMoneyLineLike): LineMoneyLike {
-  if (line.price.price_formula?.basis === "time") return statedLine(line.amount_cents ?? 0, line.quantity);
-  const discount = line.price.discount ?? null;
-  const stated = line.price.stated_cents ?? (line.amount_cents ?? 0) + (discount?.amount_cents ?? 0);
-  return {
-    quantity: line.quantity,
-    price: {
-      rates: [],
-      counts: [],
-      discount: discount === null ? null : { rate: discount.rate, type: discount.type },
-      stated_cents: stated,
-    },
+export interface StoredLineMoney {
+  quantity: number;
+  gross_cents: number;
+  discount_cents: number;
+}
+
+/** A slice of a line's stored money: each figure the line's, over the units it covers. */
+export interface MoneySlice {
+  gross_cents: number;
+  discount_cents: number;
+  /** `gross_cents − discount_cents`: a subtraction, nothing rounds. */
+  net_cents: number;
+}
+
+/**
+ * A stored payable line's money as a part slices it (D7): its stated GROSS
+ * (`price.stated_cents`, or — before the backfill — its net plus its discount
+ * record) and its discount in cents. A TIME line slices its stored net with no
+ * discount: its money is its counts priced (or Xero's, linked), so what a part
+ * takes of it is a share of that.
+ */
+export function payableStoredMoney(line: PayableMoneyLineLike): StoredLineMoney {
+  if (line.price.price_formula?.basis === "time") {
+    return { quantity: line.quantity, gross_cents: line.amount_cents ?? 0, discount_cents: 0 };
+  }
+  const discount = line.price.discount?.amount_cents ?? 0;
+  const gross = line.price.stated_cents ?? (line.amount_cents ?? 0) + discount;
+  return { quantity: line.quantity, gross_cents: gross, discount_cents: discount };
+}
+
+/**
+ * **Units `(before, after]` of a line's STORED money** (one-document-model D7):
+ * the gross and the discount each sliced on the CUMULATIVE value
+ * (`round(x · k ÷ quantity)`, once), and the net their difference. A rate is
+ * never re-applied: a part inherits money, so every part of a line sums EXACTLY
+ * to the line on all three figures, and a part's own `net = gross − discount`
+ * holds by construction. Defined past `quantity` (over-billing) and with the
+ * bounds swapped (a reversal). A line of no units slices to zero.
+ */
+export function sliceStoredMoney(money: StoredLineMoney, before: number, after: number): MoneySlice {
+  const at = (cents: number, k: number) => {
+    assertUnits(k);
+    return statedGrossAt(cents, money.quantity, k);
   };
+  const gross = Number(at(money.gross_cents, after) - at(money.gross_cents, before));
+  const discount = Number(at(money.discount_cents, after) - at(money.discount_cents, before));
+  return { gross_cents: gross, discount_cents: discount, net_cents: gross - discount };
+}
+
+/**
+ * **The ONE place a discount RATE becomes money on a stated line** (D7): when an
+ * operator states a gross or discount terms. The discount on the whole line at
+ * its quantity, by the one line-money function (`lineDiscountAtCents`: a percent
+ * rounded once from the exact gross, a flat `rate × quantity`), and the net by
+ * subtraction. Nothing re-applies a rate afterwards: the document pricer and the
+ * refine read the stored cents, and parts slice them ({@link sliceStoredMoney}).
+ *
+ * A discount larger than the gross is a negative net, the writer's 400 to make.
+ */
+export function applyDiscountTerms(
+  grossCents: number,
+  quantity: number,
+  terms: FormulaDiscount | null,
+): { amount_cents: number; discount: { rate: number; type: FormulaDiscount["type"]; amount_cents: number } | null } {
+  if (terms === null) return { amount_cents: grossCents, discount: null };
+  const off = lineDiscountAtCents(
+    { quantity, price: { rates: [], counts: [], discount: { rate: terms.rate, type: terms.type }, stated_cents: grossCents } },
+    quantity,
+  );
+  return { amount_cents: grossCents - off, discount: { rate: terms.rate, type: terms.type, amount_cents: off } };
 }
 
 /**

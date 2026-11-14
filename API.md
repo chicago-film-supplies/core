@@ -29372,11 +29372,13 @@ by the purchase line and the bill/credit line alike, like
 {@link PayablePriceMoneyCore}, which it is deliberately not part of: every key
 there is derived, and this one is the input.
 
-Set, the line's money is the one line-money function's (`lineMoneyAtCents`,
-`schemas/_line-money.ts`): `subtotal_cents` is `stated_cents`, the line's
-`amount_cents` (the net) is `lineMoneyAtCents(quantity)`, and
-`discount.amount_cents` is `lineDiscountAtCents(quantity)`. A stated total
-governs a line that also carries rates (a LINKED time line: Xero's money).
+Set, `subtotal_cents` is `stated_cents` and the line's `amount_cents` (the
+net) is `stated_cents − discount.amount_cents`, on every line, whole or part
+(D7). The discount's CENTS are the money: an operator's stated price turns the
+rate into cents once (`applyDiscountTerms`), and a part of a line takes its
+slice of the line's stated gross and cents (`sliceStoredMoney`), so nothing
+re-applies a rate to a part. A stated total governs a line that also carries
+rates (a LINKED time line: Xero's money).
 
 In the `flat_money` merge group with `quantity` and `amount_cents`: it is
 what they are derived from, so it follows or is kept with them as one unit.
@@ -52200,11 +52202,11 @@ the minimum skipped — only a flat tax reads it, and is refused.
 
 Two inputs, by what the line states:
 
-- **`price.stated_cents` set** (one-document-model ruling 39): the GROSS.
-  `subtotal_cents` = `stated_cents`; the net is `lineMoneyAtCents(quantity)`
-  and `discount.amount_cents` is `lineDiscountAtCents(quantity)` — the one
-  line-money function, so the whole line and every part of it come from one
-  author. `amount_cents` is ignored here and re-derived by the caller.
+- **`price.stated_cents` set** (one-document-model ruling 39, D7): the GROSS.
+  `subtotal_cents` = `stated_cents`; the net is `stated_cents −
+  discount.amount_cents`, the declared discount CENTS, so a rate is never
+  re-applied to a line — a part's cents are its slice of its source's.
+  `amount_cents` is ignored here and re-derived by the caller.
 - **absent or `null`** (a line written before the backfill): the declared net
   `amount_cents`, and `subtotal_cents` = net + `discount.amount_cents`, the
   discount record being DECLARED (what came off).
@@ -52407,9 +52409,21 @@ interface MeteredUnits {
 }
 ```
 
+### `MoneySlice`
+
+A slice of a line's stored money: each figure the line's, over the units it covers.
+
+```ts
+interface MoneySlice {
+  gross_cents: number;
+  discount_cents: number;
+  net_cents: number;
+}
+```
+
 ### `PayableMoneyLineLike`
 
-The stored payable-line surface {@link payableMoneyLine} reads.
+The stored payable-line surface {@link payableStoredMoney} reads.
 
 ```ts
 interface PayableMoneyLineLike {
@@ -52449,6 +52463,19 @@ interface RateSnapshot {
 }
 ```
 
+### `StoredLineMoney`
+
+**A line's STORED money, as a part slices it** (one-document-model D7): its
+gross and its discount in cents over its quantity. Net is their difference.
+
+```ts
+interface StoredLineMoney {
+  quantity: number;
+  gross_cents: number;
+  discount_cents: number;
+}
+```
+
 ### `TierCount`
 
 One tier's metered count, an exact rational. `den > 0`, reduced. A count may
@@ -52462,6 +52489,17 @@ interface TierCount {
   den: number;
 }
 ```
+
+### `applyDiscountTerms(grossCents: number, quantity: number, terms: FormulaDiscount | null): typeLiteral`
+
+**The ONE place a discount RATE becomes money on a stated line** (D7): when an
+operator states a gross or discount terms. The discount on the whole line at
+its quantity, by the one line-money function (`lineDiscountAtCents`: a percent
+rounded once from the exact gross, a flat `rate × quantity`), and the net by
+subtraction. Nothing re-applies a rate afterwards: the document pricer and the
+refine read the stored cents, and parts slice them ({@link sliceStoredMoney}).
+
+A discount larger than the gross is a negative net, the writer's 400 to make.
 
 ### `catalogRateSnapshot(rates: readonly CatalogRateLike[], asOf: string | null): RateSnapshot[]`
 
@@ -52579,17 +52617,13 @@ counts: {@link priceFromFormula} is unchanged, and a delta of two meterings
 
 The amount of `rateKey`'s OPEN row (`applied_to: null`), or `null` when the key has none.
 
-### `payableMoneyLine(line: PayableMoneyLineLike): LineMoneyLike`
+### `payableStoredMoney(line: PayableMoneyLineLike): StoredLineMoney`
 
-**A stored FLAT payable line as the one function reads it** (ruling 39, S3):
-its stated GROSS is `price.stated_cents`, or — on a line written before the
-backfill — the declared net plus its declared discount record, the gross the
-schema's absent arm reads (`statedTotalMoneyIssues`). Retired with that arm in
-core beta B, when every flat payable line states `stated_cents`.
-
-A TIME line partitions its stored NET, undiscounted ({@link statedLine}): its
-money is its counts priced (or Xero's, linked), and its discount's pricing
-factor is its counted periods, which a stated line's factor of 1 cannot read.
+A stored payable line's money as a part slices it (D7): its stated GROSS
+(`price.stated_cents`, or — before the backfill — its net plus its discount
+record) and its discount in cents. A TIME line slices its stored net with no
+discount: its money is its counts priced (or Xero's, linked), so what a part
+takes of it is a share of that.
 
 ### `priceFormulaRefOf(formula: PricingFormula): PriceFormulaRef`
 
@@ -52630,6 +52664,16 @@ names keeps its rows when the old rates had it, and a NEW key opens on
 price). Rows for keys the new formula does not name are dropped: a product's
 rate history is its current formula's, and every line already priced keeps
 its own snapshot.
+
+### `sliceStoredMoney(money: StoredLineMoney, before: number, after: number): MoneySlice`
+
+**Units `(before, after]` of a line's STORED money** (one-document-model D7):
+the gross and the discount each sliced on the CUMULATIVE value
+(`round(x · k ÷ quantity)`, once), and the net their difference. A rate is
+never re-applied: a part inherits money, so every part of a line sums EXACTLY
+to the line on all three figures, and a part's own `net = gross − discount`
+holds by construction. Defined past `quantity` (over-billing) and with the
+bounds swapped (a reversal). A line of no units slices to zero.
 
 ### `snapshotRates(formula: PriceFormulaRule, rates: readonly DatedRateLike[], asOf: string): RateSnapshot[]`
 
@@ -53041,7 +53085,8 @@ interface BillLineCreditPart {
   n: number;
   amount_cents: number;
   discount: DiscountType | null;
-  stated_cents?: number;
+  stated_cents: number;
+  units_from: number | null;
   substituted_for: SubstitutedForEntryType[];
 }
 ```
@@ -53060,15 +53105,13 @@ interface BillLineCredited {
 ### `CreditMoney`
 
 One credit line's money, as both credit arms price it (one-document-model
-6e-0b1 D4): the default is a partition of what is credited, through the one
-line-money function; a supplier's MEMO overrides it and becomes the credit
-line's own `price.stated_cents`, with `discount: null` (a memo is net).
+6e-0b1 D4, D7): by default the slice of what is credited ({@link partMoney});
+a supplier's MEMO overrides it as the credit line's own `price.stated_cents`
+with `discount: null` (a memo is net). Every credit line states its gross.
 
 ```ts
 interface CreditMoney {
-  amount_cents: number;
-  discount: DiscountType | null;
-  stated_cents?: number;
+  units_from: number | null;
 }
 ```
 
@@ -53081,6 +53124,18 @@ the receivable side.
 
 ```ts
 const PAYABLE_LINE_CLAIMS: LineClaimSide<PurchaseRow>;
+```
+
+### `PartMoney`
+
+A part's money as a stored row states it (one-document-model D7).
+
+```ts
+interface PartMoney {
+  amount_cents: number;
+  stated_cents: number;
+  discount: DiscountType | null;
+}
 ```
 
 ### `PayableLineRekey`
@@ -53289,6 +53344,13 @@ so an edited bill strands nothing.
 A credit that names a bill line is priced by {@link billLineCreditParts}
 instead (one-document-model 6d): from that line, not the pool.
 
+### `partMoney(line: PayableMoneyLineLike & typeLiteral, from: number, to: number): PartMoney`
+
+**Units `(from, to]` of a source line, as a part stores them** (D7): its
+slices of the source's stored gross and discount cents, and the net as their
+difference. A part never re-applies a rate, so the parts of a line sum to it
+exactly on every figure and each part's own `net = gross − discount` holds.
+
 ### `payableScopedSync(prev: Purchase, next: Purchase): typeLiteral`
 
 **The payable side of the scoped initiator → billing sync**
@@ -53323,10 +53385,9 @@ the line from where its `quantity_billed` stands, by the one line-money
 function (`lineUnitsCents`, defined past the ordered count because
 over-billing is legal), so the bills of a line sum to its `amount_cents`.
 
-The discount record is the line's discount on `quantity` units FROM UNIT 0
-(`lineDiscountAtCents`), position-free: the sync compares a bill line with
-its projection at its own quantity and knows no position, as its
-`requantify` share does (6e-0b1 S3). It is informational and never summed.
+The money is the slice `(before, before + quantity]` of the line's stored
+gross and discount cents ({@link partMoney}, D7), and the line records
+`units_from: before`, so the sync can tell it still is that slice.
 
 The line's price is built by `flatPayablePrice` (the stated-total arm), so
 the projection parses on its own; the writer prices the whole document with
@@ -53997,7 +54058,7 @@ Is a landed cost frozen? A receipt has priced part of it once the line's
 ### `landedCostWeightCents(line: Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "price">, received: number): number`
 
 A line's weight when one landed amount is spread over several lines: the
-value still to arrive, `lineUnitsCents(line, received, quantity)`. Units
+value still to arrive, the net slice of `(received, quantity]` (`sliceStoredMoney`). Units
 already received carry none of it, because the entry only ever prices units
 received after it.
 

@@ -185,7 +185,6 @@ import {
   type RateSnapshotType,
   RateSnapshotSchema,
 } from "./price-formula.ts";
-import { lineDiscountAtCents, lineMoneyAtCents } from "./_line-money.ts";
 
 // ── Status ───────────────────────────────────────────────────────
 
@@ -398,11 +397,13 @@ export const PayablePriceMoneyCore: {
  * {@link PayablePriceMoneyCore}, which it is deliberately not part of: every key
  * there is derived, and this one is the input.
  *
- * Set, the line's money is the one line-money function's (`lineMoneyAtCents`,
- * `schemas/_line-money.ts`): `subtotal_cents` is `stated_cents`, the line's
- * `amount_cents` (the net) is `lineMoneyAtCents(quantity)`, and
- * `discount.amount_cents` is `lineDiscountAtCents(quantity)`. A stated total
- * governs a line that also carries rates (a LINKED time line: Xero's money).
+ * Set, `subtotal_cents` is `stated_cents` and the line's `amount_cents` (the
+ * net) is `stated_cents − discount.amount_cents`, on every line, whole or part
+ * (D7). The discount's CENTS are the money: an operator's stated price turns the
+ * rate into cents once (`applyDiscountTerms`), and a part of a line takes its
+ * slice of the line's stated gross and cents (`sliceStoredMoney`), so nothing
+ * re-applies a rate to a part. A stated total governs a line that also carries
+ * rates (a LINKED time line: Xero's money).
  *
  * In the `flat_money` merge group with `quantity` and `amount_cents`: it is
  * what they are derived from, so it follows or is kept with them as one unit.
@@ -483,11 +484,11 @@ export function purchaseLineMoneyIssues(
         issues.push({ path: ["price", "stated_cents"], message: "a time line states no total; its bills decide its cost" });
       }
       // Its money is zero whatever it states; a stated total is reported once, above.
-      if (item.price) issues.push(...statedTotalMoneyIssues({ ...item.price, stated_cents: null }, 0, null));
+      if (item.price) issues.push(...statedTotalMoneyIssues({ ...item.price, stated_cents: null }, 0));
       return issues;
     }
     if (item.amount_cents === null) issues.push({ path: ["amount_cents"], message: "a bill or credit line states its amount" });
-    else if (item.price) issues.push(...statedTotalMoneyIssues(item.price, item.amount_cents, item.quantity ?? null));
+    else if (item.price) issues.push(...statedTotalMoneyIssues(item.price, item.amount_cents));
     return issues;
   }
   if (item.amount_cents === null) issues.push({ path: ["amount_cents"], message: "a flat line states its amount" });
@@ -496,7 +497,7 @@ export function purchaseLineMoneyIssues(
     issues.push({ path: ["quantity_billed"], message: "a flat line counts what is billed" });
   }
   if (item.price && item.amount_cents !== null) {
-    issues.push(...statedTotalMoneyIssues(item.price, item.amount_cents, item.quantity ?? null));
+    issues.push(...statedTotalMoneyIssues(item.price, item.amount_cents));
   }
   return issues;
 }
@@ -506,11 +507,12 @@ export function purchaseLineMoneyIssues(
  * input gives (`priceDocument`'s stated-total arm is the author; this is the
  * value assertion beside it).
  *
- * - **`price.stated_cents` set** (ruling 39): the gross is `stated_cents`, and
- *   the net (`amountCents`) and the discount record are the one line-money
- *   function's at the line's `quantity` (`lineMoneyAtCents`,
- *   `lineDiscountAtCents`). A line that states a total but no `quantity` is
- *   refused: there is nothing to derive over.
+ * - **`price.stated_cents` set** (ruling 39, D7): the gross is `stated_cents`,
+ *   and the net (`amountCents`) is `stated_cents − discount.amount_cents`: a
+ *   subtraction, checked on every line, whole or part. The RATE is not
+ *   re-applied here: it becomes cents once, when an operator states the price
+ *   (`applyDiscountTerms`), and a part slices the cents (`sliceStoredMoney`), so
+ *   a part of a percent-discounted line is not 1¢ off its own re-derivation.
  * - **absent or `null`** (every line written before the backfill): the gross is
  *   `amountCents + discount.amount_cents`, the declared discount record. Beta B
  *   retires this arm on a flat line.
@@ -518,32 +520,18 @@ export function purchaseLineMoneyIssues(
 function statedTotalMoneyIssues(
   price: PurchaseLinePrice,
   amountCents: number,
-  quantity: number | null,
 ): { path: (string | number)[]; message: string }[] {
   const issues: { path: (string | number)[]; message: string }[] = [];
   const stated = price.stated_cents ?? null;
   let gross = amountCents + (price.discount?.amount_cents ?? 0);
   if (stated !== null) {
-    if (quantity === null) {
-      return [{ path: ["price", "stated_cents"], message: "a stated total is derived over the line's quantity, and none is stated" }];
-    }
     gross = stated;
-    const line = { quantity, price: { rates: price.rates, counts: [], discount: price.discount, stated_cents: stated } };
-    const net = lineMoneyAtCents(line, quantity);
+    const net = stated - (price.discount?.amount_cents ?? 0);
     if (amountCents !== net) {
       issues.push({
         path: ["amount_cents"],
-        message: `amount_cents ${amountCents} must equal the stated total's money over ${quantity} unit(s): ${net}`,
+        message: `amount_cents ${amountCents} must equal the stated total less its discount: ${net}`,
       });
-    }
-    if (price.discount !== null) {
-      const off = lineDiscountAtCents(line, quantity);
-      if (price.discount.amount_cents !== off) {
-        issues.push({
-          path: ["price", "discount", "amount_cents"],
-          message: `price.discount.amount_cents ${price.discount.amount_cents} must equal the stated total's discount: ${off}`,
-        });
-      }
     }
   }
   if (price.subtotal_discounted_cents !== amountCents) {

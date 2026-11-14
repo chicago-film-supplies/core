@@ -92,8 +92,6 @@ import {
   type Tax,
 } from "./orders.ts";
 import {
-  lineDiscountAtCents,
-  lineMoneyAtCents,
   meterUnits,
   type MeterRate,
   type PricingFormula,
@@ -675,11 +673,11 @@ export interface StatedTotalLine {
  *
  * Two inputs, by what the line states:
  *
- * - **`price.stated_cents` set** (one-document-model ruling 39): the GROSS.
- *   `subtotal_cents` = `stated_cents`; the net is `lineMoneyAtCents(quantity)`
- *   and `discount.amount_cents` is `lineDiscountAtCents(quantity)` — the one
- *   line-money function, so the whole line and every part of it come from one
- *   author. `amount_cents` is ignored here and re-derived by the caller.
+ * - **`price.stated_cents` set** (one-document-model ruling 39, D7): the GROSS.
+ *   `subtotal_cents` = `stated_cents`; the net is `stated_cents −
+ *   discount.amount_cents`, the declared discount CENTS, so a rate is never
+ *   re-applied to a line — a part's cents are its slice of its source's.
+ *   `amount_cents` is ignored here and re-derived by the caller.
  * - **absent or `null`** (a line written before the backfill): the declared net
  *   `amount_cents`, and `subtotal_cents` = net + `discount.amount_cents`, the
  *   discount record being DECLARED (what came off).
@@ -704,18 +702,14 @@ export interface StatedTotalLine {
 export function priceStatedTotalLine(line: StatedTotalLine): LinePriceMoney {
   const stated = line.price.stated_cents ?? null;
   let amount = line.amount_cents;
-  let discount = line.price.discount === null ? null : { ...line.price.discount };
+  const discount = line.price.discount === null ? null : { ...line.price.discount };
   let gross: number | null = null;
   if (stated !== null) {
-    // Ruling 39: the stated GROSS is the input, and the net and the discount
-    // record are the one line-money function's at the line's quantity.
-    const money = {
-      quantity: line.quantity,
-      price: { rates: [], counts: [], discount: line.price.discount, stated_cents: stated },
-    };
-    amount = lineMoneyAtCents(money, line.quantity);
+    // D7: the stated GROSS less its discount CENTS. A rate is never re-applied
+    // here: it became cents when the price was stated (`applyDiscountTerms`),
+    // and a part's cents are its slice of its source's (`sliceStoredMoney`).
+    amount = stated - (discount?.amount_cents ?? 0);
     gross = stated;
-    if (discount !== null) discount = { ...discount, amount_cents: lineDiscountAtCents(money, line.quantity) };
   }
   if (amount === null) throw new PriceRefusalError(`Line ${line.uid} states no amount`);
   const taxes = line.price.taxes.map((t) => ({

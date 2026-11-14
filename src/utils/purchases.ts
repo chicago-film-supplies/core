@@ -29,7 +29,7 @@ import {
   isPurchaseLine,
 } from "../schemas/mod.ts";
 import { apportionCents } from "./money.ts";
-import { lineMoneyAtCents, lineUnitsCents, payableMoneyLine, statedLine } from "../schemas/_line-money.ts";
+import { lineMoneyAtCents, payableStoredMoney, sliceStoredMoney, statedLine } from "../schemas/_line-money.ts";
 import { componentQuantities, type ComponentRowForWalk } from "./order-lines.ts";
 import { productCountsStock } from "./products.ts";
 import { derivePurchaseCreditStatus, recomputePurchaseBillTotals } from "./invoices.ts";
@@ -116,7 +116,7 @@ export function purchaseLineReceiptTargetCents(
   }
   return line.landed_costs.reduce(
     (sum, entry) => sum + landedPricedCents(entry, quantityReceived),
-    lineMoneyAtCents(payableMoneyLine(line), quantityReceived),
+    sliceStoredMoney(payableStoredMoney(line), 0, quantityReceived).net_cents,
   );
 }
 
@@ -154,7 +154,7 @@ export function strandedLandedCents(
 
 /**
  * A line's weight when one landed amount is spread over several lines: the
- * value still to arrive, `lineUnitsCents(line, received, quantity)`. Units
+ * value still to arrive, the net slice of `(received, quantity]` (`sliceStoredMoney`). Units
  * already received carry none of it, because the entry only ever prices units
  * received after it.
  */
@@ -163,7 +163,7 @@ export function landedCostWeightCents(
   received: number,
 ): number {
   if (received >= line.quantity) return 0; // Nothing still to arrive; an over-receipt prices nothing either.
-  return lineUnitsCents(payableMoneyLine(line), received, line.quantity);
+  return sliceStoredMoney(payableStoredMoney(line), received, line.quantity).net_cents;
 }
 
 /** One buy line as {@link allocateLandedCostCents} weighs it: the line and its row's received count. */

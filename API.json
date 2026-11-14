@@ -13737,7 +13737,7 @@
           "kind": "variable",
           "name": "PayableStatedCore",
           "declaration": "const PayableStatedCore: typeLiteral;",
-          "doc": "**`price.stated_cents` — a payable line's stated GROSS, the input its money is\nderived from** (one-document-model ruling 39, 6e-0b1 S2). ONE instance, spread\nby the purchase line and the bill/credit line alike, like\n{@link PayablePriceMoneyCore}, which it is deliberately not part of: every key\nthere is derived, and this one is the input.\n\nSet, the line's money is the one line-money function's (`lineMoneyAtCents`,\n`schemas/_line-money.ts`): `subtotal_cents` is `stated_cents`, the line's\n`amount_cents` (the net) is `lineMoneyAtCents(quantity)`, and\n`discount.amount_cents` is `lineDiscountAtCents(quantity)`. A stated total\ngoverns a line that also carries rates (a LINKED time line: Xero's money).\n\nIn the `flat_money` merge group with `quantity` and `amount_cents`: it is\nwhat they are derived from, so it follows or is kept with them as one unit.\n\n⚠️ **Optional and nullable in core beta A, by design** (the plan's staging,\n2026-11-13): stored lines predate it and the backfill runs after the deploy\nthat declares it (`cfs-release-order`: under `z.strictObject` the deploy\nprecedes the backfill). Beta B requires it on a flat line through the money\nrefine; the key itself stays nullable, because the price schema is shared\nwith time lines.\n\n⚠️ Receivable lines do not carry it until 6e-0b2 (D2): there an invoice or\ncredit-note line is priced from its rates.\n\nNot on the `@cfs/core/schemas` barrel, like {@link PayablePriceMoneyCore}."
+          "doc": "**`price.stated_cents` — a payable line's stated GROSS, the input its money is\nderived from** (one-document-model ruling 39, 6e-0b1 S2). ONE instance, spread\nby the purchase line and the bill/credit line alike, like\n{@link PayablePriceMoneyCore}, which it is deliberately not part of: every key\nthere is derived, and this one is the input.\n\nSet, `subtotal_cents` is `stated_cents` and the line's `amount_cents` (the\nnet) is `stated_cents − discount.amount_cents`, on every line, whole or part\n(D7). The discount's CENTS are the money: an operator's stated price turns the\nrate into cents once (`applyDiscountTerms`), and a part of a line takes its\nslice of the line's stated gross and cents (`sliceStoredMoney`), so nothing\nre-applies a rate to a part. A stated total governs a line that also carries\nrates (a LINKED time line: Xero's money).\n\nIn the `flat_money` merge group with `quantity` and `amount_cents`: it is\nwhat they are derived from, so it follows or is kept with them as one unit.\n\n⚠️ **Optional and nullable in core beta A, by design** (the plan's staging,\n2026-11-13): stored lines predate it and the backfill runs after the deploy\nthat declares it (`cfs-release-order`: under `z.strictObject` the deploy\nprecedes the backfill). Beta B requires it on a flat line through the money\nrefine; the key itself stays nullable, because the price schema is shared\nwith time lines.\n\n⚠️ Receivable lines do not carry it until 6e-0b2 (D2): there an invoice or\ncredit-note line is priced from its rates.\n\nNot on the `@cfs/core/schemas` barrel, like {@link PayablePriceMoneyCore}."
         },
         {
           "kind": "interface",
@@ -24852,7 +24852,7 @@
           "kind": "function",
           "name": "priceStatedTotalLine",
           "signature": "priceStatedTotalLine(line: StatedTotalLine): LinePriceMoney",
-          "doc": "**The stated-total arm: a payable line's money is its stated amount.**\n\nTwo inputs, by what the line states:\n\n- **`price.stated_cents` set** (one-document-model ruling 39): the GROSS.\n  `subtotal_cents` = `stated_cents`; the net is `lineMoneyAtCents(quantity)`\n  and `discount.amount_cents` is `lineDiscountAtCents(quantity)` — the one\n  line-money function, so the whole line and every part of it come from one\n  author. `amount_cents` is ignored here and re-derived by the caller.\n- **absent or `null`** (a line written before the backfill): the declared net\n  `amount_cents`, and `subtotal_cents` = net + `discount.amount_cents`, the\n  discount record being DECLARED (what came off).\n\nEither way:\n\n- `subtotal_discounted_cents` = the net CFS pays;\n- `taxes` re-amounted on the net from each tax's own rate and type\n  (`computeItemTaxAmountCents`, the one tax-amount author) — `[]` on an exempt\n  side;\n- `total_cents` = net + Σ taxes.\n\nThe twin of stage 4's fee arm: a declared amount stored as the line's money,\nnot re-derived from rates. Exported for the projectors that default a bill\nor credit line from its purchase line before the writer prices the document.\n\nBasis-blind: a LINKED time line's stated amount is Xero's money and prices\nthrough here too.",
+          "doc": "**The stated-total arm: a payable line's money is its stated amount.**\n\nTwo inputs, by what the line states:\n\n- **`price.stated_cents` set** (one-document-model ruling 39, D7): the GROSS.\n  `subtotal_cents` = `stated_cents`; the net is `stated_cents −\n  discount.amount_cents`, the declared discount CENTS, so a rate is never\n  re-applied to a line — a part's cents are its slice of its source's.\n  `amount_cents` is ignored here and re-derived by the caller.\n- **absent or `null`** (a line written before the backfill): the declared net\n  `amount_cents`, and `subtotal_cents` = net + `discount.amount_cents`, the\n  discount record being DECLARED (what came off).\n\nEither way:\n\n- `subtotal_discounted_cents` = the net CFS pays;\n- `taxes` re-amounted on the net from each tax's own rate and type\n  (`computeItemTaxAmountCents`, the one tax-amount author) — `[]` on an exempt\n  side;\n- `total_cents` = net + Σ taxes.\n\nThe twin of stage 4's fee arm: a declared amount stored as the line's money,\nnot re-derived from rates. Exported for the projectors that default a bill\nor credit line from its purchase line before the writer prices the document.\n\nBasis-blind: a LINKED time line's stated amount is Xero's money and prices\nthrough here too.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -24944,9 +24944,15 @@
         },
         {
           "kind": "interface",
+          "name": "MoneySlice",
+          "declaration": "interface MoneySlice {\n  gross_cents: number;\n  discount_cents: number;\n  net_cents: number;\n}",
+          "doc": "A slice of a line's stored money: each figure the line's, over the units it covers."
+        },
+        {
+          "kind": "interface",
           "name": "PayableMoneyLineLike",
           "declaration": "interface PayableMoneyLineLike {\n  quantity: number;\n  amount_cents: number | null;\n  price: typeLiteral;\n}",
-          "doc": "The stored payable-line surface {@link payableMoneyLine} reads."
+          "doc": "The stored payable-line surface {@link payableStoredMoney} reads."
         },
         {
           "kind": "typeAlias",
@@ -24968,9 +24974,23 @@
         },
         {
           "kind": "interface",
+          "name": "StoredLineMoney",
+          "declaration": "interface StoredLineMoney {\n  quantity: number;\n  gross_cents: number;\n  discount_cents: number;\n}",
+          "doc": "**A line's STORED money, as a part slices it** (one-document-model D7): its\ngross and its discount in cents over its quantity. Net is their difference."
+        },
+        {
+          "kind": "interface",
           "name": "TierCount",
           "declaration": "interface TierCount {\n  rate_key: string;\n  num: number;\n  den: number;\n}",
           "doc": "One tier's metered count, an exact rational. `den > 0`, reduced. A count may\nbe zero, and a STATED count (an extension section's added days) may be\nnegative."
+        },
+        {
+          "kind": "function",
+          "name": "applyDiscountTerms",
+          "signature": "applyDiscountTerms(grossCents: number, quantity: number, terms: FormulaDiscount | null): typeLiteral",
+          "doc": "**The ONE place a discount RATE becomes money on a stated line** (D7): when an\noperator states a gross or discount terms. The discount on the whole line at\nits quantity, by the one line-money function (`lineDiscountAtCents`: a percent\nrounded once from the exact gross, a flat `rate × quantity`), and the net by\nsubtraction. Nothing re-applies a rate afterwards: the document pricer and the\nrefine read the stored cents, and parts slice them ({@link sliceStoredMoney}).\n\nA discount larger than the gross is a negative net, the writer's 400 to make.",
+          "paramTags": [],
+          "returnsTag": null
         },
         {
           "kind": "function",
@@ -25062,9 +25082,9 @@
         },
         {
           "kind": "function",
-          "name": "payableMoneyLine",
-          "signature": "payableMoneyLine(line: PayableMoneyLineLike): LineMoneyLike",
-          "doc": "**A stored FLAT payable line as the one function reads it** (ruling 39, S3):\nits stated GROSS is `price.stated_cents`, or — on a line written before the\nbackfill — the declared net plus its declared discount record, the gross the\nschema's absent arm reads (`statedTotalMoneyIssues`). Retired with that arm in\ncore beta B, when every flat payable line states `stated_cents`.\n\nA TIME line partitions its stored NET, undiscounted ({@link statedLine}): its\nmoney is its counts priced (or Xero's, linked), and its discount's pricing\nfactor is its counted periods, which a stated line's factor of 1 cannot read.",
+          "name": "payableStoredMoney",
+          "signature": "payableStoredMoney(line: PayableMoneyLineLike): StoredLineMoney",
+          "doc": "A stored payable line's money as a part slices it (D7): its stated GROSS\n(`price.stated_cents`, or — before the backfill — its net plus its discount\nrecord) and its discount in cents. A TIME line slices its stored net with no\ndiscount: its money is its counts priced (or Xero's, linked), so what a part\ntakes of it is a share of that.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25097,6 +25117,14 @@
           "name": "ratesForFormula",
           "signature": "ratesForFormula(rates: readonly DatedRate[], formula: PriceFormulaRule, changedAt: string, _: unknown): DatedRate[]",
           "doc": "The rates after a product moves onto `formula`: every key the new formula\nnames keeps its rows when the old rates had it, and a NEW key opens on\n`changedAt`'s day at the first open amount (so a one-key product keeps its\nprice). Rows for keys the new formula does not name are dropped: a product's\nrate history is its current formula's, and every line already priced keeps\nits own snapshot.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "sliceStoredMoney",
+          "signature": "sliceStoredMoney(money: StoredLineMoney, before: number, after: number): MoneySlice",
+          "doc": "**Units `(before, after]` of a line's STORED money** (one-document-model D7):\nthe gross and the discount each sliced on the CUMULATIVE value\n(`round(x · k ÷ quantity)`, once), and the net their difference. A rate is\nnever re-applied: a part inherits money, so every part of a line sums EXACTLY\nto the line on all three figures, and a part's own `net = gross − discount`\nholds by construction. Defined past `quantity` (over-billing) and with the\nbounds swapped (a reversal). A line of no units slices to zero.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25358,7 +25386,7 @@
         {
           "kind": "interface",
           "name": "BillLineCreditPart",
-          "declaration": "interface BillLineCreditPart {\n  line: PurchaseDocumentItem;\n  credited: BillLineCredited;\n  n: number;\n  amount_cents: number;\n  discount: DiscountType | null;\n  stated_cents?: number;\n  substituted_for: SubstitutedForEntryType[];\n}",
+          "declaration": "interface BillLineCreditPart {\n  line: PurchaseDocumentItem;\n  credited: BillLineCredited;\n  n: number;\n  amount_cents: number;\n  discount: DiscountType | null;\n  stated_cents: number;\n  units_from: number | null;\n  substituted_for: SubstitutedForEntryType[];\n}",
           "doc": "One bill row a supplier credit copies: {@link billLineCreditParts}' element."
         },
         {
@@ -25370,14 +25398,20 @@
         {
           "kind": "interface",
           "name": "CreditMoney",
-          "declaration": "interface CreditMoney {\n  amount_cents: number;\n  discount: DiscountType | null;\n  stated_cents?: number;\n}",
-          "doc": "One credit line's money, as both credit arms price it (one-document-model\n6e-0b1 D4): the default is a partition of what is credited, through the one\nline-money function; a supplier's MEMO overrides it and becomes the credit\nline's own `price.stated_cents`, with `discount: null` (a memo is net)."
+          "declaration": "interface CreditMoney {\n  units_from: number | null;\n}",
+          "doc": "One credit line's money, as both credit arms price it (one-document-model\n6e-0b1 D4, D7): by default the slice of what is credited ({@link partMoney});\na supplier's MEMO overrides it as the credit line's own `price.stated_cents`\nwith `discount: null` (a memo is net). Every credit line states its gross."
         },
         {
           "kind": "variable",
           "name": "PAYABLE_LINE_CLAIMS",
           "declaration": "const PAYABLE_LINE_CLAIMS: LineClaimSide<PurchaseRow>;",
           "doc": "The payable side of `orderLineClaimIssues`: a bill or credit's\n`path_purchase_item`. A line closed to 0 is removed (ruling 47), so there is\nno closed line to refuse: a claim on it names a row that is not there, as on\nthe receivable side."
+        },
+        {
+          "kind": "interface",
+          "name": "PartMoney",
+          "declaration": "interface PartMoney {\n  amount_cents: number;\n  stated_cents: number;\n  discount: DiscountType | null;\n}",
+          "doc": "A part's money as a stored row states it (one-document-model D7)."
         },
         {
           "kind": "interface",
@@ -25473,6 +25507,14 @@
         },
         {
           "kind": "function",
+          "name": "partMoney",
+          "signature": "partMoney(line: PayableMoneyLineLike & typeLiteral, from: number, to: number): PartMoney",
+          "doc": "**Units `(from, to]` of a source line, as a part stores them** (D7): its\nslices of the source's stored gross and discount cents, and the net as their\ndifference. A part never re-applies a rate, so the parts of a line sum to it\nexactly on every figure and each part's own `net = gross − discount` holds.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "payableScopedSync",
           "signature": "payableScopedSync(prev: Purchase, next: Purchase): typeLiteral",
           "doc": "**The payable side of the scoped initiator → billing sync**\n(`syncScopedDestinations`, `@cfs/core/utils/invoices`): the purchase → bill\nsync IS the order → invoice sync, with a `purchase` scope divider, the\n`path_purchase_item` move pointer, {@link projectPurchaseRowForBill} and the\npurchase ↔ bill field set (one-document-model Phase 3).\n\nBuilt per sync over the two purchase revisions it converts\n({@link asEngineSource}): the engine hands its projector the converted rows,\nand the side maps each back to the purchase row it came from. A line closed to\n0 is removed (ruling 47), so an overridden bill row that billed it keeps no\npointer, as an invoice row whose order line was removed keeps none.",
@@ -25491,7 +25533,7 @@
           "kind": "function",
           "name": "projectPurchaseLineToBillLine",
           "signature": "projectPurchaseLineToBillLine(item: PurchaseItem, opts: ProjectBillLineOptions): PurchaseDocumentItem",
-          "doc": "**Default a bill line from its purchase line** (D5). Name, formula, discount\nterms, posting and attribution are the purchase line's (each then\noverridable on the bill until it settles). The amount is `quantity` units of\nthe line from where its `quantity_billed` stands, by the one line-money\nfunction (`lineUnitsCents`, defined past the ordered count because\nover-billing is legal), so the bills of a line sum to its `amount_cents`.\n\nThe discount record is the line's discount on `quantity` units FROM UNIT 0\n(`lineDiscountAtCents`), position-free: the sync compares a bill line with\nits projection at its own quantity and knows no position, as its\n`requantify` share does (6e-0b1 S3). It is informational and never summed.\n\nThe line's price is built by `flatPayablePrice` (the stated-total arm), so\nthe projection parses on its own; the writer prices the whole document with\n`priceDocument`, which states the same money and the line's `taxes_base`.\n\nA TIME line projects unpriced, with the caller's `counts` seed\n({@link remainingTimeCounts}); the writer's `priceDocument` prices it.",
+          "doc": "**Default a bill line from its purchase line** (D5). Name, formula, discount\nterms, posting and attribution are the purchase line's (each then\noverridable on the bill until it settles). The amount is `quantity` units of\nthe line from where its `quantity_billed` stands, by the one line-money\nfunction (`lineUnitsCents`, defined past the ordered count because\nover-billing is legal), so the bills of a line sum to its `amount_cents`.\n\nThe money is the slice `(before, before + quantity]` of the line's stored\ngross and discount cents ({@link partMoney}, D7), and the line records\n`units_from: before`, so the sync can tell it still is that slice.\n\nThe line's price is built by `flatPayablePrice` (the stated-total arm), so\nthe projection parses on its own; the writer prices the whole document with\n`priceDocument`, which states the same money and the line's `taxes_base`.\n\nA TIME line projects unpriced, with the caller's `counts` seed\n({@link remainingTimeCounts}); the writer's `priceDocument` prices it.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25909,7 +25951,7 @@
           "kind": "function",
           "name": "landedCostWeightCents",
           "signature": "landedCostWeightCents(line: Pick<PurchaseSaleItem, \"amount_cents\" | \"quantity\" | \"price\">, received: number): number",
-          "doc": "A line's weight when one landed amount is spread over several lines: the\nvalue still to arrive, `lineUnitsCents(line, received, quantity)`. Units\nalready received carry none of it, because the entry only ever prices units\nreceived after it.",
+          "doc": "A line's weight when one landed amount is spread over several lines: the\nvalue still to arrive, the net slice of `(received, quantity]` (`sliceStoredMoney`). Units\nalready received carry none of it, because the entry only ever prices units\nreceived after it.",
           "paramTags": [],
           "returnsTag": null
         },

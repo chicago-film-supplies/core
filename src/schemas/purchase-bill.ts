@@ -251,6 +251,17 @@ interface PurchaseDocumentLineBase {
   /** The `path` of the bill line credited — the AR credit note's `path_invoice_item`. */
   path_bill_item?: string[];
   /**
+   * **The first unit of its SOURCE line this line covers** (one-document-model
+   * D7): a bill line's units `(units_from, units_from + quantity]` of its
+   * purchase line, a credit line's of the bill row it credits. Its money is that
+   * slice of the source's stored gross and discount cents (`sliceStoredMoney`),
+   * and the purchase → bill sync reads it to tell an untouched part (still
+   * exactly its slice) from an overridden one. Absent on a line written before
+   * D7, and on a line that is not a part (a bill-authored row, a memo credit, a
+   * pool credit): read as 0, the sync's behaviour before D7.
+   */
+  units_from?: number | null;
+  /**
    * On a supplier CREDIT line only: this line reverses BILLING — it un-bills the
    * units (or money, or counts) it credits, so the purchase stops counting them
    * as billed. The AR credit note's `reverses_billing`, one grain over (ruling 84
@@ -469,6 +480,8 @@ const docItemShape = {
   uid_purchase_bill: FirestoreId.optional().meta({ seed: false }),
   // `seed: false`: `[]` fails `.min(1)`, exactly as `path_invoice_item`.
   path_bill_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
+  // A part's first unit of its source line (the docblock above). Writer-set.
+  units_from: z.int().min(0).nullable().optional().meta({ seed: false }),
   // A credit line's billing-reversal marker (the docblock above). `seed: false`:
   // a seeded `false` would put the key on a bill line, which the bill refuses.
   reverses_billing: z.boolean().optional().meta({ seed: false }),

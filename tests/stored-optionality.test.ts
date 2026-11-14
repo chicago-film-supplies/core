@@ -101,6 +101,9 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["purchases.items[].price.stated_cents", "mid-expand"],
   ["purchase-bills.items[].price.stated_cents", "mid-expand"],
   ["purchase-credits.items[].price.stated_cents", "mid-expand"],
+  // D7: a part's first unit of its source line. Absent on a line that is no part, and on a pre-D7 one.
+  ["purchase-bills.items[].units_from", "array-member-uncensusable"],
+  ["purchase-credits.items[].units_from", "array-member-uncensusable"],
   // ── pending-census — measurable with `orderBy`, awaiting the both-environment
   //    census before any of them is tightened. The directly actionable set.
   ["bookings.destinations.collection.address.address_coordinates", "pending-census"],

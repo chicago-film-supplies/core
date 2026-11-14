@@ -24,6 +24,7 @@ import {
   purchaseLineBilledNet,
   billedPoolCreditMoney,
   billLineCreditMoney,
+  partMoney,
   billLineCredited,
   recomputePurchaseQuantityBilled,
   syncPurchaseToBills,
@@ -35,7 +36,7 @@ import { asCreditRows, hireDates, payablePrice, purchaseDivider, purchasePair, p
 import { computeDocumentDiffs, type DocumentDiffContext, type DocumentQuantityEntry } from "../src/utils/documentDiff.ts";
 import { priceFormulaRefOf } from "../src/utils/price-formulas.ts";
 import { frozenCumulativeShareCents, frozenFlatShareCents } from "./helpers/frozen-line-money.ts";
-import { lineUnitsCents, statedLine as pseudoLine } from "../src/utils/price-formulas.ts";
+import { applyDiscountTerms, lineUnitsCents, statedLine as pseudoLine } from "../src/utils/price-formulas.ts";
 import {
   emptyInboundBreakdown,
   type Purchase,
@@ -164,6 +165,12 @@ const NONE: PurchaseBilledDocuments = { uid_purchase: PURCHASE, purchase_items: 
 /** The bill line projected from `item` for `quantity` units — at its path, with its uid. (`_n` is legacy.) */
 const project = (item: PurchaseItem, _n = 10, quantity = 1) =>
   projectPurchaseLineToBillLine(item, { uid_purchase: PURCHASE, quantity });
+/**
+ * A line's money as a writer stamps it (D7): the net, and the stated gross it
+ * implies, `net + discount cents`, so the line stays closed.
+ */
+const restated = <L extends { amount_cents: number | null; price: { discount: { amount_cents: number } | null } }>(line: L, net: number): L =>
+  ({ ...line, amount_cents: net, price: { ...line.price, stated_cents: net + (line.price.discount?.amount_cents ?? 0) } });
 /** The bill lines of a bill, dividers dropped. */
 const linesOf = (bill: PurchaseBill) => purchaseDocumentLines(bill.items);
 
@@ -230,8 +237,9 @@ Deno.test("projected flat lines parse inside a PUSHED bill, and in a LINKED one"
 Deno.test("priceDocument (payable): the stated amount IS the money, the discount the gross on top; totals are the Σ", () => {
   const discount = { rate: 10, type: "percent" as const, amount_cents: 5222 };
   const base = project(buyLine(), 10, 1);
-  const stale = { ...base, price: { ...base.price, discount, subtotal_cents: 1, subtotal_discounted_cents: 1, total_cents: 1 } };
-  const freight = { ...project(buyLine({ uid: lid(5), path: [DIV, lid(5)] }), 11, 1), amount_cents: 1500 };
+  // A line written before the backfill states no gross: the declared net and record (the absent arm).
+  const stale = { ...base, price: { ...base.price, discount, stated_cents: null, subtotal_cents: 1, subtotal_discounted_cents: 1, total_cents: 1 } };
+  const freight = restated(project(buyLine({ uid: lid(5), path: [DIV, lid(5)] }), 11, 1), 1500);
   const priced = priceDocument([stale, freight], payableCtx("purchase_bill"));
   assertEquals(priced.items[0].price.subtotal_cents, 46995 + 5222);
   assertEquals(priced.items[0].price.subtotal_discounted_cents, 46995);
@@ -247,7 +255,8 @@ Deno.test("priceDocument (payable): the stated amount IS the money, the discount
 });
 
 Deno.test("priceDocument (payable): a LINKED line's stamped Xero amount prices to exactly itself", () => {
-  const line = { ...project(buyLine(), 10, 3), amount_cents: 140000 };
+  // The link writer stamps Xero's net and restates the gross it implies (D7).
+  const line = restated(project(buyLine(), 10, 3), 140000);
   const priced = priceDocument([line], payableCtx("purchase_bill"));
   assertEquals(priced.items[0].price.total_cents, 140000);
   assertEquals(priced.items[0].amount_cents, 140000);
@@ -751,8 +760,8 @@ Deno.test("billedPoolCreditMoney: hand-stated cases, from the pool, never the PO
   assertEquals(cents({ pool: { quantity: 2, amount_cents: 1000 }, n: 1 }), 500);
   const blended = { quantity: 2, amount_cents: 300 };
   // A memo governs, up to the pool, and is the credit line's stated total (D4).
-  assertEquals(billedPoolCreditMoney({ pool: blended, n: 1, memo_cents: 7 }), { amount_cents: 7, discount: null, stated_cents: 7 });
-  assertEquals("stated_cents" in billedPoolCreditMoney({ pool: blended, n: 1 }), false, "a default credit states no total");
+  assertEquals(billedPoolCreditMoney({ pool: blended, n: 1, memo_cents: 7 }), { amount_cents: 7, discount: null, stated_cents: 7, units_from: null });
+  assertEquals(billedPoolCreditMoney({ pool: blended, n: 1 }), { amount_cents: 150, discount: null, stated_cents: 150, units_from: null }, "a pool credit states its net as its gross");
   assertThrows(() => cents({ pool: blended, n: 1, memo_cents: 301 }), RangeError, "exceeds");
   assertThrows(() => cents({ pool: blended, n: 3 }), RangeError, "exceeds");
   assertThrows(() => cents({ pool: blended, n: 0 }), RangeError, "exceeds");
@@ -771,7 +780,7 @@ Deno.test("billLineCreditMoney: a named bill line prices first-come from ITS mon
   // A blended pool never enters: the line's own rate.
   assertEquals(cents({ line: billRow(1, 200), credited: none, n: 1 }), 200);
   // A memo governs, up to what is left of the line's money, as the line's stated total.
-  assertEquals(billLineCreditMoney({ line, credited: none, n: 1, memo_cents: 7 }), { amount_cents: 7, discount: null, stated_cents: 7 });
+  assertEquals(billLineCreditMoney({ line, credited: none, n: 1, memo_cents: 7 }), { amount_cents: 7, discount: null, stated_cents: 7, units_from: null });
   assertThrows(() => cents({ line, credited: { quantity: 1, amount_cents: 9000 }, n: 1, memo_cents: 1001 }), RangeError, "1000 cents left");
   // Part-credited by a memo: the first-come share is capped at the money left.
   assertEquals(cents({ line, credited: { quantity: 1, amount_cents: 9000 }, n: 2 }), 1000);
@@ -793,6 +802,37 @@ Deno.test("billLineCreditMoney: a credit INHERITS the row's discount terms, its 
   }
   assertEquals(credited.amount_cents, 9000, "the parts' money sums to the row's net");
   assertEquals(records, 1000, "the parts' records sum to the row's");
+});
+
+Deno.test("D7: every part of a percent-discounted line is closed (net = gross − cents) and the parts sum to the line on all three figures", () => {
+  // The case that motivated D7: a percent re-applied to a part's own rounded gross
+  // can sit 1¢ off the part's slice of the line. Slicing stored cents never does.
+  let seed = 9;
+  const next = (bound: number) => (seed = (seed * 1103515245 + 12345) % 2147483648) % bound;
+  let reDerivedOff = 0;
+  for (let round = 0; round < 5_000; round++) {
+    const q = 2 + next(30);
+    const gross = 1 + next(5_000_000);
+    const rate = (1 + next(999_999)) / 10_000;
+    const m = applyDiscountTerms(gross, q, { rate, type: "percent" });
+    const line = billRow(q, m.amount_cents, m.discount);
+    let at = 0;
+    const sum = { gross: 0, cents: 0, net: 0 };
+    while (at < q) {
+      const n = 1 + next(q - at);
+      const part = partMoney(line, at, at + n);
+      assertEquals(part.amount_cents, part.stated_cents - part.discount!.amount_cents, "a part is closed");
+      if (applyDiscountTerms(part.stated_cents, n, { rate, type: "percent" }).amount_cents !== part.amount_cents) reDerivedOff++;
+      sum.gross += part.stated_cents;
+      sum.cents += part.discount!.amount_cents;
+      sum.net += part.amount_cents;
+      at += n;
+    }
+    assertEquals([sum.gross, sum.cents, sum.net], [gross, m.discount!.amount_cents, m.amount_cents]);
+  }
+  // Companion: re-applying the rate to a part DOES move it, or the sweep proves nothing.
+  console.log(`re-applying the rate to a part disagreed on ${reDerivedOff} parts`);
+  assert(reDerivedOff > 0, "re-deriving a part from its own gross never disagreed: the corpus does not discriminate");
 });
 
 Deno.test("billLineCreditMoney: any run of credits of one bill line sums to exactly its money", () => {
@@ -1198,20 +1238,19 @@ const BILL_SYNC_TIME = { formulas: FORMULAS, holidays: [] as string[] };
 const GROUP = iuid(30);
 const groupRow = { type: "group", uid: GROUP, name: "New Group", description: "", path: [PURCHASE, DIV, GROUP] } as PurchaseDocumentRow;
 const moved = (line: PurchaseDocumentItem, quantity: number, amount_cents: number) => ({
-  ...line,
+  ...restated(line, amount_cents),
   quantity,
-  amount_cents,
   path: [PURCHASE, DIV, GROUP, line.uid],
   path_purchase_item: [DIV, line.uid],
-  price: { ...line.price, subtotal_cents: amount_cents, subtotal_discounted_cents: amount_cents, total_cents: amount_cents },
+  price: { ...restated(line, amount_cents).price, subtotal_cents: amount_cents, subtotal_discounted_cents: amount_cents, total_cents: amount_cents },
 }) as PurchaseDocumentItem;
 
 Deno.test("a stored bill may hold a plain split: two rows billing one purchase line parse", () => {
   const item = buyLine();
   const line = project(item, 10, 3);
   const stays = {
-    ...line, quantity: 2, amount_cents: 93990,
-    price: { ...line.price, subtotal_cents: 93990, subtotal_discounted_cents: 93990, total_cents: 93990 },
+    ...restated(line, 93990), quantity: 2,
+    price: { ...restated(line, 93990).price, subtotal_cents: 93990, subtotal_discounted_cents: 93990, total_cents: 93990 },
   } as PurchaseDocumentItem;
   const bill = billDoc(1, [stays, moved(line, 1, 46995)]);
   bill.items = [...bill.items.slice(0, 3), groupRow, ...bill.items.slice(3)].filter((r) => r.type !== "group" || r === groupRow);
@@ -1695,7 +1734,7 @@ Deno.test("W4R syncPurchaseToBills: a bill whose AMOUNT was edited keeps its rec
   });
   // Billed in full, then the supplier's amount typed in: the records were never touched.
   const whole = project(prev, 10, 4);
-  const edited = withPayableMoney({ ...whole, amount_cents: 39000 }) as PurchaseDocumentItem;
+  const edited = withPayableMoney(restated(whole, 39000)) as PurchaseDocumentItem;
   const [out] = sync(prev, next, [billDoc(1, [edited])]);
   const [held] = linesOf(out.bill) as (PurchaseDocumentItem & { out_of_service?: unknown })[];
   // Without the group the records would follow alone: 5 shares on a 4-unit line.
@@ -1703,48 +1742,56 @@ Deno.test("W4R syncPurchaseToBills: a bill whose AMOUNT was edited keeps its rec
   parses(out.bill);
 });
 
-// ── price.stated_cents: the stated GROSS is the input (one-document-model 6e-0b1 S2) ──
+// ── price.stated_cents: the stated GROSS, less its discount CENTS (6e-0b1 S2, D7) ──
 
-// Expected values are hand-computed from the exact rational, not from the code:
-// 100,001 × (100 − 33.3333) ÷ 100 = 66,667.33… → 66,667; a flat $0.07/unit
-// over 3 units is 21¢ off 100,001.
 const PERCENT_THIRD = { rate: 33.3333, type: "percent" as const, amount_cents: 0 };
 const FLAT_7C = { rate: 0.07, type: "flat" as const, amount_cents: 0 };
-const statedLine = (discount: typeof PERCENT_THIRD | typeof FLAT_7C | null, kind: "purchase" | "bill") => {
+
+// Expected values are hand-computed from the exact rational, not from the code.
+// The RATE becomes cents at one event (`applyDiscountTerms`); the pricer and the
+// refine read the cents and never re-apply it.
+const statedLine = (discount: typeof PERCENT_THIRD | typeof FLAT_7C | null, kind: "purchase" | "bill", cents = 0) => {
   const base = kind === "purchase" ? buyLine() : project(buyLine(), 10, 3);
-  // A stale net and a stale discount record: the pricer must derive both.
-  return { ...base, amount_cents: 1, price: { ...base.price, discount, stated_cents: 100_001 } } as PurchaseItem;
+  // A stale net and stale money keys: the pricer restates them from the gross and the cents.
+  const off = discount === null ? null : { ...discount, amount_cents: cents };
+  return { ...base, amount_cents: 1, price: { ...base.price, discount: off, stated_cents: 100_001 } } as PurchaseItem;
 };
 
-Deno.test("priceDocument (payable): a line stating `stated_cents` derives its net, discount record and amount_cents from the one function", () => {
+Deno.test("applyDiscountTerms: the rate becomes cents once, on the whole stated line (hand-computed)", () => {
+  // 33.3333% off $1,000.01 over 3: 100001 × 0.666667 = 66667.33 → 66667, so 33334 off.
+  assertEquals(applyDiscountTerms(100_001, 3, PERCENT_THIRD), { amount_cents: 66_667, discount: { rate: 33.3333, type: "percent", amount_cents: 33_334 } });
+  // $0.07 a unit over 3: 21 off.
+  assertEquals(applyDiscountTerms(100_001, 3, FLAT_7C), { amount_cents: 99_980, discount: { rate: 0.07, type: "flat", amount_cents: 21 } });
+  assertEquals(applyDiscountTerms(100_001, 3, null), { amount_cents: 100_001, discount: null });
+});
+
+Deno.test("priceDocument (payable): a stated line's net is its gross less its discount CENTS — the rate is never re-applied (D7)", () => {
   for (const kind of ["purchase", "bill"] as const) {
     const ctx = payableCtx(kind === "purchase" ? "purchase" : "purchase_bill");
-    for (const [discount, net] of [[PERCENT_THIRD, 66_667], [FLAT_7C, 99_980], [null, 100_001]] as const) {
-      const [priced] = priceDocument([statedLine(discount, kind)], ctx).items as PurchaseItem[];
-      const label = `${kind} ${discount?.type ?? "undiscounted"}`;
+    for (const [discount, cents] of [[PERCENT_THIRD, 33_334], [PERCENT_THIRD, 33_333], [FLAT_7C, 21], [null, 0]] as const) {
+      const [priced] = priceDocument([statedLine(discount, kind, cents)], ctx).items as PurchaseItem[];
+      const label = `${kind} ${discount?.type ?? "undiscounted"} ${cents}`;
       assertEquals(priced.price.subtotal_cents, 100_001, `${label}: the gross is the stated total`);
-      assertEquals(priced.price.subtotal_discounted_cents, net, label);
-      assertEquals(priced.amount_cents, net, `${label}: amount_cents is written back as the derived net`);
-      assertEquals(priced.price.discount?.amount_cents ?? null, discount === null ? null : 100_001 - net, label);
+      assertEquals(priced.price.subtotal_discounted_cents, 100_001 - cents, label);
+      assertEquals(priced.amount_cents, 100_001 - cents, `${label}: amount_cents is written back as the net`);
+      assertEquals(priced.price.discount?.amount_cents ?? null, discount === null ? null : cents, `${label}: the cents are kept, not re-derived`);
       assertEquals((priced.price as { stated_cents?: number }).stated_cents, 100_001, `${label}: the input is kept`);
     }
   }
 });
 
 Deno.test("priceDocument (payable): a stated line parses through the stored schemas; a stale net beside it does not", () => {
-  const [purchaseLine] = priceDocument([statedLine(PERCENT_THIRD, "purchase")], payableCtx("purchase")).items as PurchaseItem[];
+  const [purchaseLine] = priceDocument([statedLine(PERCENT_THIRD, "purchase", 33_334)], payableCtx("purchase")).items as PurchaseItem[];
   assert(PurchaseSaleItemSchema.safeParse(purchaseLine).success, "the priced purchase line parses");
   const stale = { ...purchaseLine, amount_cents: 66_668, price: { ...purchaseLine.price, subtotal_discounted_cents: 66_668, total_cents: 66_668 } };
   const r = PurchaseSaleItemSchema.safeParse(stale);
   assert(!r.success);
   assertEquals(r.error.issues.map((i) => i.path.join(".")), ["amount_cents"], "one wrong net is one issue, on the derived key");
-  const wrongOff = { ...purchaseLine, price: { ...purchaseLine.price, discount: { ...PERCENT_THIRD, amount_cents: 33_335 } } };
-  const w = PurchaseSaleItemSchema.safeParse(wrongOff);
-  assert(!w.success);
-  // The gross is the stated total, not net + record, so a wrong record is ONE issue.
-  assertEquals(w.error.issues.map((i) => i.path.join(".")), ["price.discount.amount_cents"]);
+  // A part's cents are its slice, not the rate re-applied: a record the rate would not give still parses if closed.
+  const part = { ...purchaseLine, amount_cents: 66_668, price: { ...purchaseLine.price, discount: { ...PERCENT_THIRD, amount_cents: 33_333 }, subtotal_discounted_cents: 66_668, total_cents: 66_668 } };
+  assert(PurchaseSaleItemSchema.safeParse(part).success, "closed is the rule, whatever the rate would give");
 
-  const [billLine] = priceDocument([statedLine(FLAT_7C, "bill")], payableCtx("purchase_bill")).items as unknown as PurchaseDocumentItem[];
+  const [billLine] = priceDocument([statedLine(FLAT_7C, "bill", 21)], payableCtx("purchase_bill")).items as unknown as PurchaseDocumentItem[];
   const bill = PurchaseBillSchema.safeParse(billDoc(1, [billLine]));
   assert(bill.success, JSON.stringify(bill.error?.issues));
 });
@@ -1770,14 +1817,51 @@ Deno.test("purchaseLineMoneyIssues: a TIME line on a purchase states no total; o
   assertEquals(purchaseLineMoneyIssues({ price: linked, amount_cents: 500, quantity: 1 }, "document"), []);
 });
 
-Deno.test("flatPayablePrice: given a stated total it stores the input and derives the money; without one the key set is unchanged", () => {
-  const args = { uid: lid(2), quantity: 3, amount_cents: null, price_formula: FIXED_REF, discount: PERCENT_THIRD, counts: true } as const;
+Deno.test("flatPayablePrice: given a stated total it stores the input and the net is the gross less the cents; without one the key set is unchanged", () => {
+  const args = { uid: lid(2), quantity: 3, amount_cents: null, price_formula: FIXED_REF, discount: { ...PERCENT_THIRD, amount_cents: 33_334 }, counts: true } as const;
   const stated = flatPayablePrice({ ...args, stated_cents: 100_001 });
   assertEquals(stated.stated_cents, 100_001);
   assertEquals(stated.subtotal_cents, 100_001);
   assertEquals(stated.subtotal_discounted_cents, 66_667);
-  assertEquals(stated.discount?.amount_cents, 33_334, "the derived record, not the caller's 0");
+  assertEquals(stated.discount?.amount_cents, 33_334, "the caller's cents, kept");
   const legacy = flatPayablePrice({ ...args, amount_cents: 66_667, discount: { ...PERCENT_THIRD, amount_cents: 33_334 } });
   assertEquals("stated_cents" in legacy, false, "a writer that states no total does not widen its key set");
   assertEquals(legacy.subtotal_cents, 100_001);
+});
+
+// ── D7: the merge rule applied to a PART ─────────────────────────────
+
+Deno.test("syncPurchaseToBills (D7): an untouched PART follows a purchase discount edit as its slice; an overridden part stays", () => {
+  // $1,000.00 over 4; bill 1 bills units (0, 2], bill 2 units (2, 4].
+  const prev = buyLine({ quantity: 4, amount_cents: 100_000, price: payablePrice(0, { formula: FIXED_REF }) });
+  const m = applyDiscountTerms(100_000, 4, { rate: 12.5, type: "percent" });
+  const next = { ...prev, amount_cents: m.amount_cents, price: { ...prev.price, discount: m.discount, stated_cents: 100_000 } } as PurchaseItem;
+  const first = projectPurchaseLineToBillLine(prev, { uid_purchase: PURCHASE, quantity: 2, from: 0 });
+  const second = projectPurchaseLineToBillLine(prev, { uid_purchase: PURCHASE, quantity: 2, from: 2 });
+  assertEquals([first.units_from, second.units_from], [0, 2], "each part records where it starts");
+  const [b1, b2] = sync(prev, next, [billDoc(1, [first]), billDoc(2, [second])]);
+  const [l1] = linesOf(b1.bill) as PurchaseDocumentItem[];
+  const [l2] = linesOf(b2.bill) as PurchaseDocumentItem[];
+  // Each is its slice of the discounted line, and together they are the line exactly.
+  assertEquals(l1.amount_cents + l2.amount_cents, m.amount_cents);
+  assertEquals((l1.price.discount?.amount_cents ?? 0) + (l2.price.discount?.amount_cents ?? 0), m.discount!.amount_cents);
+  assertEquals([l1.price.stated_cents, l2.price.stated_cents], [50_000, 50_000]);
+  assertEquals(l2.price.discount?.rate, 12.5, "a discount newly reaches a SECOND partial bill, not only the first");
+  parses(b1.bill);
+  parses(b2.bill);
+
+  // An overridden part (the supplier billed a different amount) keeps its GROSS; its terms
+  // were untouched, so the new discount follows and is applied to that gross (the rate event).
+  const typed = withPayableMoney(restated(second, 49_000)) as PurchaseDocumentItem;
+  const [kept] = sync(prev, next, [billDoc(2, [typed])]);
+  const [k] = linesOf(kept.bill) as PurchaseDocumentItem[];
+  assertEquals([k.price.stated_cents, k.amount_cents, k.price.discount?.amount_cents], [49_000, 42_875, 6_125]);
+  parses(kept.bill);
+
+  // Terms the operator changed on the bill stay, and so does the money.
+  const ownTerms = applyDiscountTerms(50_000, 2, { rate: 5, type: "percent" });
+  const termed = withPayableMoney({ ...second, amount_cents: ownTerms.amount_cents, price: { ...second.price, discount: ownTerms.discount, stated_cents: 50_000 } }) as PurchaseDocumentItem;
+  const [stays] = sync(prev, next, [billDoc(2, [termed])]);
+  const [t] = linesOf(stays.bill) as PurchaseDocumentItem[];
+  assertEquals([t.amount_cents, t.price.discount?.rate], [47_500, 5]);
 });

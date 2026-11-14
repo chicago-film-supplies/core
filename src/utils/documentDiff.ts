@@ -203,7 +203,7 @@ import {
   purchaseLineBilledNet,
   purchaseLineKey,
 } from "./purchase-documents.ts";
-import { lineMoneyAtCents, payableMoneyLine, priceFromFormula } from "./price-formulas.ts";
+import { payableStoredMoney, priceFromFormula, sliceStoredMoney } from "./price-formulas.ts";
 import { lineCustodyAt, type PurchaseLineCustody } from "./bookings-inbound.ts";
 import { type PricingFormulas, statedChargeWindows } from "./price-document.ts";
 import {
@@ -1516,7 +1516,9 @@ function billLineFields(line: PurchaseDocumentItem, item: PurchaseItem): Documen
     // member, a replacement line's `out_of_service` (W4R), IS compared: `there`
     // is fitted to this bill's quantity, so only a bill naming different
     // records from its purchase line reports.
-    if (f.path === "quantity" || f.path === "amount_cents") continue;
+    // `price.stated_cents`, the group's money input, is a part's own slice (D7)
+    // and so differs on every partial bill for the same reason.
+    if (f.path === "quantity" || f.path === "amount_cents" || f.path === "price.stated_cents") continue;
     const segs = f.path.split(".");
     let unit = f.path;
     for (let i = 1; i < segs.length; i++) {
@@ -1616,8 +1618,8 @@ function payableQuantityEntry(
     credits: namingCredits,
   });
   const ordered = item.quantity;
-  // What the billed units should cost: the one line-money function at the net billed count (ruling 39).
-  const expected_cents = lineMoneyAtCents(payableMoneyLine(item), Math.max(0, net.quantity));
+  // What the billed units should cost: the line's stored money sliced at the net billed count (D7).
+  const expected_cents = sliceStoredMoney(payableStoredMoney(item), 0, Math.max(0, net.quantity)).net_cents;
   if (net.quantity === ordered && net.amount_cents === expected_cents) return null;
   return {
     kind: "quantity",

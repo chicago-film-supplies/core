@@ -62,10 +62,11 @@ import {
   payableLineUid,
 } from "../schemas/mod.ts";
 import {
-  lineDiscountAtCents,
   lineUnitsCents,
-  payableMoneyLine,
   type PayableMoneyLineLike,
+  applyDiscountTerms,
+  payableStoredMoney,
+  sliceStoredMoney,
   statedLine,
 } from "../schemas/_line-money.ts";
 import { fitOutOfServiceEntries } from "./replacements.ts";
@@ -276,7 +277,7 @@ function foldPurchaseDocument(
     for (const e of substitutedForOf(line) ?? []) {
       const x = e.path.join("/");
       if (e.path.length === 0 || e.quantity <= 0 || !liveX.has(x)) continue;
-      const share = lineUnitsCents(payableMoneyLine(line), units, units + e.quantity);
+      const share = sliceStoredMoney(payableStoredMoney(line), units, units + e.quantity).net_cents;
       const entry = at(x);
       entry.amount_cents += share;
       if (anchorAt.has(`${rel}\x1e${x}`)) {
@@ -435,45 +436,52 @@ export function recomputePurchaseQuantityBilled(
 
 // ── Money ───────────────────────────────────────────────────────
 
-/**
- * A part's discount RECORD over units `(before, after]` of a line: the one
- * function's `lineDiscountAtCents(after) − lineDiscountAtCents(before)`, so the
- * parts' records sum to the line's. `null` when the line carries no discount.
- * Informational: `amount_cents` is already net, so this moves no money.
- */
-function partDiscount(
-  line: PayableMoneyLineLike & { price: { discount: DiscountType | null } },
-  before: number,
-  after: number,
-): DiscountType | null {
-  const discount = line.price.discount;
-  if (discount === null) return null;
-  const m = payableMoneyLine(line);
-  return { ...discount, amount_cents: lineDiscountAtCents(m, after) - lineDiscountAtCents(m, before) };
+/** A part's money as a stored row states it (one-document-model D7). */
+export interface PartMoney {
+  /** The net: `stated_cents − discount.amount_cents`. */
+  amount_cents: number;
+  /** The part's gross: its slice of the source's stated gross. */
+  stated_cents: number;
+  /** The source's discount TERMS, with the part's slice of its discount cents; `null` when it has none. */
+  discount: DiscountType | null;
 }
 
 /**
- * A BILL line's discount record on `quantity` units of its purchase line, from
- * unit 0 (`lineDiscountAtCents`): position-free, the sync's convention (see
- * {@link projectPurchaseLineToBillLine}). `null` when the line has no discount.
+ * **Units `(from, to]` of a source line, as a part stores them** (D7): its
+ * slices of the source's stored gross and discount cents, and the net as their
+ * difference. A part never re-applies a rate, so the parts of a line sum to it
+ * exactly on every figure and each part's own `net = gross − discount` holds.
  */
-function billLineDiscount(item: PurchaseItem, quantity: number): DiscountType | null {
-  return partDiscount(item, 0, quantity);
+export function partMoney(
+  line: PayableMoneyLineLike & { price: { discount: DiscountType | null } },
+  from: number,
+  to: number,
+): PartMoney {
+  const slice = sliceStoredMoney(payableStoredMoney(line), from, to);
+  const terms = line.price.discount;
+  return {
+    amount_cents: slice.net_cents,
+    stated_cents: slice.gross_cents,
+    discount: terms === null ? null : { ...terms, amount_cents: slice.discount_cents },
+  };
+}
+
+/** Is a stored row's money exactly `part`? Gross (stated, or net + cents), cents and net. */
+function moneyIs(row: PayableMoneyLineLike & { price: { discount: DiscountType | null } }, part: PartMoney): boolean {
+  const own = payableStoredMoney(row);
+  return row.amount_cents === part.amount_cents && own.gross_cents === part.stated_cents &&
+    own.discount_cents === (part.discount?.amount_cents ?? 0);
 }
 
 /**
  * One credit line's money, as both credit arms price it (one-document-model
- * 6e-0b1 D4): the default is a partition of what is credited, through the one
- * line-money function; a supplier's MEMO overrides it and becomes the credit
- * line's own `price.stated_cents`, with `discount: null` (a memo is net).
+ * 6e-0b1 D4, D7): by default the slice of what is credited ({@link partMoney});
+ * a supplier's MEMO overrides it as the credit line's own `price.stated_cents`
+ * with `discount: null` (a memo is net). Every credit line states its gross.
  */
-export interface CreditMoney {
-  /** The credit line's net. */
-  amount_cents: number;
-  /** The discount record the line inherits, over the units credited; `null` on a memo or an undiscounted line. */
-  discount: DiscountType | null;
-  /** Set only on a memo: the credit line's `price.stated_cents`. */
-  stated_cents?: number;
+export interface CreditMoney extends PartMoney {
+  /** The first unit of the bill row the credit covers; `null` on a memo or a pool credit, which is no slice. */
+  units_from: number | null;
 }
 
 /**
@@ -508,12 +516,10 @@ export function billedPoolCreditMoney(args: {
     if (memo_cents > pool.amount_cents) {
       throw new RangeError(`a credit of ${memo_cents} cents exceeds the ${pool.amount_cents} cents billed`);
     }
-    return { amount_cents: memo_cents, discount: null, stated_cents: memo_cents };
+    return { amount_cents: memo_cents, discount: null, stated_cents: memo_cents, units_from: null };
   }
-  return {
-    amount_cents: lineUnitsCents(statedLine(pool.amount_cents, pool.quantity), pool.quantity - n, pool.quantity),
-    discount: null,
-  };
+  const net = lineUnitsCents(statedLine(pool.amount_cents, pool.quantity), pool.quantity - n, pool.quantity);
+  return { amount_cents: net, discount: null, stated_cents: net, units_from: null };
 }
 
 /** What live supplier credits have already taken from one bill line. */
@@ -595,11 +601,13 @@ export function billLineCreditMoney(args: {
   const room = Math.max(0, line.amount_cents - credited.amount_cents);
   if (memo_cents !== undefined) {
     if (memo_cents > room) throw new RangeError(`a credit of ${memo_cents} cents exceeds the ${room} cents left on the bill line`);
-    return { amount_cents: memo_cents, discount: null, stated_cents: memo_cents };
+    return { amount_cents: memo_cents, discount: null, stated_cents: memo_cents, units_from: null };
   }
   const from = credited.quantity;
-  const share = lineUnitsCents(payableMoneyLine(line), from, from + n);
-  return { amount_cents: Math.min(room, share), discount: partDiscount(line, from, from + n) };
+  const part = partMoney(line, from, from + n);
+  // A line part-credited by a memo may have less left than the slice: what is left, as a net figure.
+  if (part.amount_cents > room) return { amount_cents: room, discount: null, stated_cents: room, units_from: null };
+  return { ...part, units_from: from };
 }
 
 /**
@@ -640,10 +648,12 @@ export interface BillLineCreditPart {
   n: number;
   /** Their money, first-come, and the discount record they inherit (D4). */
   amount_cents: number;
-  /** The row's discount terms, its record over these units; `null` on a memo. */
+  /** The row's discount terms, its slice of the row's cents over these units; `null` on a memo. */
   discount: DiscountType | null;
-  /** Set only on a memo: the credit line's `price.stated_cents` (D4). */
-  stated_cents?: number;
+  /** The credit line's gross: its slice of the row's, or the memo (D4, D7). */
+  stated_cents: number;
+  /** The first unit of the row this part covers; `null` on a memo. */
+  units_from: number | null;
   /** The row's LIVE `substituted_for` entries, sliced to those units ({@link sliceSubstitutedFor}). */
   substituted_for: SubstitutedForEntryType[];
 }
@@ -808,10 +818,9 @@ export interface ProjectBillLineOptions {
  * function (`lineUnitsCents`, defined past the ordered count because
  * over-billing is legal), so the bills of a line sum to its `amount_cents`.
  *
- * The discount record is the line's discount on `quantity` units FROM UNIT 0
- * (`lineDiscountAtCents`), position-free: the sync compares a bill line with
- * its projection at its own quantity and knows no position, as its
- * `requantify` share does (6e-0b1 S3). It is informational and never summed.
+ * The money is the slice `(before, before + quantity]` of the line's stored
+ * gross and discount cents ({@link partMoney}, D7), and the line records
+ * `units_from: before`, so the sync can tell it still is that slice.
  *
  * The line's price is built by `flatPayablePrice` (the stated-total arm), so
  * the projection parses on its own; the writer prices the whole document with
@@ -826,13 +835,15 @@ export function projectPurchaseLineToBillLine(
 ): PurchaseDocumentItem {
   if (item.price.price_formula.basis === "time") return projectTimeLine(item, opts);
   const before = opts.from ?? item.quantity_billed ?? 0;
-  const amount_cents = lineUnitsCents(payableMoneyLine(item), before, before + opts.quantity);
+  const part = partMoney(item, before, before + opts.quantity);
+  const amount_cents = part.amount_cents;
   const price: PurchaseDocumentLinePrice = flatPayablePrice({
     uid: item.uid,
     quantity: opts.quantity,
     amount_cents,
+    stated_cents: part.stated_cents,
     price_formula: item.price.price_formula,
-    discount: billLineDiscount(item, opts.quantity),
+    discount: part.discount,
     taxes: item.price.taxes,
     taxes_base: item.price.taxes_base,
     counts: true,
@@ -843,6 +854,7 @@ export function projectPurchaseLineToBillLine(
     ...attributionOf(item, opts.quantity),
     quantity: opts.quantity,
     amount_cents,
+    units_from: before,
     price,
   } as PurchaseDocumentItem;
 }
@@ -1106,7 +1118,7 @@ export function projectPurchaseLineForBill(item: PurchaseItem, quantity: number)
     price: {
       price_formula: item.price.price_formula,
       rates: item.price.rates,
-      discount: billLineDiscount(item, quantity),
+      discount: partMoney(item, 0, quantity).discount,
     },
     ...attributionOf(item, quantity),
     ...exchangedForProjection(item),
@@ -1185,14 +1197,16 @@ export function payableScopedSync(prev: Purchase, next: Purchase): {
       if (!isPurchaseLine(row) || row.price.price_formula.basis === "time") return { ...row, quantity };
       const line = source === undefined ? undefined : original.get(source);
       if (line !== undefined && isPurchaseLine(line) && line.quantity > 0 && purchaseItemBasis(line) === "flat") {
-        const money = payableMoneyLine(line);
-        if (row.amount_cents === lineUnitsCents(money, 0, row.quantity)) {
-          return { ...row, quantity, amount_cents: lineUnitsCents(money, 0, quantity) };
+        // Still exactly its slice of the line at its own units (D7)? Then the slice at the new count.
+        const from = row.units_from ?? 0;
+        if (moneyIs(row, partMoney(line, from, from + row.quantity))) {
+          return withPart(row, quantity, partMoney(line, from, from + quantity), from);
         }
       }
       if (scaleFrom !== undefined && scaleFrom > 0 && scaleFrom !== quantity) {
-        // A pseudo-line: the row's own net over the count it had, rescaled.
-        return { ...row, quantity, amount_cents: lineUnitsCents(statedLine(row.amount_cents, scaleFrom), 0, quantity) };
+        // A pseudo-source: the row's own stored money over the count it had, rescaled.
+        const own = { ...row, quantity: scaleFrom };
+        return withPart(row, quantity, partMoney(own, 0, quantity), row.units_from ?? null);
       }
       return { ...row, quantity };
     },
@@ -1283,27 +1297,63 @@ export const PAYABLE_LINE_CLAIMS: LineClaimSide<PurchaseRow> = {
   pointerKey: "path_purchase_item",
 };
 
+/** A row at `quantity` units carrying `part` (D7). */
+function withPart<R extends PurchaseDocumentItem>(row: R, quantity: number, part: PartMoney, from: number | null): R {
+  return {
+    ...row,
+    quantity,
+    amount_cents: part.amount_cents,
+    ...(from !== null ? { units_from: from } : {}),
+    price: { ...row.price, stated_cents: part.stated_cents, discount: part.discount },
+  };
+}
+
 /**
- * A bill line's discount record is ITS SHARE of its purchase line's discount
- * (`billLineDiscount`, as {@link projectPurchaseLineToBillLine} writes it at
- * create). The sync's projector projects the WHOLE line, so a discount that
- * newly reaches a partial bill line arrives at the whole line's amount; this
- * restates it as the line's share whenever its terms are the purchase line's.
- * A line whose terms the operator changed keeps its own record. Money does not
- * move: `amount_cents` is the stated NET, and the record is informational.
+ * **The merge rule, applied to a PART** (one-document-model D7): a bill line
+ * that was exactly its slice of the PREVIOUS purchase line — money and discount
+ * terms — becomes its slice of the NEXT one at the same units; anything else is
+ * the operator's and stays — except that terms the merge moved onto a line whose
+ * money is its own are applied to that line's own gross, the one rate event
+ * (`applyDiscountTerms`). The engine cannot do this itself: a part never
+ * equals the whole-line projection, and its discount cents are derived, so the
+ * engine keeps a part's money whatever the purchase did. A discount that newly
+ * reaches a part thus lands as the part's slice, and a price or terms edit on the
+ * purchase reaches every untouched bill of it.
+ *
+ * `units_from` absent reads as 0: a bill written before D7 behaves as it did.
  */
-function reshareDiscounts(rows: readonly PurchaseDocumentRow[], next: Purchase): PurchaseDocumentRow[] {
-  const byKey = new Map(purchaseLines(next.items).map((i) => [purchaseLineKey(next.uid, i.path), i]));
-  return rows.map((row) => {
-    if (row.type === "purchase" || row.type === "destination" || row.type === "group") return row;
-    const discount = row.price.discount;
+function followPurchaseSlices(
+  synced: readonly PurchaseDocumentRow[],
+  scoped: readonly PurchaseDocumentRow[],
+  prev: Purchase,
+  next: Purchase,
+): PurchaseDocumentRow[] {
+  const lineAt = (p: Purchase) => new Map(purchaseLines(p.items).map((i) => [purchaseLineKey(p.uid, i.path), i]));
+  const before = lineAt(prev);
+  const after = lineAt(next);
+  const held = new Map(scoped.filter(isPurchaseLine).map((r) => [r.path.join("/"), r as PurchaseDocumentItem]));
+  return synced.map((row) => {
+    if (!isPurchaseLine(row) || row.price.price_formula.basis === "time") return row;
     const key = purchaseLineKeyOf(row);
-    const item = key === null ? undefined : byKey.get(key);
-    const source = item?.price.discount;
-    if (!discount || !item || !source || source.rate !== discount.rate || source.type !== discount.type) return row;
-    const amount_cents = billLineDiscount(item, row.quantity)?.amount_cents ?? 0;
-    if (amount_cents === discount.amount_cents) return row;
-    return { ...row, price: { ...row.price, discount: { ...discount, amount_cents } } };
+    const was = held.get(row.path.join("/"));
+    const p = key === null ? undefined : before.get(key);
+    const n = key === null ? undefined : after.get(key);
+    if (!was || !p || !n || purchaseItemBasis(p) !== "flat" || purchaseItemBasis(n) !== "flat") return row;
+    const from = was.units_from ?? 0;
+    const termsOf = (d: DiscountType | null) => (d === null ? null : `${d.type}:${d.rate}`);
+    const sameTerms = termsOf(was.price.discount) === termsOf(p.price.discount);
+    if (!sameTerms || !moneyIs(was, partMoney(p, from, from + was.quantity))) {
+      // The line's money is its own. If the merge moved its terms (they were
+      // untouched), that is a rate event on the line's OWN gross (D7).
+      const terms = row.price.discount;
+      if (termsOf(terms) === termsOf(was.price.discount)) return row;
+      const gross = payableStoredMoney(was).gross_cents;
+      const applied = applyDiscountTerms(gross, row.quantity, terms === null ? null : { rate: terms.rate, type: terms.type });
+      return withPart(row as PurchaseDocumentItem, row.quantity, { ...applied, stated_cents: gross }, null);
+    }
+    const part = partMoney(n, from, from + row.quantity);
+    if (moneyIs(row, part) && (row.price.discount?.rate ?? null) === (n.price.discount?.rate ?? null)) return row;
+    return withPart(row as PurchaseDocumentItem, row.quantity, part, from);
   });
 }
 
@@ -1351,7 +1401,7 @@ export function syncPurchaseToBills(args: SyncPurchaseToBillsArgs): PurchaseBill
     );
     const rows = computePurchaseDocumentItemPaths([
       ...bill.items.slice(0, start + 1),
-      ...reshareDiscounts(synced, args.next),
+      ...followPurchaseSlices(synced, scoped, args.prev, args.next),
       ...bill.items.slice(end),
     ]);
     if (purchaseDocumentLines(rows).length === 0 && purchaseDocumentLines(bill.items).length > 0) {

@@ -804,6 +804,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "purchaseLineBilledCounts",
     "purchaseLineBilledNet",
     "billedPoolCreditMoney",
+    // A part's money is a writer's step (D7): a render reads the stored line.
+    "partMoney",
     "billLineCredited",
     "billLineCreditMoney",
     "purchaseLineCovers",
