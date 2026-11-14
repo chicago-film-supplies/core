@@ -52266,9 +52266,10 @@ interface FormulaDiscount {
 
 ### `LineMoneyLike`
 
-The line surface {@link lineMoneyAtCents} reads: a line states EITHER its
-`rates` (and `counts`), or a total over its quantity in `price.stated_cents`
-(the GROSS, before `discount`). Never both.
+The line surface {@link lineMoneyAtCents} reads: a line's money comes from its
+`rates` (and `counts`), or from a total over its quantity in
+`price.stated_cents` (the GROSS, before `discount`). When both are present the
+stated total governs (a LINKED time line: Xero's money, the formula's rates).
 
 ```ts
 interface LineMoneyLike {

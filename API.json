@@ -24886,7 +24886,7 @@
           "kind": "interface",
           "name": "LineMoneyLike",
           "declaration": "interface LineMoneyLike {\n  type?: ItemTypeType;\n  quantity: number;\n  price: typeLiteral;\n}",
-          "doc": "The line surface {@link lineMoneyAtCents} reads: a line states EITHER its\n`rates` (and `counts`), or a total over its quantity in `price.stated_cents`\n(the GROSS, before `discount`). Never both."
+          "doc": "The line surface {@link lineMoneyAtCents} reads: a line's money comes from its\n`rates` (and `counts`), or from a total over its quantity in\n`price.stated_cents` (the GROSS, before `discount`). When both are present the\nstated total governs (a LINKED time line: Xero's money, the formula's rates)."
         },
         {
           "kind": "interface",

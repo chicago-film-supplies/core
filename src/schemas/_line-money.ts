@@ -112,9 +112,10 @@ export function priceFromFormula(
 // ── The one line-money function (one-document-model ruling 39) ──────────
 
 /**
- * The line surface {@link lineMoneyAtCents} reads: a line states EITHER its
- * `rates` (and `counts`), or a total over its quantity in `price.stated_cents`
- * (the GROSS, before `discount`). Never both.
+ * The line surface {@link lineMoneyAtCents} reads: a line's money comes from its
+ * `rates` (and `counts`), or from a total over its quantity in
+ * `price.stated_cents` (the GROSS, before `discount`). When both are present the
+ * stated total governs (a LINKED time line: Xero's money, the formula's rates).
  */
 export interface LineMoneyLike {
   /** Read only to refuse a line whose money is the document's (`pricing: "from_total"`). */
@@ -135,9 +136,8 @@ function statedOf(line: LineMoneyLike): number | null {
   const stated = line.price.stated_cents ?? null;
   if (stated === null) return null;
   if (!Number.isInteger(stated)) throw new Error(`price.stated_cents is integer cents, got ${stated}`);
-  if (line.price.rates.length > 0) {
-    throw new Error("A line states rates OR a stated total, never both");
-  }
+  // A stated total GOVERNS a line that also carries rates: a LINKED time line's
+  // money is Xero's, and its rates are the formula's, kept for the record.
   return stated;
 }
 
@@ -186,8 +186,8 @@ function moneyAt(line: LineMoneyLike, k: number): { gross: bigint; net: bigint }
  * Defined past `quantity` (an over-billed line, D5) at the same per-unit money,
  * and `0` at `k = 0` and on a stated line of no units.
  *
- * @throws on a non-integer or negative `k`, a line stating both rates and a total,
- *   or a line whose money is the document's (`pricing` other than `pre_tax`).
+ * @throws on a non-integer or negative `k`, or a line whose money is the
+ *   document's (`pricing` other than `pre_tax`).
  */
 export function lineMoneyAtCents(line: LineMoneyLike, k: number): number {
   return Number(moneyAt(line, k).net);

@@ -285,11 +285,13 @@ Deno.test("…and the wrong forms DO disagree: per-part rounding, last-n placeme
 Deno.test("line money: refusals", () => {
   assertThrows(() => lineMoneyAtCents(stated(100, 3), -1), RangeError);
   assertThrows(() => lineMoneyAtCents(stated(100, 3), 1.5), RangeError);
-  assertThrows(() =>
+  // A stated total governs a line that also carries rates (a linked time line).
+  assertEquals(
     lineMoneyAtCents({
-      quantity: 1,
-      price: { rates: [{ rate_key: "flat", amount_cents: 100 }], counts: [], discount: null, stated_cents: 100 },
-    }, 1)
+      quantity: 2,
+      price: { rates: [{ rate_key: "day", amount_cents: 999 }], counts: [{ rate_key: "day", num: 3, den: 1 }], discount: null, stated_cents: 101 },
+    }, 1),
+    51,
   );
   assertThrows(() => lineMoneyAtCents({ type: "transaction_fee", ...stated(100, 1) }, 1));
   assertEquals(lineMoneyAtCents(stated(100, 0), 5), 0);
