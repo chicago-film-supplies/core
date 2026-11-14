@@ -1084,13 +1084,16 @@ export const PurchaseDocumentItemInput: z.ZodType<PurchaseDocumentItemInputType>
  * bill line (one-document-model 6d), and what it un-bills.
  *
  * - **flat, naming no bill line** — `quantity` units, priced from the line's
- *   billed pool (`purchaseLineCreditCents`): the pool's share, or a stated
- *   `amount_cents` the pool caps.
+ *   billed pool (`billedPoolCreditMoney`): the pool's share, or the supplier's
+ *   memo, which the pool caps.
  * - **flat, naming a bill line** — units `(c, c + quantity]` of that line, `c`
  *   what live credits already took from it, priced first-come from the line's
- *   own money (`billLineCreditCents`), or a stated `amount_cents` capped at what
- *   is left of it. The units are capped per bill line and by the pools behind
- *   them (`creditableBillLines`).
+ *   own money with its discount terms (`billLineCreditMoney`), or the supplier's
+ *   memo, capped at what is left of it. The units are capped per bill line and
+ *   by the pools behind them (`creditableBillLines`).
+ * - **the memo** (6e-0b1 D4) is the credit line's own `price.stated_cents`, net
+ *   by nature, so the line stores `discount: null`. Until core beta B it may be
+ *   sent as `amount_cents` instead; sent together the two must agree.
  * - **time** — credited by COUNTS, as an AR credit note is (0b ruling 3):
  *   `quantity` units over `counts`, priced `rates × counts` like the bill line
  *   it reverses. Absent `counts`, the writer credits everything the line is
@@ -1113,12 +1116,14 @@ export interface PurchaseCreditItemInputType extends Omit<PurchaseDocumentItemIn
   /**
    * The bill line credited (api-cloudrun#1439). Both or neither with
    * {@link path_bill_item}; refused on a link. Its units are capped per bill line
-   * (`creditableBillLines`) and priced first-come from it (`billLineCreditCents`).
+   * (`creditableBillLines`) and priced first-come from it (`billLineCreditMoney`).
    */
   uid_purchase_bill?: string;
   path_bill_item?: string[];
-  /** A pushed flat line's stated credit, capped at the line's billed pool; a supplier's memo governs. */
+  /** The supplier's memo, as `price.stated_cents` names it; retired in core beta B. */
   amount_cents?: number;
+  /** The supplier's memo for a pushed flat line: the credit line's own stated total (D4), capped at what it credits. */
+  price?: { stated_cents?: number | null };
 }
 
 /** Zod schema for PurchaseCreditItemInputType. */
@@ -1130,7 +1135,20 @@ export const PurchaseCreditItemInput: z.ZodType<PurchaseCreditItemInputType> = z
   uid_purchase_bill: FirestoreId.optional(),
   path_bill_item: z.array(ItemUid).min(1).optional(),
   amount_cents: z.int().min(0).optional(),
+  price: z.object({ stated_cents: z.int().min(0).nullable().optional() }).optional(),
+}).superRefine((item, ctx) => {
+  // Both name the memo while clients move over (D4); sent together they must agree.
+  for (const issue of payableInputStatedIssues({ type: "credit", ...item }, false)) ctx.addIssue({ code: "custom", ...issue });
 });
+
+/**
+ * The supplier's memo a credit item input states (6e-0b1 D4): its
+ * `price.stated_cents`, or `amount_cents` until core beta B. `undefined` when it
+ * states none, so the line is priced by its default partition.
+ */
+export function creditItemMemoCents(item: Pick<PurchaseCreditItemInputType, "amount_cents" | "price">): number | undefined {
+  return item.price?.stated_cents ?? item.amount_cents ?? undefined;
+}
 
 /**
  * A document-only charge item as an operator states it on a PUSHED bill or
@@ -1297,8 +1315,8 @@ export const CreatePurchaseBillInput: z.ZodType<CreatePurchaseBillInputType> = z
  *
  * Each `items` entry UN-bills that quantity of its purchase item, or of the
  * bill line it names: it lowers `quantity_billed`, and a PUSHED credit prices it
- * from the line's billed pool (`purchaseLineCreditCents`) or from the named bill
- * line (`billLineCreditCents`), so more than was billed cannot be credited. A price correction with no quantity is a `charge_items` entry
+ * from the line's billed pool (`billedPoolCreditMoney`) or from the named bill
+ * line (`billLineCreditMoney`), so more than was billed cannot be credited. A price correction with no quantity is a `charge_items` entry
  * (push only). A LINKED credit reads its date, reference and total from Xero,
  * as a linked bill does.
  */

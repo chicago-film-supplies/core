@@ -23,7 +23,7 @@ import {
   purchaseItemTouched,
 } from "../src/utils/purchase-actions.ts";
 import { deriveInvoiceStatus } from "../src/utils/invoices.ts";
-import { billLineCreditCents, billLineCreditParts, purchaseLineBilledNet } from "../src/utils/purchase-documents.ts";
+import { billLineCreditMoney, billLineCreditParts, purchaseLineBilledNet } from "../src/utils/purchase-documents.ts";
 import { sliceSubstitutedFor } from "../src/utils/substitutions.ts";
 import { InvoiceActionRefusal } from "../src/utils/invoice-actions.ts";
 import type { PurchaseLineCustody } from "../src/utils/bookings-inbound.ts";
@@ -525,7 +525,7 @@ Deno.test("billLineCreditParts: a substitute kit's root credit copies its subtre
   assertEquals(creditableBillLines(bill, { per_purchase: [{ uid_purchase: PU, purchase: { items }, bills: [bill], credits }] })[0].units, 0);
   // A kit is priced from its rows: a stated amount is refused.
   assertThrows(
-    () => billLineCreditParts({ bill, path: [PU, "y"], n: 1, credits: [], purchaseKeys, stated_cents: 10 }),
+    () => billLineCreditParts({ bill, path: [PU, "y"], n: 1, credits: [], purchaseKeys, memo_cents: 10 }),
     RangeError,
     "states no amount",
   );
@@ -584,7 +584,7 @@ Deno.test("creditableBillLines: crediting a substitute segment by segment nets e
     const [line] = creditableBillLines(bill, { per_purchase: [{ uid_purchase: PU, purchase: { items }, bills: [bill], credits }] });
     assert(line.units >= 1, `units ${taken + 1}.. are offered`);
     const n = line.units;
-    const cents = billLineCreditCents({ line: { quantity: 7, amount_cents: 101 }, credited: { quantity: taken, amount_cents: taken_cents }, n });
+    const cents = billLineCreditMoney({ line: { quantity: 7, amount_cents: 101, price: { discount: null } }, credited: { quantity: taken, amount_cents: taken_cents }, n }).amount_cents;
     const slice = sliceSubstitutedFor(entries, taken, taken + n);
     credits.push(credit6d([named("A", ["y"], n, { amount_cents: cents, ...(slice.length > 0 ? { substituted_for: slice } : {}) })]));
     runs.push(n);

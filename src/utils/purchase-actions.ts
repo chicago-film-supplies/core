@@ -457,7 +457,7 @@ export interface CreditableBillLine {
  * (`purchaseDocumentBilling`), so a credit spanning two segments could
  * attribute a cent to one line that the bill gave the other. Within one
  * segment, successive credits sum exactly to the bill's share (the credit is
- * priced first-come, `billLineCreditCents`, and the shares telescope).
+ * priced first-come, `billLineCreditMoney`, and the shares telescope).
  *
  * Absent rather than offered, failing closed:
  * - a line on a bill not live in Xero, a time line, a kit header, a $0 line;

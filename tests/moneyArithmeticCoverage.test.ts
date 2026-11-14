@@ -351,6 +351,81 @@ Deno.test("moneyArithmeticCoverage — computeLineMoney is the only pre-tax bran
   );
 });
 
+// ── Ratchet F: the one line-money function holds the line partitions ───
+//
+// One-document-model 6e-0b1 S4 (ruling 39). Before S3 a payable line was
+// partitioned by four per-site roundings (`cumulativeShareCents`,
+// `flatShareCents`, `flatDiscountShare`, an inline in `documentDiff.ts`), and
+// each was a place a part could be rounded on its own and stop summing to its
+// line. They are deleted; every whole-line, partial, credit, split, close and
+// diff figure is a difference of `lineMoneyAtCents`. This arm keeps a per-part
+// rounding from growing back: every LINE of `src/` that calls a `roundDiv*`
+// primitive is counted per file, EXACTLY, with what it rounds.
+
+const ROUND_DIV_RE = /\broundDivHalf(?:Up|AwayFromZero)\s*\(/;
+/** The primitives' own declarations are not calls. */
+const ROUND_DIV_DECL_RE = /^\s*export\s+function\s+roundDivHalf/;
+
+const ROUND_DIV_SITES = new Map<string, { count: number; why: string }>([
+  ["src/schemas/_line-money.ts", {
+    count: 5,
+    why: "THE line money: priceFromFormula's three single roundings (subtotal, percent net, flat net) " +
+      "and the stated arm's gross and percent net",
+  }],
+  ["src/utils/money.ts", {
+    count: 2,
+    why: "the primitives themselves: roundDivHalfAwayFromZero composing roundDivHalfUp, and " +
+      "perUnitCostAt4dp (a 4dp RATE, not money)",
+  }],
+  ["src/utils/orders.ts", {
+    count: 4,
+    why: "a percent_of_total fee's amount, the line's two tax amounts (percent and flat), and " +
+      "a replacement's total — each a whole figure, rounded once, never a part of a line",
+  }],
+  ["src/utils/movements.ts", {
+    count: 2,
+    why: "costOfUnits and consumeNewestFirst: a COST-BASIS partition over held units, not line money",
+  }],
+  ["src/utils/invoices.ts", {
+    count: 1,
+    why: "the Xero unit amount: a wire contract (ruling 40), money ÷ quantity for a third party to re-multiply",
+  }],
+]);
+
+async function roundDivCounts(): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  const hits = (await grep(ROUND_DIV_RE))
+    // The generated template-helper catalogue holds these names as STRINGS.
+    .filter((h) => h.file !== "src/schemas/template-helpers.generated.ts")
+    .filter((h) => !ROUND_DIV_DECL_RE.test(h.text));
+  for (const h of hits) counts.set(h.file, (counts.get(h.file) ?? 0) + 1);
+  return counts;
+}
+
+Deno.test("moneyArithmeticCoverage — a roundDiv call is one of the catalogued figures, never a per-part rounding", async () => {
+  const counts = await roundDivCounts();
+  const unlisted = [...counts.keys()].filter((f) => !ROUND_DIV_SITES.has(f)).sort();
+  assertEquals(
+    unlisted,
+    [],
+    "A roundDiv primitive is called in a file this arm has never seen. A part of a line is " +
+      "`lineUnitsCents` (`@cfs/core/utils/price-formulas`), and a pseudo-line partition is " +
+      "`statedLine` — never a rounding of its own. Catalogue it here only if it rounds a WHOLE " +
+      "figure, with why and an exact count:\n" + unlisted.map((f) => `  + ${f}`).join("\n"),
+  );
+  const drifted: string[] = [];
+  for (const [file, { count, why }] of ROUND_DIV_SITES) {
+    const actual = counts.get(file) ?? 0;
+    if (actual !== count) drifted.push(`  ${file}: catalogued ${count} (${why}), found ${actual}`);
+  }
+  assertEquals(
+    drifted.join("\n"),
+    "",
+    "A catalogued roundDiv count moved. Re-derive it deliberately — a bare bump is how a " +
+      "per-part rounding hides on an already-blessed path:\n" + drifted.join("\n"),
+  );
+});
+
 // ── Non-vacuity ──────────────────────────────────────────────────────
 
 Deno.test("moneyArithmeticCoverage — the scans bite (non-vacuity)", async () => {
@@ -424,6 +499,19 @@ Deno.test("moneyArithmeticCoverage — the scans bite (non-vacuity)", async () =
     PRICER_DECL_RE.test("  const { total_cents } = calculateItemPrice(item, taxes);"),
     false,
     "PRICER_DECL_RE swallows a real call",
+  );
+  // Ratchet F's floor and plants: the token matches a call and a longer name does not,
+  // a declaration is not counted, and the census reaches every catalogued file.
+  assertEquals(ROUND_DIV_RE.test("const x = roundDivHalfUp(a, b);"), true, "ROUND_DIV_RE stopped matching a call");
+  assertEquals(ROUND_DIV_RE.test("roundDivHalfAwayFromZero (a, b)"), true, "ROUND_DIV_RE misses the other primitive");
+  assertEquals(ROUND_DIV_RE.test("myroundDivHalfUpish(a)"), false, "ROUND_DIV_RE lost its \\b boundary");
+  assertEquals(ROUND_DIV_DECL_RE.test("export function roundDivHalfUp(num: bigint"), true, "ROUND_DIV_DECL_RE stopped matching");
+  assertEquals(ROUND_DIV_DECL_RE.test("  return roundDivHalfUp(a, b);"), false, "ROUND_DIV_DECL_RE swallows a call");
+  const roundDiv = await roundDivCounts();
+  assertEquals(
+    [...ROUND_DIV_SITES.keys()].filter((f) => (roundDiv.get(f) ?? 0) === 0),
+    [],
+    "Ratchet F's scan reached none of a catalogued file's calls: the walker or the regex is inert.",
   );
   const pricerHits = (await grep(PRETAX_PRICER_RE))
     .filter((h) => h.file !== "src/schemas/template-helpers.generated.ts")

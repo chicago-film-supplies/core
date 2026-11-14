@@ -17,7 +17,8 @@ import { assert, assertEquals } from "@std/assert";
 import { buildOrderScopedItems, type InvoiceItem } from "../src/utils/invoices.ts";
 import type { LineItem } from "../src/utils/orders.ts";
 import { type AccountedCreditNote, type AccountedInvoice, invoicedByPath } from "../src/utils/quantityAccounting.ts";
-import { flatShareCents, purchaseCreditBilling } from "../src/utils/purchase-documents.ts";
+import { purchaseCreditBilling } from "../src/utils/purchase-documents.ts";
+import { lineUnitsCents, statedLine } from "../src/utils/price-formulas.ts";
 import { sliceSubstitutedFor } from "../src/utils/substitutions.ts";
 import type { PurchaseDocumentRow } from "../src/schemas/mod.ts";
 import { FIVE_DAY_WEEK, fdwCounts } from "./helpers/formulas.ts";
@@ -114,7 +115,7 @@ Deno.test("one credit fold sweep: AP — a substitute root credit's shares sum t
     const s = 1 + int(rand, Q); // units standing in for X (the first s)
     const c = int(rand, Q); // units of Y already credited
     const n = 1 + int(rand, Q - c); // this credit's units
-    const amount = flatShareCents(A, Q, c, c + n); // first-come, as billLineCreditCents prices it
+    const amount = lineUnitsCents(statedLine(A, Q), c, c + n); // first-come, as billLineCreditMoney prices it
     const slice = sliceSubstitutedFor([{ path: [D, "x"], quantity: s }], c, c + n);
     const row = {
       type: "sale", uid: "y", path: [PU, D, "y"], quantity: n, amount_cents: amount,
@@ -128,7 +129,7 @@ Deno.test("one credit fold sweep: AP — a substitute root credit's shares sum t
     if (e === 0) continue;
     cases++;
     // The bill's own share of those same units: (c, c + e] of Y's amount.
-    const billShare = flatShareCents(A, Q, c, c + e);
+    const billShare = lineUnitsCents(statedLine(A, Q), c, c + e);
     const diff = Math.abs((folded.get(`${D}/x`)?.amount_cents ?? 0) - billShare);
     worst = Math.max(worst, diff);
     if (diff > 0) off++;

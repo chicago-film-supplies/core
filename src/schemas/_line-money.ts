@@ -215,6 +215,56 @@ export function lineDiscountAtCents(line: LineMoneyLike, k: number): number {
 }
 
 /**
+ * **A PSEUDO-line: `statedCents` over `quantity` units, undiscounted** — for a
+ * partition of an amount that is not one line's money (one-document-model 6e-0b1
+ * S3): a landed cost over its units, a bill split's leftover over its group, a
+ * billed POOL over its units, a row's money rescaled to a new count. Named so a
+ * reader can tell it from a real line. `lineUnitsCents(statedLine(a, q), b, k)`
+ * is `round(a·k ÷ q) − round(a·b ÷ q)`, defined past `q`.
+ */
+export function statedLine(statedCents: number, quantity: number): LineMoneyLike {
+  return { quantity, price: { rates: [], counts: [], discount: null, stated_cents: statedCents } };
+}
+
+/** The stored payable-line surface {@link payableMoneyLine} reads. */
+export interface PayableMoneyLineLike {
+  quantity: number;
+  /** The stored NET; `null` on a purchase time line. */
+  amount_cents: number | null;
+  price: {
+    price_formula?: { basis: string };
+    discount: (FormulaDiscount & { amount_cents?: number }) | null;
+    stated_cents?: number | null;
+  };
+}
+
+/**
+ * **A stored FLAT payable line as the one function reads it** (ruling 39, S3):
+ * its stated GROSS is `price.stated_cents`, or — on a line written before the
+ * backfill — the declared net plus its declared discount record, the gross the
+ * schema's absent arm reads (`statedTotalMoneyIssues`). Retired with that arm in
+ * core beta B, when every flat payable line states `stated_cents`.
+ *
+ * A TIME line partitions its stored NET, undiscounted ({@link statedLine}): its
+ * money is its counts priced (or Xero's, linked), and its discount's pricing
+ * factor is its counted periods, which a stated line's factor of 1 cannot read.
+ */
+export function payableMoneyLine(line: PayableMoneyLineLike): LineMoneyLike {
+  if (line.price.price_formula?.basis === "time") return statedLine(line.amount_cents ?? 0, line.quantity);
+  const discount = line.price.discount ?? null;
+  const stated = line.price.stated_cents ?? (line.amount_cents ?? 0) + (discount?.amount_cents ?? 0);
+  return {
+    quantity: line.quantity,
+    price: {
+      rates: [],
+      counts: [],
+      discount: discount === null ? null : { rate: discount.rate, type: discount.type },
+      stated_cents: stated,
+    },
+  };
+}
+
+/**
  * Does a line's stored money equal what its own snapshot reproduces? The
  * single-document check every formula-priced line runs (ruling 8): `rates`,
  * `counts`, `quantity` and `discount` → `subtotal_discounted_cents`, compared

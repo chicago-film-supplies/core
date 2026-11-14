@@ -28,8 +28,8 @@ import {
   isLineItemType,
   isPurchaseLine,
 } from "../schemas/mod.ts";
-import { apportionCents, roundDivHalfUp, toCentsBig } from "./money.ts";
-import { type FormulaDiscount, priceFromFormula } from "../schemas/_line-money.ts";
+import { apportionCents } from "./money.ts";
+import { lineMoneyAtCents, lineUnitsCents, payableMoneyLine, statedLine } from "../schemas/_line-money.ts";
 import { componentQuantities, type ComponentRowForWalk } from "./order-lines.ts";
 import { productCountsStock } from "./products.ts";
 import { derivePurchaseCreditStatus, recomputePurchaseBillTotals } from "./invoices.ts";
@@ -59,58 +59,6 @@ export {
 // The payable line uid rule (W4K) lives beside the refines that check it.
 export { payableInputUidIssue, payableLineUid, payableLineUidIssue, type PayableLineUidFields };
 
-/**
- * The cents a line's units `(before, after]` cost — the k-th receipt or the
- * k-th bill line against a purchase line, priced from where the cumulative
- * count stood before it to where it stands after.
- *
- * `round(amount × after ÷ quantity) − round(amount × before ÷ quantity)`, each
- * rounded once, half-up, over integers.
- *
- * ⭐ **The CUMULATIVE value is rounded, never the partial.** So the partials
- * along any path from 0 to `quantity` telescope to `amount_cents` exactly — no
- * remainder rule, no "last one absorbs the cent" — and the price of reaching a
- * cumulative count is the same whichever deliveries got there. Rounding each
- * partial instead (`round(amount × k ÷ quantity)`) drifts: three receipts of 1
- * against a $10.00 line of 3 cost 333 + 333 + 333 = 999.
- *
- * Receipts and bills run this SEPARATELY, each on its own cumulative count, so
- * a CFS-pushed bill and the receipts it covers carry the same money however the
- * two were split (`cfs-money`: closure under the quantum, × n ÷ d in integer
- * cents, round once).
- *
- * A REVERSAL is the same call with the bounds swapped in sign: the units
- * `(after, before]` leave at exactly what they cost to arrive, because the
- * cumulative value at a count does not depend on the path.
- *
- * @throws when `quantity < 1`, `amountCents < 0`, or the bounds are not
- *   `0 ≤ before ≤ after ≤ quantity` — the writer owns those checks, and a
- *   caller that reaches this past them has a bucket bug to surface, not a price
- *   to invent.
- */
-export function cumulativeShareCents(
-  amountCents: number,
-  quantity: number,
-  before: number,
-  after: number,
-): number {
-  if (!Number.isInteger(quantity) || quantity < 1) {
-    throw new RangeError(`cumulativeShareCents: quantity must be a positive integer, got ${quantity}`);
-  }
-  if (!Number.isInteger(amountCents) || amountCents < 0) {
-    throw new RangeError(`cumulativeShareCents: amountCents must be a non-negative integer, got ${amountCents}`);
-  }
-  if (!Number.isInteger(before) || !Number.isInteger(after) || before < 0 || before > after || after > quantity) {
-    throw new RangeError(
-      `cumulativeShareCents: need 0 ≤ before ≤ after ≤ quantity, got before=${before} after=${after} quantity=${quantity}`,
-    );
-  }
-  const amount = BigInt(amountCents);
-  const qty = BigInt(quantity);
-  const at = (k: number) => roundDivHalfUp(amount * BigInt(k), qty);
-  return Number(at(after) - at(before));
-}
-
 // ── Landed cost (api-cloudrun#1227) ──────────────────────────────
 
 /**
@@ -131,14 +79,15 @@ export function landedUnitsPriced(
 
 /**
  * The cents a landed cost has put onto the ledger at a cumulative received
- * count — `cumulativeShareCents` over the entry's own units, so the receipts
- * telescope to `amount_cents` exactly once every one of them has arrived.
+ * count — the one line-money function over a PSEUDO-line, the entry's amount
+ * over its own units (`statedLine`), so the receipts telescope to `amount_cents`
+ * exactly once every one of them has arrived.
  */
 export function landedPricedCents(
   entry: Pick<PurchaseLandedCost, "amount_cents" | "quantity" | "received_at_entry">,
   quantityReceived: number,
 ): number {
-  return cumulativeShareCents(entry.amount_cents, entry.quantity, 0, landedUnitsPriced(entry, quantityReceived));
+  return lineMoneyAtCents(statedLine(entry.amount_cents, entry.quantity), landedUnitsPriced(entry, quantityReceived));
 }
 
 /**
@@ -158,12 +107,16 @@ export function landedPricedCents(
  * formula.
  */
 export function purchaseLineReceiptTargetCents(
-  line: Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "landed_costs">,
+  line: Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "landed_costs" | "price">,
   quantityReceived: number,
 ): number {
+  // The writer owns the bucket checks; a count past them is a bug to surface, not a price to invent.
+  if (!Number.isInteger(quantityReceived) || quantityReceived < 0 || quantityReceived > line.quantity) {
+    throw new RangeError(`a receipt target needs 0 ≤ received ≤ ${line.quantity}, got ${quantityReceived}`);
+  }
   return line.landed_costs.reduce(
     (sum, entry) => sum + landedPricedCents(entry, quantityReceived),
-    cumulativeShareCents(line.amount_cents, line.quantity, 0, quantityReceived),
+    lineMoneyAtCents(payableMoneyLine(line), quantityReceived),
   );
 }
 
@@ -201,21 +154,21 @@ export function strandedLandedCents(
 
 /**
  * A line's weight when one landed amount is spread over several lines: the
- * value still to arrive, `cumulativeShareCents(amount, quantity, received,
- * quantity)`. Units already received carry none of it, because the
- * entry only ever prices units received after it.
+ * value still to arrive, `lineUnitsCents(line, received, quantity)`. Units
+ * already received carry none of it, because the entry only ever prices units
+ * received after it.
  */
 export function landedCostWeightCents(
-  line: Pick<PurchaseSaleItem, "amount_cents" | "quantity">,
+  line: Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "price">,
   received: number,
 ): number {
   if (received >= line.quantity) return 0; // Nothing still to arrive; an over-receipt prices nothing either.
-  return cumulativeShareCents(line.amount_cents, line.quantity, received, line.quantity);
+  return lineUnitsCents(payableMoneyLine(line), received, line.quantity);
 }
 
 /** One buy line as {@link allocateLandedCostCents} weighs it: the line and its row's received count. */
 export interface LandedCostTarget {
-  line: Pick<PurchaseSaleItem, "amount_cents" | "quantity">;
+  line: Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "price">;
   received: number;
 }
 
@@ -290,42 +243,6 @@ export function remainingToReceive(
   custody: Pick<PurchaseLineCustody, "received">,
 ): number {
   return item.quantity - custody.received;
-}
-
-/**
- * **A flat purchase line's NET cost and its discount record** (Phase 2 ruling 7):
- * the operator states the GROSS and a supplier discount, and the line stores the
- * net as `amount_cents` — what receipts, basis, bills and credits slice.
- *
- * Composed from the money steps every priced line already uses, so no new
- * rounding exists here:
- *
- * - **percent** — `priceFromFormula` on one period at the gross: the discounted
- *   amount rounds ONCE, half away from zero, exactly as a customer line's does.
- * - **flat** — `rate` is 4dp dollars PER UNIT (`cfs-money`: a rate is not an
- *   amount), taken to cents as `priceFromFormula` takes it, then multiplied by
- *   the integer quantity: closed, nothing to round.
- *
- * A discount larger than the gross yields a negative net, which the stored
- * schema refuses — the caller's 400 to make, not this function's to clamp.
- *
- * @returns `discount` is `null` when none was stated; otherwise its
- *   `amount_cents` is `gross − net`.
- */
-export function flatPurchaseLineMoney(
-  grossCents: number,
-  quantity: number,
-  discount: FormulaDiscount | null,
-): { amount_cents: number; discount: { rate: number; type: FormulaDiscount["type"]; amount_cents: number } | null } {
-  if (!Number.isInteger(grossCents) || !Number.isInteger(quantity)) {
-    throw new Error(`A flat purchase line's gross and quantity are integers, got ${grossCents} × ${quantity}`);
-  }
-  if (discount === null) return { amount_cents: grossCents, discount: null };
-  const net = discount.type === "percent"
-    ? priceFromFormula([{ rate_key: "flat", amount_cents: grossCents }], [{ rate_key: "flat", num: 1, den: 1 }], 1, discount)
-      .subtotal_discounted_cents
-    : grossCents - Number(toCentsBig(discount.rate)) * quantity;
-  return { amount_cents: net, discount: { rate: discount.rate, type: discount.type, amount_cents: grossCents - net } };
 }
 
 /**

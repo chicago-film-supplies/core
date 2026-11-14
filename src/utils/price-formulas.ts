@@ -614,8 +614,11 @@ export {
   type LineMoneyLike,
   lineMoneyAtCents,
   lineUnitsCents,
+  payableMoneyLine,
+  type PayableMoneyLineLike,
   priceFromFormula,
   type RateSnapshot,
+  statedLine,
 } from "../schemas/_line-money.ts";
 import type { RateSnapshot } from "../schemas/_line-money.ts";
 import type { DocLineItemTypeType } from "../schemas/common.ts";

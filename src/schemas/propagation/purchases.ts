@@ -480,7 +480,7 @@ const createPurchaseBillRules: CollectionRule[] = [
     target: "purchases",
     mode: "co-write",
     invariant:
-      "Every bill product line bills ONE purchase line: it sits at `[purchase uid, ...that line's path]` under the purchase's `purchase` divider and takes its uid (never joined by product: one product may sit on two lines), or names it by the move pointer `path_purchase_item`, and is defaulted from it by `projectPurchaseLineToBillLine` (`@cfs/core/utils/purchase-documents`). A FLAT line is counted by the recount (`purchase-billed:bills-to-purchase`) and priced at `flatShareCents(line.amount_cents, line.quantity, billed_before, billed_after)` — never a client input — so the bills of a fully billed line sum to its amount exactly. A TIME line is billed by counts: the bill writer seeds `remainingTimeCounts` (the pair's metered counts less what live bills already bill there) and `priceDocument` prices `rates × counts`. Billing past what was ordered is LEGAL and flagged by the purchase↔bill diff, never refused (D5, reversing #1396). The bill's uid is appended to the purchase's `query_by_bills` in the same commit. A LINKED bill's lines are projected the same way for attribution; its total is Xero's and is exempt.",
+      "Every bill product line bills ONE purchase line: it sits at `[purchase uid, ...that line's path]` under the purchase's `purchase` divider and takes its uid (never joined by product: one product may sit on two lines), or names it by the move pointer `path_purchase_item`, and is defaulted from it by `projectPurchaseLineToBillLine` (`@cfs/core/utils/purchase-documents`). A FLAT line is counted by the recount (`purchase-billed:bills-to-purchase`) and priced at `lineUnitsCents(line, billed_before, billed_after)`, the one line-money function — never a client input — so the bills of a fully billed line sum to its amount exactly. A TIME line is billed by counts: the bill writer seeds `remainingTimeCounts` (the pair's metered counts less what live bills already bill there) and `priceDocument` prices `rates × counts`. Billing past what was ordered is LEGAL and flagged by the purchase↔bill diff, never refused (D5, reversing #1396). The bill's uid is appended to the purchase's `query_by_bills` in the same commit. A LINKED bill's lines are projected the same way for attribution; its total is Xero's and is exempt.",
     enforced_by: [BILL_MOVES_THE_BUCKET],
     transaction: "create-purchase-bill",
     fields: [
@@ -499,7 +499,7 @@ const createPurchaseBillRules: CollectionRule[] = [
         source: ["items", "amount_cents"],
         target: ["items", "amount_cents"],
         transform:
-          "flatShareCents(line.amount_cents, line.quantity, billed_before, billed_before + quantity) — read from the purchase line, never written to it",
+          "lineUnitsCents(line, billed_before, billed_before + quantity) — the one line-money function over the purchase line, read from it, never written to it",
       },
     ],
   },
@@ -713,7 +713,7 @@ const CREDIT_UNBILLS_THE_BUCKET: EnforcementRef = {
   ref:
     "api-cloudrun/tests/integration/purchases/purchaseCredits.test.ts::push — a credit un-bills its items at their cumulative share",
   clause:
-    "each credit recounts its purchase lines' quantity_billed in the same commit; a pushed credit line naming no bill line is priced from the line's billed pool (`purchaseLineCreditCents`: a share of what live bills net of live credits hold, or a stated amount, capped at the pool), and one naming a bill line first-come from that line's own money (`billLineCreditCents`), so a bill and the credit of all its units sum to zero; un-billing past quantity_billed is refused",
+    "each credit recounts its purchase lines' quantity_billed in the same commit; a pushed credit line naming no bill line is priced from the line's billed pool (`billedPoolCreditMoney`: a share of what live bills net of live credits hold, or the supplier's memo as the line's `price.stated_cents`, capped at the pool), and one naming a bill line first-come from that line's own money with its discount terms (`billLineCreditMoney`), so a bill and the credit of all its units sum to zero; un-billing past quantity_billed is refused",
   gates: true,
 };
 
@@ -795,7 +795,7 @@ const createPurchaseCreditRules: CollectionRule[] = [
     target: "purchases",
     mode: "co-write",
     invariant:
-      "Every credit line UN-bills some quantity of ONE purchase line — the line at its path under the purchase's `purchase` divider, or its `path_purchase_item` move pointer; the recount (`purchase-billed:credits-to-purchase`) lowers the count. Un-billing past `quantity_billed` is refused. A PUSHED credit line is priced at `flatShareCents(line.amount_cents, line.quantity, billed_after, billed_before)` — the share of the range it un-bills — so a bill and a credit of all its units net to zero. A LINKED credit's lines are priced the same way for attribution; its total is Xero's.",
+      "Every credit line UN-bills some quantity of ONE purchase line — the line at its path under the purchase's `purchase` divider, or its `path_purchase_item` move pointer; the recount (`purchase-billed:credits-to-purchase`) lowers the count. Un-billing past `quantity_billed` is refused. A PUSHED credit line is priced by the one line-money function over the range it un-bills (`lineUnitsCents`) — so a bill and a credit of all its units net to zero. A LINKED credit's lines are priced the same way for attribution; its total is Xero's.",
     enforced_by: [CREDIT_UNBILLS_THE_BUCKET],
     transaction: "create-purchase-credit",
     fields: [

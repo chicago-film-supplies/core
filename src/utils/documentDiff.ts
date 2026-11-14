@@ -203,8 +203,7 @@ import {
   purchaseLineBilledNet,
   purchaseLineKey,
 } from "./purchase-documents.ts";
-import { priceFromFormula } from "./price-formulas.ts";
-import { roundDivHalfUp } from "./money.ts";
+import { lineMoneyAtCents, payableMoneyLine, priceFromFormula } from "./price-formulas.ts";
 import { lineCustodyAt, type PurchaseLineCustody } from "./bookings-inbound.ts";
 import { type PricingFormulas, statedChargeWindows } from "./price-document.ts";
 import {
@@ -1617,10 +1616,8 @@ function payableQuantityEntry(
     credits: namingCredits,
   });
   const ordered = item.quantity;
-  // `quantity ≥ 1`: a line closed to 0 is removed (ruling 47), so the share always has a divisor.
-  const expected_cents = Number(
-    roundDivHalfUp(BigInt(item.amount_cents ?? 0) * BigInt(Math.max(0, net.quantity)), BigInt(item.quantity)),
-  );
+  // What the billed units should cost: the one line-money function at the net billed count (ruling 39).
+  const expected_cents = lineMoneyAtCents(payableMoneyLine(item), Math.max(0, net.quantity));
   if (net.quantity === ordered && net.amount_cents === expected_cents) return null;
   return {
     kind: "quantity",

@@ -16,8 +16,11 @@ import {
   priceFromFormula,
 } from "../src/utils/price-formulas.ts";
 import { roundDivHalfUp } from "../src/utils/money.ts";
-import { cumulativeShareCents, flatPurchaseLineMoney } from "../src/utils/purchases.ts";
-import { flatShareCents } from "../src/utils/purchase-documents.ts";
+import {
+  frozenCumulativeShareCents as cumulativeShareCents,
+  frozenFlatPurchaseLineMoney as flatPurchaseLineMoney,
+  frozenFlatShareCents as flatShareCents,
+} from "./helpers/frozen-line-money.ts";
 
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0;

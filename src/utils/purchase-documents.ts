@@ -25,7 +25,7 @@
  *
  * A payable line's money is written by `priceDocument`'s stated-total arm
  * (`priceStatedTotalLine`): the line states its net in `amount_cents`, and its
- * k-th bill is defaulted by `cumulativeShareCents` (via {@link flatShareCents}),
+ * k-th bill is defaulted by the one line-money function (`lineUnitsCents`),
  * exactly as its receipts are, so the bills of a fully billed line sum to the
  * line's `amount_cents`.
  *
@@ -61,10 +61,15 @@ import {
   isKitHeaderLine,
   payableLineUid,
 } from "../schemas/mod.ts";
-import { cumulativeShareCents } from "./purchases.ts";
+import {
+  lineDiscountAtCents,
+  lineUnitsCents,
+  payableMoneyLine,
+  type PayableMoneyLineLike,
+  statedLine,
+} from "../schemas/_line-money.ts";
 import { fitOutOfServiceEntries } from "./replacements.ts";
 import type { ExchangedForEntryType, OutOfServiceEntryType } from "../schemas/mod.ts";
-import { roundDivHalfUp } from "./money.ts";
 import {
   collectSubstitutionAnchors,
   type CreditableRow,
@@ -190,7 +195,7 @@ export interface PurchaseLineBilling {
  *   as an invoice's does on AR (`invoicedByPath`): each live entry credits X
  *   with its units and their share of Y's money and counts, and the rest of Y
  *   stays at Y's own join. The stand-in units take Y's FIRST units' share
- *   (`cumulativeShareCents`), so the parts sum to exactly Y's amount.
+ *   (`lineUnitsCents`), so the parts sum to exactly Y's amount.
  * - An entry is live while the purchase still carries X (`purchase_items`);
  *   a spent one bills nothing for X, and its units count at Y's own join.
  * - X's kit components are credited through the PURCHASE's own ratio
@@ -271,7 +276,7 @@ function foldPurchaseDocument(
     for (const e of substitutedForOf(line) ?? []) {
       const x = e.path.join("/");
       if (e.path.length === 0 || e.quantity <= 0 || !liveX.has(x)) continue;
-      const share = flatShareCents(line.amount_cents, line.quantity, units, units + e.quantity);
+      const share = lineUnitsCents(payableMoneyLine(line), units, units + e.quantity);
       const entry = at(x);
       entry.amount_cents += share;
       if (anchorAt.has(`${rel}\x1e${x}`)) {
@@ -431,26 +436,44 @@ export function recomputePurchaseQuantityBilled(
 // ── Money ───────────────────────────────────────────────────────
 
 /**
- * A FLAT bill line's share of its purchase line's discount, for the record.
- * `amount_cents` is already net (ruling 7), so this moves no money: it is
- * `round(discount × billed ÷ ordered)`, informational, and never summed.
+ * A part's discount RECORD over units `(before, after]` of a line: the one
+ * function's `lineDiscountAtCents(after) − lineDiscountAtCents(before)`, so the
+ * parts' records sum to the line's. `null` when the line carries no discount.
+ * Informational: `amount_cents` is already net, so this moves no money.
  */
-function flatDiscountShare(discount: DiscountType, billed: number, ordered: number): number {
-  if (ordered === 0) return 0; // A canceled line: no discount left to share.
-  return Number(roundDivHalfUp(BigInt(discount.amount_cents) * BigInt(billed), BigInt(ordered)));
+function partDiscount(
+  line: PayableMoneyLineLike & { price: { discount: DiscountType | null } },
+  before: number,
+  after: number,
+): DiscountType | null {
+  const discount = line.price.discount;
+  if (discount === null) return null;
+  const m = payableMoneyLine(line);
+  return { ...discount, amount_cents: lineDiscountAtCents(m, after) - lineDiscountAtCents(m, before) };
 }
 
 /**
- * The cents a flat line's units `(before, after]` cost — `cumulativeShareCents`,
- * extended past `quantity` at the same per-unit rate, because over-billing is
- * legal (D5) and still needs a default. A writer pricing anything against a
- * line's `quantity_billed`, which may stand past `quantity`, prices through this
- * and never through `cumulativeShareCents`, which throws there.
+ * A BILL line's discount record on `quantity` units of its purchase line, from
+ * unit 0 (`lineDiscountAtCents`): position-free, the sync's convention (see
+ * {@link projectPurchaseLineToBillLine}). `null` when the line has no discount.
  */
-export function flatShareCents(amountCents: number, quantity: number, before: number, after: number): number {
-  if (after <= quantity) return cumulativeShareCents(amountCents, quantity, before, after);
-  const at = (k: number) => Number(roundDivHalfUp(BigInt(amountCents) * BigInt(k), BigInt(quantity)));
-  return at(after) - at(before);
+function billLineDiscount(item: PurchaseItem, quantity: number): DiscountType | null {
+  return partDiscount(item, 0, quantity);
+}
+
+/**
+ * One credit line's money, as both credit arms price it (one-document-model
+ * 6e-0b1 D4): the default is a partition of what is credited, through the one
+ * line-money function; a supplier's MEMO overrides it and becomes the credit
+ * line's own `price.stated_cents`, with `discount: null` (a memo is net).
+ */
+export interface CreditMoney {
+  /** The credit line's net. */
+  amount_cents: number;
+  /** The discount record the line inherits, over the units credited; `null` on a memo or an undiscounted line. */
+  discount: DiscountType | null;
+  /** Set only on a memo: the credit line's `price.stated_cents`. */
+  stated_cents?: number;
 }
 
 /**
@@ -459,34 +482,38 @@ export function flatShareCents(amountCents: number, quantity: number, before: nu
  * (`purchaseLineBilledNet`: live bills less live credits), never of the PO line,
  * so an edited bill strands nothing.
  *
- * - The pool's share of its last `n` units. Crediting the whole pool returns
- *   exactly its money, and successive credits sum to it.
- * - `stated_cents`: the supplier's memo governs, refused above the pool, because
+ * - The pool's LAST `n` units of a PSEUDO-line, the pool's net over its units
+ *   (`statedLine`): crediting the whole pool returns exactly its money, and
+ *   successive credits sum to it. The pool is net, so no discount is inherited.
+ * - `memo_cents`: the supplier's memo governs, refused above the pool, because
  *   an operator typed it.
  *
- * A credit that names a bill line is priced by {@link billLineCreditCents}
+ * A credit that names a bill line is priced by {@link billLineCreditParts}
  * instead (one-document-model 6d): from that line, not the pool.
  *
  * @throws {RangeError} when `n` is outside `1..pool quantity`, the pool holds no
- *   money, or a stated amount exceeds the pool
+ *   money, or a memo exceeds the pool
  */
-export function purchaseLineCreditCents(args: {
+export function billedPoolCreditMoney(args: {
   pool: PurchaseLineBilledNet;
   n: number;
-  stated_cents?: number;
-}): number {
-  const { pool, n, stated_cents } = args;
+  memo_cents?: number;
+}): CreditMoney {
+  const { pool, n, memo_cents } = args;
   if (!Number.isInteger(n) || n < 1 || n > pool.quantity) {
     throw new RangeError(`crediting ${n} exceeds the ${pool.quantity} billed`);
   }
   if (pool.amount_cents <= 0) throw new RangeError("this line's billed pool holds no money to credit");
-  if (stated_cents !== undefined) {
-    if (stated_cents > pool.amount_cents) {
-      throw new RangeError(`a credit of ${stated_cents} cents exceeds the ${pool.amount_cents} cents billed`);
+  if (memo_cents !== undefined) {
+    if (memo_cents > pool.amount_cents) {
+      throw new RangeError(`a credit of ${memo_cents} cents exceeds the ${pool.amount_cents} cents billed`);
     }
-    return stated_cents;
+    return { amount_cents: memo_cents, discount: null, stated_cents: memo_cents };
   }
-  return flatShareCents(pool.amount_cents, pool.quantity, pool.quantity - n, pool.quantity);
+  return {
+    amount_cents: lineUnitsCents(statedLine(pool.amount_cents, pool.quantity), pool.quantity - n, pool.quantity),
+    discount: null,
+  };
 }
 
 /** What live supplier credits have already taken from one bill line. */
@@ -536,41 +563,43 @@ export function billLineCredited(
 
 /**
  * **What a supplier credit of `n` units of one bill line is worth**
- * (one-document-model 6d, owner 2026-11-11): units `(c, c + n]` of the line,
- * `c` the units live credits already took (`billLineCredited`), priced
- * FIRST-COME (`flatShareCents`), so crediting a line in parts sums to exactly
- * its amount — $100.00 over 3 units credited one at a time is 3333 + 3334 +
- * 3333, never 9999.
+ * (one-document-model 6d, owner 2026-11-11; D4 2026-11-13): units `(c, c + n]`
+ * of the line, `c` the units live credits already took (`billLineCredited`),
+ * priced FIRST-COME by the one line-money function (`lineUnitsCents`), so
+ * crediting a line in parts sums to exactly its amount — $100.00 over 3 units
+ * credited one at a time is 3333 + 3334 + 3333, never 9999. The credit line
+ * INHERITS the row's discount terms, its record over the same units (D4).
  *
- * ⚠️ **Deliberately unlike AR**, where each credit-note line rounds on its own
- * (`priceCreditNote`). This module's rule is that a line's documents sum to the
- * line's money exactly, and a credit of a bill line is one more of them.
+ * ⚠️ **Deliberately unlike AR, until 6e-0b2**, where each credit-note line
+ * re-prices on its own (`priceCreditNote`).
  *
- * - `stated_cents`: the supplier's memo governs, refused above what is left of
- *   the line's money.
+ * - `memo_cents`: the supplier's memo governs, refused above what is left of
+ *   the line's money, and is stored as the credit line's `price.stated_cents`.
  * - The first-come share is capped at what is left of the line's money, so a
- *   line part-credited at a stated amount cannot be over-credited.
+ *   line part-credited by a memo cannot be over-credited.
  *
- * @throws {RangeError} when `n` is outside `1..units left`, or a stated amount
- *   exceeds the money left
+ * @throws {RangeError} when `n` is outside `1..units left`, or a memo exceeds
+ *   the money left
  */
-export function billLineCreditCents(args: {
-  line: { quantity: number; amount_cents: number };
+export function billLineCreditMoney(args: {
+  line: PayableMoneyLineLike & { amount_cents: number; price: { discount: DiscountType | null } };
   credited: BillLineCredited;
   n: number;
-  stated_cents?: number;
-}): number {
-  const { line, credited, n, stated_cents } = args;
+  memo_cents?: number;
+}): CreditMoney {
+  const { line, credited, n, memo_cents } = args;
   const left = line.quantity - credited.quantity;
   if (!Number.isInteger(n) || n < 1 || n > left) {
     throw new RangeError(`crediting ${n} exceeds the ${Math.max(0, left)} left on the bill line`);
   }
   const room = Math.max(0, line.amount_cents - credited.amount_cents);
-  if (stated_cents !== undefined) {
-    if (stated_cents > room) throw new RangeError(`a credit of ${stated_cents} cents exceeds the ${room} cents left on the bill line`);
-    return stated_cents;
+  if (memo_cents !== undefined) {
+    if (memo_cents > room) throw new RangeError(`a credit of ${memo_cents} cents exceeds the ${room} cents left on the bill line`);
+    return { amount_cents: memo_cents, discount: null, stated_cents: memo_cents };
   }
-  return Math.min(room, flatShareCents(line.amount_cents, line.quantity, credited.quantity, credited.quantity + n));
+  const from = credited.quantity;
+  const share = lineUnitsCents(payableMoneyLine(line), from, from + n);
+  return { amount_cents: Math.min(room, share), discount: partDiscount(line, from, from + n) };
 }
 
 /**
@@ -609,8 +638,12 @@ export interface BillLineCreditPart {
   credited: BillLineCredited;
   /** Units this credit takes of the row: `(credited.quantity, credited.quantity + n]`. */
   n: number;
-  /** Their money, first-come ({@link billLineCreditCents}). */
+  /** Their money, first-come, and the discount record they inherit (D4). */
   amount_cents: number;
+  /** The row's discount terms, its record over these units; `null` on a memo. */
+  discount: DiscountType | null;
+  /** Set only on a memo: the credit line's `price.stated_cents` (D4). */
+  stated_cents?: number;
   /** The row's LIVE `substituted_for` entries, sliced to those units ({@link sliceSubstitutedFor}). */
   substituted_for: SubstitutedForEntryType[];
 }
@@ -637,8 +670,8 @@ export interface BillLineCreditPart {
  * as the fold reads them; a spent one stands in for nothing and is not copied.
  *
  * @throws {RangeError} when no line row sits at `path`, `n` exceeds a row's units
- *   left, a stated amount exceeds the money left, or a kit's credit states an
- *   amount (a kit is priced from its rows)
+ *   left, a memo exceeds the money left, or a kit's credit states a memo (a kit
+ *   is priced from its rows)
  */
 export function billLineCreditParts(args: {
   bill: Pick<PurchaseBill, "uid" | "items">;
@@ -647,14 +680,15 @@ export function billLineCreditParts(args: {
   credits: readonly Pick<PurchaseCredit, "status" | "items">[];
   /** Keys (`path.join("/")`, purchase-relative) of the purchase's rows. */
   purchaseKeys: ReadonlySet<string>;
-  stated_cents?: number;
+  /** The supplier's memo for the root row: its credit line's `price.stated_cents` (D4). */
+  memo_cents?: number;
 }): BillLineCreditPart[] {
-  const { bill, path, n, credits, purchaseKeys, stated_cents } = args;
+  const { bill, path, n, credits, purchaseKeys, memo_cents } = args;
   const key = path.join("/");
   const root = bill.items.find((r): r is PurchaseDocumentItem => isPurchaseLine(r) && r.path.join("/") === key);
   if (root === undefined) throw new RangeError(`bill has no line at ${key}`);
   const subtree = substituteKitSubtree(bill.items, path);
-  if (subtree.length > 0 && stated_cents !== undefined) {
+  if (subtree.length > 0 && memo_cents !== undefined) {
     throw new RangeError("a substitute kit's credit is priced from its rows, so it states no amount");
   }
   const c = billLineCredited(bill.uid, path, credits).quantity;
@@ -662,18 +696,13 @@ export function billLineCreditParts(args: {
     const credited = billLineCredited(bill.uid, line.path, credits);
     const m = to - from;
     const live = (substitutedForOf(line) ?? []).filter((e) => purchaseKeys.has(e.path.join("/")));
-    return {
+    const money = billLineCreditMoney({
       line,
       credited,
       n: m,
-      amount_cents: billLineCreditCents({
-        line,
-        credited,
-        n: m,
-        ...(line === root && stated_cents !== undefined ? { stated_cents } : {}),
-      }),
-      substituted_for: sliceSubstitutedFor(live, from, to),
-    };
+      ...(line === root && memo_cents !== undefined ? { memo_cents } : {}),
+    });
+    return { line, credited, n: m, ...money, substituted_for: sliceSubstitutedFor(live, from, to) };
   };
   const out = [part(root, c, c + n)];
   const at = (k: number, q: number) => Math.floor((2 * k * q + root.quantity) / (2 * root.quantity));
@@ -774,11 +803,15 @@ export interface ProjectBillLineOptions {
 /**
  * **Default a bill line from its purchase line** (D5). Name, formula, discount
  * terms, posting and attribution are the purchase line's (each then
- * overridable on the bill until it settles). The amount is `quantity` units at
- * the line's cumulative share from where its `quantity_billed` stands
- * ({@link flatShareCents}, extended past the ordered count because
- * over-billing is legal), so the bills of a line sum to its `amount_cents`; the
- * discount record is the same share of the purchase line's.
+ * overridable on the bill until it settles). The amount is `quantity` units of
+ * the line from where its `quantity_billed` stands, by the one line-money
+ * function (`lineUnitsCents`, defined past the ordered count because
+ * over-billing is legal), so the bills of a line sum to its `amount_cents`.
+ *
+ * The discount record is the line's discount on `quantity` units FROM UNIT 0
+ * (`lineDiscountAtCents`), position-free: the sync compares a bill line with
+ * its projection at its own quantity and knows no position, as its
+ * `requantify` share does (6e-0b1 S3). It is informational and never summed.
  *
  * The line's price is built by `flatPayablePrice` (the stated-total arm), so
  * the projection parses on its own; the writer prices the whole document with
@@ -792,17 +825,14 @@ export function projectPurchaseLineToBillLine(
   opts: ProjectBillLineOptions,
 ): PurchaseDocumentItem {
   if (item.price.price_formula.basis === "time") return projectTimeLine(item, opts);
-  const amount = item.amount_cents ?? 0;
   const before = opts.from ?? item.quantity_billed ?? 0;
-  const amount_cents = flatShareCents(amount, item.quantity, before, before + opts.quantity);
+  const amount_cents = lineUnitsCents(payableMoneyLine(item), before, before + opts.quantity);
   const price: PurchaseDocumentLinePrice = flatPayablePrice({
     uid: item.uid,
     quantity: opts.quantity,
     amount_cents,
     price_formula: item.price.price_formula,
-    discount: item.price.discount
-      ? { ...item.price.discount, amount_cents: flatDiscountShare(item.price.discount, opts.quantity, item.quantity) }
-      : null,
+    discount: billLineDiscount(item, opts.quantity),
     taxes: item.price.taxes,
     taxes_base: item.price.taxes_base,
     counts: true,
@@ -1076,9 +1106,7 @@ export function projectPurchaseLineForBill(item: PurchaseItem, quantity: number)
     price: {
       price_formula: item.price.price_formula,
       rates: item.price.rates,
-      discount: item.price.discount
-        ? { ...item.price.discount, amount_cents: flatDiscountShare(item.price.discount, quantity, item.quantity) }
-        : null,
+      discount: billLineDiscount(item, quantity),
     },
     ...attributionOf(item, quantity),
     ...exchangedForProjection(item),
@@ -1157,13 +1185,14 @@ export function payableScopedSync(prev: Purchase, next: Purchase): {
       if (!isPurchaseLine(row) || row.price.price_formula.basis === "time") return { ...row, quantity };
       const line = source === undefined ? undefined : original.get(source);
       if (line !== undefined && isPurchaseLine(line) && line.quantity > 0 && purchaseItemBasis(line) === "flat") {
-        const amount = line.amount_cents ?? 0;
-        if (row.amount_cents === flatShareCents(amount, line.quantity, 0, row.quantity)) {
-          return { ...row, quantity, amount_cents: flatShareCents(amount, line.quantity, 0, quantity) };
+        const money = payableMoneyLine(line);
+        if (row.amount_cents === lineUnitsCents(money, 0, row.quantity)) {
+          return { ...row, quantity, amount_cents: lineUnitsCents(money, 0, quantity) };
         }
       }
       if (scaleFrom !== undefined && scaleFrom > 0 && scaleFrom !== quantity) {
-        return { ...row, quantity, amount_cents: flatShareCents(row.amount_cents, scaleFrom, 0, quantity) };
+        // A pseudo-line: the row's own net over the count it had, rescaled.
+        return { ...row, quantity, amount_cents: lineUnitsCents(statedLine(row.amount_cents, scaleFrom), 0, quantity) };
       }
       return { ...row, quantity };
     },
@@ -1256,7 +1285,7 @@ export const PAYABLE_LINE_CLAIMS: LineClaimSide<PurchaseRow> = {
 
 /**
  * A bill line's discount record is ITS SHARE of its purchase line's discount
- * (`flatDiscountShare`, as {@link projectPurchaseLineToBillLine} writes it at
+ * (`billLineDiscount`, as {@link projectPurchaseLineToBillLine} writes it at
  * create). The sync's projector projects the WHOLE line, so a discount that
  * newly reaches a partial bill line arrives at the whole line's amount; this
  * restates it as the line's share whenever its terms are the purchase line's.
@@ -1272,7 +1301,7 @@ function reshareDiscounts(rows: readonly PurchaseDocumentRow[], next: Purchase):
     const item = key === null ? undefined : byKey.get(key);
     const source = item?.price.discount;
     if (!discount || !item || !source || source.rate !== discount.rate || source.type !== discount.type) return row;
-    const amount_cents = flatDiscountShare(source, row.quantity, item.quantity);
+    const amount_cents = billLineDiscount(item, row.quantity)?.amount_cents ?? 0;
     if (amount_cents === discount.amount_cents) return row;
     return { ...row, price: { ...row.price, discount: { ...discount, amount_cents } } };
   });

@@ -80,9 +80,10 @@
  *
  * - **flat** — `amount_cents` is what the whole item costs, NET of any supplier
  *   discount, integer cents, and `price.rates` is empty. The k-th receipt or
- *   bill against an item is priced by `cumulativeShareCents`
- *   (`@cfs/core/utils/purchases`), which rounds the CUMULATIVE share once, so the
- *   partials sum to `amount_cents` exactly with no remainder rule. There is no
+ *   bill against an item is priced by the one line-money function
+ *   (`lineUnitsCents`, `@cfs/core/utils/price-formulas`), which rounds the
+ *   CUMULATIVE value once, so the partials sum to `amount_cents` exactly with no
+ *   remainder rule. There is no
  *   stored per-unit rate: measured on prod, most buys cost a total that does
  *   not divide by their quantity, and no reader needs one (`perUnitCostAt4dp`
  *   derives the display rate).
@@ -318,8 +319,8 @@ const flatMoney = { propagate: true, shared_group: "flat_money" } as const;
  * - A line states its WHOLE net cost in the line's `amount_cents` (the DECLARED
  *   stated total: a buy, a fixed-cost subrent, freight or a fee) and carries
  *   `rates: []`. Measured: most stored buys cost a total that does not divide
- *   by their quantity, and every reader slices the total with
- *   `cumulativeShareCents`, so no per-unit rate is stored.
+ *   by their quantity, and every reader slices the total with the one
+ *   line-money function (`lineUnitsCents`), so no per-unit rate is stored.
  * - The COMPUTED half is the receivable line's money (`subtotal_cents`,
  *   `subtotal_discounted_cents`, `taxes`, `total_cents`), written by
  *   `priceDocument`'s stated-total arm (one-document-model Phase 2): subtotal =
@@ -597,8 +598,8 @@ export function purchaseItemBasis(item: { price?: PurchaseLinePrice }): PriceFor
  * **What it spreads over is fixed at entry.** `quantity` is the item's
  * outstanding count when the entry was made, and `received_at_entry` is
  * what the line had received at that moment (its row's custody, C8). The k-th receipt prices the units received
- * since the entry, `clamp(received − received_at_entry, 0, quantity)`, with
- * `cumulativeShareCents`, so the shares telescope to `amount_cents` exactly when
+ * since the entry, `clamp(received − received_at_entry, 0, quantity)`, with the
+ * one line-money function over the entry's amount (`statedLine`), so the shares telescope to `amount_cents` exactly when
  * every outstanding unit arrives (`purchaseLineReceiptTargetCents`,
  * `@cfs/core/utils/purchases`).
  *

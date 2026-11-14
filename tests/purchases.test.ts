@@ -26,6 +26,8 @@ import {
   type PurchaseItem,
   PurchaseDestinationInput,
   PurchaseBillRowInput,
+  PurchaseCreditItemInput,
+  creditItemMemoCents,
   PurchaseItemInput,
   PurchaseRowInput,
   type PurchaseLandedCost,
@@ -45,7 +47,6 @@ import { deriveInvoiceStatus, invoiceFieldIsFrozen, invoiceIsFrozen, recomputePu
 import { XERO_ASSET_ACCOUNTS } from "../src/utils/movements.ts";
 import {
   allocateLandedCostCents,
-  cumulativeShareCents,
   deriveQueryByItemTypes,
   expandPurchaseItems,
   isLandedCostFrozen,
@@ -65,7 +66,23 @@ import {
   NO_LINE_CUSTODY,
 } from "../src/utils/purchases.ts";
 import { apportionCents } from "../src/utils/money.ts";
-import { costedProductUid, flatPurchaseLineMoney, lineProductUid } from "../src/utils/purchases.ts";
+import { costedProductUid, lineProductUid } from "../src/utils/purchases.ts";
+import { type FormulaDiscount, lineDiscountAtCents, lineMoneyAtCents, lineUnitsCents, statedLine } from "../src/utils/price-formulas.ts";
+
+/**
+ * The one line-money function's partition of a stated amount — what
+ * `cumulativeShareCents` was until 6e-0b1 S3 folded it in (ruling 39). The sweeps
+ * below now guard the one function on that domain.
+ */
+const share = (amount: number, quantity: number, before: number, after: number): number =>
+  lineUnitsCents(statedLine(amount, quantity), before, after);
+
+/** A stated flat line's net and discount record — what `flatPurchaseLineMoney` was until S3. */
+function flatMoney(gross: number, quantity: number, discount: FormulaDiscount | null) {
+  const line = { quantity, price: { rates: [], counts: [], discount, stated_cents: gross } };
+  const amount_cents = lineMoneyAtCents(line, quantity);
+  return { amount_cents, discount: discount === null ? null : { ...discount, amount_cents: lineDiscountAtCents(line, quantity) } };
+}
 import { mockTimestamp } from "./helpers/timestamp.ts";
 import { asCreditRows, payablePrice, purchaseDivider, purchasePair, payableLine, withPayableMoney } from "./helpers/payable.ts";
 
@@ -111,7 +128,7 @@ function randomPath(rand: () => number, quantity: number): number[] {
 
 const DRAWS = 200_000;
 
-Deno.test("cumulativeShareCents: over 200k random lines and paths, partials sum EXACTLY, each within a cent of pro rata, and the cumulative equals exact half-up", () => {
+Deno.test("lineUnitsCents (a stated line): over 200k random lines and paths, partials sum EXACTLY, each within a cent of pro rata, and the cumulative equals exact half-up", () => {
   const rand = mulberry32(1210);
   let partials = 0;
   let failure: string | null = null;
@@ -124,11 +141,11 @@ Deno.test("cumulativeShareCents: over 200k random lines and paths, partials sum 
     let sum = 0n;
     for (const step of randomPath(rand, quantity)) {
       const after = before + step;
-      const part = BigInt(cumulativeShareCents(amount, quantity, before, after));
+      const part = BigInt(share(amount, quantity, before, after));
       // Exact pro rata of `step` units is amount·step/quantity; the partial is
       // the difference of two values each within ½ cent, so within 1 cent.
       const diff = part * BigInt(quantity) - BigInt(amount) * BigInt(step);
-      const cum = BigInt(cumulativeShareCents(amount, quantity, 0, after));
+      const cum = BigInt(share(amount, quantity, 0, after));
       // Plain comparisons, not assertions, in the hot loop: an assertion call
       // per step was 3/4 of this test's runtime. The first failure is kept.
       if (failure === null) {
@@ -153,7 +170,7 @@ Deno.test("cumulativeShareCents: over 200k random lines and paths, partials sum 
   assert(partials > DRAWS, "the sweep exercised multi-step paths");
 });
 
-Deno.test("cumulativeShareCents companion: rounding each PARTIAL instead does NOT sum to the line — the sweep above can fail", () => {
+Deno.test("lineUnitsCents companion: rounding each PARTIAL instead does NOT sum to the line — the sweep above can fail", () => {
   // The form this replaces: price each receipt on its own. If it never
   // disagreed, the exact-sum assertion above would be guarding nothing.
   const rand = mulberry32(1210);
@@ -169,20 +186,20 @@ Deno.test("cumulativeShareCents companion: rounding each PARTIAL instead does NO
   }
   assert(drifted > 1_000, `per-partial rounding drifted on only ${drifted} of 20,000 lines`);
   // The docblock's worked example, pinned.
-  assertEquals([1, 1, 1].map(() => cumulativeShareCents(1000, 3, 0, 1)), [333, 333, 333]);
+  assertEquals([1, 1, 1].map(() => share(1000, 3, 0, 1)), [333, 333, 333]);
   assertEquals(
-    [cumulativeShareCents(1000, 3, 0, 1), cumulativeShareCents(1000, 3, 1, 2), cumulativeShareCents(1000, 3, 2, 3)],
+    [share(1000, 3, 0, 1), share(1000, 3, 1, 2), share(1000, 3, 2, 3)],
     [333, 334, 333],
   );
 });
 
-Deno.test("cumulativeShareCents: refuses bounds a correct writer never sends", () => {
-  assertThrows(() => cumulativeShareCents(100, 0, 0, 0), RangeError);
-  assertThrows(() => cumulativeShareCents(-1, 2, 0, 1), RangeError);
-  assertThrows(() => cumulativeShareCents(100, 2, 1, 0), RangeError);
-  assertThrows(() => cumulativeShareCents(100, 2, 0, 3), RangeError);
-  assertThrows(() => cumulativeShareCents(100, 2, 0.5, 1), RangeError);
-  assertEquals(cumulativeShareCents(100, 2, 1, 1), 0);
+Deno.test("purchaseLineReceiptTargetCents: refuses a count a correct writer never sends (the guard cumulativeShareCents carried)", () => {
+  const l = line({ quantity: 2, amount_cents: 100 });
+  assertThrows(() => purchaseLineReceiptTargetCents(l, 3), RangeError);
+  assertThrows(() => purchaseLineReceiptTargetCents(l, -1), RangeError);
+  assertThrows(() => purchaseLineReceiptTargetCents(l, 0.5), RangeError);
+  assertEquals(purchaseLineReceiptTargetCents(l, 0), 0);
+  assertEquals(share(100, 2, 1, 1), 0);
 });
 
 // ── item fixtures ────────────────────────────────────────────────────
@@ -1702,8 +1719,8 @@ Deno.test("landed cost companion: a (before, after] landed partial on top of the
   // would be guarding nothing.
   const l = line({ quantity: 2, amount_cents: 0, landed_costs: [entry({ amount_cents: 10_000, quantity: 2 })] });
   const wrongTarget = (before: number, after: number) =>
-    cumulativeShareCents(l.amount_cents, l.quantity, 0, after) +
-    cumulativeShareCents(10_000, 2, before, after);
+    share(l.amount_cents, l.quantity, 0, after) +
+    share(10_000, 2, before, after);
   const journal: number[] = [];
   let before = 0;
   for (const after of [1, 2]) {
@@ -1776,7 +1793,7 @@ Deno.test("landed cost inputs: a subrent item cannot carry them; a buy item inpu
   assertEquals(twice.error.issues.map((i) => i.path.join(".")), ["landed_costs.1.uid"]);
 });
 
-// ── flatPurchaseLineMoney (Phase 2 ruling 7) ─────────────────────────
+// ── a stated flat line's net (Phase 2 ruling 7; the one function since 6e-0b1 S3) ─────────────────────────
 
 
 /** Seeded LCG — corpora are reproducible, never `Math.random()`. */
@@ -1794,7 +1811,7 @@ function exactPercentNet(gross: number, rate4dp: number): number {
   return Number(2n * r >= den ? q + 1n : q);
 }
 
-Deno.test("flatPurchaseLineMoney: percent net matches an exact oracle over 100k lines; the quantized ratio disagrees", () => {
+Deno.test("stated flat line money: percent net matches an exact oracle over 100k lines; the quantized ratio disagrees", () => {
   const rand = flatMoneyLcg(77);
   let wrong = 0;
   let companionWrong = 0;
@@ -1803,7 +1820,7 @@ Deno.test("flatPurchaseLineMoney: percent net matches an exact oracle over 100k 
     const gross = 1 + Math.floor(rand() * 5_000_000);
     const rate4dp = Math.floor(rand() * 1_000_000); // 0.0000 … 99.9999 %
     const rate = rate4dp / 10_000;
-    const got = flatPurchaseLineMoney(gross, 1 + Math.floor(rand() * 50), { rate, type: "percent" });
+    const got = flatMoney(gross, 1 + Math.floor(rand() * 50), { rate, type: "percent" });
     const want = exactPercentNet(gross, rate4dp);
     if (got.amount_cents !== want) wrong++;
     if (got.discount!.amount_cents !== gross - got.amount_cents) wrong++;
@@ -1817,16 +1834,16 @@ Deno.test("flatPurchaseLineMoney: percent net matches an exact oracle over 100k 
   assert(companionWrong > 50_000, `quantized-ratio companion stopped discriminating: ${companionWrong}`);
 });
 
-Deno.test("flatPurchaseLineMoney: a flat discount is cents per unit × quantity; none is the gross", () => {
-  assertEquals(flatPurchaseLineMoney(61_718, 288, null), { amount_cents: 61_718, discount: null });
+Deno.test("stated flat line money: a flat discount is cents per unit × quantity; none is the gross", () => {
+  assertEquals(flatMoney(61_718, 288, null), { amount_cents: 61_718, discount: null });
   // $0.10 off each of 288 units = $28.80.
-  assertEquals(flatPurchaseLineMoney(61_718, 288, { rate: 0.1, type: "flat" }), {
+  assertEquals(flatMoney(61_718, 288, { rate: 0.1, type: "flat" }), {
     amount_cents: 61_718 - 2_880,
     discount: { rate: 0.1, type: "flat", amount_cents: 2_880 },
   });
   // 10% of $617.18 = $61.718 → $61.72 off, half away from zero.
-  assertEquals(flatPurchaseLineMoney(61_718, 288, { rate: 10, type: "percent" }).amount_cents, 55_546);
-  assertThrows(() => flatPurchaseLineMoney(100.5, 1, null));
+  assertEquals(flatMoney(61_718, 288, { rate: 10, type: "percent" }).amount_cents, 55_546);
+  assertThrows(() => flatMoney(100.5, 1, null));
 });
 
 Deno.test("PurchaseSchema: a stored line holds at least 1 — a line closed to 0 is removed (ruling 47)", () => {
@@ -1931,4 +1948,16 @@ Deno.test("PurchaseBillRowInput: a row may state its gross as price.stated_cents
   assertEquals(issuePaths(PurchaseBillRowInput, { ...row, price: { stated_cents: 100 } }), []);
   assertEquals(issuePaths(PurchaseBillRowInput, { ...row, amount_cents: 100, price: { stated_cents: 100 } }), []);
   assertEquals(issuePaths(PurchaseBillRowInput, { ...row, amount_cents: 100, price: { stated_cents: 99 } }), ["price.stated_cents"]);
+});
+
+Deno.test("PurchaseCreditItemInput: the memo is price.stated_cents, or amount_cents until beta B; both sent must agree (6e-0b1 D4)", () => {
+  const credit = { path_purchase_item: ["abcdefghij0123456789"], quantity: 1 };
+  assertEquals(issuePaths(PurchaseCreditItemInput, credit), [], "no memo: the default partition");
+  assertEquals(issuePaths(PurchaseCreditItemInput, { ...credit, price: { stated_cents: 700 } }), []);
+  assertEquals(issuePaths(PurchaseCreditItemInput, { ...credit, amount_cents: 700, price: { stated_cents: 700 } }), []);
+  assertEquals(issuePaths(PurchaseCreditItemInput, { ...credit, amount_cents: 700, price: { stated_cents: 701 } }), ["price.stated_cents"]);
+  assertEquals(creditItemMemoCents({ price: { stated_cents: 700 } }), 700);
+  assertEquals(creditItemMemoCents({ amount_cents: 700 }), 700);
+  assertEquals(creditItemMemoCents({ price: { stated_cents: null } }), undefined);
+  assertEquals(creditItemMemoCents({}), undefined);
 });

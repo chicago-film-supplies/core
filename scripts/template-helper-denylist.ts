@@ -748,15 +748,12 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   purchases: [
     // A close's arithmetic, for the writer and the operator's preview; a render never closes a line.
     "purchaseLineCloseOutcome",
-    "cumulativeShareCents",
     "deriveQueryByItemTypes",
     "deriveQueryByOrders",
     "deriveQueryByProducts",
     "custodyBySourceItem",
     "derivePurchaseStatus",
     "expandPurchaseItems",
-    // Writes a flat line's net and discount record (ruling 7) — a writer's step.
-    "flatPurchaseLineMoney",
     "purchaseItemCommittedCents",
     "purchaseItemProduct",
     // The payable line uid rule (W4K): what a writer keys a line by, and its refines.
@@ -797,7 +794,6 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // purchase → bill sync. A template renders a bill whose lines already carry
   // their counts and money.
   "purchase-documents": [
-    "flatShareCents",
     "projectPurchaseLineForBill",
     "projectPurchaseLineToBillLine",
     "projectPurchaseRowForBill",
@@ -807,9 +803,9 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "payableScopedSync",
     "purchaseLineBilledCounts",
     "purchaseLineBilledNet",
-    "purchaseLineCreditCents",
+    "billedPoolCreditMoney",
     "billLineCredited",
-    "billLineCreditCents",
+    "billLineCreditMoney",
     "purchaseLineCovers",
     "remainingTimeCounts",
     "purchaseLineKey",

@@ -3364,8 +3364,8 @@ ACCPAYCREDIT, or link one the supplier's credit was entered as in Xero.
 
 Each `items` entry UN-bills that quantity of its purchase item, or of the
 bill line it names: it lowers `quantity_billed`, and a PUSHED credit prices it
-from the line's billed pool (`purchaseLineCreditCents`) or from the named bill
-line (`billLineCreditCents`), so more than was billed cannot be credited. A price correction with no quantity is a `charge_items` entry
+from the line's billed pool (`billedPoolCreditMoney`) or from the named bill
+line (`billLineCreditMoney`), so more than was billed cannot be credited. A price correction with no quantity is a `charge_items` entry
 (push only). A LINKED credit reads its date, reference and total from Xero,
 as a linked bill does.
 
@@ -11447,13 +11447,16 @@ One line of a supplier CREDIT as an operator states it: a purchase item, or a
 bill line (one-document-model 6d), and what it un-bills.
 
 - **flat, naming no bill line** — `quantity` units, priced from the line's
-  billed pool (`purchaseLineCreditCents`): the pool's share, or a stated
-  `amount_cents` the pool caps.
+  billed pool (`billedPoolCreditMoney`): the pool's share, or the supplier's
+  memo, which the pool caps.
 - **flat, naming a bill line** — units `(c, c + quantity]` of that line, `c`
   what live credits already took from it, priced first-come from the line's
-  own money (`billLineCreditCents`), or a stated `amount_cents` capped at what
-  is left of it. The units are capped per bill line and by the pools behind
-  them (`creditableBillLines`).
+  own money with its discount terms (`billLineCreditMoney`), or the supplier's
+  memo, capped at what is left of it. The units are capped per bill line and
+  by the pools behind them (`creditableBillLines`).
+- **the memo** (6e-0b1 D4) is the credit line's own `price.stated_cents`, net
+  by nature, so the line stores `discount: null`. Until core beta B it may be
+  sent as `amount_cents` instead; sent together the two must agree.
 - **time** — credited by COUNTS, as an AR credit note is (0b ruling 3):
   `quantity` units over `counts`, priced `rates × counts` like the bill line
   it reverses. Absent `counts`, the writer credits everything the line is
@@ -11468,6 +11471,7 @@ interface PurchaseCreditItemInputType {
   uid_purchase_bill?: string;
   path_bill_item?: string[];
   amount_cents?: number;
+  price?: typeLiteral;
 }
 ```
 
@@ -11963,8 +11967,8 @@ the freight still posts through a bill's charge item to its own account.
 **What it spreads over is fixed at entry.** `quantity` is the item's
 outstanding count when the entry was made, and `received_at_entry` is
 what the line had received at that moment (its row's custody, C8). The k-th receipt prices the units received
-since the entry, `clamp(received − received_at_entry, 0, quantity)`, with
-`cumulativeShareCents`, so the shares telescope to `amount_cents` exactly when
+since the entry, `clamp(received − received_at_entry, 0, quantity)`, with the
+one line-money function over the entry's amount (`statedLine`), so the shares telescope to `amount_cents` exactly when
 every outstanding unit arrives (`purchaseLineReceiptTargetCents`,
 `@cfs/core/utils/purchases`).
 
@@ -12031,8 +12035,8 @@ discount, and the money `priceDocument` computes from them.
 - A line states its WHOLE net cost in the line's `amount_cents` (the DECLARED
   stated total: a buy, a fixed-cost subrent, freight or a fee) and carries
   `rates: []`. Measured: most stored buys cost a total that does not divide
-  by their quantity, and every reader slices the total with
-  `cumulativeShareCents`, so no per-unit rate is stored.
+  by their quantity, and every reader slices the total with the one
+  line-money function (`lineUnitsCents`), so no per-unit rate is stored.
 - The COMPUTED half is the receivable line's money (`subtotal_cents`,
   `subtotal_discounted_cents`, `taxes`, `total_cents`), written by
   `priceDocument`'s stated-total arm (one-document-model Phase 2): subtotal =
@@ -17765,6 +17769,12 @@ and they take their heading from the column above them. Same for
 This is what keeps the search and filter surfaces from shrinking to the column
 surface. Gating them on exact column membership alone lost contact-name search
 on organizations, orders and fulfillments, and the created-by facet everywhere.
+
+### `creditItemMemoCents(item: Pick<PurchaseCreditItemInputType, "amount_cents" | "price">): number | undefined`
+
+The supplier's memo a credit item input states (6e-0b1 D4): its
+`price.stated_cents`, or `amount_cents` until core beta B. `undefined` when it
+states none, so the line is priced by its default partition.
 
 ### `custodyMovementSlot(rule: CustodyRule, bookingType: "rental" | "sale"): string | null`
 
@@ -29113,9 +29123,10 @@ Every item snapshots the formula it is priced by
 
 - **flat** — `amount_cents` is what the whole item costs, NET of any supplier
   discount, integer cents, and `price.rates` is empty. The k-th receipt or
-  bill against an item is priced by `cumulativeShareCents`
-  (`@cfs/core/utils/purchases`), which rounds the CUMULATIVE share once, so the
-  partials sum to `amount_cents` exactly with no remainder rule. There is no
+  bill against an item is priced by the one line-money function
+  (`lineUnitsCents`, `@cfs/core/utils/price-formulas`), which rounds the
+  CUMULATIVE value once, so the partials sum to `amount_cents` exactly with no
+  remainder rule. There is no
   stored per-unit rate: measured on prod, most buys cost a total that does
   not divide by their quantity, and no reader needs one (`perUnitCostAt4dp`
   derives the display rate).
@@ -29613,8 +29624,8 @@ the freight still posts through a bill's charge item to its own account.
 **What it spreads over is fixed at entry.** `quantity` is the item's
 outstanding count when the entry was made, and `received_at_entry` is
 what the line had received at that moment (its row's custody, C8). The k-th receipt prices the units received
-since the entry, `clamp(received − received_at_entry, 0, quantity)`, with
-`cumulativeShareCents`, so the shares telescope to `amount_cents` exactly when
+since the entry, `clamp(received − received_at_entry, 0, quantity)`, with the
+one line-money function over the entry's amount (`statedLine`), so the shares telescope to `amount_cents` exactly when
 every outstanding unit arrives (`purchaseLineReceiptTargetCents`,
 `@cfs/core/utils/purchases`).
 
@@ -29681,8 +29692,8 @@ discount, and the money `priceDocument` computes from them.
 - A line states its WHOLE net cost in the line's `amount_cents` (the DECLARED
   stated total: a buy, a fixed-cost subrent, freight or a fee) and carries
   `rates: []`. Measured: most stored buys cost a total that does not divide
-  by their quantity, and every reader slices the total with
-  `cumulativeShareCents`, so no per-unit rate is stored.
+  by their quantity, and every reader slices the total with the one
+  line-money function (`lineUnitsCents`), so no per-unit rate is stored.
 - The COMPUTED half is the receivable line's money (`subtotal_cents`,
   `subtotal_discounted_cents`, `taxes`, `total_cents`), written by
   `priceDocument`'s stated-total arm (one-document-model Phase 2): subtotal =
@@ -30366,8 +30377,8 @@ ACCPAYCREDIT, or link one the supplier's credit was entered as in Xero.
 
 Each `items` entry UN-bills that quantity of its purchase item, or of the
 bill line it names: it lowers `quantity_billed`, and a PUSHED credit prices it
-from the line's billed pool (`purchaseLineCreditCents`) or from the named bill
-line (`billLineCreditCents`), so more than was billed cannot be credited. A price correction with no quantity is a `charge_items` entry
+from the line's billed pool (`billedPoolCreditMoney`) or from the named bill
+line (`billLineCreditMoney`), so more than was billed cannot be credited. A price correction with no quantity is a `charge_items` entry
 (push only). A LINKED credit reads its date, reference and total from Xero,
 as a linked bill does.
 
@@ -30654,13 +30665,16 @@ One line of a supplier CREDIT as an operator states it: a purchase item, or a
 bill line (one-document-model 6d), and what it un-bills.
 
 - **flat, naming no bill line** — `quantity` units, priced from the line's
-  billed pool (`purchaseLineCreditCents`): the pool's share, or a stated
-  `amount_cents` the pool caps.
+  billed pool (`billedPoolCreditMoney`): the pool's share, or the supplier's
+  memo, which the pool caps.
 - **flat, naming a bill line** — units `(c, c + quantity]` of that line, `c`
   what live credits already took from it, priced first-come from the line's
-  own money (`billLineCreditCents`), or a stated `amount_cents` capped at what
-  is left of it. The units are capped per bill line and by the pools behind
-  them (`creditableBillLines`).
+  own money with its discount terms (`billLineCreditMoney`), or the supplier's
+  memo, capped at what is left of it. The units are capped per bill line and
+  by the pools behind them (`creditableBillLines`).
+- **the memo** (6e-0b1 D4) is the credit line's own `price.stated_cents`, net
+  by nature, so the line stores `discount: null`. Until core beta B it may be
+  sent as `amount_cents` instead; sent together the two must agree.
 - **time** — credited by COUNTS, as an AR credit note is (0b ruling 3):
   `quantity` units over `counts`, priced `rates × counts` like the bill line
   it reverses. Absent `counts`, the writer credits everything the line is
@@ -30675,6 +30689,7 @@ interface PurchaseCreditItemInputType {
   uid_purchase_bill?: string;
   path_bill_item?: string[];
   amount_cents?: number;
+  price?: typeLiteral;
 }
 ```
 
@@ -31070,6 +31085,12 @@ interface VoidPurchaseCreditInputType {
   version: number;
 }
 ```
+
+### `creditItemMemoCents(item: Pick<PurchaseCreditItemInputType, "amount_cents" | "price">): number | undefined`
+
+The supplier's memo a credit item input states (6e-0b1 D4): its
+`price.stated_cents`, or `amount_cents` until core beta B. `undefined` when it
+states none, so the line is priced by its default partition.
 
 ### `derivePurchaseCreditSources(uidPurchase: string, rows: readonly PurchaseDocumentRow[]): Pick<PurchaseCredit, "sources" | "query_by_sources">`
 
@@ -52386,6 +52407,18 @@ interface MeteredUnits {
 }
 ```
 
+### `PayableMoneyLineLike`
+
+The stored payable-line surface {@link payableMoneyLine} reads.
+
+```ts
+interface PayableMoneyLineLike {
+  quantity: number;
+  amount_cents: number | null;
+  price: typeLiteral;
+}
+```
+
 ### `PricingFormula`
 
 A price formula as a pricer or a line builder reads it: the rule, plus the
@@ -52546,6 +52579,18 @@ counts: {@link priceFromFormula} is unchanged, and a delta of two meterings
 
 The amount of `rateKey`'s OPEN row (`applied_to: null`), or `null` when the key has none.
 
+### `payableMoneyLine(line: PayableMoneyLineLike): LineMoneyLike`
+
+**A stored FLAT payable line as the one function reads it** (ruling 39, S3):
+its stated GROSS is `price.stated_cents`, or — on a line written before the
+backfill — the declared net plus its declared discount record, the gross the
+schema's absent arm reads (`statedTotalMoneyIssues`). Retired with that arm in
+core beta B, when every flat payable line states `stated_cents`.
+
+A TIME line partitions its stored NET, undiscounted ({@link statedLine}): its
+money is its counts priced (or Xero's, linked), and its discount's pricing
+factor is its counted periods, which a stated line's factor of 1 cannot read.
+
 ### `priceFormulaRefOf(formula: PricingFormula): PriceFormulaRef`
 
 The snapshot a line stores for `formula` — `{ uid, name, basis }`.
@@ -52590,6 +52635,15 @@ its own snapshot.
 
 The snapshot a line takes at its pricing date: one {@link RateSnapshot} per
 segment's `rate_key`, from the rows in force at `asOf`.
+
+### `statedLine(statedCents: number, quantity: number): LineMoneyLike`
+
+**A PSEUDO-line: `statedCents` over `quantity` units, undiscounted** — for a
+partition of an amount that is not one line's money (one-document-model 6e-0b1
+S3): a landed cost over its units, a bill split's leftover over its group, a
+billed POOL over its units, a row's money rescaled to a new count. Named so a
+reader can tell it from a real line. `lineUnitsCents(statedLine(a, q), b, k)`
+is `round(a·k ÷ q) − round(a·b ÷ q)`, defined past `q`.
 
 ### `statedUnits(formula: PriceFormulaRule, count: number, opts: typeLiteral): TierCount[]`
 
@@ -52779,7 +52833,7 @@ Why one segment: a credit row's fold splits ITS money over its entries
 (`purchaseDocumentBilling`), so a credit spanning two segments could
 attribute a cent to one line that the bill gave the other. Within one
 segment, successive credits sum exactly to the bill's share (the credit is
-priced first-come, `billLineCreditCents`, and the shares telescope).
+priced first-come, `billLineCreditMoney`, and the shares telescope).
 
 Absent rather than offered, failing closed:
 - a line on a bill not live in Xero, a time line, a kit header, a $0 line;
@@ -52966,7 +53020,7 @@ through `purchaseLineKeyOf` (`schemas/purchase-bill.ts`).
 
 A payable line's money is written by `priceDocument`'s stated-total arm
 (`priceStatedTotalLine`): the line states its net in `amount_cents`, and its
-k-th bill is defaulted by `cumulativeShareCents` (via {@link flatShareCents}),
+k-th bill is defaulted by the one line-money function (`lineUnitsCents`),
 exactly as its receipts are, so the bills of a fully billed line sum to the
 line's `amount_cents`.
 
@@ -52986,6 +53040,8 @@ interface BillLineCreditPart {
   credited: BillLineCredited;
   n: number;
   amount_cents: number;
+  discount: DiscountType | null;
+  stated_cents?: number;
   substituted_for: SubstitutedForEntryType[];
 }
 ```
@@ -52998,6 +53054,21 @@ What live supplier credits have already taken from one bill line.
 interface BillLineCredited {
   quantity: number;
   amount_cents: number;
+}
+```
+
+### `CreditMoney`
+
+One credit line's money, as both credit arms price it (one-document-model
+6e-0b1 D4): the default is a partition of what is credited, through the one
+line-money function; a supplier's MEMO overrides it and becomes the credit
+line's own `price.stated_cents`, with `discount: null` (a memo is net).
+
+```ts
+interface CreditMoney {
+  amount_cents: number;
+  discount: DiscountType | null;
+  stated_cents?: number;
 }
 ```
 
@@ -53144,23 +53215,23 @@ interface SyncPurchaseToBillsArgs {
 }
 ```
 
-### `billLineCreditCents(args: typeLiteral): number`
+### `billLineCreditMoney(args: typeLiteral): CreditMoney`
 
 **What a supplier credit of `n` units of one bill line is worth**
-(one-document-model 6d, owner 2026-11-11): units `(c, c + n]` of the line,
-`c` the units live credits already took (`billLineCredited`), priced
-FIRST-COME (`flatShareCents`), so crediting a line in parts sums to exactly
-its amount — $100.00 over 3 units credited one at a time is 3333 + 3334 +
-3333, never 9999.
+(one-document-model 6d, owner 2026-11-11; D4 2026-11-13): units `(c, c + n]`
+of the line, `c` the units live credits already took (`billLineCredited`),
+priced FIRST-COME by the one line-money function (`lineUnitsCents`), so
+crediting a line in parts sums to exactly its amount — $100.00 over 3 units
+credited one at a time is 3333 + 3334 + 3333, never 9999. The credit line
+INHERITS the row's discount terms, its record over the same units (D4).
 
-⚠️ **Deliberately unlike AR**, where each credit-note line rounds on its own
-(`priceCreditNote`). This module's rule is that a line's documents sum to the
-line's money exactly, and a credit of a bill line is one more of them.
+⚠️ **Deliberately unlike AR, until 6e-0b2**, where each credit-note line
+re-prices on its own (`priceCreditNote`).
 
-- `stated_cents`: the supplier's memo governs, refused above what is left of
-  the line's money.
+- `memo_cents`: the supplier's memo governs, refused above what is left of
+  the line's money, and is stored as the credit line's `price.stated_cents`.
 - The first-come share is capped at what is left of the line's money, so a
-  line part-credited at a stated amount cannot be over-credited.
+  line part-credited by a memo cannot be over-credited.
 
 ### `billLineCreditParts(args: typeLiteral): BillLineCreditPart[]`
 
@@ -53202,13 +53273,21 @@ exactly AR's netting liveness.
 move then no longer counts against the row. The pool cap
 (`purchaseLineBilledNet`) still sees it.
 
-### `flatShareCents(amountCents: number, quantity: number, before: number, after: number): number`
+### `billedPoolCreditMoney(args: typeLiteral): CreditMoney`
 
-The cents a flat line's units `(before, after]` cost — `cumulativeShareCents`,
-extended past `quantity` at the same per-unit rate, because over-billing is
-legal (D5) and still needs a default. A writer pricing anything against a
-line's `quantity_billed`, which may stand past `quantity`, prices through this
-and never through `cumulativeShareCents`, which throws there.
+**What a supplier credit of `n` flat units is worth, when it names no bill
+line** (api-cloudrun#1439) — a share of the line's billed POOL
+(`purchaseLineBilledNet`: live bills less live credits), never of the PO line,
+so an edited bill strands nothing.
+
+- The pool's LAST `n` units of a PSEUDO-line, the pool's net over its units
+  (`statedLine`): crediting the whole pool returns exactly its money, and
+  successive credits sum to it. The pool is net, so no discount is inherited.
+- `memo_cents`: the supplier's memo governs, refused above the pool, because
+  an operator typed it.
+
+A credit that names a bill line is priced by {@link billLineCreditParts}
+instead (one-document-model 6d): from that line, not the pool.
 
 ### `payableScopedSync(prev: Purchase, next: Purchase): typeLiteral`
 
@@ -53239,11 +53318,15 @@ and a followed discount lands as the bill's share rather than the whole.
 
 **Default a bill line from its purchase line** (D5). Name, formula, discount
 terms, posting and attribution are the purchase line's (each then
-overridable on the bill until it settles). The amount is `quantity` units at
-the line's cumulative share from where its `quantity_billed` stands
-({@link flatShareCents}, extended past the ordered count because
-over-billing is legal), so the bills of a line sum to its `amount_cents`; the
-discount record is the same share of the purchase line's.
+overridable on the bill until it settles). The amount is `quantity` units of
+the line from where its `quantity_billed` stands, by the one line-money
+function (`lineUnitsCents`, defined past the ordered count because
+over-billing is legal), so the bills of a line sum to its `amount_cents`.
+
+The discount record is the line's discount on `quantity` units FROM UNIT 0
+(`lineDiscountAtCents`), position-free: the sync compares a bill line with
+its projection at its own quantity and knows no position, as its
+`requantify` share does (6e-0b1 S3). It is informational and never summed.
 
 The line's price is built by `flatPayablePrice` (the stated-total arm), so
 the projection parses on its own; the writer prices the whole document with
@@ -53317,7 +53400,7 @@ billed" reader goes through it.
   as an invoice's does on AR (`invoicedByPath`): each live entry credits X
   with its units and their share of Y's money and counts, and the rest of Y
   stays at Y's own join. The stand-in units take Y's FIRST units' share
-  (`cumulativeShareCents`), so the parts sum to exactly Y's amount.
+  (`lineUnitsCents`), so the parts sum to exactly Y's amount.
 - An entry is live while the purchase still carries X (`purchase_items`);
   a spent one bills nothing for X, and its units count at Y's own join.
 - X's kit components are credited through the PURCHASE's own ratio
@@ -53384,21 +53467,6 @@ it, which the diff has to be able to show.
 Does this purchase line COUNT for coverage — a subrent, charge or replacement
 line whose purchase was not canceled? A line closed to nothing is removed
 (ruling 47), so every line still present covered what it covered.
-
-### `purchaseLineCreditCents(args: typeLiteral): number`
-
-**What a supplier credit of `n` flat units is worth, when it names no bill
-line** (api-cloudrun#1439) — a share of the line's billed POOL
-(`purchaseLineBilledNet`: live bills less live credits), never of the PO line,
-so an edited bill strands nothing.
-
-- The pool's share of its last `n` units. Crediting the whole pool returns
-  exactly its money, and successive credits sum to it.
-- `stated_cents`: the supplier's memo governs, refused above the pool, because
-  an operator typed it.
-
-A credit that names a bill line is priced by {@link billLineCreditCents}
-instead (one-document-model 6d): from that line, not the pool.
 
 ### `purchaseLineKey(uidPurchase: string, path: readonly string[]): string`
 
@@ -53675,7 +53743,7 @@ One buy line as {@link allocateLandedCostCents} weighs it: the line and its row'
 
 ```ts
 interface LandedCostTarget {
-  line: Pick<PurchaseSaleItem, "amount_cents" | "quantity">;
+  line: Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "price">;
   received: number;
 }
 ```
@@ -53817,31 +53885,6 @@ relative to its purchase block (`path.slice(1)`), as the margin fold does.
 
 **Returns** — The costed product's uid, or `null` when no line sits above the row
 
-### `cumulativeShareCents(amountCents: number, quantity: number, before: number, after: number): number`
-
-The cents a line's units `(before, after]` cost — the k-th receipt or the
-k-th bill line against a purchase line, priced from where the cumulative
-count stood before it to where it stands after.
-
-`round(amount × after ÷ quantity) − round(amount × before ÷ quantity)`, each
-rounded once, half-up, over integers.
-
-⭐ **The CUMULATIVE value is rounded, never the partial.** So the partials
-along any path from 0 to `quantity` telescope to `amount_cents` exactly — no
-remainder rule, no "last one absorbs the cent" — and the price of reaching a
-cumulative count is the same whichever deliveries got there. Rounding each
-partial instead (`round(amount × k ÷ quantity)`) drifts: three receipts of 1
-against a $10.00 line of 3 cost 333 + 333 + 333 = 999.
-
-Receipts and bills run this SEPARATELY, each on its own cumulative count, so
-a CFS-pushed bill and the receipts it covers carry the same money however the
-two were split (`cfs-money`: closure under the quantum, × n ÷ d in integer
-cents, round once).
-
-A REVERSAL is the same call with the bounds swapped in sign: the units
-`(after, before]` leave at exactly what they cost to arrive, because the
-cumulative value at a count does not depend on the path.
-
 ### `custodyBySourceItem(movements: readonly SourceItemMovement[]): Map<string, PurchaseLineCustody>`
 
 **Each purchase row's custody, from the journal** (ruling 65): the net of
@@ -53945,45 +53988,25 @@ bare pack (one-document-model Phase 6a-K), and is deleted once none does.
 Returns rather than throws: a refusal is an operator-facing 400, and core
 throws plain `Error`, which a consumer's middleware reads as a 500.
 
-### `flatPurchaseLineMoney(grossCents: number, quantity: number, discount: FormulaDiscount | null): typeLiteral`
-
-**A flat purchase line's NET cost and its discount record** (Phase 2 ruling 7):
-the operator states the GROSS and a supplier discount, and the line stores the
-net as `amount_cents` — what receipts, basis, bills and credits slice.
-
-Composed from the money steps every priced line already uses, so no new
-rounding exists here:
-
-- **percent** — `priceFromFormula` on one period at the gross: the discounted
-  amount rounds ONCE, half away from zero, exactly as a customer line's does.
-- **flat** — `rate` is 4dp dollars PER UNIT (`cfs-money`: a rate is not an
-  amount), taken to cents as `priceFromFormula` takes it, then multiplied by
-  the integer quantity: closed, nothing to round.
-
-A discount larger than the gross yields a negative net, which the stored
-schema refuses — the caller's 400 to make, not this function's to clamp.
-
-**Returns** — `discount` is `null` when none was stated; otherwise its
-`amount_cents` is `gross − net`.
-
 ### `isLandedCostFrozen(entry: Pick<PurchaseLandedCost, "received_at_entry">, received: number): boolean`
 
 Is a landed cost frozen? A receipt has priced part of it once the line's
 `received` count (its row's custody, `custodyBySourceItem`) passes
 `received_at_entry`.
 
-### `landedCostWeightCents(line: Pick<PurchaseSaleItem, "amount_cents" | "quantity">, received: number): number`
+### `landedCostWeightCents(line: Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "price">, received: number): number`
 
 A line's weight when one landed amount is spread over several lines: the
-value still to arrive, `cumulativeShareCents(amount, quantity, received,
-quantity)`. Units already received carry none of it, because the
-entry only ever prices units received after it.
+value still to arrive, `lineUnitsCents(line, received, quantity)`. Units
+already received carry none of it, because the entry only ever prices units
+received after it.
 
 ### `landedPricedCents(entry: Pick<PurchaseLandedCost, "amount_cents" | "quantity" | "received_at_entry">, quantityReceived: number): number`
 
 The cents a landed cost has put onto the ledger at a cumulative received
-count — `cumulativeShareCents` over the entry's own units, so the receipts
-telescope to `amount_cents` exactly once every one of them has arrived.
+count — the one line-money function over a PSEUDO-line, the entry's amount
+over its own units (`statedLine`), so the receipts telescope to `amount_cents`
+exactly once every one of them has arrived.
 
 ### `landedUnitsPriced(entry: Pick<PurchaseLandedCost, "quantity" | "received_at_entry">, quantityReceived: number): number`
 
@@ -54064,7 +54087,7 @@ removed. A TIME charge ends its pair's window instead (ruling 63).
 Only the facts both sides need live here; restating the money, keeping the
 booking and moving the window are the writer's.
 
-### `purchaseLineReceiptTargetCents(line: Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "landed_costs">, quantityReceived: number): number`
+### `purchaseLineReceiptTargetCents(line: Pick<PurchaseSaleItem, "amount_cents" | "quantity" | "landed_costs" | "price">, quantityReceived: number): number`
 
 The CUMULATIVE cost a buy line's receipts should have journalled once
 `quantityReceived` units are in: the goods' share plus every landed cost's

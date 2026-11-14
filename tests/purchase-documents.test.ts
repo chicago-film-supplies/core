@@ -10,7 +10,6 @@
  */
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
-  flatShareCents,
   PAYABLE_LINE_CLAIMS,
   purchaseDocumentsBefore,
   purchaseLineBilledCounts,
@@ -23,8 +22,8 @@ import {
   purchaseDocumentScope,
   purchaseCreditBilling,
   purchaseLineBilledNet,
-  purchaseLineCreditCents,
-  billLineCreditCents,
+  billedPoolCreditMoney,
+  billLineCreditMoney,
   billLineCredited,
   recomputePurchaseQuantityBilled,
   syncPurchaseToBills,
@@ -35,7 +34,8 @@ import type { TaxCatalog } from "../src/utils/tax-classes.ts";
 import { asCreditRows, hireDates, payablePrice, purchaseDivider, purchasePair, payableLine, withPayableMoney } from "./helpers/payable.ts";
 import { computeDocumentDiffs, type DocumentDiffContext, type DocumentQuantityEntry } from "../src/utils/documentDiff.ts";
 import { priceFormulaRefOf } from "../src/utils/price-formulas.ts";
-import { cumulativeShareCents } from "../src/utils/purchases.ts";
+import { frozenCumulativeShareCents, frozenFlatShareCents } from "./helpers/frozen-line-money.ts";
+import { lineUnitsCents, statedLine as pseudoLine } from "../src/utils/price-formulas.ts";
 import {
   emptyInboundBreakdown,
   type Purchase,
@@ -185,8 +185,8 @@ Deno.test("projector: a FLAT line bills its cumulative share — three bills of 
 Deno.test("projector: OVER-billing a flat line still defaults, at the same per-unit rate (D5: flagged, never refused)", () => {
   const line = project(buyLine({ quantity_billed: 3 }), 10, 1);
   assertEquals(line.amount_cents, 46995);
-  // Within the ordered count it is exactly cumulativeShareCents.
-  assertEquals(project(buyLine(), 10, 2).amount_cents, cumulativeShareCents(140985, 3, 0, 2));
+  // Within the ordered count it is exactly the old cumulative share.
+  assertEquals(project(buyLine(), 10, 2).amount_cents, frozenCumulativeShareCents(140985, 3, 0, 2));
 });
 
 Deno.test("projector: a flat line's discount is recorded as its share; amount_cents stays the NET (ruling 7)", () => {
@@ -726,66 +726,87 @@ Deno.test("purchaseDocumentScope: a credit line copied from a bill row keeps the
   assertThrows(() => purchaseDocumentScope(purchase, [{ ...credited(y), path: [PURCHASE, DIV, lid(5)] }], { bills: [bill] }), Error, "holds no row");
 });
 
-Deno.test("flatShareCents: past `quantity` it keeps the per-unit rate, and agrees with cumulativeShareCents inside it", () => {
+Deno.test("lineUnitsCents (a stated line): past `quantity` it keeps the per-unit rate, as flatShareCents did (6e-0b1 S3)", () => {
   // $14.09 over 3 units: 470, 939, 1409 cumulative, then 1879 and 2348 past the order.
-  assertEquals(flatShareCents(1409, 3, 3, 4), 470);
-  assertEquals(flatShareCents(1409, 3, 3, 5), 939);
-  assertEquals(flatShareCents(1409, 3, 2, 5), 1409);
-  assertEquals(flatShareCents(1409, 3, 0, 2), cumulativeShareCents(1409, 3, 0, 2));
+  const l = pseudoLine(1409, 3);
+  assertEquals(lineUnitsCents(l, 3, 4), 470);
+  assertEquals(lineUnitsCents(l, 3, 5), 939);
+  assertEquals(lineUnitsCents(l, 2, 5), 1409);
+  assertEquals(lineUnitsCents(l, 0, 2), frozenFlatShareCents(1409, 3, 0, 2));
   // Telescoping past the order: the ranges sum to the whole.
-  assertEquals(flatShareCents(1409, 3, 0, 2) + flatShareCents(1409, 3, 2, 5), flatShareCents(1409, 3, 0, 5));
-  // Companion: the primitive refuses what this one is for.
-  assertThrows(() => cumulativeShareCents(1409, 3, 3, 4), RangeError);
+  assertEquals(lineUnitsCents(l, 0, 2) + lineUnitsCents(l, 2, 5), lineUnitsCents(l, 0, 5));
 });
 
-// ── What a supplier credit is worth (api-cloudrun#1439) ─────────────
+// ── What a supplier credit is worth (api-cloudrun#1439; 6e-0b1 D4) ──────────
 
-Deno.test("purchaseLineCreditCents: hand-stated cases, from the pool, never the PO line", () => {
+/** A bill row as the credit pricer reads it. */
+const billRow = (quantity: number, amount_cents: number, discount: PurchaseDocumentItem["price"]["discount"] = null) =>
+  ({ quantity, amount_cents, price: { discount } });
+
+Deno.test("billedPoolCreditMoney: hand-stated cases, from the pool, never the PO line", () => {
   const pool = { quantity: 14, amount_cents: 55958 };
-  assertEquals(purchaseLineCreditCents({ pool, n: 14 }), 55958, "CFS-SCR-1's case: nothing strands");
-  assertEquals(purchaseLineCreditCents({ pool: { quantity: 3, amount_cents: 1000 }, n: 1 }), 333);
-  assertEquals(purchaseLineCreditCents({ pool: { quantity: 2, amount_cents: 1000 }, n: 1 }), 500);
+  const cents = (args: Parameters<typeof billedPoolCreditMoney>[0]) => billedPoolCreditMoney(args).amount_cents;
+  assertEquals(cents({ pool, n: 14 }), 55958, "CFS-SCR-1's case: nothing strands");
+  assertEquals(cents({ pool: { quantity: 3, amount_cents: 1000 }, n: 1 }), 333);
+  assertEquals(cents({ pool: { quantity: 2, amount_cents: 1000 }, n: 1 }), 500);
   const blended = { quantity: 2, amount_cents: 300 };
-  // A stated amount governs, up to the pool.
-  assertEquals(purchaseLineCreditCents({ pool: blended, n: 1, stated_cents: 7 }), 7);
-  assertThrows(() => purchaseLineCreditCents({ pool: blended, n: 1, stated_cents: 301 }), RangeError, "exceeds");
-  assertThrows(() => purchaseLineCreditCents({ pool: blended, n: 3 }), RangeError, "exceeds");
-  assertThrows(() => purchaseLineCreditCents({ pool: blended, n: 0 }), RangeError, "exceeds");
-  assertThrows(() => purchaseLineCreditCents({ pool: { quantity: 2, amount_cents: 0 }, n: 1 }), RangeError, "no money");
+  // A memo governs, up to the pool, and is the credit line's stated total (D4).
+  assertEquals(billedPoolCreditMoney({ pool: blended, n: 1, memo_cents: 7 }), { amount_cents: 7, discount: null, stated_cents: 7 });
+  assertEquals("stated_cents" in billedPoolCreditMoney({ pool: blended, n: 1 }), false, "a default credit states no total");
+  assertThrows(() => cents({ pool: blended, n: 1, memo_cents: 301 }), RangeError, "exceeds");
+  assertThrows(() => cents({ pool: blended, n: 3 }), RangeError, "exceeds");
+  assertThrows(() => cents({ pool: blended, n: 0 }), RangeError, "exceeds");
+  assertThrows(() => cents({ pool: { quantity: 2, amount_cents: 0 }, n: 1 }), RangeError, "no money");
 });
 
-Deno.test("billLineCreditCents: a named bill line prices first-come from ITS money, not the pool (6d, owner 2026-11-11)", () => {
-  const line = { quantity: 3, amount_cents: 10000 };
+Deno.test("billLineCreditMoney: a named bill line prices first-come from ITS money, not the pool (6d, owner 2026-11-11)", () => {
+  const line = billRow(3, 10000);
   const none = { quantity: 0, amount_cents: 0 };
+  const cents = (args: Parameters<typeof billLineCreditMoney>[0]) => billLineCreditMoney(args).amount_cents;
   // $100.00 over 3 units, one at a time: 3333 + 3334 + 3333 = 10000, never 9999.
-  assertEquals(billLineCreditCents({ line, credited: none, n: 1 }), 3333);
-  assertEquals(billLineCreditCents({ line, credited: { quantity: 1, amount_cents: 3333 }, n: 1 }), 3334);
-  assertEquals(billLineCreditCents({ line, credited: { quantity: 2, amount_cents: 6667 }, n: 1 }), 3333);
-  assertEquals(billLineCreditCents({ line, credited: none, n: 3 }), 10000);
+  assertEquals(cents({ line, credited: none, n: 1 }), 3333);
+  assertEquals(cents({ line, credited: { quantity: 1, amount_cents: 3333 }, n: 1 }), 3334);
+  assertEquals(cents({ line, credited: { quantity: 2, amount_cents: 6667 }, n: 1 }), 3333);
+  assertEquals(cents({ line, credited: none, n: 3 }), 10000);
   // A blended pool never enters: the line's own rate.
-  assertEquals(billLineCreditCents({ line: { quantity: 1, amount_cents: 200 }, credited: none, n: 1 }), 200);
-  // A stated amount governs, up to what is left of the line's money.
-  assertEquals(billLineCreditCents({ line, credited: none, n: 1, stated_cents: 7 }), 7);
-  assertThrows(() => billLineCreditCents({ line, credited: { quantity: 1, amount_cents: 9000 }, n: 1, stated_cents: 1001 }), RangeError, "1000 cents left");
-  // Part-credited at a stated amount: the first-come share is capped at the money left.
-  assertEquals(billLineCreditCents({ line, credited: { quantity: 1, amount_cents: 9000 }, n: 2 }), 1000);
+  assertEquals(cents({ line: billRow(1, 200), credited: none, n: 1 }), 200);
+  // A memo governs, up to what is left of the line's money, as the line's stated total.
+  assertEquals(billLineCreditMoney({ line, credited: none, n: 1, memo_cents: 7 }), { amount_cents: 7, discount: null, stated_cents: 7 });
+  assertThrows(() => cents({ line, credited: { quantity: 1, amount_cents: 9000 }, n: 1, memo_cents: 1001 }), RangeError, "1000 cents left");
+  // Part-credited by a memo: the first-come share is capped at the money left.
+  assertEquals(cents({ line, credited: { quantity: 1, amount_cents: 9000 }, n: 2 }), 1000);
   // Units: never past what the line has left.
-  assertThrows(() => billLineCreditCents({ line, credited: { quantity: 2, amount_cents: 6667 }, n: 2 }), RangeError, "1 left");
-  assertThrows(() => billLineCreditCents({ line, credited: none, n: 0 }), RangeError, "exceeds");
+  assertThrows(() => cents({ line, credited: { quantity: 2, amount_cents: 6667 }, n: 2 }), RangeError, "1 left");
+  assertThrows(() => cents({ line, credited: none, n: 0 }), RangeError, "exceeds");
 });
 
-Deno.test("billLineCreditCents: any run of credits of one bill line sums to exactly its money", () => {
+Deno.test("billLineCreditMoney: a credit INHERITS the row's discount terms, its record over the units credited (D4)", () => {
+  // Gross $100.00 over 3 at 10% off: net 9000, record 1000. Credited one at a time.
+  const line = billRow(3, 9000, { rate: 10, type: "percent", amount_cents: 1000 });
+  let credited = { quantity: 0, amount_cents: 0 };
+  let records = 0;
+  for (let i = 0; i < 3; i++) {
+    const m = billLineCreditMoney({ line, credited, n: 1 });
+    assertEquals([m.discount?.rate, m.discount?.type], [10, "percent"], "the row's terms");
+    records += m.discount!.amount_cents;
+    credited = { quantity: credited.quantity + 1, amount_cents: credited.amount_cents + m.amount_cents };
+  }
+  assertEquals(credited.amount_cents, 9000, "the parts' money sums to the row's net");
+  assertEquals(records, 1000, "the parts' records sum to the row's");
+});
+
+Deno.test("billLineCreditMoney: any run of credits of one bill line sums to exactly its money", () => {
   // Companion: the independent per-credit rounding this replaced does NOT.
   let seed = 7;
   const next = (bound: number) => (seed = (seed * 1103515245 + 12345) % 2147483648) % bound;
   let independentWrong = 0;
   for (let round = 0; round < 5_000; round++) {
-    const line = { quantity: 1 + next(40), amount_cents: 1 + next(5_000_000) };
+    const line = billRow(1 + next(40), 1 + next(5_000_000));
     const credited = { quantity: 0, amount_cents: 0 };
     let independent = 0;
     while (credited.quantity < line.quantity) {
       const n = 1 + next(line.quantity - credited.quantity);
-      const cents = billLineCreditCents({ line, credited, n });
+      const cents = billLineCreditMoney({ line, credited, n }).amount_cents;
       credited.quantity += n;
       credited.amount_cents += cents;
       independent += Math.round((line.amount_cents * n) / line.quantity);
@@ -812,7 +833,7 @@ Deno.test("billLineCredited: live credits naming that bill line, by bill AND pat
   assertEquals(billLineCredited("C", [P, "x"], credits), { quantity: 0, amount_cents: 0 });
 });
 
-Deno.test("purchaseLineCreditCents: any split of a pool sums to exactly its money", () => {
+Deno.test("billedPoolCreditMoney: any split of a pool sums to exactly its money", () => {
   // The oracle is the pool's own total, which the pricer never produces.
   let seed = 41;
   const next = (bound: number) => (seed = (seed * 1103515245 + 12345) % 2147483648) % bound;
@@ -823,7 +844,7 @@ Deno.test("purchaseLineCreditCents: any split of a pool sums to exactly its mone
     let sum = 0;
     while (quantity > 0) {
       const n = 1 + next(quantity);
-      const cents = purchaseLineCreditCents({ pool: { quantity, amount_cents }, n });
+      const cents = billedPoolCreditMoney({ pool: { quantity, amount_cents }, n }).amount_cents;
       sum += cents;
       quantity -= n;
       amount_cents -= cents;
@@ -1472,8 +1493,8 @@ Deno.test("W5 billing: a merged Y splits — stand-in units take its FIRST units
   const x = subX();
   const bill = billDoc(1, [subY(x, 3, 10000, 2)]);
   const docs = billedOf(purchaseDoc([x]), [bill]);
-  assertEquals(purchaseLineBilledNet(x.path, docs), { quantity: 2, amount_cents: flatShareCents(10000, 3, 0, 2) });
-  assertEquals(purchaseLineBilledNet([DIV, ALT], docs), { quantity: 1, amount_cents: 10000 - flatShareCents(10000, 3, 0, 2) });
+  assertEquals(purchaseLineBilledNet(x.path, docs), { quantity: 2, amount_cents: frozenFlatShareCents(10000, 3, 0, 2) });
+  assertEquals(purchaseLineBilledNet([DIV, ALT], docs), { quantity: 1, amount_cents: 10000 - frozenFlatShareCents(10000, 3, 0, 2) });
 });
 
 Deno.test("W5 billing: an entry is spent once the purchase no longer carries X — X is not billed through it", () => {
@@ -1527,7 +1548,7 @@ Deno.test("W5 sync: X leaving the purchase spends the entry, and its units go wi
   const [out] = sync([x, keep], [keep], [billDoc(1, [project(x, 10, 3), merged])]);
   assert(out.changed);
   const y = linesOf(out.bill).find((l) => l.uid === merged.uid)!;
-  assertEquals([y.quantity, y.amount_cents], [1, flatShareCents(45000, 3, 0, 1)]);
+  assertEquals([y.quantity, y.amount_cents], [1, frozenFlatShareCents(45000, 3, 0, 1)]);
   assertEquals("substituted_for" in y ? y.substituted_for : undefined, undefined);
   assertEquals(linesOf(out.bill).some((l) => l.uid === x.uid), false, "untouched X goes with its line");
   parses(out.bill);
