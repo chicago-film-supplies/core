@@ -345,37 +345,38 @@ function roundRational(num: bigint, den: bigint): bigint {
   return neg ? -up : up;
 }
 
+/**
+ * The exact rational, rounded ONCE per figure (one-document-model ruling 39,
+ * owner 2026-11-13): the subtotal from Σ tiers, and the discounted amount from
+ * the EXACT sum, never from the rounded subtotal.
+ */
 function oracle(
   rates: Record<string, number>,
   tiers: readonly TierCount[],
   quantity: number,
   discount: Discount,
 ): { subtotal_cents: number; subtotal_discounted_cents: number } {
+  // Exact sums as fractions over the product of the dens (structurally unlike the
+  // engine's lcm).
+  let den = 1n;
+  for (const t of tiers) den *= BigInt(t.den);
   let sub = 0n;
   let off = 0n;
+  const flatCents = discount?.type === "flat"
+    ? roundRational(BigInt(Math.round(discount.rate * 10_000)), 100n) // whole cents first
+    : 0n;
   for (const t of tiers) {
-    sub += roundRational(
-      BigInt(rates[t.rate_key]) * BigInt(quantity) * BigInt(t.num),
-      BigInt(t.den),
-    );
-    if (discount?.type === "flat") {
-      // `rate` is 4dp dollars: as an exact rational, rate·10⁴ / 10⁴ dollars = rate·10⁴ / 100 cents.
-      const r4 = BigInt(Math.round(discount.rate * 10_000));
-      // Cents are whole first (`toCentsBig`), matching the stored discount contract.
-      const cents = roundRational(r4, 100n);
-      off += roundRational(
-        cents * BigInt(quantity) * BigInt(t.num),
-        BigInt(t.den),
-      );
-    }
+    const units = BigInt(quantity) * BigInt(t.num) * (den / BigInt(t.den));
+    sub += BigInt(rates[t.rate_key]) * units;
+    off += flatCents * units;
   }
-  let disc = sub;
+  let disc: bigint;
   if (discount?.type === "percent") {
     const r6 = BigInt(Math.round(discount.rate * 1_000_000));
-    disc = roundRational(sub * (100_000_000n - r6), 100_000_000n);
-  } else if (discount?.type === "flat") disc = sub - off;
+    disc = roundRational(sub * (100_000_000n - r6), den * 100_000_000n);
+  } else disc = roundRational(sub - off, den);
   return {
-    subtotal_cents: Number(sub),
+    subtotal_cents: Number(roundRational(sub, den)),
     subtotal_discounted_cents: Number(disc),
   };
 }
@@ -389,9 +390,13 @@ function randomDiscount(rand: () => number): Discount {
   return { type: "flat", rate: int(rand, 0, 50_000) / 100 };
 }
 
-Deno.test("(i) the money step reproduces the retired calculateItemSubtotal and the rational oracle — 300k lines, one counter per arm", () => {
+Deno.test("(i) the money step is the exact rational rounded once, and keeps the retired calculateItemSubtotal's undiscounted money — 300k lines, one counter per arm", () => {
   const rand = lcg(20261031);
-  let vsLegacy = 0, vsOracle = 0;
+  // The retired form rounded the subtotal and then the discount; since the
+  // single-rounding change it must still agree on an UNDISCOUNTED line and is
+  // expected to disagree on some discounted ones (reported, and asserted > 0 as
+  // the two-rounding companion).
+  let vsLegacyUndiscounted = 0, vsLegacyDiscounted = 0, vsOracle = 0;
   let fiveDay = 0,
     fixed = 0,
     belowFloor = 0,
@@ -430,7 +435,10 @@ Deno.test("(i) the money step reproduces the retired calculateItemSubtotal and t
     if (
       got.subtotal_cents !== legacy.subtotal_cents ||
       got.subtotal_discounted_cents !== legacy.subtotal_discounted_cents
-    ) vsLegacy++;
+    ) {
+      if (discount === null) vsLegacyUndiscounted++;
+      else vsLegacyDiscounted++;
+    }
     const exact = oracle({ [key]: base }, tiers, quantity, discount);
     if (
       got.subtotal_cents !== exact.subtotal_cents ||
@@ -460,7 +468,9 @@ Deno.test("(i) the money step reproduces the retired calculateItemSubtotal and t
     if (discount?.type === "flat") flat++;
   }
 
-  assertEquals(vsLegacy, 0, "the engine disagrees with the retired calculateItemSubtotal");
+  assertEquals(vsLegacyUndiscounted, 0, "the engine disagrees with the retired calculateItemSubtotal on an undiscounted line");
+  console.log(`the retired two-rounding form disagrees on ${vsLegacyDiscounted} discounted lines of 300,000`);
+  assert(vsLegacyDiscounted > 0, "the two-rounding form never disagreed: the corpus does not discriminate");
   assertEquals(
     vsOracle,
     0,

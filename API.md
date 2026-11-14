@@ -52264,6 +52264,20 @@ interface FormulaDiscount {
 }
 ```
 
+### `LineMoneyLike`
+
+The line surface {@link lineMoneyAtCents} reads: a line states EITHER its
+`rates` (and `counts`), or a total over its quantity in `price.stated_cents`
+(the GROSS, before `discount`). Never both.
+
+```ts
+interface LineMoneyLike {
+  type?: ItemTypeType;
+  quantity: number;
+  price: typeLiteral;
+}
+```
+
 ### `MeterInput`
 
 {@link meterUnits}' inputs.
@@ -52412,6 +52426,35 @@ It decides no money: price a period by metering the windows clipped to it.
 
 The formula uids a set of lines name — what a caller must load into {@link PricingFormulas}.
 
+### `lineDiscountAtCents(line: LineMoneyLike, k: number): number`
+
+**The discount on a line's first `k` units**: gross at `k` minus money at `k`,
+so a part's discount RECORD is a difference of cumulative values too and the
+parts' records sum to the whole line's.
+
+### `lineMoneyAtCents(line: LineMoneyLike, k: number): number`
+
+**The money of a line's first `k` units** — pre-tax, after discount — the one
+function every whole-line, partial, credit, split, close and diff figure is a
+difference of (one-document-model ruling 39).
+
+- **rate line:** `priceFromFormula(rates, counts, k, discount)`, so `k = quantity`
+  is exactly the money `computeLineMoney` stores.
+- **stated line:** the gross `stated_cents × k ÷ quantity`, rounded once; the
+  net from the EXACT gross: a percent rounded once, a flat `rate × k` off
+  (closed: a stated line's pricing factor is 1, ruling 39 D1).
+
+Defined past `quantity` (an over-billed line, D5) at the same per-unit money,
+and `0` at `k = 0` and on a stated line of no units.
+
+### `lineUnitsCents(line: LineMoneyLike, before: number, after: number): number`
+
+**The money of units `(before, after]` of a line** — `lineMoneyAtCents(after) −
+lineMoneyAtCents(before)`. ⭐ The CUMULATIVE value is rounded, never the part,
+so the parts along any path from 0 to `quantity` sum exactly to the whole line
+and a count's money does not depend on the path that reached it (the partition
+rule, `cfs-money`). A reversal is the same call with the bounds swapped.
+
 ### `meanTierCounts(rows: readonly typeLiteral[]): TierCount[]`
 
 **The quantity-weighted mean of several rows' tier counts**, exact: for each
@@ -52447,13 +52490,24 @@ The snapshot a line stores for `formula` — `{ uid, name, basis }`.
 
 ### `priceFromFormula(rates: readonly RateSnapshot[], tiers: readonly TierCountLike[], quantity: number, discount: FormulaDiscount | null): typeLiteral`
 
-**Tier counts → money.** Integer cents, each tier `× n ÷ d` rounded once.
+**Tier counts → money.** Integer cents, each figure the EXACT rational rounded
+ONCE, half away from zero (one-document-model ruling 39, owner 2026-11-13: the
+strongest form).
 
-- `subtotal_cents` = Σ tier `round(rate × quantity × num ÷ den)`.
-- percent discount: `round(subtotal × (100 − rate) ÷ 100)`, once, on the sum.
-- flat discount: `rate` dollars per unit per counted period, so each tier's
-  discount is `round(rate × quantity × num ÷ den)`; a discount larger than
-  the line goes negative, the caller's to surface.
+- `subtotal_cents` = `round(Σ tier rate × quantity × num ÷ den)`.
+- percent discount: `subtotal_discounted_cents` = `round(Σ tier … × (100 − rate) ÷ 100)`,
+  from the exact sum, never from the rounded subtotal.
+- flat discount: `rate` dollars per unit per counted period, so the discounted
+  amount is `round(Σ tier (rate_cents − flat_cents) × quantity × num ÷ den)`; a
+  discount larger than the line goes negative, the caller's to surface.
+
+⭐ **Why one rounding:** every part of a line is a difference of this function's
+cumulative values ({@link lineUnitsCents}), and only a value rounded once from
+the exact rational keeps every part within 1¢ of exact. Rounding per tier, or
+the subtotal and then the discount, put a percent-discounted part 2¢ off
+(measured: 874 of 100,000). Census before the change, prod, dev and `test`: no
+stored line this function reproduced moved; the only lines that would are the
+frozen ones it never reproduced.
 
 ### `rateInForce(rates: readonly R[], rateKey: string, asOf: string): R | null`
 

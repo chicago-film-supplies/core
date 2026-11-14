@@ -12,7 +12,7 @@
  *
  * @module
  */
-import type { RateType } from "./common.ts";
+import { ITEM_CONTRACTS, type ItemTypeType, type RateType } from "./common.ts";
 import { roundDivHalfAwayFromZero, toCentsBig } from "../utils/money.ts";
 
 /** One tier's exact metered count — `TierCount`, `@cfs/core/utils/price-formulas`. */
@@ -40,14 +40,27 @@ const QTY_SCALE = 10_000n;
 /** Scale for a percent discount rate — `calculateItemSubtotal`'s own. */
 const RATE_SCALE = 1_000_000n;
 
+const gcd = (a: bigint, b: bigint): bigint => (b === 0n ? a : gcd(b, a % b));
+
 /**
- * **Tier counts → money.** Integer cents, each tier `× n ÷ d` rounded once.
+ * **Tier counts → money.** Integer cents, each figure the EXACT rational rounded
+ * ONCE, half away from zero (one-document-model ruling 39, owner 2026-11-13: the
+ * strongest form).
  *
- * - `subtotal_cents` = Σ tier `round(rate × quantity × num ÷ den)`.
- * - percent discount: `round(subtotal × (100 − rate) ÷ 100)`, once, on the sum.
- * - flat discount: `rate` dollars per unit per counted period, so each tier's
- *   discount is `round(rate × quantity × num ÷ den)`; a discount larger than
- *   the line goes negative, the caller's to surface.
+ * - `subtotal_cents` = `round(Σ tier rate × quantity × num ÷ den)`.
+ * - percent discount: `subtotal_discounted_cents` = `round(Σ tier … × (100 − rate) ÷ 100)`,
+ *   from the exact sum, never from the rounded subtotal.
+ * - flat discount: `rate` dollars per unit per counted period, so the discounted
+ *   amount is `round(Σ tier (rate_cents − flat_cents) × quantity × num ÷ den)`; a
+ *   discount larger than the line goes negative, the caller's to surface.
+ *
+ * ⭐ **Why one rounding:** every part of a line is a difference of this function's
+ * cumulative values ({@link lineUnitsCents}), and only a value rounded once from
+ * the exact rational keeps every part within 1¢ of exact. Rounding per tier, or
+ * the subtotal and then the discount, put a percent-discounted part 2¢ off
+ * (measured: 874 of 100,000). Census before the change, prod, dev and `test`: no
+ * stored line this function reproduced moved; the only lines that would are the
+ * frozen ones it never reproduced.
  *
  * @throws when a tier names a rate key `rates` does not carry.
  */
@@ -59,7 +72,14 @@ export function priceFromFormula(
 ): { subtotal_cents: number; subtotal_discounted_cents: number } {
   const qty = BigInt(Math.round(quantity * Number(QTY_SCALE)));
   const byKey = new Map(rates.map((r) => [r.rate_key, r.amount_cents]));
-  let subtotal = 0n;
+  // One common denominator: QTY_SCALE × lcm(den), so the sums below are exact.
+  let lcm = 1n;
+  for (const t of tiers) {
+    const d = BigInt(t.den);
+    lcm = (lcm / gcd(lcm, d)) * d;
+  }
+  const den = QTY_SCALE * lcm;
+  let gross = 0n;
   let flatOff = 0n;
   const flatCents = discount?.type === "flat" ? toCentsBig(discount.rate) : 0n;
   for (const t of tiers) {
@@ -70,29 +90,129 @@ export function priceFromFormula(
     if (!Number.isInteger(amount)) {
       throw new Error(`Rate "${t.rate_key}" is not integer cents: ${amount}`);
     }
-    const den = QTY_SCALE * BigInt(t.den);
-    subtotal += roundDivHalfAwayFromZero(
-      BigInt(amount) * qty * BigInt(t.num),
-      den,
-    );
-    if (flatCents !== 0n) {
-      flatOff += roundDivHalfAwayFromZero(flatCents * qty * BigInt(t.num), den);
-    }
+    const units = qty * BigInt(t.num) * (lcm / BigInt(t.den));
+    gross += BigInt(amount) * units;
+    flatOff += flatCents * units;
   }
-  let discounted = subtotal;
+  let discounted: bigint;
   if (discount?.type === "percent") {
     const rate = BigInt(Math.round(discount.rate * Number(RATE_SCALE)));
     const scale = 100n * RATE_SCALE;
-    discounted = roundDivHalfAwayFromZero(subtotal * (scale - rate), scale);
-  } else if (discount?.type === "flat") {
-    discounted = subtotal - flatOff;
+    discounted = roundDivHalfAwayFromZero(gross * (scale - rate), den * scale);
+  } else {
+    discounted = roundDivHalfAwayFromZero(gross - flatOff, den);
   }
   return {
-    subtotal_cents: Number(subtotal),
+    subtotal_cents: Number(roundDivHalfAwayFromZero(gross, den)),
     subtotal_discounted_cents: Number(discounted),
   };
 }
 
+
+// ── The one line-money function (one-document-model ruling 39) ──────────
+
+/**
+ * The line surface {@link lineMoneyAtCents} reads: a line states EITHER its
+ * `rates` (and `counts`), or a total over its quantity in `price.stated_cents`
+ * (the GROSS, before `discount`). Never both.
+ */
+export interface LineMoneyLike {
+  /** Read only to refuse a line whose money is the document's (`pricing: "from_total"`). */
+  type?: ItemTypeType;
+  quantity: number;
+  price: {
+    rates: readonly RateSnapshot[];
+    counts: readonly TierCountLike[];
+    discount: FormulaDiscount | null;
+    stated_cents?: number | null;
+  };
+}
+
+function statedOf(line: LineMoneyLike): number | null {
+  if (line.type !== undefined && ITEM_CONTRACTS[line.type].pricing !== "pre_tax") {
+    throw new Error(`A "${line.type}" line has no line money of its own (pricing "${ITEM_CONTRACTS[line.type].pricing}")`);
+  }
+  const stated = line.price.stated_cents ?? null;
+  if (stated === null) return null;
+  if (!Number.isInteger(stated)) throw new Error(`price.stated_cents is integer cents, got ${stated}`);
+  if (line.price.rates.length > 0) {
+    throw new Error("A line states rates OR a stated total, never both");
+  }
+  return stated;
+}
+
+function assertUnits(k: number): void {
+  if (!Number.isInteger(k) || k < 0) throw new RangeError(`A unit count is a non-negative integer, got ${k}`);
+}
+
+/** The stated arm: `stated × k ÷ Q`, rounded once; `0` on a line of no units. */
+function statedGrossAt(stated: number, quantity: number, k: number): bigint {
+  if (quantity === 0) return 0n;
+  return roundDivHalfAwayFromZero(BigInt(stated) * BigInt(k), BigInt(quantity));
+}
+
+function moneyAt(line: LineMoneyLike, k: number): { gross: bigint; net: bigint } {
+  assertUnits(k);
+  const stated = statedOf(line);
+  const discount = line.price.discount;
+  if (stated === null) {
+    const m = priceFromFormula(line.price.rates, line.price.counts, k, discount);
+    return { gross: BigInt(m.subtotal_cents), net: BigInt(m.subtotal_discounted_cents) };
+  }
+  const gross = statedGrossAt(stated, line.quantity, k);
+  if (discount === null || line.quantity === 0) return { gross, net: gross };
+  if (discount.type === "percent") {
+    // From the exact gross, never the rounded one: one rounding (see priceFromFormula).
+    const rate = BigInt(Math.round(discount.rate * Number(RATE_SCALE)));
+    const scale = 100n * RATE_SCALE;
+    const net = roundDivHalfAwayFromZero(BigInt(stated) * BigInt(k) * (scale - rate), BigInt(line.quantity) * scale);
+    return { gross, net };
+  }
+  // flat: dollars per unit, and a stated line's pricing factor is 1 (ruling 39 D1).
+  return { gross, net: gross - toCentsBig(discount.rate) * BigInt(k) };
+}
+
+/**
+ * **The money of a line's first `k` units** — pre-tax, after discount — the one
+ * function every whole-line, partial, credit, split, close and diff figure is a
+ * difference of (one-document-model ruling 39).
+ *
+ * - **rate line:** `priceFromFormula(rates, counts, k, discount)`, so `k = quantity`
+ *   is exactly the money `computeLineMoney` stores.
+ * - **stated line:** the gross `stated_cents × k ÷ quantity`, rounded once; the
+ *   net from the EXACT gross: a percent rounded once, a flat `rate × k` off
+ *   (closed: a stated line's pricing factor is 1, ruling 39 D1).
+ *
+ * Defined past `quantity` (an over-billed line, D5) at the same per-unit money,
+ * and `0` at `k = 0` and on a stated line of no units.
+ *
+ * @throws on a non-integer or negative `k`, a line stating both rates and a total,
+ *   or a line whose money is the document's (`pricing` other than `pre_tax`).
+ */
+export function lineMoneyAtCents(line: LineMoneyLike, k: number): number {
+  return Number(moneyAt(line, k).net);
+}
+
+/**
+ * **The money of units `(before, after]` of a line** — `lineMoneyAtCents(after) −
+ * lineMoneyAtCents(before)`. ⭐ The CUMULATIVE value is rounded, never the part,
+ * so the parts along any path from 0 to `quantity` sum exactly to the whole line
+ * and a count's money does not depend on the path that reached it (the partition
+ * rule, `cfs-money`). A reversal is the same call with the bounds swapped.
+ */
+export function lineUnitsCents(line: LineMoneyLike, before: number, after: number): number {
+  return lineMoneyAtCents(line, after) - lineMoneyAtCents(line, before);
+}
+
+/**
+ * **The discount on a line's first `k` units**: gross at `k` minus money at `k`,
+ * so a part's discount RECORD is a difference of cumulative values too and the
+ * parts' records sum to the whole line's.
+ */
+export function lineDiscountAtCents(line: LineMoneyLike, k: number): number {
+  const m = moneyAt(line, k);
+  return Number(m.gross - m.net);
+}
 
 /**
  * Does a line's stored money equal what its own snapshot reproduces? The

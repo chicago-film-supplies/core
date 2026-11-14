@@ -608,7 +608,15 @@ export function meanTierCounts(rows: readonly { quantity: number; counts: readon
 // The money step lives schema-side (`schemas/_line-money.ts`) so the stored
 // line refine — rates + counts + quantity + discount reproduce the line's money
 // — can call the one implementation (Phase 2 ruling 8). Re-exported here.
-export { type FormulaDiscount, priceFromFormula, type RateSnapshot } from "../schemas/_line-money.ts";
+export {
+  type FormulaDiscount,
+  lineDiscountAtCents,
+  type LineMoneyLike,
+  lineMoneyAtCents,
+  lineUnitsCents,
+  priceFromFormula,
+  type RateSnapshot,
+} from "../schemas/_line-money.ts";
 import type { RateSnapshot } from "../schemas/_line-money.ts";
 import type { DocLineItemTypeType } from "../schemas/common.ts";
 

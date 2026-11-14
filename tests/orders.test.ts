@@ -426,13 +426,17 @@ function exactLineCents(line: SweepLine): { subtotal: bigint; discounted: bigint
   const subtotal = exactRound(baseCents * qty * factorNum, 10_000n * factorDen);
   if (!line.discount) return { subtotal, discounted: subtotal };
 
+  // The discounted amount is the EXACT rational rounded once, never from the
+  // rounded subtotal (one-document-model ruling 39, owner 2026-11-13).
   if (line.discount.type === "percent") {
     const rate = BigInt(Math.round(line.discount.rate * 1_000_000));
-    return { subtotal, discounted: exactRound(subtotal * (100_000_000n - rate), 100_000_000n) };
+    return {
+      subtotal,
+      discounted: exactRound(baseCents * qty * factorNum * (100_000_000n - rate), 10_000n * factorDen * 100_000_000n),
+    };
   }
   const rateCents = BigInt(Math.round(line.discount.rate * 100));
-  const off = exactRound(rateCents * qty * factorNum, 10_000n * factorDen);
-  return { subtotal, discounted: subtotal - off };
+  return { subtotal, discounted: exactRound((baseCents - rateCents) * qty * factorNum, 10_000n * factorDen) };
 }
 
 /**

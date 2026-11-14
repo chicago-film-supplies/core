@@ -24884,6 +24884,12 @@
         },
         {
           "kind": "interface",
+          "name": "LineMoneyLike",
+          "declaration": "interface LineMoneyLike {\n  type?: ItemTypeType;\n  quantity: number;\n  price: typeLiteral;\n}",
+          "doc": "The line surface {@link lineMoneyAtCents} reads: a line states EITHER its\n`rates` (and `counts`), or a total over its quantity in `price.stated_cents`\n(the GROSS, before `discount`). Never both."
+        },
+        {
+          "kind": "interface",
           "name": "MeterInput",
           "declaration": "interface MeterInput {\n  windows: readonly MeterRange[];\n  span?: MeterRange | null;\n  holidays: readonly string[];\n  rates?: readonly MeterRate[] | null;\n}",
           "doc": "{@link meterUnits}' inputs."
@@ -24972,6 +24978,30 @@
         },
         {
           "kind": "function",
+          "name": "lineDiscountAtCents",
+          "signature": "lineDiscountAtCents(line: LineMoneyLike, k: number): number",
+          "doc": "**The discount on a line's first `k` units**: gross at `k` minus money at `k`,\nso a part's discount RECORD is a difference of cumulative values too and the\nparts' records sum to the whole line's.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "lineMoneyAtCents",
+          "signature": "lineMoneyAtCents(line: LineMoneyLike, k: number): number",
+          "doc": "**The money of a line's first `k` units** — pre-tax, after discount — the one\nfunction every whole-line, partial, credit, split, close and diff figure is a\ndifference of (one-document-model ruling 39).\n\n- **rate line:** `priceFromFormula(rates, counts, k, discount)`, so `k = quantity`\n  is exactly the money `computeLineMoney` stores.\n- **stated line:** the gross `stated_cents × k ÷ quantity`, rounded once; the\n  net from the EXACT gross: a percent rounded once, a flat `rate × k` off\n  (closed: a stated line's pricing factor is 1, ruling 39 D1).\n\nDefined past `quantity` (an over-billed line, D5) at the same per-unit money,\nand `0` at `k = 0` and on a stated line of no units.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "lineUnitsCents",
+          "signature": "lineUnitsCents(line: LineMoneyLike, before: number, after: number): number",
+          "doc": "**The money of units `(before, after]` of a line** — `lineMoneyAtCents(after) −\nlineMoneyAtCents(before)`. ⭐ The CUMULATIVE value is rounded, never the part,\nso the parts along any path from 0 to `quantity` sum exactly to the whole line\nand a count's money does not depend on the path that reached it (the partition\nrule, `cfs-money`). A reversal is the same call with the bounds swapped.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "meanTierCounts",
           "signature": "meanTierCounts(rows: readonly typeLiteral[]): TierCount[]",
           "doc": "**The quantity-weighted mean of several rows' tier counts**, exact: for each\ntier, Σ quantity × count ÷ Σ quantity. Rows that bill one line from two places\non ONE document (a split) read as one billing of that line: 2 + 2 units over\n30 days is 30 days, not 60. A single row comes back as it is.",
@@ -25006,7 +25036,7 @@
           "kind": "function",
           "name": "priceFromFormula",
           "signature": "priceFromFormula(rates: readonly RateSnapshot[], tiers: readonly TierCountLike[], quantity: number, discount: FormulaDiscount | null): typeLiteral",
-          "doc": "**Tier counts → money.** Integer cents, each tier `× n ÷ d` rounded once.\n\n- `subtotal_cents` = Σ tier `round(rate × quantity × num ÷ den)`.\n- percent discount: `round(subtotal × (100 − rate) ÷ 100)`, once, on the sum.\n- flat discount: `rate` dollars per unit per counted period, so each tier's\n  discount is `round(rate × quantity × num ÷ den)`; a discount larger than\n  the line goes negative, the caller's to surface.",
+          "doc": "**Tier counts → money.** Integer cents, each figure the EXACT rational rounded\nONCE, half away from zero (one-document-model ruling 39, owner 2026-11-13: the\nstrongest form).\n\n- `subtotal_cents` = `round(Σ tier rate × quantity × num ÷ den)`.\n- percent discount: `subtotal_discounted_cents` = `round(Σ tier … × (100 − rate) ÷ 100)`,\n  from the exact sum, never from the rounded subtotal.\n- flat discount: `rate` dollars per unit per counted period, so the discounted\n  amount is `round(Σ tier (rate_cents − flat_cents) × quantity × num ÷ den)`; a\n  discount larger than the line goes negative, the caller's to surface.\n\n⭐ **Why one rounding:** every part of a line is a difference of this function's\ncumulative values ({@link lineUnitsCents}), and only a value rounded once from\nthe exact rational keeps every part within 1¢ of exact. Rounding per tier, or\nthe subtotal and then the discount, put a percent-discounted part 2¢ off\n(measured: 874 of 100,000). Census before the change, prod, dev and `test`: no\nstored line this function reproduced moved; the only lines that would are the\nfrozen ones it never reproduced.",
           "paramTags": [],
           "returnsTag": null
         },
