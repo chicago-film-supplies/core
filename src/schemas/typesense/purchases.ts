@@ -49,7 +49,8 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  * the invoice's and bill's are, BESIDE the kept `total_cents` pair. Both pairs
  * stay through the expand so every step is manager-first: the default column
  * moves to `totals.total_cents` in beta D, once this index is live, and v7 drops
- * the old pair with the stored key.
+ * the old pair with the stored key. Beta D moved the default column; the
+ * schema is unchanged, so no reindex.
  */
 export const purchases: TypesenseCollectionConfig = {
   alias: "purchases",
@@ -106,7 +107,7 @@ export const purchases: TypesenseCollectionConfig = {
   synonyms: [],
   pulseShards: 1,
   displayDefaults: {
-    columns: ["number", "date_fs", "supplier.name", "subject", "status", "total_cents"],
+    columns: ["number", "date_fs", "supplier.name", "subject", "status", "totals.total_cents"],
     filters: { status: [] },
   },
 };

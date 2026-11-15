@@ -778,7 +778,6 @@ export {
   PurchaseLineRefSchema,
   deriveQueryByOrders,
   deriveQueryByProducts,
-  purchaseItemCommittedCents,
   purchaseItemProduct,
   payableLineUid,
   payableLineUidIssue,

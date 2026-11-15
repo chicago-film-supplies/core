@@ -101,9 +101,9 @@
  * co-written bucket only on flat lines, and a time line resolves on custody
  * (Q7). Over-billing is never refused (D5) — the purchase↔bill diff flags it.
  *
- * `total_cents` is the COMMITTED amount (owner, 2026-10-30): Σ of the flat
- * lines' amounts. A time line adds 0; what was billed against it is its bills'
- * totals.
+ * The purchase's `totals.total_cents` is the COMMITTED amount (owner,
+ * 2026-10-30; the order's `totals` since D5): Σ of the lines' stored money. A
+ * time line prices to 0; what was billed against it is its bills' totals.
  *
  * No tax is CHARGED on a purchase (owner, 2026-10-05): stock bought for sale or
  * rent is bought resale-exempt and the tax is collected from the end user. The
@@ -247,7 +247,7 @@ export const PURCHASE_STATUS_TRAITS: Readonly<Record<PurchaseStatusType, Purchas
  *
  * 🔴 **Closed, and read through exhaustive switches.** Every reader that
  * branches on an item's arm switches over this union with a `never` default
- * (`purchaseItemSupplies`, `purchaseItemCommittedCents`, …), so a new member is a
+ * (`purchaseItemSupplies`, `purchaseItemProduct`, …), so a new member is a
  * compile error at every one of them rather than a silent fall-through.
  *
  * Explicit tuple type rather than `as const` alone: core#43 is JSR's npm
@@ -1073,24 +1073,6 @@ function unreachableItem(item: never): never {
 }
 
 /**
- * The amount an item COMMITS up front — the term of the purchase's
- * `total_cents` (owner, 2026-10-30): a flat line's net amount, and 0 for a time
- * line, whose cost is decided as it accrues.
- */
-export function purchaseItemCommittedCents(item: PurchaseItem): number {
-  switch (item.type) {
-    case "sale":
-      return item.amount_cents;
-    case "rental":
-    case "service":
-    case "replacement":
-      return item.amount_cents ?? 0;
-    default:
-      return unreachableItem(item);
-  }
-}
-
-/**
  * The product an item ORDERS — a sale or rental line's uid — or `undefined`: a
  * service line's `uid_product` is attribution, and a replacement's twin is not
  * an order.
@@ -1350,8 +1332,12 @@ export interface Purchase {
    * divider, joined by `uid`.
    */
   destinations: PurchaseDestination[];
-  /** Σ {@link purchaseItemCommittedCents} — refined; equal to `totals.total_cents` while both exist. */
-  total_cents: number;
+  /**
+   * The old committed total, retired by D5 (ruling 62) for {@link totals}. No
+   * writer states it since beta D; refined equal to `totals.total_cents` while a
+   * stored purchase still carries it, and deleted in beta E after the purge.
+   */
+  total_cents?: number;
   /**
    * The order's `totals`, one initiator shape on both sides (one-document-model
    * ruling 62, D5): the sum of the lines' stored money, as `priceDocument`'s
@@ -1361,10 +1347,10 @@ export interface Purchase {
    * `total_cents` here is the committed amount `total_cents` above has always
    * been. Refined against the lines ({@link purchaseTotalsIssues}).
    *
-   * Optional through D5's expand (beta C): absent on a purchase stored before the
-   * backfill; required in beta D, when `total_cents` goes.
+   * Required since D5 beta D (backfilled 2026-11-15: prod 317 of 317, `test` 300
+   * of 300, dev through the mirror); every writer states it from `purchaseTotals`.
    */
-  totals?: InitiatorTotalsType;
+  totals: InitiatorTotalsType;
   /**
    * Mirror of the products the items order ({@link deriveQueryByProducts}), for
    * "which purchases name this product" as one `array-contains` — the stock
@@ -1468,23 +1454,14 @@ function checkPurchase(p: Purchase, ctx: z.RefinementCtx): void {
     }
   }
 
-  const total = purchaseLines(p.items).reduce((sum, item) => sum + purchaseItemCommittedCents(item), 0);
-  if (p.total_cents !== total) {
+  for (const issue of purchaseTotalsIssues(p.items, p.totals)) ctx.addIssue({ code: "custom", ...issue });
+  // D5 contract: the old key no writer states any more, until the purge empties it.
+  if (p.total_cents !== undefined && p.total_cents !== p.totals.total_cents) {
     ctx.addIssue({
       code: "custom",
       path: ["total_cents"],
-      message: `total_cents ${p.total_cents} must equal the items' committed ${total}`,
+      message: `total_cents ${p.total_cents} must equal totals.total_cents ${p.totals.total_cents}`,
     });
-  }
-  if (p.totals !== undefined) {
-    for (const issue of purchaseTotalsIssues(p.items, p.totals)) ctx.addIssue({ code: "custom", ...issue });
-    if (p.totals.total_cents !== p.total_cents) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["totals", "total_cents"],
-        message: `totals.total_cents ${p.totals.total_cents} must equal total_cents ${p.total_cents}`,
-      });
-    }
   }
 }
 
@@ -1553,13 +1530,13 @@ export const PurchaseSchema: z.ZodType<Purchase> = z.strictObject({
   // before; this is what lets a corpus re-parse see a stored violation.
   items: z.array(PurchaseRowSchema).min(1).meta({ label: "Item" }).superRefine(checkZeroPricedComponents),
   destinations: z.array(PurchaseDestinationSchema).min(1).superRefine(checkExchangePairs).meta({ label: "Destination" }),
-  // "Committed Total" through D5's expand only: `totals.total_cents` beside it is
-  // "Total", and two columns on one surface may not share a heading (T9). The
-  // key goes in beta E.
-  total_cents: z.int().min(0).meta({ column: true, label: "Committed Total", ...homonym }),
-  // D5 expand: the initiator's totals, `derived` as the order's are (which also
-  // tags the key the bill shares by name). Optional until the backfill.
-  totals: InitiatorTotals.optional().meta({ derived: true }),
+  // D5 contract (beta D): optional, written by nothing, and no longer a column;
+  // `totals.total_cents` is the purchase's "Total". The purge empties it and
+  // beta E deletes the key.
+  total_cents: z.int().min(0).optional().meta(homonym),
+  // The initiator's totals, `derived` as the order's are (which also tags the key
+  // the bill shares by name). Required since beta D.
+  totals: InitiatorTotals.meta({ derived: true }),
   query_by_products: z.array(FirestoreId).meta({ derived: true }),
   query_by_orders: z.array(FirestoreId).meta({ derived: true }),
   query_by_item_types: z.array(PurchaseItemTypeEnum).meta({ derived: true }),
@@ -1592,7 +1569,7 @@ export const PurchaseSchema: z.ZodType<Purchase> = z.strictObject({
   title: "Purchase",
   collection: "purchases",
   displayDefaults: {
-    columns: ["number", "date", "supplier.name", "subject", "status", "total_cents"],
+    columns: ["number", "date", "supplier.name", "subject", "status", "totals.total_cents"],
     filters: { status: [] },
     sort: { column: "number", direction: "desc" },
     groupBy: [

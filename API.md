@@ -9854,7 +9854,7 @@ product type, stock method or asset account from it.
 
 🔴 **Closed, and read through exhaustive switches.** Every reader that
 branches on an item's arm switches over this union with a `never` default
-(`purchaseItemSupplies`, `purchaseItemCommittedCents`, …), so a new member is a
+(`purchaseItemSupplies`, `purchaseItemProduct`, …), so a new member is a
 compile error at every one of them rather than a silent fall-through.
 
 Explicit tuple type rather than `as const` alone: core#43 is JSR's npm
@@ -11163,8 +11163,8 @@ interface Purchase {
   notes: string | null;
   items: PurchaseRow[];
   destinations: PurchaseDestination[];
-  total_cents: number;
-  totals?: InitiatorTotalsType;
+  total_cents?: number;
+  totals: InitiatorTotalsType;
   query_by_products: string[];
   query_by_orders: string[];
   query_by_item_types: PurchaseItemTypeType[];
@@ -18808,12 +18808,6 @@ A subrent line's hire window, read off its pair — `{start, end}` with a null
 The basis of an item's formula. Every STORED item carries `price` (beta B);
 the parameter stays loose for a client's draft line, which reads as flat
 until it names a formula.
-
-### `purchaseItemCommittedCents(item: PurchaseItem): number`
-
-The amount an item COMMITS up front — the term of the purchase's
-`total_cents` (owner, 2026-10-30): a flat line's net amount, and 0 for a time
-line, whose cost is decided as it accrues.
 
 ### `purchaseItemProduct(item: PurchaseItem): string | undefined`
 
@@ -29172,9 +29166,9 @@ It also makes `quantity_billed` null exactly on time lines: billed is a
 co-written bucket only on flat lines, and a time line resolves on custody
 (Q7). Over-billing is never refused (D5) — the purchase↔bill diff flags it.
 
-`total_cents` is the COMMITTED amount (owner, 2026-10-30): Σ of the flat
-lines' amounts. A time line adds 0; what was billed against it is its bills'
-totals.
+The purchase's `totals.total_cents` is the COMMITTED amount (owner,
+2026-10-30; the order's `totals` since D5): Σ of the lines' stored money. A
+time line prices to 0; what was billed against it is its bills' totals.
 
 No tax is CHARGED on a purchase (owner, 2026-10-05): stock bought for sale or
 rent is bought resale-exempt and the tax is collected from the end user. The
@@ -29312,7 +29306,7 @@ product type, stock method or asset account from it.
 
 🔴 **Closed, and read through exhaustive switches.** Every reader that
 branches on an item's arm switches over this union with a `never` default
-(`purchaseItemSupplies`, `purchaseItemCommittedCents`, …), so a new member is a
+(`purchaseItemSupplies`, `purchaseItemProduct`, …), so a new member is a
 compile error at every one of them rather than a silent fall-through.
 
 Explicit tuple type rather than `as const` alone: core#43 is JSR's npm
@@ -29443,8 +29437,8 @@ interface Purchase {
   notes: string | null;
   items: PurchaseRow[];
   destinations: PurchaseDestination[];
-  total_cents: number;
-  totals?: InitiatorTotalsType;
+  total_cents?: number;
+  totals: InitiatorTotalsType;
   query_by_products: string[];
   query_by_orders: string[];
   query_by_item_types: PurchaseItemTypeType[];
@@ -30225,12 +30219,6 @@ A subrent line's hire window, read off its pair — `{start, end}` with a null
 The basis of an item's formula. Every STORED item carries `price` (beta B);
 the parameter stays loose for a client's draft line, which reads as flat
 until it names a formula.
-
-### `purchaseItemCommittedCents(item: PurchaseItem): number`
-
-The amount an item COMMITS up front — the term of the purchase's
-`total_cents` (owner, 2026-10-30): a flat line's net amount, and 0 for a time
-line, whose cost is decided as it accrues.
 
 ### `purchaseItemProduct(item: PurchaseItem): string | undefined`
 
@@ -35484,7 +35472,8 @@ v6 (one-document-model D5, ruling 62): the initiator's `totals`, declared as
 the invoice's and bill's are, BESIDE the kept `total_cents` pair. Both pairs
 stay through the expand so every step is manager-first: the default column
 moves to `totals.total_cents` in beta D, once this index is live, and v7 drops
-the old pair with the stored key.
+the old pair with the stored key. Beta D moved the default column; the
+schema is unchanged, so no reindex.
 
 ```ts
 const purchases: TypesenseCollectionConfig;
@@ -54174,12 +54163,6 @@ or `replacement` line's names a catalog product or is `custom-`.
 
 Attached to every stored purchase line arm and, through `documentItemsIssues`
 (`schemas/purchase-bill.ts`), to every bill and supplier-credit line.
-
-### `purchaseItemCommittedCents(item: PurchaseItem): number`
-
-The amount an item COMMITS up front — the term of the purchase's
-`total_cents` (owner, 2026-10-30): a flat line's net amount, and 0 for a time
-line, whose cost is decided as it accrues.
 
 ### `purchaseItemProduct(item: PurchaseItem): string | undefined`
 

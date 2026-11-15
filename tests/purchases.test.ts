@@ -59,12 +59,13 @@ import {
   type PurchaseExpansionProduct,
   deriveQueryByOrders,
   deriveQueryByProducts,
-  purchaseItemCommittedCents,
   remainingToBill,
   remainingToReceive,
   remainingToReturn,
   NO_LINE_CUSTODY,
+  purchaseItemProduct,
 } from "../src/utils/purchases.ts";
+import { purchaseTotals } from "../src/utils/price-document.ts";
 import { apportionCents } from "../src/utils/money.ts";
 import { costedProductUid, lineProductUid } from "../src/utils/purchases.ts";
 import { type FormulaDiscount, lineDiscountAtCents, lineMoneyAtCents, lineUnitsCents, statedLine } from "../src/utils/price-formulas.ts";
@@ -339,7 +340,7 @@ function purchase(over: Record<string, unknown> = {}) {
     notes: null,
     items: rows ?? [purchaseDivider(D), ...items],
     destinations: [purchasePair(D, hasHire ? HIRE : null)],
-    total_cents: 140985,
+    totals: flatTotals(140985),
     query_by_products: deriveQueryByProducts(items),
     query_by_orders: deriveQueryByOrders(items),
     query_by_item_types: deriveQueryByItemTypes(items),
@@ -361,7 +362,7 @@ function purchase(over: Record<string, unknown> = {}) {
 function withItems(items: PurchaseItem[], over: Record<string, unknown> = {}) {
   return purchase({
     items,
-    total_cents: items.reduce((s, i) => s + purchaseItemCommittedCents(i), 0),
+    totals: purchaseTotals([purchaseDivider(D), ...items]),
     query_by_products: deriveQueryByProducts(items),
     query_by_orders: deriveQueryByOrders(items),
     query_by_item_types: deriveQueryByItemTypes(items),
@@ -411,7 +412,7 @@ Deno.test("PurchaseSchema: one product may sit on two items (D2), in two groups 
   assertEquals(issuePaths(PurchaseSchema, withItems([line({ path: [] })])), ["items.1.path"]);
   const grouped = purchase({
     rows: [purchaseDivider(D), { uid: G, type: "group", name: "Spare", path: [D, G], description: "" }, ...two],
-    total_cents: 141085,
+    totals: flatTotals(141085),
   });
   assertEquals(issuePaths(PurchaseSchema, grouped), [], "one uid under two parents is two rows");
 });
@@ -431,28 +432,27 @@ const flatTotals = (subtotal: number, replacement = 0) => ({
   replacement_total_cents: replacement,
 });
 
-Deno.test("PurchaseSchema: totals is the Σ of the lines' stored money, and absent through the expand (D5)", () => {
+Deno.test("PurchaseSchema: totals is the Σ of the lines' stored money, and required (D5 beta D)", () => {
   const items = [line(), freight(), hireLine({ price: { ...flatPrice, replacement_cents: 4500 } }), timeHire({ path: [D, lid(9)], uid: lid(9) })];
   const total = 140985 + 1_500 + 50_000;
-  const base = withItems(items, { total_cents: total });
-  assertEquals(issuePaths(PurchaseSchema, base), [], "absent: a purchase stored before the backfill");
-  assertEquals(issuePaths(PurchaseSchema, { ...base, totals: flatTotals(total, 45_000) }), []);
+  const base = withItems(items, { totals: flatTotals(total, 45_000) });
+  assertEquals(issuePaths(PurchaseSchema, base), []);
+  // A time line prices to 0: it commits nothing until its bills price its windows.
+  assertEquals(base.totals.total_cents, total);
+  const { totals: _t, ...absent } = base;
+  assertEquals(issuePaths(PurchaseSchema, absent), ["totals"], "required since beta D: the backfill stated it everywhere");
   // Each figure is refused alone, at its own key.
   for (
     const [key, value] of [
       ["subtotal_cents", total + 1],
       ["subtotal_discounted_cents", total - 1],
       ["discount_amount_cents", 1],
+      ["total_cents", total + 1],
       ["replacement_total_cents", 0],
     ] as const
   ) {
     assertEquals(issuePaths(PurchaseSchema, { ...base, totals: { ...flatTotals(total, 45_000), [key]: value } }), [`totals.${key}`], key);
   }
-  // total_cents disagrees with the lines AND with the old key.
-  assertEquals(issuePaths(PurchaseSchema, { ...base, totals: { ...flatTotals(total, 45_000), total_cents: total + 1 } }), [
-    "totals.total_cents",
-    "totals.total_cents",
-  ]);
   const tax = { uid: "testtax1000000000000", name: "Sales Tax", rate: 10, type: "percent" as const, amount_cents: 1 };
   assertEquals(issuePaths(PurchaseSchema, { ...base, totals: { ...flatTotals(total, 45_000), taxes: [tax] } }), ["totals.taxes"]);
   assertEquals(issuePaths(PurchaseSchema, { ...base, totals: { ...flatTotals(total, 45_000), transaction_fees: [tax] } }), [
@@ -462,16 +462,12 @@ Deno.test("PurchaseSchema: totals is the Σ of the lines' stored money, and abse
   assertEquals(issuePaths(PurchaseSchema, { ...base, totals: { ...flatTotals(total, 45_000), amount_due_cents: 0 } }), ["totals"]);
 });
 
-Deno.test("PurchaseSchema: total_cents is the Σ of the COMMITTED amounts", () => {
-  assertEquals(issuePaths(PurchaseSchema, purchase({ total_cents: 140984 })), ["total_cents"]);
-  // A time line commits nothing (owner, 2026-10-30): its bills decide its cost.
-  assertEquals(purchaseItemCommittedCents(timeHire()), 0);
-  assertEquals(purchaseItemCommittedCents(carrierLine()), 0);
-  assertEquals(purchaseItemCommittedCents(hireLine()), 50_000);
-  assertEquals(purchaseItemCommittedCents(freight()), 1_500);
-  const mixed = [line(), freight()];
-  assertEquals(issuePaths(PurchaseSchema, withItems(mixed, { total_cents: 140985 + 1_500 })), []);
-  assertEquals(issuePaths(PurchaseSchema, withItems(mixed, { total_cents: 140985 + 1_500 + 50_000 })), ["total_cents"]);
+Deno.test("PurchaseSchema: the old total_cents is optional, and refused only where it disagrees with totals (D5 beta D)", () => {
+  const items = [line(), freight()];
+  const base = withItems(items);
+  assertEquals(issuePaths(PurchaseSchema, base), [], "absent: no writer states it since beta D");
+  assertEquals(issuePaths(PurchaseSchema, { ...base, total_cents: 140985 + 1_500 }), [], "a stored purchase before the purge");
+  assertEquals(issuePaths(PurchaseSchema, { ...base, total_cents: 140985 }), ["total_cents"]);
 });
 
 Deno.test("PurchaseSchema: the status is the inbound bookings', so the document refines none of it (7a, ruling 55)", () => {
@@ -483,8 +479,8 @@ Deno.test("PurchaseSchema: the status is the inbound bookings', so the document 
 });
 
 Deno.test("PurchaseSchema: a purchase orders at least one item", () => {
-  assertEquals(issuePaths(PurchaseSchema, purchase({ items: [], total_cents: 0 })), ["items"]);
-  assertEquals(issuePaths(PurchaseSchema, purchase({ rows: [], total_cents: 0 })).includes("items"), true);
+  assertEquals(issuePaths(PurchaseSchema, purchase({ items: [], totals: flatTotals(0) })), ["items"]);
+  assertEquals(issuePaths(PurchaseSchema, purchase({ rows: [], totals: flatTotals(0) })).includes("items"), true);
 });
 
 Deno.test("PurchaseSchema: every line sits under a destination divider its pair answers (one-document-model Phase 3)", () => {
@@ -573,7 +569,8 @@ Deno.test("PurchaseSchema: a TIME line commits nothing — no amount, no billed 
 Deno.test("PurchaseSchema: a line's price money is what its stated amount gives — each identity alone", () => {
   const discounted = hireLine({ amount_cents: 45_000, price: { ...flatPrice, discount: { rate: 10, type: "percent", amount_cents: 5_000 } } });
   assertEquals(discounted.price.subtotal_cents, 50_000, "the fixture is the rule: gross = net + discount");
-  const total = { total_cents: 45_000 };
+  // totals derived from the planted lines, so each refusal is the line's alone.
+  const total = {};
   assertEquals(issuePaths(PurchaseSchema, withItems([discounted], total)), []);
   const off = (price: Partial<typeof discounted.price>) => withItems([{ ...discounted, price: { ...discounted.price, ...price } }], total);
   assertEquals(issuePaths(PurchaseSchema, off({ subtotal_discounted_cents: 45_001 })), ["items.1.price.subtotal_discounted_cents"]);
@@ -594,7 +591,7 @@ Deno.test("PurchaseSchema: a buy states its `price` — required since beta B, a
 Deno.test("PurchaseSchema: a supplier discount sits beside the NET amount (ruling 7)", () => {
   const discounted = hireLine({ amount_cents: 45_000, price: { ...flatPrice, discount: { rate: 10, type: "percent", amount_cents: 5_000 } } });
   assertEquals(issuePaths(PurchaseSchema, withItems([discounted])), []);
-  assertEquals(purchaseItemCommittedCents(discounted), 45_000, "the committed amount is the net");
+  assertEquals(withItems([discounted]).totals.total_cents, 45_000, "the committed amount is the net");
 });
 
 Deno.test("PurchaseSchema: the retired arms and keys are refused — a hard cutover (ruling 5)", () => {
@@ -677,10 +674,10 @@ Deno.test("the item-type switches are exhaustive over PURCHASE_ITEM_TYPES", () =
   };
   assertEquals(Object.keys(one).sort(), [...PURCHASE_ITEM_TYPES].sort());
   for (const type of PURCHASE_ITEM_TYPES) {
-    purchaseItemCommittedCents(one[type]);
+    purchaseItemProduct(one[type]);
     purchaseLineCloseOutcome(one[type], NO_LINE_CUSTODY);
   }
-  assertThrows(() => purchaseItemCommittedCents({ ...line(), type: "lease" } as unknown as PurchaseItem));
+  assertThrows(() => purchaseItemProduct({ ...line(), type: "lease" } as unknown as PurchaseItem));
 });
 
 // ── item inputs ──────────────────────────────────────────────────────

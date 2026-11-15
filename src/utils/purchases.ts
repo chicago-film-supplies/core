@@ -13,7 +13,6 @@ import {
   deriveQueryByOrders,
   deriveQueryByProducts,
   type ProductTypeType,
-  purchaseItemCommittedCents,
   purchaseItemProduct,
   payableInputUidIssue,
   payableLineUid,
@@ -53,7 +52,6 @@ export {
   deriveQueryByItemTypes,
   deriveQueryByOrders,
   deriveQueryByProducts,
-  purchaseItemCommittedCents,
   purchaseItemProduct,
 };
 // The payable line uid rule (W4K) lives beside the refines that check it.

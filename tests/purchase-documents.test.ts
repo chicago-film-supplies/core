@@ -423,7 +423,7 @@ function purchaseDoc(items: PurchaseItem[]): Purchase {
     notes: null,
     items: [purchaseDivider(DIV), ...items],
     destinations: [purchasePair(DIV, hire ? { start: jan(1), end: null } : null)],
-    total_cents: 0,
+    totals: purchaseTotals([purchaseDivider(DIV), ...items]),
     query_by_products: [PRODUCT],
     query_by_orders: [],
     query_by_item_types: ["rental"],

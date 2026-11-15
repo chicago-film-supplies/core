@@ -754,7 +754,6 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "custodyBySourceItem",
     "derivePurchaseStatus",
     "expandPurchaseItems",
-    "purchaseItemCommittedCents",
     "purchaseItemProduct",
     // The payable line uid rule (W4K): what a writer keys a line by, and its refines.
     "payableInputUidIssue",
