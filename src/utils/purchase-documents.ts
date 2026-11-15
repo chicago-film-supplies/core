@@ -1042,14 +1042,17 @@ function timeLineFields(): readonly SharedField[] {
 }
 
 /**
- * **A purchase line in a BILL line's shape, over the shared keys only** — the
- * merge's three arguments must all be in the downstream shape (core#52), and
- * the purchase↔bill diff compares exactly what the merge follows.
+ * **A purchase line in a BILL line's shape, over the shared keys only, fitted
+ * to a bill row's quantity** — the purchase ↔ bill DIFF's projection
+ * (`DIFF_SIDES.payable.line.projectLine`, `utils/documentDiff.ts`).
  *
- * `quantity` is the units the bill line bills: the discount record is that
- * share of the purchase line's ({@link projectPurchaseLineToBillLine}'s rule),
- * so an untouched bill line compares equal to its projection and follows it,
- * and a followed discount lands as the bill's share rather than the whole.
+ * ⚠️ Not the sync's: the sync projects the whole line from unit 0
+ * ({@link projectPurchaseRowForBill}) and merges `quantity`, the money and
+ * `out_of_service` as one `flat_money` group, so a partial bill keeps all of
+ * them. The diff ignores groups, so it fits the projection to the row's
+ * quantity instead: the discount record becomes that quantity's share and
+ * `out_of_service` that quantity's records, and only a row naming different
+ * records from its purchase line reports.
  */
 export function projectPurchaseLineForBill(item: PurchaseItem, quantity: number): Record<string, unknown> {
   return {

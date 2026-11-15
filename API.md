@@ -41373,12 +41373,17 @@ interface DocumentCredit {
 
 ### `DocumentDiffContext`
 
-What the order ↔ invoice explanation arms need, per order.
+What the diff needs beyond the documents: every formula their lines name and
+the holiday list, what an extension's counts are metered with (ruling 8: a
+window stores no count).
+
+⚠️ It carried `taxNameByUid` and `isOrderFrozen` until the one field comparer
+(one-document-model F10): they fed the invoice sync badge's explanation arms,
+which could never change the diff's output (every field they cover is
+`derived`) and are no longer called from it.
 
 ```ts
 interface DocumentDiffContext {
-  taxNameByUid: ReadonlyMap<string, string>;
-  isOrderFrozen: fnOrConstructor;
   formulas: PricingFormulas;
   holidays: readonly string[];
 }
@@ -41667,7 +41672,7 @@ field comparers are unchanged.
 
 - `sources` — The documents the caller holds, the viewed one included
 - `viewing` — Which of them is being viewed
-- `context` — Tax names and the order freeze predicate, for the explanation arms
+- `context` — The pricing formulas and holidays an extension's counts are metered with
 
 **Returns** — Entries keyed by the viewed document's own path keys; empty when the
 viewed document is not among `sources`
@@ -53555,14 +53560,17 @@ pointer, as an invoice row whose order line was removed keeps none.
 
 ### `projectPurchaseLineForBill(item: PurchaseItem, quantity: number): Record<string, unknown>`
 
-**A purchase line in a BILL line's shape, over the shared keys only** — the
-merge's three arguments must all be in the downstream shape (core#52), and
-the purchase↔bill diff compares exactly what the merge follows.
+**A purchase line in a BILL line's shape, over the shared keys only, fitted
+to a bill row's quantity** — the purchase ↔ bill DIFF's projection
+(`DIFF_SIDES.payable.line.projectLine`, `utils/documentDiff.ts`).
 
-`quantity` is the units the bill line bills: the discount record is that
-share of the purchase line's ({@link projectPurchaseLineToBillLine}'s rule),
-so an untouched bill line compares equal to its projection and follows it,
-and a followed discount lands as the bill's share rather than the whole.
+⚠️ Not the sync's: the sync projects the whole line from unit 0
+({@link projectPurchaseRowForBill}) and merges `quantity`, the money and
+`out_of_service` as one `flat_money` group, so a partial bill keeps all of
+them. The diff ignores groups, so it fits the projection to the row's
+quantity instead: the discount record becomes that quantity's share and
+`out_of_service` that quantity's records, and only a row naming different
+records from its purchase line reports.
 
 ### `projectPurchaseLineToBillLine(item: PurchaseItem, opts: ProjectBillLineOptions): PurchaseDocumentItem`
 

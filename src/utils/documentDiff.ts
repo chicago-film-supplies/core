@@ -107,11 +107,15 @@
  * row that owns its booking: `fulfilled` is its billable units, `invoiced` what
  * its replacement lines bill.
  *
- * Order ↔ invoice line differences go through
- * {@link invoiceItemDifferences} + {@link explainInvoiceItemDifferences} FIRST
- * and are filtered to the compared fields SECOND — the explanation arms are the
- * sync badge's, reused rather than restated, so this can never report a
- * difference the badge has explained away.
+ * Initiator ↔ billing line differences, on both sides, come from ONE comparer
+ * ({@link billingLineFields}, one-document-model F10): the shared fields the
+ * side's sync merges, minus `derived`, `homonym` and the account's fields. It
+ * replaced an order ↔ invoice comparer built on the invoice sync badge's
+ * `invoiceItemDifferences` + `explainInvoiceItemDifferences` and a separate
+ * purchase ↔ bill one. The badge's explanation arms cover only `derived`
+ * fields, which this never reports, so it still cannot report a difference the
+ * badge explains away. Census 2026-11-15: no stored document's field entries
+ * moved, in prod, dev or `test`.
  *
  * ## A substitution is ONE difference, never a pair of presence entries
  *
@@ -151,7 +155,6 @@ import type {
   Purchase,
   PurchaseBill,
   PurchaseCredit,
-  PurchaseDocDestination,
   PurchaseDocumentItem,
   PurchaseItem,
   Side,
@@ -175,10 +178,8 @@ import {
 } from "../schemas/mod.ts";
 import {
   canonicalizePayload,
-  explainInvoiceItemDifferences,
   extensionSectionTargets,
   type InvoiceItem,
-  invoiceItemDifferences,
   invoiceAuthoredSubtrees,
   isInExtensionSection,
   isInInvoiceAuthoredSubtree,
@@ -192,9 +193,9 @@ import {
   purchaseBillSharedDocFields,
   purchaseBillSharedLineFields,
 } from "./purchase-documents.ts";
-import { priceFromFormula } from "./price-formulas.ts";
+import { formulaMoneyMismatch } from "../schemas/_line-money.ts";
 import type { PurchaseLineCustody } from "./bookings-inbound.ts";
-import { type PricingFormulas, statedChargeWindows } from "./price-document.ts";
+import type { PricingFormulas } from "./price-document.ts";
 import {
   collectSubstitutionAnchors,
   isAtOrBelow,
@@ -586,47 +587,20 @@ export interface DocumentDiffSources {
   purchaseCustody?: ReadonlyMap<string, ReadonlyMap<string, PurchaseLineCustody>>;
 }
 
-/** What the order ↔ invoice explanation arms need, per order. */
+/**
+ * What the diff needs beyond the documents: every formula their lines name and
+ * the holiday list, what an extension's counts are metered with (ruling 8: a
+ * window stores no count).
+ *
+ * ⚠️ It carried `taxNameByUid` and `isOrderFrozen` until the one field comparer
+ * (one-document-model F10): they fed the invoice sync badge's explanation arms,
+ * which could never change the diff's output (every field they cover is
+ * `derived`) and are no longer called from it.
+ */
 export interface DocumentDiffContext {
-  /** Tax uid → name, as {@link explainInvoiceItemDifferences} requires. */
-  taxNameByUid: ReadonlyMap<string, string>;
-  /**
-   * Whether an order is frozen (no longer repriceable). A caller predicate
-   * because the status set lives with the writer that enforces it
-   * (`api-cloudrun/src/lib/orderTaxPricing.ts` `REPRICEABLE_ORDER_STATUSES`).
-   */
-  isOrderFrozen: (order: Order) => boolean;
-  /**
-   * Every formula the documents' lines name, and the holiday list — what an
-   * extension's counts are metered with (ruling 8: a window stores no count).
-   */
   formulas: PricingFormulas;
   holidays: readonly string[];
 }
-
-/**
- * The DERIVED line fields, read off the shared-field classification rather than
- * listed here — the same source {@link mergeSharedFields} skips.
- *
- * ⭐ **This replaced two hand-maintained lists, and that is the point.** There
- * used to be a `COMPARED_LINE_FIELDS` set naming what produced a `differs`
- * entry and a `SPLIT_DERIVED_FIELDS` set naming what a quantity/day split
- * excused. A field absent from the first was invisible to every diff view with
- * nothing saying so, and the two lists could disagree with the SYNC about what
- * counts as an override — which is precisely how a line could read "overridden"
- * in one place and "synced" in another.
- *
- * Now the diff walks the same key intersection the sync merges, so **a new
- * shared field is compared by construction** and the two answers cannot drift.
- */
-const derivedLineFields = (): ReadonlySet<string> => {
-  if (derivedLineFieldsMemo) return derivedLineFieldsMemo;
-  derivedLineFieldsMemo = new Set(
-    orderInvoiceSharedFields().line.filter((f) => f.kind === "derived").map((f) => f.path),
-  );
-  return derivedLineFieldsMemo;
-};
-let derivedLineFieldsMemo: ReadonlySet<string> | undefined;
 
 /** The pair keys a comparison is addressed BY, never part of what it compares. */
 const PAIR_IDENTITY_FIELDS: ReadonlySet<string> = new Set(["uid", "uid_order", "uid_purchase"]);
@@ -684,16 +658,30 @@ function invoiceScopes(invoice: Invoice): string[] {
     .map((it) => it.uid);
 }
 
-type DiffSide = { kind: DocumentKind; doc: Order | Fulfillment | Invoice | Purchase | PurchaseBill; lines: ScopedLines };
+/** The role a document plays in a comparison (ruling 29's roles; credits are never compared here). */
+type DiffRole = "initiator" | "custody" | "billing";
+
+/**
+ * One document in a comparison: its KIND (for a {@link DocumentRef} only), and
+ * its role and side, which are all the comparison reads (ruling 33).
+ */
+type DiffSide = {
+  kind: DocumentKind;
+  role: DiffRole;
+  side: Side;
+  doc: Order | Fulfillment | Invoice | Purchase | PurchaseBill;
+  lines: ScopedLines;
+};
 
 /** What a document IS, whichever side it sits on: the comparison reads this, never the collection. */
-const isBilling = (side: DiffSide): boolean => side.kind === "invoice" || side.kind === "bill";
-const isInitiator = (side: DiffSide): boolean => side.kind === "order" || side.kind === "purchase";
+const isBilling = (side: DiffSide): boolean => side.role === "billing";
+const isInitiator = (side: DiffSide): boolean => side.role === "initiator";
+const isCustody = (side: DiffSide): boolean => side.role === "custody";
 
-/** Only fulfillable lines take part in a comparison that involves a fulfillment. */
+/** Only fulfillable lines take part in a comparison that involves a custody document. */
 function comparable(side: DiffSide, other: DiffSide, item: LineItem): boolean {
-  const involvesFulfillment = side.kind === "fulfillment" || other.kind === "fulfillment";
-  return !involvesFulfillment || isFulfillableItemType(item.type);
+  const involvesCustody = isCustody(side) || isCustody(other);
+  return !involvesCustody || isFulfillableItemType(item.type);
 }
 
 /** The compared fields two same-path lines disagree on. `here` belongs to `viewed`. */
@@ -702,108 +690,118 @@ function lineFields(
   source: DiffSide,
   here: LineItem,
   there: LineItem,
-  orderUid: string,
-  context: DocumentDiffContext,
+  initiatorUid: string,
   expectedFulfillmentQuantity?: number,
 ): DocumentDiffField[] {
-  if (viewed.kind === "purchase" || viewed.kind === "bill") return payableLineFields(viewed, source, here, there);
-  const involvesFulfillment = viewed.kind === "fulfillment" || source.kind === "fulfillment";
-  // Fulfillment ↔ invoice quantity is the `quantity` entry's, over every invoice.
-  if (involvesFulfillment && (viewed.kind === "invoice" || source.kind === "invoice")) return [];
-  if (involvesFulfillment) {
-    // D2: a fulfillment row is the order's quantity, less what substitutes took
-    // from it, plus what it stands in for (manager#414).
-    const fulfillmentQuantity = (viewed.kind === "fulfillment" ? here : there).quantity ?? 0;
-    const orderQuantity = (viewed.kind === "order" ? here : there).quantity ?? 0;
-    const expected = expectedFulfillmentQuantity ?? orderQuantity;
-    const fields: DocumentDiffField[] = fulfillmentQuantity === expected
-      ? []
-      : [{ field: "quantity", here: here.quantity ?? null, there: there.quantity ?? null }];
-    // An exchange unit's `exchanged_for` is shared whole with the fulfillment
-    // (`shared: "value"`), so a picker can re-aim it (manager#537).
-    if (exchangedForDiffers(here, there)) {
-      fields.push({ field: "exchanged_for", here: exchangedForOfLine(here), there: exchangedForOfLine(there) });
-    }
-    return fields;
+  const involvesCustody = isCustody(viewed) || isCustody(source);
+  // Custody ↔ billing quantity is the `quantity` entry's, over every billing document.
+  if (involvesCustody && (isBilling(viewed) || isBilling(source))) return [];
+  if (!involvesCustody) {
+    // Initiator ↔ billing: one comparer, computed billing-first, oriented by the view.
+    const viewingBilling = isBilling(viewed);
+    const billing = viewingBilling ? viewed : source;
+    const fields = billingLineFields(
+      billing.side,
+      viewingBilling ? there : here,
+      viewingBilling ? here : there,
+      billing.doc as DiffBilling,
+      initiatorUid,
+    );
+    return viewingBilling ? fields : fields.map((f) => ({ field: f.field, here: f.there, there: f.here }));
   }
-  // order ↔ invoice: the badge's comparator and explanation arms, then the owner's field filter.
-  const order = (viewed.kind === "order" ? viewed.doc : source.doc) as Order;
-  const invoice = (viewed.kind === "invoice" ? viewed.doc : source.doc) as Invoice;
-  const orderLine = viewed.kind === "order" ? here : there;
-  const invoiceLine = (viewed.kind === "invoice" ? here : there) as unknown as InvoiceItem;
-  const expected = projectOrderItemToInvoiceItem(orderLine, orderUid) as unknown as InvoiceItem;
-  const { unexplained } = explainInvoiceItemDifferences(
-    expected,
-    invoiceLine,
-    invoiceItemDifferences(expected, invoiceLine),
-    {
-      taxNameByUid: context.taxNameByUid,
-      orderFrozen: context.isOrderFrozen(order),
-      // ⚠️ The `invoice_windows` arm cannot change this function's OUTPUT — the
-      // counts and every money field it covers are `derived`, and the filters
-      // below drop those unconditionally (see the G2 comment). It is passed
-      // anyway, and truthfully: an empty context reads as "this invoice states
-      // no windows", which would rot the day a non-derived field joined the arm.
-      invoiceChargeWindows: statedChargeWindows(invoice.destinations ?? []),
-      formulas: context.formulas,
-      holidays: context.holidays,
-    },
-  );
-  const derived = derivedLineFields();
-  return unexplained
-    // How many units and days are billed is the `quantity` entry's, over the sum.
-    .filter((f) => f !== "quantity" && f !== "price.counts")
-    // The comparator names a price difference at the KEY (`price.discount`);
-    // the classification is per LEAF (`price.discount.rate` propagated,
-    // `.amount_cents` derived). Judge it at the classification's grain.
-    .flatMap((f) => classifiedGrain(here, there, f))
-    // 🔴 **A DERIVED field never produces a row on its own — this is G2, and the
-    // suppression is UNCONDITIONAL.** An invoice is repriced in its OWN context —
-    // its jurisdiction, its tax date — so its derived money can differ from the
-    // order's with no operator edit and no split at all. The sync never compares
-    // a derived field; the diff must not either, or the two disagree about what
-    // "overridden" means.
-    //
-    // A difference an operator caused still reports, through its CAUSE: a
-    // declared input (`rates`, `price_formula`, `base_percent`), a discount's `rate`/`type`,
-    // or a tax's causes (`uid_tax_class`, `uid_tax_class_override`, the doc's
-    // `tax_exempt`/`uid_store`, the pair's `jurisdiction`). `price.taxes` itself
-    // is derived WHOLE, rate included: a document's rate is the one whose window
-    // holds the document's own as-of date (the `cfs-tax` skill), so an invoice's
-    // rate can legitimately differ from its order's.
-    .filter((f) => !derived.has(f))
-    .map((field) => ({ field, here: readField(here, field), there: readField(there, field) }));
+  // D2: a custody row is the initiator's quantity, less what substitutes took
+  // from it, plus what it stands in for (manager#414).
+  const fulfillmentQuantity = (isCustody(viewed) ? here : there).quantity ?? 0;
+  const orderQuantity = (isInitiator(viewed) ? here : there).quantity ?? 0;
+  const expected = expectedFulfillmentQuantity ?? orderQuantity;
+  const fields: DocumentDiffField[] = fulfillmentQuantity === expected
+    ? []
+    : [{ field: "quantity", here: here.quantity ?? null, there: there.quantity ?? null }];
+  // An exchange unit's `exchanged_for` is shared whole with the fulfillment
+  // (`shared: "value"`), so a picker can re-aim it (manager#537).
+  if (exchangedForDiffers(here, there)) {
+    fields.push({ field: "exchanged_for", here: exchangedForOfLine(here), there: exchangedForOfLine(there) });
+  }
+  return fields;
 }
 
 /**
- * The shared LEAVES a key-level difference resolves to, read off the
- * shared-field classification.
+ * The fields the per-line ACCOUNT reports (ruling 92): how many units a row
+ * bills, and the money of a part of a stated line. A billing row routinely
+ * carries a different count or a part's money from its initiator line, and the
+ * one `quantity` entry, summed over every billing document, is where that is
+ * judged. Side-blind: a path the side's classification lacks never occurs (an
+ * order line has neither money key).
  *
- * `invoiceItemDifferences` reports `price.discount` whole. With this the diff
- * sees `price.discount.rate` and `price.discount.amount_cents` separately, so
- * a split bill's smaller discount AMOUNT (derived) is not an override while a
- * changed RATE is. Before this, the comparison ran at the key and the derived
- * set held leaves, so the key was never "derived" and every split-billed
- * discounted line read as overridden (core#118).
- *
- * A value present on one side only (a discount added or removed) stays the
- * whole key: that is one operator decision, not a list of leaf changes.
+ * ⚠️ `amount_cents` is `propagated` in the payable `flat_money` group, not
+ * `derived` (`schemas/purchase.ts`): the sync merges the group as one unit and
+ * a linked line's amount is Xero's. So naming it here is load-bearing. It is
+ * also why one field list per side reproduces the sync's per-LINE list, which
+ * leaves `amount_cents` out on a time line: the comparer skips it on every line.
  */
-function classifiedGrain(here: LineItem, there: LineItem, field: string): string[] {
-  const leaves = classifiedLinePaths().filter((p) => p.startsWith(`${field}.`));
-  if (leaves.length === 0) return [field];
-  if (readField(here, field) === null || readField(there, field) === null) return [field];
-  return leaves.filter((leaf) =>
-    JSON.stringify(canonicalizePayload(readField(here, leaf))) !== JSON.stringify(canonicalizePayload(readField(there, leaf)))
-  );
-}
+const ACCOUNT_LINE_FIELDS: ReadonlySet<string> = new Set(["quantity", "amount_cents", "price.stated_cents"]);
 
-const classifiedLinePaths = (): readonly string[] => {
-  if (classifiedLinePathsMemo) return classifiedLinePathsMemo;
-  classifiedLinePathsMemo = orderInvoiceSharedFields().line.map((f) => f.path);
-  return classifiedLinePathsMemo;
-};
-let classifiedLinePathsMemo: readonly string[] | undefined;
+/**
+ * **The one comparer between an initiator line and the billing row that bills
+ * it, on both sides** (ruling 33). `here` is the billing row's value, `there`
+ * the initiator line's, projected into the billing row's shape by the side's
+ * `projectLine`.
+ *
+ * The rule, written once:
+ * - walk the shared line fields the side's SYNC merges, so a new shared field is
+ *   compared by construction and the diff and the sync agree about what
+ *   "overridden" means;
+ * - skip `derived` (G2: a billing document reprices in its own context, so its
+ *   derived money differs with no operator edit; a real change reports through
+ *   its CAUSE — a rate, a discount's `rate`/`type`, a tax class), `homonym`
+ *   (the same key meaning different things) and {@link ACCOUNT_LINE_FIELDS};
+ * - compare at the leaf, or at its nearest ancestor that is not an object on
+ *   both sides: a discount added or removed is one operator decision, not a
+ *   list of leaf changes (core#118);
+ * - compare an `atom` over the keys both schemas declare (`SharedField.keys`),
+ *   as {@link compareDocFields} does;
+ * - compare canonically, absent ≡ null, and report `null`, never `undefined`;
+ * - append the side's own-money check (ruling 33's second domain fact).
+ *
+ * It ignores `shared_group` deliberately, a named difference from the merge:
+ * the payable `flat_money` group's `out_of_service` IS compared (the projection
+ * fits it to the row's quantity, so only a row naming different records
+ * reports), while `quantity` and the money are the account's.
+ */
+function billingLineFields(
+  side: Side,
+  initiatorLine: LineItem,
+  billingLine: LineItem,
+  billingDoc: DiffBilling,
+  initiatorUid: string,
+): DocumentDiffField[] {
+  const data = DIFF_SIDES[side].line;
+  const there = data.projectLine(initiatorLine, billingLine, initiatorUid);
+  const isObj = (v: unknown) => v !== null && typeof v === "object" && !Array.isArray(v);
+  const out: DocumentDiffField[] = [];
+  const seen = new Set<string>();
+  for (const f of data.sharedLineFields()) {
+    if (f.kind === "derived" || f.kind === "homonym" || ACCOUNT_LINE_FIELDS.has(f.path)) continue;
+    const segs = f.path.split(".");
+    let unit = f.path;
+    for (let i = 1; i < segs.length; i++) {
+      const parent = segs.slice(0, i).join(".");
+      if (!isObj(readField(billingLine, parent)) || !isObj(readField(there, parent))) {
+        unit = parent;
+        break;
+      }
+    }
+    if (seen.has(unit)) continue;
+    seen.add(unit);
+    const shape = unit === f.path ? f : undefined;
+    const h = pickSharedKeys(readField(billingLine, unit) ?? null, shape);
+    const t = pickSharedKeys(readField(there, unit) ?? null, shape);
+    if (JSON.stringify(canonicalizePayload(h)) !== JSON.stringify(canonicalizePayload(t))) {
+      out.push({ field: unit, here: h, there: t });
+    }
+  }
+  return [...out, ...data.ownMoney(billingLine, billingDoc)];
+}
 
 /** A line's `exchanged_for` entries, with absent read as none. */
 function exchangedForOfLine(item: LineItem): ExchangeEntry[] {
@@ -838,8 +836,9 @@ function push<K>(map: Map<K, DocumentDiffEntry[]>, k: K, entry: DocumentDiffEntr
 }
 
 /**
- * The document-level fields to compare between two document kinds, read off the
- * shared-field classification rather than listed here (G13).
+ * The document-level fields to compare between two documents of one side, by
+ * their ROLES, read off the shared-field classification rather than listed here
+ * (G13).
  *
  * `null` means the pair has no direct document-level relationship. An invoice
  * and a fulfillment are both projections OF an order and have no link to each
@@ -847,13 +846,11 @@ function push<K>(map: Map<K, DocumentDiffEntry[]>, k: K, entry: DocumentDiffEntr
  * order and once against each other, and there is no rule saying which of the
  * two should have followed the other.
  */
-function docFieldsFor(a: DocumentKind, b: DocumentKind): readonly SharedField[] | null {
-  const pair = new Set([a, b]);
-  if (pair.size !== 2) return null;
-  if (pair.has("order") && pair.has("invoice")) return orderInvoiceSharedFields().doc;
-  if (pair.has("order") && pair.has("fulfillment")) return orderFulfillmentSharedFields().doc;
-  if (pair.has("purchase") && pair.has("bill")) return purchaseBillSharedDocFields();
-  return null;
+function docFieldsFor(a: DiffSide, b: DiffSide): readonly SharedField[] | null {
+  const roles = new Set([a.role, b.role]);
+  if (roles.size !== 2 || !roles.has("initiator")) return null;
+  const fields = DIFF_SIDES[a.side].docFields;
+  return roles.has("billing") ? fields.billing() : fields.custody();
 }
 
 /**
@@ -878,7 +875,7 @@ function docFieldsFor(a: DocumentKind, b: DocumentKind): readonly SharedField[] 
  * into the fulfillment's shape before merging; this is the same projection.
  */
 function compareDocFields(out: DocumentDiffMap, viewed: DiffSide, source: DiffSide): void {
-  const shared = docFieldsFor(viewed.kind, source.kind);
+  const shared = docFieldsFor(viewed, source);
   if (shared === null) return;
   const sourceRef = refOf(source.kind, source.doc);
   // One entry per source, however many scopes reach the same pair.
@@ -896,8 +893,8 @@ function compareDocFields(out: DocumentDiffMap, viewed: DiffSide, source: DiffSi
 }
 
 /** An `atom` restricted to the keys both documents declare; any other value unchanged. */
-function pickSharedKeys(value: unknown, field: SharedField): unknown {
-  if (field.kind !== "atom" || field.keys === undefined) return value;
+function pickSharedKeys(value: unknown, field: SharedField | undefined): unknown {
+  if (field === undefined || field.kind !== "atom" || field.keys === undefined) return value;
   if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
   // The document's own key order, so the reported value reads as stored.
   const shared = new Set(field.keys);
@@ -916,7 +913,6 @@ function compareScope(
   source: DiffSide,
   orderUid: string,
   billed: (rel: string) => boolean,
-  context: DocumentDiffContext,
   notInvoiced: (rel: string, viewedKey: string) => void,
   invoiceLegs: ReadonlySet<string> = new Set(),
 ): void {
@@ -955,8 +951,9 @@ function compareScope(
   const pairsOf = (side: DiffSide): Map<string, DocDestinationType> => {
     const m = new Map<string, DocDestinationType>();
     for (const p of side.doc.destinations as readonly (DocDestinationType | InvoiceDocDestinationType)[]) {
-      if (side.kind === "invoice" && (p as InvoiceDocDestinationType).uid_order !== orderUid) continue;
-      if (side.kind === "bill" && (p as unknown as PurchaseDocDestination).uid_purchase !== orderUid) continue;
+      // A billing document's pairs name the initiator they bill (the side's scope key).
+      const scopeKey = BILLING_FOLD[side.side].pairScopeKey;
+      if (isBilling(side) && (p as unknown as Record<string, unknown>)[scopeKey] !== orderUid) continue;
       m.set(p.uid, p);
     }
     return m;
@@ -1027,7 +1024,7 @@ function compareScope(
     return substitutionCredit((orderSide.doc as Order).items as unknown as LineItem[], direct);
   })();
   const expectedFulfillmentQuantity = (rel: string, downstreamRow: LineItem, orderRow: LineItem): number | undefined => {
-    if (downstream?.kind !== "fulfillment" || liveAnchors.length === 0) return undefined;
+    if (downstream === undefined || !isCustody(downstream) || liveAnchors.length === 0) return undefined;
     const path = rel.split("/");
     const liveX = new Set(liveAnchors.filter((a) => isAtOrBelow(path, a.path)).map((a) => key(a.substitutedFor)));
     return (orderRow.quantity ?? 0) - (credit.get(rel) ?? 0) + standInUnits(downstreamRow as MaybeSubstitution, liveX);
@@ -1041,7 +1038,7 @@ function compareScope(
       const claimed = viewed.lines.claims.get(rel);
       const claimedLine = claimed === undefined ? undefined : source.lines.byKey.get(claimed);
       if (claimed !== undefined && claimedLine !== undefined) {
-        moved(rel, claimed, viewedKey(rel), lineFields(viewed, source, here, placedAt(claimedLine, rel), orderUid, context));
+        moved(rel, claimed, viewedKey(rel), lineFields(viewed, source, here, placedAt(claimedLine, rel), orderUid));
         continue;
       }
       // The viewed document carries a substitute Y where the source carries X.
@@ -1073,7 +1070,7 @@ function compareScope(
     const expected = downstream === undefined
       ? undefined
       : expectedFulfillmentQuantity(rel, downstream === viewed ? here : there, downstream === viewed ? there : here);
-    const fields = lineFields(viewed, source, here, there, orderUid, context, expected);
+    const fields = lineFields(viewed, source, here, there, orderUid, expected);
     if (fields.length > 0) push(out.lines, viewedKey(rel), { source: sourceRef, kind: "differs", fields });
   }
   for (const [rel, there] of source.lines.byKey) {
@@ -1082,7 +1079,7 @@ function compareScope(
     const claimed = source.lines.claims.get(rel);
     const claimedLine = claimed === undefined ? undefined : viewed.lines.byKey.get(claimed);
     if (claimed !== undefined && claimedLine !== undefined) {
-      moved(claimed, claimed, viewedKey(rel), lineFields(viewed, source, placedAt(claimedLine, rel), there, orderUid, context));
+      moved(claimed, claimed, viewedKey(rel), lineFields(viewed, source, placedAt(claimedLine, rel), there, orderUid));
       continue;
     }
     // A viewed invoice row elsewhere bills this line: its `moved` entry is the answer.
@@ -1110,7 +1107,7 @@ function compareScope(
     const h = here as unknown as Record<string, unknown>;
     const t = there as unknown as Record<string, unknown>;
     const fields: DocumentDiffField[] = [];
-    const involvesFulfillment = viewed.kind === "fulfillment" || source.kind === "fulfillment";
+    const involvesFulfillment = isCustody(viewed) || isCustody(source);
     for (const field of [...new Set([...Object.keys(h), ...Object.keys(t)])].sort()) {
       if (PAIR_IDENTITY_FIELDS.has(field)) continue;
       if (involvesFulfillment && FULFILLMENT_UNOWNED_PAIR_FIELDS.has(field)) continue;
@@ -1156,6 +1153,34 @@ interface DiffSideData {
   custodyInput(initiator: DiffInitiator, custodyDoc: Fulfillment | undefined, sources: DocumentDiffSources): ReadonlyMap<string, CustodyRow> | null;
   /** Lost/damaged records, pre-placed; empty when not passed. */
   outOfServiceInput(initiator: DiffInitiator, custodyDoc: Fulfillment | undefined, sources: DocumentDiffSources): OutOfServiceInput[];
+  /** What {@link billingLineFields} reads per side: the data, never the rule. */
+  line: {
+    /** An initiator line in its billing row's shape, over the shared keys. */
+    projectLine(initiatorLine: LineItem, billingLine: LineItem, initiatorUid: string): LineItem;
+    /** The shared line fields the side's initiator → billing SYNC merges. */
+    sharedLineFields(): readonly SharedField[];
+    /** A billing row's check of its own money (ruling 33's second domain fact); `[]` where the side has none. */
+    ownMoney(billingLine: LineItem, billingDoc: DiffBilling): DocumentDiffField[];
+  };
+  /** The document-level fields the initiator shares with each derived role; `null` for none. */
+  docFields: { billing(): readonly SharedField[]; custody(): readonly SharedField[] | null };
+}
+
+/**
+ * A LINKED bill's time line against its own snapshot: the supplier's money must
+ * be what its own `rates × counts × quantity` reproduce, through the one
+ * single-document check (`formulaMoneyMismatch`). Only a linked document's
+ * money is not CFS's to derive (ruling 33's second domain fact); a pushed or
+ * flat line's money is the account's question.
+ */
+function linkedTimeLineMoney(billingLine: LineItem, billingDoc: DiffBilling): DocumentDiffField[] {
+  const line = billingLine as unknown as PurchaseDocumentItem;
+  if ((billingDoc as PurchaseBill).origin !== "linked" || line.price?.price_formula.basis !== "time") return [];
+  const expected = formulaMoneyMismatch(line.price, line.quantity, line.amount_cents);
+  if (expected === null) return [];
+  // A rate key the counts name and the rates lack: the snapshot itself is broken.
+  if (Number.isNaN(expected)) return [{ field: "price.counts", here: line.price.counts, there: line.price.rates }];
+  return [{ field: "amount_cents", here: line.amount_cents, there: expected }];
 }
 
 const DIFF_SIDES: Readonly<Record<Side, DiffSideData>> = {
@@ -1169,6 +1194,13 @@ const DIFF_SIDES: Readonly<Record<Side, DiffSideData>> = {
     custodyInput: (_initiator, custodyDoc) => custodyDoc === undefined ? null : fulfillmentCustody(custodyDoc),
     outOfServiceInput: (initiator, custodyDoc, s) =>
       s.outOfService === undefined ? [] : orderOutOfServiceInputs(initiator as Order, custodyDoc, s.outOfService, s.invoices ?? []),
+    line: {
+      projectLine: (initiatorLine, _billingLine, initiatorUid) =>
+        projectOrderItemToInvoiceItem(initiatorLine, initiatorUid) as unknown as LineItem,
+      sharedLineFields: () => orderInvoiceSharedFields().line,
+      ownMoney: () => [],
+    },
+    docFields: { billing: () => orderInvoiceSharedFields().doc, custody: () => orderFulfillmentSharedFields().doc },
   },
   payable: {
     kinds: { initiator: "purchase", custody: "fulfillment", billing: "bill", credit: "purchase_credit" },
@@ -1181,6 +1213,17 @@ const DIFF_SIDES: Readonly<Record<Side, DiffSideData>> = {
     custodyInput: (initiator, _custodyDoc, s) => purchaseCustody(initiator as Purchase, s.purchaseCustody?.get(initiator.uid)),
     // Payable lost/damaged records are not compared (none is passed).
     outOfServiceInput: () => [],
+    line: {
+      // Fitted to the bill row's quantity, unlike the sync's whole-line
+      // projection: the diff ignores the `flat_money` group, so a partial
+      // replacement bill would otherwise report `out_of_service` on every row.
+      projectLine: (initiatorLine, billingLine) =>
+        projectPurchaseLineForBill(initiatorLine as unknown as PurchaseItem, billingLine.quantity ?? 0) as unknown as LineItem,
+      sharedLineFields: purchaseBillSharedLineFields,
+      ownMoney: linkedTimeLineMoney,
+    },
+    // No stored receipt is compared yet (custodyDocs above).
+    docFields: { billing: purchaseBillSharedDocFields, custody: () => null },
   },
 };
 
@@ -1334,7 +1377,7 @@ function creditRefs(side: Side, scope: InitiatorScope, uids: readonly string[]):
  *
  * @param sources - The documents the caller holds, the viewed one included
  * @param viewing - Which of them is being viewed
- * @param context - Tax names and the order freeze predicate, for the explanation arms
+ * @param context - The pricing formulas and holidays an extension's counts are metered with
  * @returns Entries keyed by the viewed document's own path keys; empty when the
  *   viewed document is not among `sources`
  */
@@ -1412,9 +1455,9 @@ export function computeDocumentDiffs(
     }
   };
 
-  const billingSide = (doc: DiffBilling, scope: InitiatorScope): DiffSide => ({ kind: kinds.billing, doc, lines: scopeBilling(side, doc, scope.initiator) });
-  const initiatorSide = (scope: InitiatorScope): DiffSide => ({ kind: kinds.initiator, doc: scope.initiator, lines: scope.scoped });
-  const custodySide = (doc: Fulfillment): DiffSide => ({ kind: kinds.custody, doc, lines: scopeFulfillment(doc) });
+  const billingSide = (doc: DiffBilling, scope: InitiatorScope): DiffSide => ({ kind: kinds.billing, role: "billing", side, doc, lines: scopeBilling(side, doc, scope.initiator) });
+  const initiatorSide = (scope: InitiatorScope): DiffSide => ({ kind: kinds.initiator, role: "initiator", side, doc: scope.initiator, lines: scope.scoped });
+  const custodySide = (doc: Fulfillment): DiffSide => ({ kind: kinds.custody, role: "custody", side, doc, lines: scopeFulfillment(doc) });
   const named = (scope: InitiatorScope) => (rel: string) => scope.fold.byPath.has(rel);
 
   /** An initiator- or custody-shaped viewed side against every billing document on its initiator. */
@@ -1429,7 +1472,7 @@ export function computeDocumentDiffs(
         out.unaligned.push({ scope: scope.initiator.uid, source: refOf(kinds.billing, doc) });
         continue;
       }
-      compareScope(out, viewed, billingSide(doc, scope), scope.initiator.uid, named(scope), context, () => {}, authoredLegs(side, doc, scope.initiator));
+      compareScope(out, viewed, billingSide(doc, scope), scope.initiator.uid, named(scope), () => {}, authoredLegs(side, doc, scope.initiator));
     }
     for (const [rel, item] of viewed.lines.byKey) {
       // Against billing documents a custody document answers for its fulfillable rows only.
@@ -1447,7 +1490,7 @@ export function computeDocumentDiffs(
     if (scope === undefined) return out;
     const viewed = initiatorSide(scope);
     if (scope.custodyDoc !== undefined) {
-      compareScope(out, viewed, custodySide(scope.custodyDoc), viewing.uid, named(scope), context, () => {});
+      compareScope(out, viewed, custodySide(scope.custodyDoc), viewing.uid, named(scope), () => {});
     }
     againstBilling(viewed, scope);
     return out;
@@ -1459,7 +1502,7 @@ export function computeDocumentDiffs(
     const viewed = custodySide(custodyDoc);
     const scope = scopeOf(custodyDoc.uid);
     if (scope === undefined) return out;
-    compareScope(out, viewed, initiatorSide(scope), scope.initiator.uid, named(scope), context, () => {});
+    compareScope(out, viewed, initiatorSide(scope), scope.initiator.uid, named(scope), () => {});
     againstBilling(viewed, scope);
     return out;
   }
@@ -1496,7 +1539,7 @@ export function computeDocumentDiffs(
       if (entry !== null) fileEntry(k, entry);
     };
     const legs = authoredLegs(side, doc, scope.initiator);
-    compareScope(out, viewed, initiatorSide(scope), uid, named(scope), context, notBilledHere, legs);
+    compareScope(out, viewed, initiatorSide(scope), uid, named(scope), notBilledHere, legs);
     // Each row this document carries reports the sum for the initiator line it bills.
     for (const [rel, at] of scope.fold.byPath) {
       for (const row of at.rows) {
@@ -1506,89 +1549,12 @@ export function computeDocumentDiffs(
       }
     }
     if (scope.custodyDoc !== undefined) {
-      compareScope(out, viewed, custodySide(scope.custodyDoc), uid, named(scope), context, notBilledHere, legs);
+      compareScope(out, viewed, custodySide(scope.custodyDoc), uid, named(scope), notBilledHere, legs);
     }
     fileOutOfService(scope, viewedKey);
   }
   return out;
 }
-
-// ── The payable side ─────────────────────────────────────────────
-
-function readLeaf(root: unknown, path: string): unknown {
-  let v: unknown = root;
-  for (const s of path.split(".")) {
-    if (v === null || typeof v !== "object" || Array.isArray(v)) return undefined;
-    v = (v as Record<string, unknown>)[s];
-  }
-  return v;
-}
-
-/**
- * The shared fields a bill line and its purchase line disagree on, `here` the
- * bill line's. What the sync merges, read off the two schemas and projected to
- * the bill's shape. A null parent (no discount on one side) compares the parent
- * whole, as the merge does.
- */
-function billLineFields(line: PurchaseDocumentItem, item: PurchaseItem): DocumentDiffField[] {
-  const there = projectPurchaseLineForBill(item, line.quantity);
-  const out: DocumentDiffField[] = [];
-  const seen = new Set<string>();
-  const isObj = (v: unknown) => v !== null && typeof v === "object" && !Array.isArray(v);
-  for (const f of purchaseBillSharedLineFields()) {
-    if (f.kind === "derived" || f.kind === "homonym") continue;
-    // `quantity` and `amount_cents` (in the `flat_money` group) are what the
-    // `quantity` entry states, summed over every bill; a per-bill field entry
-    // would report every partial bill as a difference. The group's third
-    // member, a replacement line's `out_of_service` (W4R), IS compared: `there`
-    // is fitted to this bill's quantity, so only a bill naming different
-    // records from its purchase line reports.
-    // `price.stated_cents`, the group's money input, is a part's own slice (D7)
-    // and so differs on every partial bill for the same reason.
-    if (f.path === "quantity" || f.path === "amount_cents" || f.path === "price.stated_cents") continue;
-    const segs = f.path.split(".");
-    let unit = f.path;
-    for (let i = 1; i < segs.length; i++) {
-      const parent = segs.slice(0, i).join(".");
-      if (!isObj(readLeaf(line, parent)) || !isObj(readLeaf(there, parent))) {
-        unit = parent;
-        break;
-      }
-    }
-    if (seen.has(unit)) continue;
-    seen.add(unit);
-    const h = readLeaf(line, unit);
-    const t = readLeaf(there, unit);
-    if (JSON.stringify(canonicalizePayload(h)) !== JSON.stringify(canonicalizePayload(t))) {
-      out.push({ field: unit, here: h, there: t });
-    }
-  }
-  return out;
-}
-
-/** A linked time line's Xero amount against its own `rates × counts`: the one place a line's money can disagree with itself. */
-function linkedMoneyField(line: PurchaseDocumentItem, origin: PurchaseBill["origin"]): DocumentDiffField[] {
-  if (origin !== "linked" || line.price?.price_formula.basis !== "time") return [];
-  let expected: number;
-  try {
-    expected = priceFromFormula(line.price.rates, line.price.counts, 1, line.price.discount).subtotal_discounted_cents;
-  } catch {
-    return [{ field: "price.counts", here: line.price.counts, there: line.price.rates }];
-  }
-  return expected === line.amount_cents ? [] : [{ field: "amount_cents", here: line.amount_cents, there: expected }];
-}
-
-/** The `lineFields` arm for a bill against its purchase; `here` belongs to the viewed document. */
-function payableLineFields(viewed: DiffSide, source: DiffSide, here: LineItem, there: LineItem): DocumentDiffField[] {
-  const viewingBill = viewed.kind === "bill";
-  const line = (viewingBill ? here : there) as unknown as PurchaseDocumentItem;
-  const item = (viewingBill ? there : here) as unknown as PurchaseItem;
-  const origin = ((viewingBill ? viewed : source).doc as PurchaseBill).origin;
-  const fields = [...billLineFields(line, item), ...linkedMoneyField(line, origin)];
-  return viewingBill ? fields : fields.map((f) => ({ field: f.field, here: f.there, there: f.here }));
-}
-
-
 
 /** Every keyable credit, per invoice row, plus the notes that could not be keyed. */
 interface CreditKeys {

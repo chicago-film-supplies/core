@@ -950,7 +950,7 @@ const credit = (items: PurchaseDocumentItem[], status: PurchaseCredit["status"] 
   }) as unknown as PurchaseCredit;
 
 // The payable diff reads no receivable context; the shared engine still takes one.
-const DIFF_CTX = { taxNameByUid: new Map(), isOrderFrozen: () => false, formulas: {}, holidays: [] } as unknown as DocumentDiffContext;
+const DIFF_CTX = { formulas: {}, holidays: [] } as unknown as DocumentDiffContext;
 type DiffSources = { purchase: Purchase; bills: PurchaseBill[]; credits: PurchaseCredit[] };
 /** Each fixture line has received what it ordered: the diff's `fulfilled` reads row custody (C8). */
 const receivedInFull = (p: Purchase) =>
@@ -997,6 +997,29 @@ Deno.test("diff: OVER-billing a flat line is a `quantity` entry summed across bi
   assertEquals(poDiffs(credited).lines.size, 0);
   // …and a VOID credit does not.
   assertEquals(poDiffs({ ...sources, credits: [credit([back], "void")] }).lines.size, 1);
+});
+
+Deno.test("diff (F10): a LINKED time bill line checks its own money at its OWN quantity; a pushed one leaves money to the account", () => {
+  const purchase = { ...purchaseDoc([visionLine()]), destinations: [chargedPair()] } as Purchase;
+  const xero = "8a1b2c3d-0000-4000-8000-000000000002";
+  const row = (amount: number) => ({ ...timeBillLine(WEEK_2), amount_cents: amount });
+  const fieldsOn = (bill: PurchaseBill) =>
+    (computeDocumentDiffs(
+      { purchases: [purchase], bills: [bill], purchaseCredits: [] },
+      { kind: "bill", uid: bill.uid },
+      { formulas: FORMULAS, holidays: [] },
+    ).lines.get(row(0).path.join("/")) ?? [])
+      .filter((e) => e.kind === "differs")
+      .flatMap((e) => (e as { fields: unknown[] }).fields);
+  // 2 hotspots × 2 weeks prices at 18,000¢ (the pushed meter above). A copy
+  // priced at quantity 1 expected 9,000¢ and flagged this correct line.
+  assertEquals(fieldsOn(fortnightBill([row(18000)], { origin: "linked", xero_id: xero })), []);
+  assertEquals(
+    fieldsOn(fortnightBill([row(17500)], { origin: "linked", xero_id: xero })),
+    [{ field: "amount_cents", here: 17500, there: 18000 }],
+  );
+  // A pushed line's money is CFS's own derivation: never a field difference.
+  assertEquals(fieldsOn(fortnightBill([row(17500)])), []);
 });
 
 Deno.test("diff: a flat line billed at the wrong money is flagged even at the right count", () => {

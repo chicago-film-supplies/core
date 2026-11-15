@@ -28,7 +28,7 @@ const G = "0b6c3a51-6c1a-4f0e-9a51-6f1f2b9d0a02";
 const LIGHT = "prod-light";
 const TRIPOD = "prod-tripod";
 
-const CONTEXT: DocumentDiffContext = { taxNameByUid: new Map(), isOrderFrozen: () => false, formulas: FORMULAS, holidays: [] };
+const CONTEXT: DocumentDiffContext = { formulas: FORMULAS, holidays: [] };
 
 function line(uid: string, path: string[], quantity: number, baseCents: number, extra: Record<string, unknown> = {}): LineItem {
   return {
@@ -186,7 +186,7 @@ Deno.test("documentDiff: order ↔ invoice compares every shared field, and NO d
 
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {
     [`${D}/${G}/${TRIPOD}`]: [
-      'invoice#2241:differs(description=""→"moved in the catalog",name="prod-tripod"→"Renamed tripod")',
+      'invoice#2241:differs(name="prod-tripod"→"Renamed tripod",description=""→"moved in the catalog")',
     ],
     [`${D}/${LIGHT}`]: [
       'invoice#2241:differs(name="prod-light"→"Label-only change")',
@@ -194,12 +194,44 @@ Deno.test("documentDiff: order ↔ invoice compares every shared field, and NO d
   });
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-1" }, CONTEXT).lines), {
     [`${O}/${D}/${G}/${TRIPOD}`]: [
-      'order#1001:differs(description="moved in the catalog"→"",name="Renamed tripod"→"prod-tripod")',
+      'order#1001:differs(name="Renamed tripod"→"prod-tripod",description="moved in the catalog"→"")',
     ],
     [`${O}/${D}/${LIGHT}`]: [
       'order#1001:differs(name="Label-only change"→"prod-light")',
     ],
   });
+});
+
+Deno.test("documentDiff (F10): the one comparer compares exactly what the sync merges — no stray key, an atom over its shared keys", () => {
+  const fieldsAt = (inv: ReturnType<typeof invoice>, rel: string) =>
+    (computeDocumentDiffs({ orders: [order()], invoices: [inv] }, { kind: "invoice", uid: "inv-1" }, CONTEXT).lines.get(rel) ?? [])
+      .filter((e) => e.kind === "differs")
+      .flatMap((e) => (e as { fields: { field: string }[] }).fields.map((f) => f.field));
+  const at = `${O}/${D}/${LIGHT}`;
+
+  // A key no classification names is not a shared field: nothing reports it.
+  // The old order ↔ invoice comparer diffed key SETS and did.
+  const stray = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  patchLine(stray.items, at, (it) => {
+    (it as Record<string, unknown>).stray_key = "only on the invoice";
+  });
+  assertEquals(fieldsAt(stray, at), []);
+
+  // An atom (`price.price_formula`) is compared over the keys BOTH schemas
+  // declare, as a document-level atom is: an extra key is not a difference…
+  const extra = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  patchLine(extra.items, at, (it) => {
+    const price = it.price as Record<string, unknown>;
+    price.price_formula = { ...(price.price_formula as object), stray_key: true };
+  });
+  assertEquals(fieldsAt(extra, at), []);
+  // …and a shared key that moved is, reported whole.
+  const renamed = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  patchLine(renamed.items, at, (it) => {
+    const price = it.price as Record<string, unknown>;
+    price.price_formula = { ...(price.price_formula as object), name: "Some other formula" };
+  });
+  assertEquals(fieldsAt(renamed, at), ["price.price_formula"]);
 });
 
 Deno.test("documentDiff: derived money alone NEVER produces a row, split or no split — G2", () => {

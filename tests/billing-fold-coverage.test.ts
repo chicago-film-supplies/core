@@ -148,6 +148,37 @@ Deno.test("billingFoldCoverage — documentDiff names none of the account's inpu
   );
 });
 
+// ── 5. The diff compares no document KIND (F10) ───────────────────────
+
+/** A comparison of a document kind against a literal: `.kind === "invoice"`, either way round. */
+export const KIND_COMPARISON_RE =
+  /\bkind\s*[!=]==?\s*"(?:order|fulfillment|invoice|purchase|bill)"|"(?:order|fulfillment|invoice|purchase|bill)"\s*[!=]==?\s*[\w.]*\bkind\b/;
+
+/**
+ * The one named exception, until ruling 34 gives both credit documents one
+ * shape: `fileCredits` files AR credit notes and reads the viewed kind.
+ */
+const KIND_ALLOWED_IN = ["fileCredits"];
+
+Deno.test("billingFoldCoverage — documentDiff compares roles, never a document kind (F10)", async () => {
+  const dd = await readSrc("utils/documentDiff.ts");
+  const spans = KIND_ALLOWED_IN.map((name) => {
+    const span = functionSpan(dd, name);
+    assertEquals(span !== null, true, `\`${name}\` is gone from utils/documentDiff.ts: drop it from KIND_ALLOWED_IN.`);
+    return span!;
+  });
+  const hits = grepContent("src/utils/documentDiff.ts", dd, KIND_COMPARISON_RE);
+  const outside = hits.filter((h) => !spans.some((s) => h.line > s.start && h.line < s.end));
+  assertEquals(
+    show(outside),
+    "",
+    "utils/documentDiff.ts branches on a document KIND (ruling 33). A comparison reads the ROLE " +
+      "(`isBilling` / `isInitiator` / `isCustody`) and a per-side difference is an entry in `DIFF_SIDES`:\n",
+  );
+  // Each allowlisted function still holds a kind test, or its entry is stale.
+  for (const s of spans) assertEquals(hits.some((h) => h.line > s.start && h.line < s.end), true, "an allowlisted function no longer compares a kind: drop it");
+});
+
 // ── Non-vacuity: every scan reaches something and every regex bites ──
 
 Deno.test("billingFoldCoverage — the scans bite (non-vacuity)", async () => {
@@ -165,6 +196,11 @@ Deno.test("billingFoldCoverage — the scans bite (non-vacuity)", async () => {
   assertEquals(QUANTITY_LITERAL_RE.test('  kind: "quantity";'), false, "quantity RE matches the type member");
 
   assertEquals(DIFF_FORBIDDEN_RE.test('import { lineCustodyAt } from "./bookings-inbound.ts";'), true, "diff RE stopped matching");
+
+  assertEquals(KIND_COMPARISON_RE.test('if (viewed.kind === "purchase" || viewed.kind === "bill") return x;'), true, "kind RE missed the F10 branch");
+  assertEquals(KIND_COMPARISON_RE.test('const v = "invoice" !== source.kind;'), true, "kind RE missed a reversed compare");
+  assertEquals(KIND_COMPARISON_RE.test('.filter((it) => it.type === "order")'), false, "kind RE flags an ITEM type");
+  assertEquals(KIND_COMPARISON_RE.test('kinds: { initiator: "order", billing: "invoice" },'), false, "kind RE flags the DIFF_SIDES table");
 
   // The scans reach the files they claim to read.
   const qa = await readSrc("utils/quantityAccounting.ts");

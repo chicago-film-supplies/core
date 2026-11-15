@@ -289,7 +289,7 @@ Deno.test("🔴 diff: an authored LEG reports once as a pair, its rows suppresse
     destinations: [scoped(pair(D)), leg.pair],
   } as unknown as Invoice;
   const sources = { orders: [ord], invoices: [inv] };
-  const ctx = { taxNameByUid: new Map<string, string>(), isOrderFrozen: () => false, formulas: FORMULAS, holidays: [] };
+  const ctx = { formulas: FORMULAS, holidays: [] };
 
   const onInvoice = computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-1" }, ctx);
   assertEquals(onInvoice.unaligned, []);

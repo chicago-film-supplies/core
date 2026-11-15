@@ -302,7 +302,7 @@ function documents(scope: InvoiceDocItemType[]) {
   } as unknown as Invoice;
   return { orders: [ord], invoices: [inv] };
 }
-const ctx = { taxNameByUid: new Map<string, string>(), isOrderFrozen: () => false, formulas: FORMULAS, holidays: [] };
+const ctx = { formulas: FORMULAS, holidays: [] };
 
 Deno.test("🔴 diff: ONE moved entry per side for a move — no not_on_source, no unbilled X", () => {
   const sources = documents(movedInvoice());

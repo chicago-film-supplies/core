@@ -19386,8 +19386,8 @@
         {
           "kind": "interface",
           "name": "DocumentDiffContext",
-          "declaration": "interface DocumentDiffContext {\n  taxNameByUid: ReadonlyMap<string, string>;\n  isOrderFrozen: fnOrConstructor;\n  formulas: PricingFormulas;\n  holidays: readonly string[];\n}",
-          "doc": "What the order ↔ invoice explanation arms need, per order."
+          "declaration": "interface DocumentDiffContext {\n  formulas: PricingFormulas;\n  holidays: readonly string[];\n}",
+          "doc": "What the diff needs beyond the documents: every formula their lines name and\nthe holiday list, what an extension's counts are metered with (ruling 8: a\nwindow stores no count).\n\n⚠️ It carried `taxNameByUid` and `isOrderFrozen` until the one field comparer\n(one-document-model F10): they fed the invoice sync badge's explanation arms,\nwhich could never change the diff's output (every field they cover is\n`derived`) and are no longer called from it."
         },
         {
           "kind": "interface",
@@ -19501,7 +19501,7 @@
             },
             {
               "name": "context",
-              "doc": "Tax names and the order freeze predicate, for the explanation arms"
+              "doc": "The pricing formulas and holidays an extension's counts are metered with"
             }
           ],
           "returnsTag": "Entries keyed by the viewed document's own path keys; empty when the\nviewed document is not among `sources`"
@@ -25637,7 +25637,7 @@
           "kind": "function",
           "name": "projectPurchaseLineForBill",
           "signature": "projectPurchaseLineForBill(item: PurchaseItem, quantity: number): Record<string, unknown>",
-          "doc": "**A purchase line in a BILL line's shape, over the shared keys only** — the\nmerge's three arguments must all be in the downstream shape (core#52), and\nthe purchase↔bill diff compares exactly what the merge follows.\n\n`quantity` is the units the bill line bills: the discount record is that\nshare of the purchase line's ({@link projectPurchaseLineToBillLine}'s rule),\nso an untouched bill line compares equal to its projection and follows it,\nand a followed discount lands as the bill's share rather than the whole.",
+          "doc": "**A purchase line in a BILL line's shape, over the shared keys only, fitted\nto a bill row's quantity** — the purchase ↔ bill DIFF's projection\n(`DIFF_SIDES.payable.line.projectLine`, `utils/documentDiff.ts`).\n\n⚠️ Not the sync's: the sync projects the whole line from unit 0\n({@link projectPurchaseRowForBill}) and merges `quantity`, the money and\n`out_of_service` as one `flat_money` group, so a partial bill keeps all of\nthem. The diff ignores groups, so it fits the projection to the row's\nquantity instead: the discount record becomes that quantity's share and\n`out_of_service` that quantity's records, and only a row naming different\nrecords from its purchase line reports.",
           "paramTags": [],
           "returnsTag": null
         },
