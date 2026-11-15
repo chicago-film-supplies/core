@@ -10,8 +10,8 @@
  * exchange leg (`withExchangeLegs` in `api-cloudrun/src/lib/exchangeLegs.ts`).
  * A third kind of row reaches neither and therefore books nothing: a line the
  * fulfillment carries at a path the order lacks — a picker addition, or an
- * invoice-only line projected onto the fulfillment (`invoiceOnlyLines` in
- * `utils/quantityAccounting.ts`). CFS deducts what was FULFILLED, so those rows
+ * invoice-only line projected onto the fulfillment (`billedByPath`'s
+ * `document_only` in `utils/quantityAccounting.ts`). CFS deducts what was FULFILLED, so those rows
  * have to be able to book.
  *
  * ## Which rows

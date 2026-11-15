@@ -275,9 +275,10 @@ export interface PriceDocumentExtension {
  * The date-extension sections of an invoice's items: one per destination
  * divider carrying `path_extension_for`.
  *
- * The one derivation of {@link PriceDocumentContext.extensions}, shared by every
- * invoice writer and the manager's optimistic recompute — a caller that forgets
- * to pass it re-meters extension lines from their window, minimum included.
+ * The one derivation, run by {@link priceDocument} itself over the items it
+ * prices, on both sides (an invoice's and a bill's sections alike). It was a
+ * caller's input until 6e-0b2 F5, and a caller that forgot it re-metered
+ * extension lines from their window, minimum included.
  */
 export function invoiceExtensionSections(
   items: readonly { type: string; path: readonly string[]; path_extension_for?: readonly string[] }[],
@@ -294,8 +295,6 @@ export interface PriceDocumentContext {
   document: ReceivableDocumentKind;
   /** The tax rule's context: destinations, organization, origin, catalog, as-of. */
   tax: DocumentTaxContext;
-  /** Date-extension sections, if the document has any. */
-  extensions?: readonly PriceDocumentExtension[];
   /**
    * Every destination pair's charge windows — build it with
    * {@link chargeWindowContext}. Required: a time-formula line meters them.
@@ -386,8 +385,8 @@ function assertRepriceable(document: PriceDocumentKind): void {
 /**
  * **Stage 2 for one line: the line pricer.** `priceDocument` prices every line
  * through it, and so does the one reader that must price a line outside a
- * document — `accountLine` (`./quantityAccounting.ts`), which prices a
- * remainder and a billed row's extension (#997 D11).
+ * document — the per-line account (`accountInitiator`, `./quantityAccounting.ts`),
+ * which prices a remainder and a billed row's extension (#997 D11).
  *
  * The line must already carry its `counts` ({@link lineCounts}). `extension`
  * marks a line whose counts are the days an extension section ADDS, stated with
@@ -468,23 +467,30 @@ function formulaOf(item: LineItem, formulas: PricingFormulas): PricingFormula {
  * counts they STATE. {@link lineCounts} owns that; this is the window half,
  * split out so the invoice sync comparator can ask the same question
  * (core#112).
+ *
+ * `opts.minimum: false` meters without the formula's minimum: a bill edit
+ * re-metering an extension row over its own (extension) pair (6e-0b2 F5).
  */
 export function meteredLineCounts(
-  item: LineItem,
+  item: LineItem | PayableLine,
   ctx: Pick<PriceDocumentContext, "charge_windows" | "formulas" | "holidays">,
+  opts: { minimum?: boolean } = {},
 ): TierCount[] | null {
-  const formula = formulaOf(item, ctx.formulas);
+  // A bill line meters as an order line does: only its path, formula and rates are read.
+  const line = item as LineItem;
+  const formula = formulaOf(line, ctx.formulas);
   if (formula.meter.source === "none") {
     return meterUnits(formula, { windows: [], holidays: ctx.holidays }).tiers;
   }
-  const pair = pairOf(item, ctx.charge_windows);
+  const pair = pairOf(line, ctx.charge_windows);
   if (!pair) return null;
   const envelope = { start: pair.windows[0].start, end: pair.windows[pair.windows.length - 1].end };
   return meterUnits(formula, {
     windows: pair.windows,
     span: envelope,
     holidays: ctx.holidays,
-    rates: item.price?.rates,
+    rates: line.price?.rates,
+    ...(opts.minimum === false ? { minimum: false } : {}),
   }).tiers;
 }
 
@@ -509,7 +515,10 @@ export function meteredLineCounts(
  */
 export function lineCounts(
   item: LineItem,
-  ctx: Pick<PriceDocumentContext, "charge_windows" | "extensions" | "formulas" | "holidays">,
+  ctx: Pick<PriceDocumentContext, "charge_windows" | "formulas" | "holidays"> & {
+    /** The document's extension sections ({@link invoiceExtensionSections}); none when absent. */
+    extensions?: readonly PriceDocumentExtension[];
+  },
   carried: ReadonlyMap<LineItem, readonly TierCount[]>,
 ): TierCount[] {
   if (item.price?.price_formula == null) return [];
@@ -622,14 +631,15 @@ function sameCounts(a: readonly TierCount[], b: readonly TierCount[]): boolean {
  */
 export function chargeWindowPairViolations(
   items: readonly LineItem[],
-  ctx: Pick<PriceDocumentContext, "document" | "charge_windows" | "extensions" | "formulas" | "holidays">,
+  ctx: Pick<PriceDocumentContext, "document" | "charge_windows" | "formulas" | "holidays">,
 ): ChargeWindowPairViolation[] {
   if (keepsStoredLineDays(ctx.document)) return [];
+  const extensions = invoiceExtensionSections(items);
   const out: ChargeWindowPairViolation[] = [];
   for (const item of items) {
     if (!isPriceableItem(item) || item.price.price_formula?.basis !== "time") continue;
     // An extension line bills the days its section ADDS, not its pair's total.
-    if (extensionFor(item, ctx.extensions)) continue;
+    if (extensionFor(item, extensions)) continue;
     const pair = pairOf(item, ctx.charge_windows);
     // A time line with no pair at all is `lineCounts`' refusal to make.
     if (!pair || pair.windows.length < 2) continue;
@@ -841,7 +851,7 @@ export interface FlatPayablePrice {
  * The pushed time arm writes the metered `counts` onto the line's price and its
  * net onto `amount_cents`, so the stored line states the money it carries.
  */
-function payableLineMoney(item: LineItem, ctx: PayablePriceDocumentContext, pricing: Tax[]): LinePriceMoney {
+function payableLineMoney(item: LineItem, ctx: PayablePriceDocumentContext, pricing: Tax[], extension: boolean): LinePriceMoney {
   const price = item.price;
   if (!price || price.price_formula?.basis !== "time") return statedLineMoney(item);
   if (ctx.document.kind === "purchase") {
@@ -851,6 +861,10 @@ function payableLineMoney(item: LineItem, ctx: PayablePriceDocumentContext, pric
   if ((ctx.document.origin ?? "pushed") === "linked") return statedLineMoney(item);
   const stated = (price.counts ?? []) as TierCount[];
   let counts: TierCount[] | null = stated.length > 0 ? [...stated] : null;
+  // An extension row bills the days its section ADDS, stated by the writer (ruling 89).
+  if (counts === null && extension) {
+    throw new PriceRefusalError(`Line ${item.uid} sits in an extension section and states no counts to extend by`);
+  }
   if (counts === null) {
     if (!ctx.time) {
       throw new PriceRefusalError(`Line ${item.uid} is priced by time and states no counts; the pricer was given no windows to meter`);
@@ -864,7 +878,7 @@ function payableLineMoney(item: LineItem, ctx: PayablePriceDocumentContext, pric
     }
   }
   item.price = { ...price, counts } as LineItem["price"];
-  const money = priceLine(item, pricing);
+  const money = priceLine(item, pricing, extension);
   item.amount_cents = money.subtotal_discounted_cents;
   return money;
 }
@@ -957,6 +971,10 @@ export function priceDocument<T extends LineItem | PayableLine>(
   // `type`, `quantity`, `price` and tax-class keys they read, and its price the
   // same money keys once priced. The cast is on the way IN; the return is `T`.
   const items = input as unknown as readonly LineItem[];
+  // The document's date-extension sections, read off its own dividers: never a
+  // caller's input, so no writer can forget them and re-meter an extension row
+  // with its formula's minimum (one-document-model 6e-0b2 F5; both sides).
+  const extensions = invoiceExtensionSections(items);
 
   // Copies, so the stages below can write prices without touching the caller's items.
   const out: LineItem[] = items.map((item) =>
@@ -980,7 +998,7 @@ export function priceDocument<T extends LineItem | PayableLine>(
   for (const item of out) {
     if (!isPriceableItem(item)) continue;
     if (payable) {
-      const money = payableLineMoney(item, ctx as PayablePriceDocumentContext, pricing);
+      const money = payableLineMoney(item, ctx as PayablePriceDocumentContext, pricing, extensionFor(item, extensions) !== undefined);
       const price = item.price;
       const taxesBase = (price as { taxes_base?: TaxRefType[] }).taxes_base;
       item.price = assembleLinePrice(
@@ -991,9 +1009,9 @@ export function priceDocument<T extends LineItem | PayableLine>(
       ) as unknown as PriceObject;
       continue;
     }
-    const extension = extensionFor(item, ctx.extensions);
+    const extension = extensionFor(item, extensions);
     const formulaRef = item.price.price_formula == null ? null : priceFormulaRefOf(formulaOf(item, ctx.formulas));
-    item.price = { ...item.price, price_formula: formulaRef, counts: lineCounts(item, ctx, carried) };
+    item.price = { ...item.price, price_formula: formulaRef, counts: lineCounts(item, { ...ctx, extensions }, carried) };
     const price = item.price;
     const money: LinePriceMoney = priceLine(item, pricing, extension !== undefined);
     // ⚠️ Stage 1 has ALREADY written `taxes_base` on every pre-tax line, so it is

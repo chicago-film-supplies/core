@@ -23,7 +23,8 @@ import {
   purchaseItemTouched,
 } from "../src/utils/purchase-actions.ts";
 import { deriveInvoiceStatus } from "../src/utils/invoices.ts";
-import { billLineCreditMoney, billLineCreditParts, purchaseLineBilledNet } from "../src/utils/purchase-documents.ts";
+import { billLineCreditMoney, billLineCreditParts } from "../src/utils/purchase-documents.ts";
+import { billedNetAP } from "./helpers/account.ts";
 import { sliceSubstitutedFor } from "../src/utils/substitutions.ts";
 import { InvoiceActionRefusal } from "../src/utils/invoice-actions.ts";
 import type { PurchaseLineCustody } from "../src/utils/bookings-inbound.ts";
@@ -492,7 +493,7 @@ Deno.test("billLineCreditParts: a substitute kit's root credit copies its subtre
   const yc = row(["y", "yc"], 21, { amount_cents: 100, quantity_per_parent: 7, substituted_for: [{ path: ["k"], quantity: 21 }] });
   const bill = bill6d("A", [y, yc]);
   const credits: PurchaseCredit[] = [];
-  const net = (path: string[]) => purchaseLineBilledNet(path, { uid_purchase: PU, purchase_items: items, bills: [bill], credits });
+  const net = (path: string[]) => billedNetAP(path, { uid_purchase: PU, purchase_items: items, bills: [bill], credits });
   // The fold: Y's component money lands on X, its units on X's component.
   assertEquals([net(["k"]), net(["k", "c"]), net(["y", "yc"])], [
     { quantity: 3, amount_cents: 100 },
@@ -547,8 +548,8 @@ Deno.test("creditableBillLines: one segment per credit — a substitute's stand-
   assertEquals(unitsAt(whole, ctx6d([whole], [back])), { y: 3 });
   // …and the credit un-bills X itself, by its stand-in units: X's net falls 5 → 3.
   const docs = (credits: PurchaseCredit[]) => ({ uid_purchase: PU, purchase_items: items, bills: [whole], credits });
-  assertEquals(purchaseLineBilledNet(["x"], docs([])).quantity, 5);
-  assertEquals(purchaseLineBilledNet(["x"], docs([back])).quantity, 3);
+  assertEquals(billedNetAP(["x"], docs([])).quantity, 5);
+  assertEquals(billedNetAP(["x"], docs([back])).quantity, 3);
   // Partial: Y is 5, of which 2 stand in for X. The first credit may take only those 2…
   const partial = bill6d("A", [row(["y"], 5, { substituted_for: [{ path: ["x"], quantity: 2 }] })]);
   assertEquals(creditableBillLines(partial, ctx6d([partial])), [{ path: [PU, "y"], uid: "y", billed: 5, units: 2, stands_in_for: ["x"] }]);
@@ -573,7 +574,7 @@ Deno.test("creditableBillLines: crediting a substitute segment by segment nets e
   const y = row(["y"], 7, { amount_cents: 101, substituted_for: entries });
   const bill = bill6d("A", [y]);
   const credits: PurchaseCredit[] = [];
-  const net = (path: string) => purchaseLineBilledNet([path], { uid_purchase: PU, purchase_items: items, bills: [bill], credits });
+  const net = (path: string) => billedNetAP([path], { uid_purchase: PU, purchase_items: items, bills: [bill], credits });
   const billed = { x1: net("x1").amount_cents, x2: net("x2").amount_cents, y: net("y").amount_cents };
   assertEquals(billed.x1 + billed.x2 + billed.y, 101);
   // Each credit takes ALL it is offered — the form's default — priced and sliced as the API will.
@@ -602,7 +603,7 @@ Deno.test("creditableBillLines: the straddling credit the rule refuses is the on
   const items = asLines(buy({ uid: "x", path: ["x"], quantity: 1 }));
   const bill = bill6d("A", [row(["y"], 3, { amount_cents: 100, substituted_for: [{ path: ["x"], quantity: 1 }] })]);
   const net = (credits: PurchaseCredit[], path: string) =>
-    purchaseLineBilledNet([path], { uid_purchase: PU, purchase_items: items, bills: [bill], credits }).amount_cents;
+    billedNetAP([path], { uid_purchase: PU, purchase_items: items, bills: [bill], credits }).amount_cents;
   assertEquals([net([], "x"), net([], "y")], [33, 67]);
   // Built by hand, a credit of units 1–2 (67¢, one standing in for X) then unit 3 (33¢)
   // leaves X at −1¢ and Y at +1¢: its fold gives X half of 67¢, rounded up.

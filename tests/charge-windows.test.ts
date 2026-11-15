@@ -61,6 +61,11 @@ const at = (day: number, time: string, month = 10, offset = "-05:00") =>
 
 // ── Schema ───────────────────────────────────────────────────────────────────
 
+/** A date-extension section's divider: `priceDocument` reads the section off it (6e-0b2 F5). */
+const EXT_DIVIDER = {
+  uid: "E", type: "destination", path: ["O", "E"], path_extension_for: ["D"], name: "", description: "", quantity: 1,
+} as unknown as LineItem;
+
 Deno.test("OrderDates: charge_windows is required, and a legacy charge_start is stripped", () => {
   const base = { delivery_start: at(5, "09:00:00"), delivery_end: null, collection_start: at(9, "15:00:00"), collection_end: null };
   assertEquals(OrderDates.safeParse(base).success, false, "no windows");
@@ -594,10 +599,9 @@ Deno.test("chargeWindowContext: an invoice pair's divider path is [uid_order, ui
 Deno.test("priceDocument: an extension line bills its OWN stated counts, unfloored, never its window", () => {
   const priceExt = (counts: ReturnType<typeof fdwCounts>) => {
     const ext = line(["O", "E"], { counts });
-    return priceDocument([ext], {
+    return priceDocument([EXT_DIVIDER, ext], {
       ...priceCtx(chargeWindowContext([{ uid: "E", uid_order: "O", dates: { charge_windows: businessDayWindows([4]) } }]), { kind: "invoice", status: "draft", has_settlement: false }),
-      extensions: [{ divider_path: ["O", "E"] }],
-    }).items[0].price as unknown as { counts: { num: number; den: number }[]; subtotal_cents: number };
+    }).items[1].price as unknown as { counts: { num: number; den: number }[]; subtotal_cents: number };
   };
   // The section's writer states the added days (ruling 8); the window's 4 business days are not consulted.
   const stated = priceExt(fdwCounts(2, { stated: true }));
@@ -702,7 +706,7 @@ Deno.test("chargeWindowPairViolations: an extension line bills the days it ADDS,
   const windows = chargeWindowContext([{ uid: "E", uid_order: "O", dates: { charge_windows: businessDayWindows([3, 4]) } }]);
   const document = { kind: "invoice", status: "draft", has_settlement: false } as const;
   // Under the section: exempt — 2 is the added days, while the windows meter 10.
-  assertEquals(chargeWindowPairViolations([ext], { document, charge_windows: windows, extensions: [{ divider_path: ["O", "E"] }], ...PAIR_CTX }), []);
+  assertEquals(chargeWindowPairViolations([EXT_DIVIDER, ext], { document, charge_windows: windows, ...PAIR_CTX }), []);
   // The SAME line with no extension section declared is checked, so the
   // exemption is the section's doing rather than the line's shape.
   assertEquals(chargeWindowPairViolations([ext], { document, charge_windows: windows, ...PAIR_CTX }).length, 1);

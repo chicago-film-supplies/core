@@ -14,8 +14,9 @@ import {
   type DocumentDiffCreditNote,
   type DocumentDiffKind,
   type DocumentDiffMap,
-  type DocumentDiffOutOfService,
+  type DocumentQuantityEntry,
 } from "../src/utils/documentDiff.ts";
+import type { DocumentDiffOutOfService } from "../src/utils/quantityAccounting.ts";
 
 const O = "order-1";
 const O2 = "order-2";
@@ -568,32 +569,30 @@ Deno.test("documentDiff: a remainder — 4 invoiced of 6 — is one quantity ent
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-a" }, CONTEXT).lines), { [`${O}/${D}/${G}/${LIGHT}`]: entry });
 });
 
-Deno.test("documentDiff: the warehouse over-fulfilled and billing matched the QUOTE — the quantity entry still fires on fulfilled", () => {
-  // 🔴 The case that was invisible. Ordered 2, shipped 3, billed 2: billing
-  // agrees with the quote, so `accountLine`'s `ordered − billed` is 0 and the
-  // `billed` entry early-returns. Before the `fulfilled` entry the invoice read as
-  // perfectly aligned while a third unit went out the door unbilled.
+Deno.test("documentDiff: over-fulfilled with billing matching the QUOTE — custody is shown, never a trigger (ruling 35)", () => {
+  // Ordered 2, shipped 3, billed 2. Until one-document-model ruling 35 the
+  // `fulfilled ≠ ordered ≠ invoiced` clause fired a quantity entry here. The
+  // owner removed it on BOTH sides: billing before or apart from custody is
+  // routine (an invoice before a pickup, a bill before a delivery), so custody
+  // informs the remaining-to-bill offer, not the diff.
   const order = billedOrder(2);
   const fulfilled = fulfillment(billedOrder(3).items as unknown as LineItem[]);
   const sources = { orders: [order], fulfillments: [fulfilled], invoices: [billing("inv-a", 2241, 2)] };
-  // ⭐ The order and fulfillment views ALSO carry the pre-existing order ↔
-  // fulfillment `differs` — "you quoted 2, we fulfilled 3". That entry and the
-  // `fulfilled` one are both wanted and say different things: one compares the
-  // shipment to the quote, the other compares the billing to the shipment.
-  const fulfilled_ = "qty[#2241](o2 f3 i2,q0,x0,fq1000)";
+  // The order ↔ fulfillment `differs` stays: "you quoted 2, we fulfilled 3".
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {
-    [`${D}/${G}/${LIGHT}`]: ["fulfillment#1001:differs(quantity=2→3)", fulfilled_],
+    [`${D}/${G}/${LIGHT}`]: ["fulfillment#1001:differs(quantity=2→3)"],
   });
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), {
-    [`${D}/${G}/${LIGHT}`]: ["order#1001:differs(quantity=3→2)", fulfilled_],
+    [`${D}/${G}/${LIGHT}`]: ["order#1001:differs(quantity=3→2)"],
   });
-  // 🔴 On the INVOICE view the order ↔ fulfillment difference is not visible at
-  // all — it is a comparison between two other documents. So the `fulfilled` entry
-  // is the ONLY thing telling an invoice operator that more shipped than they
-  // are billing, which is why it belongs beside `billed` rather than in a new
-  // fulfillment ↔ invoice pair comparison.
-  assertEquals(summary(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-a" }, CONTEXT).lines), {
-    [`${O}/${D}/${G}/${LIGHT}`]: [fulfilled_],
+  // ⚠️ The accepted cost of ruling 35: the INVOICE view no longer says that more
+  // shipped than it bills. The order ↔ fulfillment difference above is not
+  // visible from it, and nothing replaces the removed entry there.
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-a" }, CONTEXT).lines), {});
+  // Once the documents DO disagree, the entry carries custody as a shown figure.
+  const short = { ...sources, invoices: [billing("inv-a", 2241, 1)] };
+  assertEquals(summary(computeDocumentDiffs(short, { kind: "invoice", uid: "inv-a" }, CONTEXT).lines), {
+    [`${O}/${D}/${G}/${LIGHT}`]: ["qty[#2241](o2 f3 i1,q1000,x0,fq2000)"],
   });
 });
 
@@ -1198,6 +1197,22 @@ Deno.test("documentDiff: a REVERSING credit nets out of invoiced, clearing the q
   const onInvoice = computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-1" }, CONTEXT);
   assertEquals(quantityAt(onInvoice, `${O}/${LIGHT_REL}`), []);
   assertEquals(onInvoice.credits.get(`${O}/${LIGHT_REL}`), expected);
+});
+
+Deno.test("documentDiff: an entry a reversing credit moved names it in `credit_sources`, as a payable entry names its supplier credit", () => {
+  // One entry shape on both sides (one-document-model 6e-0b2 F9): over-billed by
+  // 1, credited 2 back, so the line is now UNDER-billed by 1 and the note is why.
+  const { o, inv } = overbilled();
+  const cn = creditNote("cn-1", 1030, "inv-1", [{ quantity: 2, path: LIGHT_ON_INVOICE, reverses_billing: true }]);
+  const diff = computeDocumentDiffs({ orders: [o], invoices: [inv], creditNotes: [cn] }, { kind: "order", uid: O }, CONTEXT);
+  const entry = diff.lines.get(LIGHT_REL)!.find((e) => e.kind === "quantity") as DocumentQuantityEntry;
+  assertEquals([entry.ordered, entry.invoiced], [2, 1]);
+  assertEquals(entry.credit_sources.map((r) => [r.kind, r.uid, r.number]), [["credit_note", "cn-1", 1030]]);
+  // A rate line's money is `quantity_cents`; the stated-line pair is absent.
+  assertEquals([entry.billed_cents, entry.expected_cents], [undefined, undefined]);
+  // Without the note, nothing took anything back.
+  const bare = computeDocumentDiffs({ orders: [o], invoices: [inv] }, { kind: "order", uid: O }, CONTEXT);
+  assertEquals((bare.lines.get(LIGHT_REL)!.find((e) => e.kind === "quantity") as DocumentQuantityEntry).credit_sources, []);
 });
 
 Deno.test("documentDiff: a NON-reversing credit on a line the order still has is shown and never netted — invoiced stays gross", () => {

@@ -19,6 +19,7 @@
  */
 import { z } from "zod";
 import { ItemUid } from "./_uid.ts";
+import { extendChecked } from "./_extend.ts";
 
 /** Destination divider in an order/invoice items array. */
 export const DestinationDividerArm = z.strictObject({
@@ -72,6 +73,35 @@ export const DestinationDividerArm = z.strictObject({
   // Removed in three steps 2026-08-25: writers stopped, both corpora purged
   // (2,981 prod documents / 2,980 dev, 0 failed), then this arm tightened.
   description: z.string().meta({ pii: "none" }),
+});
+
+/**
+ * **A BILLING document's destination divider**: the initiator's divider, plus the
+ * one key only a billing document can carry. Declared once for both sides
+ * (one-document-model 6e-0b2 F5, ruling 89): an invoice's rows and a bill's or
+ * supplier credit's rows take this arm.
+ *
+ * `path_extension_for` marks a **date-extension section** (api-cloudrun#680 R1;
+ * owner decisions 2026-09-13, extended to the payable side by ruling 89 —
+ * "it's just another dates/destination pair with the extended time window"):
+ *
+ * - **Dates and destinations ride together**, so a second date range is a second
+ *   destination section even at the same address. Its pair
+ *   (`destinations[i].uid === this divider's uid`) states the billed window.
+ * - **The link is by PATH**: the value is the INITIATOR-relative path of the
+ *   initiator destination divider this section extends. Alignment and the one
+ *   billing fold (`billedByPath`) read an extension section as that divider, so
+ *   its lines bill the initiator's lines there.
+ * - **The no-minimum rule is DERIVED from the section, never stored on the
+ *   line**: `priceDocument` prices every line under an extension section at its
+ *   own stated `counts`, the formula's minimum skipped.
+ *
+ * ⚠️ Absent on every divider that does not open a section. There is no `null`: a
+ * divider either extends a section or it does not. A supplier credit admits the
+ * key through the shared row union and no writer sets it there.
+ */
+export const DestinationSectionDividerArm = extendChecked(DestinationDividerArm, {
+  path_extension_for: z.array(ItemUid).min(1).optional(),
 });
 
 /** Group divider in an order/invoice items array. */

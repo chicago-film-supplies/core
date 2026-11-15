@@ -50,7 +50,7 @@ import {
   substituteKitSubtree,
   type PurchaseBilledDocuments,
   purchaseBillIsLive,
-  purchaseLineBilledNet,
+  purchaseBillingFold,
 } from "./purchase-documents.ts";
 import { collectSubstitutionAnchors, sliceSubstitutedFor } from "./substitutions.ts";
 import { closeRefusal, InvoiceActionRefusal } from "./invoice-actions.ts";
@@ -229,7 +229,7 @@ function closeCancels(item: PurchaseActionItem, custody: PurchaseLineCustody, bi
  * The units a line may still bill, 0 when it has nothing to bill: what is
  * ordered, less what is billed. A TIME line counts no `quantity_billed`, so it
  * offers its open units every time — what is left of its time is the bill
- * writer's `remainingTimeCounts`, not a unit count.
+ * writer's split by the account (`splitBillTime`), not a unit count.
  */
 function billableQuantity(item: PurchaseActionItem): number {
   return remainingToBill({ quantity: item.quantity, quantity_billed: item.quantity_billed ?? 0 });
@@ -343,9 +343,10 @@ export function purchaseBillVoidRefusal(bill: PurchaseBillActionBill, ctx: Purch
       credits: p.credits,
     };
     const named = purchaseBilledPaths([bill], p.uid_purchase);
+    const fold = purchaseBillingFold(others);
     return purchaseLines(p.purchase.items).some((item) =>
       purchaseItemBasis(item) === "flat" && named.has(item.path.join("/")) &&
-      purchaseLineBilledNet(item.path, others).quantity < 0
+      (fold.byPath.get(item.path.join("/"))?.quantity ?? 0) < 0
     );
   });
   if (stranded) {
@@ -450,11 +451,11 @@ export interface CreditableBillLine {
  * from ONE SEGMENT (owner, 2026-11-11). A substitute Y's first units stand in
  * for its X's (W5), one segment per `substituted_for` entry in stored order;
  * the rest are the row's own, one more segment. So `units` is the rest of the
- * current segment, capped by the pool behind it (`purchaseLineBilledNet`): the
+ * current segment, capped by the pool behind it (`purchaseBillingFold`): the
  * entry's X for a stand-in segment, the row's own join for the own one.
  *
  * Why one segment: a credit row's fold splits ITS money over its entries
- * (`purchaseDocumentBilling`), so a credit spanning two segments could
+ * (`billedByPath`), so a credit spanning two segments could
  * attribute a cent to one line that the bill gave the other. Within one
  * segment, successive credits sum exactly to the bill's share (the credit is
  * priced first-come, `billLineCreditMoney`, and the shares telescope).
@@ -512,7 +513,8 @@ export function creditableBillLines(bill: PurchaseBillActionBill, ctx: PurchaseB
       bills: p.bills,
       credits: p.credits,
     };
-    const pool = (path: readonly string[]) => Math.max(0, purchaseLineBilledNet(path, docs).quantity);
+    const fold = purchaseBillingFold(docs);
+    const pool = (path: readonly string[]) => Math.max(0, fold.byPath.get(path.join("/"))?.quantity ?? 0);
     // Live as the fold reads it (`liveSubstitutionAnchors`): any row of the
     // purchase, so a substituted KIT, whose X is a header, counts.
     const onPurchase = new Set(p.purchase.items.map((i) => i.path.join("/")));

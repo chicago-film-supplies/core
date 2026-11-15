@@ -90,7 +90,8 @@
  * - **time** — commits nothing on the purchase (`amount_cents` and
  *   `quantity_billed` null, money zero); each bill meters it from its
  *   destination pair's charge windows as an order line is metered, and bills in
- *   parts by COUNTS (`remainingTimeCounts`, one-document-model Phase 3).
+ *   parts by COUNTS: never-billed units over their pair, owed time as an
+ *   extension section (`splitBillTime`, one-document-model 6e-0b2 F5).
  *
  * Either way the line's `price` carries the money `priceDocument` computes —
  * see {@link PurchaseLinePrice}.

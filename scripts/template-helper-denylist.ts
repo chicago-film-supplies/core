@@ -393,6 +393,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "invoiceIsFrozen",
     "invoiceFieldIsFrozen", // its per-class form over INVOICE_FIELD_FREEZE — same reason
     "purchaseBillIsLive", // the one bill liveness rule — a template reads a bill's stored totals
+    "purchaseCreditIsLive", // its supplier-credit twin, same reason
     // Settlement liveness, for MATCHING rows (the reap, the edit push's held
     // settlements). A rendered invoice reads its stored totals.
     "liveSettlements",
@@ -646,16 +647,27 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // invoices at once; a template renders one document and holds neither half.
   // Listed in UTIL_MODULES only so the drift guard sees its exports.
   quantityAccounting: [
-    "accountLine",
-    "invoicedByPath",
-    // The invoice-only lines of one order across ALL its invoices
-    // (api-cloudrun#1188) — the input to a fulfillment projection, which a
-    // template never performs.
-    "invoiceOnlyLines",
+    // The one per-line account (6e-0b2 F9): the fold over every billing and
+    // credit document of an initiator, which no render context holds.
+    "accountInitiator",
+    "accountBilling",
+    // The account's inputs: a custody document, the order's out-of-service
+    // records and every invoice, none of which a render context holds.
+    "fulfillmentCustody",
+    "orderOutOfServiceInputs",
+    "purchaseCustody",
+    // The remainder and the over-billing offer assembled from that account.
+    "buildOverbillingCredits",
+    "buildRemainingInvoice",
+    // The one billing fold (one-document-model 6e-0b2 F1): an initiator and
+    // EVERY billing and credit document on it, which no render context holds.
+    // Its `document_only` is the input to a fulfillment projection
+    // (api-cloudrun#1188), which a template never performs.
+    "billedByPath",
     // The one credit keyer (ruling 84) and its credited-units view: they need
     // the invoice's CREDIT NOTES, which a render context holds even less often
     // than the sibling invoices, and their output feeds the credit cap and
-    // `invoicedByPath`'s sum, both denied here.
+    // the fold's sum, both denied here.
     "keyInvoiceCredits",
     "unitsCreditedBefore",
     // Exact rational arithmetic over a credit budget's unit-time. A template
@@ -664,7 +676,6 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "compareTime",
     "countsTime",
     "scaleTime",
-    "remainingForOrder",
     "substitutionCredit",
   ],
   // `utils/replacements.ts` is the lost/damaged BILLING arithmetic: what an
@@ -793,6 +804,12 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // purchase → bill sync. A template renders a bill whose lines already carry
   // their counts and money.
   "purchase-documents": [
+    // The bill writer's time split and extension sections, and a supplier credit's
+    // time default (6e-0b2 F5): they read
+    // a line's ACCOUNT over every bill of the purchase, which no render context holds.
+    "billExtensionSections",
+    "creditTimeCounts",
+    "splitBillTime",
     "projectPurchaseLineForBill",
     "projectPurchaseLineToBillLine",
     "projectPurchaseRowForBill",
@@ -800,15 +817,14 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "purchaseCreditIsLive",
     "purchaseDocumentScope",
     "payableScopedSync",
-    "purchaseLineBilledCounts",
-    "purchaseLineBilledNet",
+    "purchaseBillingFold",
+    "purchaseInitiator",
     "billedPoolCreditMoney",
     // A part's money is a writer's step (D7): a render reads the stored line.
     "partMoney",
     "billLineCredited",
     "billLineCreditMoney",
     "purchaseLineCovers",
-    "remainingTimeCounts",
     "purchaseLineKey",
     "purchaseBillSharedLineFields",
     "purchaseBillSharedPairFields",

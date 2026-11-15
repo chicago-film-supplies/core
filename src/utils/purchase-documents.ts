@@ -74,11 +74,8 @@ import type { ExchangedForEntryType, OutOfServiceEntryType } from "../schemas/mo
 import {
   collectSubstitutionAnchors,
   type CreditableRow,
-  liveSubstitutionAnchors,
   type PathForwardMap,
   sliceSubstitutedFor,
-  standInUnits,
-  substitutionCredit,
 } from "./substitutions.ts";
 import { classifySharedFields, fieldsUnder, sameSharedValue, type SharedField } from "./shared-fields.ts";
 import {
@@ -86,6 +83,7 @@ import {
   invoiceIsFrozen,
   type LineClaimSide,
   purchaseBillIsLive,
+  purchaseCreditIsLive,
   type ScopedPairSide,
   type ScopedSyncSide,
   syncScopedDestinations,
@@ -94,15 +92,24 @@ import type { LineItem } from "./orders.ts";
 import {
   chargeWindowContext,
   flatPayablePrice,
-  meteredLineCounts,
   type PayablePriceDocumentContext,
   priceDocument,
   type PricingFormulas,
-  statedChargeWindows,
 } from "./price-document.ts";
-import { combineTierCounts, meanTierCounts, type TierCount } from "./price-formulas.ts";
+import { meanTierCounts, type TierCount } from "./price-formulas.ts";
+import {
+  type AccountedInitiator,
+  billedByPath,
+  type BilledAtPath,
+  type BilledByPath,
+  type ExtensionGroup,
+  type LineAccount,
+  type PayableFoldBill,
+  type PayableFoldCredit,
+} from "./quantityAccounting.ts";
+import { chicagoDayAtTimeOf } from "./dates.ts";
 
-export { purchaseBillIsLive };
+export { purchaseBillIsLive, purchaseCreditIsLive };
 
 // ── Context ─────────────────────────────────────────────────────
 
@@ -117,49 +124,15 @@ export interface PurchaseBilledDocuments {
   /**
    * The purchase's rows, dividers included: which substitutions are LIVE (the
    * purchase still carries X) and the kit ratio a substitute credits X's
-   * components by ({@link purchaseDocumentBilling}). Required, so a reader
+   * components by ({@link purchaseBillingFold}). Required, so a reader
    * cannot silently stop counting a substitute.
    */
   purchase_items: readonly CreditableRow[];
-  bills: readonly Pick<PurchaseBill, "uid" | "number" | "totals" | "items" | "status">[];
-  credits: readonly Pick<PurchaseCredit, "status" | "items">[];
-}
-
-/**
- * **The documents of one purchase dated before `bill`** — by date, then number —
- * with `bill` itself left out. A time line re-seeded on `bill` is billed for its
- * pair's time less what THESE documents bill (one-document-model item 5): a later
- * document's billing does not limit what an earlier one may bill. The bill writer
- * and the manager's optimistic reprice both read it, so the two cannot disagree.
- */
-export function purchaseDocumentsBefore<
-  B extends Pick<PurchaseBill, "uid" | "date" | "number">,
-  C extends Pick<PurchaseCredit, "date" | "number">,
->(
-  bill: Pick<PurchaseBill, "uid" | "date" | "number">,
-  purchase: { uid: string; items: readonly CreditableRow[] },
-  bills: readonly B[],
-  credits: readonly C[],
-): { uid_purchase: string; purchase_items: readonly CreditableRow[]; bills: B[]; credits: C[] } {
-  const at = Date.parse(bill.date);
-  const before = (d: { date: string; number: number }): boolean => {
-    const t = Date.parse(d.date);
-    return t < at || (t === at && d.number < bill.number);
-  };
-  return {
-    uid_purchase: purchase.uid,
-    purchase_items: purchase.items,
-    bills: bills.filter((b) => b.uid !== bill.uid && before(b)),
-    credits: credits.filter(before),
-  };
+  bills: readonly (PayableFoldBill & Pick<PurchaseBill, "number" | "totals">)[];
+  credits: readonly PayableFoldCredit[];
 }
 
 // ── Reading existing coverage ──────────────────────────────────
-
-/** Is this credit live — not voided? Every "already billed" reader asks it. */
-export function purchaseCreditIsLive(credit: Pick<PurchaseCredit, "status">): boolean {
-  return credit.status !== "void";
-}
 
 /** A purchase line's join key — `uid_purchase/...path` — the twin of `purchaseLineKeyOf`. */
 export function purchaseLineKey(uidPurchase: string, path: readonly string[]): string {
@@ -171,140 +144,6 @@ function substitutedForOf(row: PurchaseDocumentItem): PurchaseDocumentProductIte
   return "substituted_for" in row ? row.substituted_for : undefined;
 }
 
-/** What one document bills of one purchase line: {@link purchaseDocumentBilling}'s value. */
-export interface PurchaseLineBilling {
-  /** Units billed, a substitute's stand-in units included. */
-  quantity: number;
-  /** The money of those units. */
-  amount_cents: number;
-  /**
-   * The rows' counts, each with the units it bills, for the quantity-weighted
-   * mean ({@link purchaseLineBilledCounts}). A unit credited through a kit's
-   * ratio adds quantity and no part.
-   */
-  parts: { quantity: number; counts: readonly TierCount[] }[];
-}
-
-/**
- * **What one document bills of each line of purchase `uidPurchase`**, keyed by
- * the line's path relative to the purchase, joined with `/`. Every "already
- * billed" reader goes through it.
- *
- * - A row bills the line its join names (`purchaseLineKeyOf`: its own path, or
- *   its move pointer).
- * - 🔴 **A substitute Y bills the X it stands in for** (W5, `substituted_for`),
- *   as an invoice's does on AR (`invoicedByPath`): each live entry credits X
- *   with its units and their share of Y's money and counts, and the rest of Y
- *   stays at Y's own join. The stand-in units take Y's FIRST units' share
- *   (`lineUnitsCents`), so the parts sum to exactly Y's amount.
- * - An entry is live while the purchase still carries X (`purchase_items`);
- *   a spent one bills nothing for X, and its units count at Y's own join.
- * - X's kit components are credited through the PURCHASE's own ratio
- *   (`substitutionCredit`), in units only: the money a substitute stands in for
- *   is X's whole subtree's, and it lands on X. That holds whichever of Y's rows
- *   carries it: a component's stamped entries move its stand-in share of its
- *   money to X too, units staying with the ratio walk (api-cloudrun#1475).
- */
-export function purchaseDocumentBilling(
-  rows: readonly PurchaseDocumentRow[],
-  uidPurchase: string,
-  purchaseItems: readonly CreditableRow[],
-): Map<string, PurchaseLineBilling> {
-  return foldPurchaseDocument(rows, uidPurchase, purchaseItems, "bill");
-}
-
-/**
- * **What one supplier credit UN-bills of each line of purchase `uidPurchase`** —
- * {@link purchaseDocumentBilling}'s fold over the credit's rows, read as rows of
- * sign −1 (ruling 84). The caller subtracts it. Two differences, both the one
- * credit fold's rules on both sides:
- *
- * - **Only a `reverses_billing: true` line nets** (ruling 38). An unmarked line —
- *   a goodwill or freight credit — is money given back, not billing reversed.
- * - **A time credit nets COUNTS and money, never units** (R3): a line carrying
- *   `counts` adds its parts and amount and no quantity.
- *
- * Root vs component is the credit's own anchors, and that is the bill's by
- * construction: a credit of a substitute kit copies its root WITH its subtree
- * and refuses a bare component (`billLineCreditParts`, `creditableBillLines`),
- * so the copied anchors are the bill's. No stored credit carries
- * `substituted_for` (prod 2, dev 6 lines on 2026-11-13).
- */
-export function purchaseCreditBilling(
-  rows: readonly PurchaseDocumentRow[],
-  uidPurchase: string,
-  purchaseItems: readonly CreditableRow[],
-): Map<string, PurchaseLineBilling> {
-  return foldPurchaseDocument(rows, uidPurchase, purchaseItems, "credit");
-}
-
-function foldPurchaseDocument(
-  rows: readonly PurchaseDocumentRow[],
-  uidPurchase: string,
-  purchaseItems: readonly CreditableRow[],
-  role: "bill" | "credit",
-): Map<string, PurchaseLineBilling> {
-  const out = new Map<string, PurchaseLineBilling>();
-  const at = (k: string): PurchaseLineBilling => {
-    let entry = out.get(k);
-    if (!entry) out.set(k, entry = { quantity: 0, amount_cents: 0, parts: [] });
-    return entry;
-  };
-  const prefix = `${uidPurchase}/`;
-  const lines: PurchaseDocumentItem[] = [];
-  for (const row of rows) {
-    if (row.type === "purchase" || row.type === "destination" || row.type === "group") continue;
-    if (role === "credit" && row.reverses_billing !== true) continue;
-    if (row.path[0] === uidPurchase) lines.push(row);
-  }
-  /** A time credit (R3) moves counts and money, never units. */
-  const unitsOf = (line: PurchaseDocumentItem, units: number): number =>
-    role === "credit" && (line.price?.counts?.length ?? 0) > 0 ? 0 : units;
-  const anchors = liveSubstitutionAnchors(
-    purchaseItems,
-    collectSubstitutionAnchors(lines.map((l) => ({ path: l.path.slice(1), substituted_for: substitutedForOf(l) }))),
-  );
-  const liveX = new Set(anchors.map((a) => a.substitutedFor.join("/")));
-  const anchorAt = new Set(anchors.map((a) => `${a.path.join("/")}\x1e${a.substitutedFor.join("/")}`));
-  const direct = new Map<string, number>();
-  for (const line of lines) {
-    const join = purchaseLineKeyOf(line);
-    if (join === null || !join.startsWith(prefix)) continue;
-    const rel = line.path.slice(1).join("/");
-    let units = 0;
-    let cents = 0;
-    // The row's live entries in stored order take its first units, each its share of the money.
-    for (const e of substitutedForOf(line) ?? []) {
-      const x = e.path.join("/");
-      if (e.path.length === 0 || e.quantity <= 0 || !liveX.has(x)) continue;
-      const share = sliceStoredMoney(payableStoredMoney(line), units, units + e.quantity).net_cents;
-      const entry = at(x);
-      entry.amount_cents += share;
-      if (anchorAt.has(`${rel}\x1e${x}`)) {
-        // A root: its entry bills X's units, and its counts.
-        entry.quantity += unitsOf(line, e.quantity);
-        entry.parts.push({ quantity: e.quantity, counts: line.price.counts });
-        if (unitsOf(line, e.quantity) > 0) direct.set(x, (direct.get(x) ?? 0) + e.quantity);
-      }
-      // A component's stamped entry is its share of its root's. Its UNITS reach X's
-      // components through the ratio walk below. Its MONEY lands on X, as the root's
-      // does: left at the component's own join, it billed a key no purchase line
-      // carries (api-cloudrun#1475, a $0 header Y over priced components).
-      units += e.quantity;
-      cents += share;
-    }
-    const own = line.quantity - standInUnits({ path: line.path, substituted_for: substitutedForOf(line) }, liveX);
-    const entry = at(join.slice(prefix.length));
-    entry.quantity += unitsOf(line, own);
-    entry.amount_cents += line.amount_cents - cents;
-    if (own > 0) entry.parts.push({ quantity: own, counts: line.price.counts });
-  }
-  for (const [k, units] of substitutionCredit(purchaseItems, direct)) {
-    if (!direct.has(k)) at(k).quantity += units;
-  }
-  return out;
-}
-
 /**
  * Does this purchase line COUNT for coverage — a subrent, charge or replacement
  * line whose purchase was not canceled? A line closed to nothing is removed
@@ -314,105 +153,211 @@ export function purchaseLineCovers(purchase: Pick<Purchase, "status">, item: Pur
   return purchase.status !== "canceled" && item.type !== "sale";
 }
 
-/** What the live documents bill of one purchase line, net of credits. */
-export interface PurchaseLineBilledNet {
-  /** Σ live bill line quantity − Σ live credit line quantity. May be negative. */
-  quantity: number;
-  /** Σ live bill line `amount_cents` − Σ live credit line `amount_cents`. May be negative. */
-  amount_cents: number;
-}
-
 /**
- * **What the purchase line at `path` is billed, net of credits, UNFLOORED.** The
- * one sum behind {@link recomputePurchaseQuantityBilled} and the diff's `billed`
- * entry: lines join on the full path under the purchase, because one product
- * may sit on two lines. A negative is a credit with no live bill left under
- * it, which the diff has to be able to show.
+ * **A purchase as the billing account reads it** (`accountBilling("payable", …)`,
+ * `accountInitiator`): its uid, its rows and its pairs. A purchase row is not an
+ * order line by type, though the fold reads only what both carry, so the one
+ * cast lives here rather than at every payable caller. Pass the purchase with
+ * its open hires CLIPPED at the document date when the account must meter them.
  */
-export function purchaseLineBilledNet(path: readonly string[], documents: PurchaseBilledDocuments): PurchaseLineBilledNet {
-  const key = path.join("/");
-  const net: PurchaseLineBilledNet = { quantity: 0, amount_cents: 0 };
-  const add = (rows: readonly PurchaseDocumentRow[], sign: 1 | -1) => {
-    const fold = sign === 1 ? purchaseDocumentBilling : purchaseCreditBilling;
-    const billed = fold(rows, documents.uid_purchase, documents.purchase_items).get(key);
-    if (billed === undefined) return;
-    net.quantity += sign * billed.quantity;
-    net.amount_cents += sign * billed.amount_cents;
-  };
-  for (const bill of documents.bills) if (purchaseBillIsLive(bill)) add(bill.items, 1);
-  for (const credit of documents.credits) if (purchaseCreditIsLive(credit)) add(credit.items, -1);
-  return net;
+export function purchaseInitiator(purchase: Pick<Purchase, "uid" | "items" | "destinations">): AccountedInitiator {
+  return { uid: purchase.uid, items: purchase.items as unknown as readonly LineItem[], destinations: purchase.destinations };
 }
 
 /**
- * **The counts the live documents bill of one TIME purchase line, net of
- * credits** — Σ live bill `counts` − Σ live credit `counts`, tier by tier
- * (`combineTierCounts`), joined on the purchase line key as
- * {@link purchaseLineBilledNet} is. Unfloored, like it.
+ * **The billing fold over one purchase's documents** (6e-0b2 F3): what every
+ * bill and supplier credit bills at each purchase-relative path, net of credits,
+ * UNFLOORED — `billedByPath("payable", …)`, the AR fold's rules on this side.
+ * Read `byPath.get(path.join("/"))` for a line's `{ quantity, amount_cents }`:
+ * lines join on the full path under the purchase, because one product may sit on
+ * two lines. A negative is a credit with no live bill left under it, which the
+ * diff has to be able to show. Liveness is the fold's.
+ */
+export function purchaseBillingFold(documents: PurchaseBilledDocuments): BilledByPath {
+  return billedByPath(
+    "payable",
+    { uid: documents.uid_purchase, items: documents.purchase_items as readonly LineItem[] },
+    documents.bills,
+    documents.credits,
+  );
+}
+
+// ── Billing a time line: unbilled units first, then owed time (6e-0b2 F5) ──
+
+/** {@link splitBillTime}'s answer: where a bill's units of one TIME purchase line go. */
+export interface BillTimeSplit {
+  /** Units billed at the line's own path: its never-billed units, then any past every owed group (over-billing, D5). */
+  own: number;
+  /** Owed extension groups the bill takes, oldest `billed_end` first, each with the units taken. */
+  extensions: { group: ExtensionGroup; quantity: number }[];
+}
+
+/**
+ * **Split a bill's `quantity` of one TIME purchase line** by the line's account
+ * (one-document-model 6e-0b2 F5; owner 2026-11-15, "unbilled first"): the
+ * line's never-billed units first ({@link LineAccount.remaining}`.units`), then
+ * its owed extension groups, oldest `billed_end` first, each taking at most its
+ * own units. Units past both bill at the line's own path: over-billing is legal
+ * (D5) and the diff reports it.
  *
- * The rows of ONE document that bill the line fold first, into their
- * quantity-weighted mean (`meanTierCounts`), so a split reads as one billing:
- * 4 units split 2 + 2 over 30 days have billed 30 days, not 60. Summing across
- * documents is unchanged (core#149 tracks what that means for a partial bill).
+ * The account must be built over the purchase with its open hires CLIPPED at
+ * the bill date (the bill's pairs), or an open hire's pair meters nothing and
+ * nothing is ever owed.
+ *
+ * @returns `null` when neither covers a single unit: there is nothing unbilled,
+ *   which the bill writer refuses by name
+ * @throws Error when a taken group was billed by a substitute: an extension on a
+ *   substituted line cannot be built yet, as on the receivable side (manager#414)
  */
-export function purchaseLineBilledCounts(path: readonly string[], documents: PurchaseBilledDocuments): TierCount[] {
-  const key = path.join("/");
-  let net: TierCount[] = [];
-  const add = (rows: readonly PurchaseDocumentRow[], sign: 1 | -1) => {
-    const fold = sign === 1 ? purchaseDocumentBilling : purchaseCreditBilling;
-    const parts = fold(rows, documents.uid_purchase, documents.purchase_items).get(key)?.parts ?? [];
-    net = combineTierCounts(net, meanTierCounts(parts), sign);
-  };
-  for (const bill of documents.bills) if (purchaseBillIsLive(bill)) add(bill.items, 1);
-  for (const credit of documents.credits) if (purchaseCreditIsLive(credit)) add(credit.items, -1);
-  return net;
+export function splitBillTime(line: LineAccount, quantity: number): BillTimeSplit | null {
+  let left = quantity;
+  const unbilled = Math.min(left, Math.max(0, line.remaining.units));
+  left -= unbilled;
+  const extensions: BillTimeSplit["extensions"] = [];
+  const owed = [...line.remaining.owed].sort((a, b) => Date.parse(a.billed_end) - Date.parse(b.billed_end));
+  for (const group of owed) {
+    if (left <= 0) break;
+    const take = Math.min(left, group.quantity);
+    if (take <= 0) continue;
+    if (group.via === "substitute") {
+      throw new Error(
+        `Purchase line ${line.item.name} was billed by a substitute; an extension on a substituted line cannot be built yet (manager#414)`,
+      );
+    }
+    extensions.push({ group, quantity: take });
+    left -= take;
+  }
+  if (unbilled === 0 && extensions.length === 0) return null;
+  return { own: unbilled + left, extensions };
 }
 
-/** {@link remainingTimeCounts}' inputs. */
-export interface RemainingTimeCountsArgs {
-  purchase: Pick<Purchase, "uid" | "destinations">;
+/** One purchase line's owed time a bill takes: the line and {@link splitBillTime}'s extensions for it. */
+export interface BillExtensionTake {
   item: PurchaseItem;
-  documents: PurchaseBilledDocuments;
-  formulas: PricingFormulas;
-  holidays: readonly string[];
-  /**
-   * Meter over a BILL's own pair rather than the purchase's: `path` is the row's
-   * path on the bill and `destinations` the bill's pairs. A row that moved to
-   * another pair, or a pair the bill's edit re-dated, is metered there, because
-   * the purchase line's own path names the pair it sat under. `documents` is
-   * then whichever bills and credits the caller counts as already billed.
-   */
-  metered_over?: { path: readonly string[]; destinations: readonly PurchaseDocDestination[] };
+  extensions: BillTimeSplit["extensions"];
 }
 
 /**
- * **What is left to bill of a TIME purchase line, in counts** (0b ruling 3,
- * the AR rule `extensionGroups` applies to an order): the line metered over its
- * PAIR's `charge_windows` through its formula, less what live bills already
- * bill there net of credits ({@link purchaseLineBilledCounts}), each tier
- * floored at 0. Billing in parts therefore never totals more than metering the
- * whole, and an over-billed line seeds nothing (the diff reports it).
+ * **A bill's date-extension sections** (ruling 89; F5): the extra time a bill
+ * takes on lines earlier bills already billed, as the receivable remainder
+ * builds it. One section per destination and billed window: a destination
+ * divider at `[purchase, E]` carrying `path_extension_for: [destination]`, the
+ * group dividers above each line, and each line at `[purchase, E, ...its path
+ * below the destination]` with `quantity` the units taken and `counts` the
+ * group's `extension_counts` (priced with no minimum: `priceDocument` reads the
+ * section off the divider). Its pair is the destination's, windowed from the day
+ * after the group's `billed_end` to the end of the destination's CLIPPED
+ * windows.
  *
- * `null` when the line's pair states no charge windows — there is no time to
- * bill, which the bill writer refuses by name.
+ * @param purchase - The purchase with its open hires clipped at the bill date (the bill's pairs)
+ * @param takes - Per line, the owed groups {@link splitBillTime} took
+ * @param mintUid - Mints each section divider's uid
+ * @returns Rows to append to the purchase's block (dividers first, in path
+ *   order), and the pairs their sections name; empty when nothing is taken
  */
-export function remainingTimeCounts(args: RemainingTimeCountsArgs): TierCount[] | null {
-  const over = args.metered_over;
-  const source = asEngineSource(args.item);
-  const metered = meteredLineCounts(over ? { ...source, path: [...over.path] } : source, {
-    charge_windows: statedChargeWindows(over ? over.destinations : args.purchase.destinations),
-    formulas: args.formulas,
-    holidays: args.holidays,
-  });
-  if (metered === null) return null;
-  const billed = purchaseLineBilledCounts(args.item.path, { ...args.documents, uid_purchase: args.purchase.uid });
-  return combineTierCounts(metered, billed, -1).map((t) => (t.num < 0 ? { ...t, num: 0, den: 1 } : t));
+export function billExtensionSections(
+  purchase: Pick<Purchase, "uid" | "items" | "destinations">,
+  takes: readonly BillExtensionTake[],
+  mintUid: () => string = () => crypto.randomUUID(),
+): { items: PurchaseDocumentRow[]; destinations: PurchaseDocDestination[] } {
+  const P = purchase.uid;
+  const items: PurchaseDocumentRow[] = [];
+  const destinations: PurchaseDocDestination[] = [];
+  const byKey = new Map(purchase.items.map((r) => [r.path.join("/"), r]));
+  /** Per destination, its sections: one billed window set and end each, one entry per line. */
+  const sections = new Map<string, Array<{ group: ExtensionGroup; entries: Array<{ item: PurchaseItem; quantity: number; group: ExtensionGroup }> }>>();
+  for (const take of takes) {
+    const destination = take.item.path[0];
+    for (const { group, quantity } of take.extensions) {
+      const list = sections.get(destination) ?? sections.set(destination, []).get(destination)!;
+      let section = list.find((s) =>
+        s.group.billed_end === group.billed_end && sameWindowDates(s.group.billed_set, group.billed_set) &&
+        !s.entries.some((e) => e.item.path.join("/") === take.item.path.join("/"))
+      );
+      if (section === undefined) list.push(section = { group, entries: [] });
+      section.entries.push({ item: take.item, quantity, group });
+    }
+  }
+  for (const [destination, list] of sections) {
+    const divider = byKey.get(destination);
+    const pair = purchase.destinations.find((d) => d.uid === destination);
+    const windows = pair?.dates.charge_windows ?? null;
+    if (divider === undefined || divider.type !== "destination" || pair === undefined || windows === null || windows.length === 0) {
+      throw new Error(`billExtensionSections: destination ${destination} of purchase ${P} states no charge window to extend`);
+    }
+    for (const section of list) {
+      const E = mintUid();
+      items.push({ ...divider, uid: E, path: [P, E], path_extension_for: [destination] } as PurchaseDocumentRow);
+      const placedGroups = new Set<string>();
+      for (const entry of section.entries) {
+        // The group dividers between the destination and the line, carried once per section.
+        for (let k = 2; k < entry.item.path.length; k++) {
+          const ancestor = byKey.get(entry.item.path.slice(0, k).join("/"));
+          if (ancestor === undefined || ancestor.type !== "group" || placedGroups.has(ancestor.uid)) continue;
+          placedGroups.add(ancestor.uid);
+          items.push({ ...ancestor, path: [P, E, ...ancestor.path.slice(1)] } as PurchaseDocumentRow);
+        }
+        const line = projectPurchaseLineToBillLine(entry.item, {
+          uid_purchase: P,
+          quantity: entry.quantity,
+          counts: [...entry.group.extension_counts],
+        });
+        // An extension bills more days of a leg; it is not an exchange, so it keeps no
+        // take-back list (and its pair's `exchange` is cleared below), as on AR.
+        const { exchanged_for: _notAnExchange, ...extended } = line as PurchaseDocumentItem & { exchanged_for?: unknown };
+        items.push({ ...extended, path: [P, E, ...entry.item.path.slice(1)] } as PurchaseDocumentItem);
+      }
+      const start = chicagoDayAtTimeOf(section.group.billed_end, 1, windows[0].start);
+      const end = windows[windows.length - 1].end;
+      destinations.push({
+        ...purchasePairForBill(pair, P),
+        uid: E,
+        ...("exchange" in pair ? { exchange: null } : {}),
+        dates: { ...pair.dates, charge_windows: [{ start, end }] },
+      });
+    }
+  }
+  return { items, destinations };
+}
+
+/**
+ * **The counts a supplier credit of `quantity` units of one TIME purchase line
+ * takes back by default** (owner 2026-11-15, "newest time first"): the line's
+ * billed groups ({@link LineAccount.extension}`.billed`), most recently billed
+ * first, take the credited units, and the credit row states their
+ * QUANTITY-WEIGHTED MEAN counts (`meanTierCounts`). One row prices
+ * `rates × mean × quantity`, which is exactly the sum over the groups taken,
+ * because counts are rationals; a row per group would collide at the line's one
+ * path. Units past everything billed take the mean too (an over-credit, which
+ * the diff shows).
+ *
+ * Build the account over the purchase CLIPPED at the credit date, as the bill
+ * writer does, or an open hire's pair meters nothing and no group is billed.
+ *
+ * @returns `null` when no time is billed on the line: there is nothing to take back
+ */
+export function creditTimeCounts(line: LineAccount, quantity: number): TierCount[] | null {
+  const newestFirst = [...line.extension.billed].sort((a, b) => Date.parse(b.billed_end) - Date.parse(a.billed_end));
+  const taken: { quantity: number; counts: readonly TierCount[] }[] = [];
+  let left = quantity;
+  for (const group of newestFirst) {
+    if (left <= 0) break;
+    const take = Math.min(left, group.quantity);
+    if (take > 0) taken.push({ quantity: take, counts: group.billed_counts });
+    left -= take;
+  }
+  return taken.length === 0 ? null : meanTierCounts(taken);
+}
+
+/** Two window sets name the same dates, in order. */
+function sameWindowDates(a: readonly { start: string; end: string }[], b: readonly { start: string; end: string }[]): boolean {
+  return a.length === b.length && a.every((w, i) => Date.parse(w.start) === Date.parse(b[i].start) && Date.parse(w.end) === Date.parse(b[i].end));
 }
 
 /**
  * **A purchase's rows with each line's `quantity_billed` recounted** from its
- * documents (api-cloudrun#1441). A flat line's count is
- * {@link purchaseLineBilledNet} floored at 0, because the schema's bucket is
+ * documents (api-cloudrun#1441). A flat line's count is the fold's
+ * ({@link purchaseBillingFold}) floored at 0, because the schema's bucket is
  * `.min(0)`; the diff keeps the unfloored number. A time line and a divider
  * come back as they went in.
  *
@@ -426,10 +371,11 @@ export function recomputePurchaseQuantityBilled(
   purchase: Pick<Purchase, "items">,
   documents: PurchaseBilledDocuments,
 ): PurchaseRow[] {
+  const fold = purchaseBillingFold(documents);
   return purchase.items.map((row) => {
     if (row.type === "destination" || row.type === "group") return row;
     return purchaseItemBasis(row) === "flat"
-      ? { ...row, quantity_billed: Math.max(0, purchaseLineBilledNet(row.path, documents).quantity) }
+      ? { ...row, quantity_billed: Math.max(0, fold.byPath.get(row.path.join("/"))?.quantity ?? 0) }
       : row;
   });
 }
@@ -487,7 +433,8 @@ export interface CreditMoney extends PartMoney {
 /**
  * **What a supplier credit of `n` flat units is worth, when it names no bill
  * line** (api-cloudrun#1439) — a share of the line's billed POOL
- * (`purchaseLineBilledNet`: live bills less live credits), never of the PO line,
+ * (the fold's `{ quantity, amount_cents }` at the line, {@link purchaseBillingFold}:
+ * live bills less live credits), never of the PO line,
  * so an edited bill strands nothing.
  *
  * - The pool's LAST `n` units of a PSEUDO-line, the pool's net over its units
@@ -503,7 +450,7 @@ export interface CreditMoney extends PartMoney {
  *   money, or a memo exceeds the pool
  */
 export function billedPoolCreditMoney(args: {
-  pool: PurchaseLineBilledNet;
+  pool: Pick<BilledAtPath, "quantity" | "amount_cents">;
   n: number;
   memo_cents?: number;
 }): CreditMoney {
@@ -538,14 +485,14 @@ export interface BillLineCredited {
  *
  * **The CREDITED view of the one credit fold** (ruling 84): marker-free, every
  * non-void credit — the same liveness the AR cap reads (`creditableLines`). The
- * REVERSED view is {@link purchaseCreditBilling}, gated on `reverses_billing`.
+ * REVERSED view is the billing fold's ({@link purchaseBillingFold}), gated on `reverses_billing`.
  * A supplier credit has no draft state, so non-void is "issued or applied",
  * exactly AR's netting liveness.
  *
  * ⚠️ Keyed on the pointer as written, which goes stale when the bill row moves
  * (owner ruling 22, as `path_invoice_item` does on AR): a credit raised before a
  * move then no longer counts against the row. The pool cap
- * (`purchaseLineBilledNet`) still sees it.
+ * ({@link purchaseBillingFold}) still sees it.
  */
 export function billLineCredited(
   uidBill: string,
@@ -804,8 +751,9 @@ export interface ProjectBillLineOptions {
    */
   from?: number;
   /**
-   * A TIME line's counts to bill — the writer's {@link remainingTimeCounts}
-   * seed. Absent: `[]`, and `priceDocument` meters the bill's pair instead.
+   * A TIME line's counts to bill: an extension row's added counts
+   * ({@link billExtensionSections}), or a credit's ({@link creditTimeCounts}).
+   * Absent: `[]`, and `priceDocument` meters the bill's pair instead.
    */
   counts?: TierCount[];
 }
@@ -826,8 +774,8 @@ export interface ProjectBillLineOptions {
  * the projection parses on its own; the writer prices the whole document with
  * `priceDocument`, which states the same money and the line's `taxes_base`.
  *
- * A TIME line projects unpriced, with the caller's `counts` seed
- * ({@link remainingTimeCounts}); the writer's `priceDocument` prices it.
+ * A TIME line projects unpriced, with the caller's `counts` seed, if any
+ * ({@link ProjectBillLineOptions.counts}); the writer's `priceDocument` prices it.
  */
 export function projectPurchaseLineToBillLine(
   item: PurchaseItem,

@@ -90,13 +90,14 @@ import {
   type AccountedCreditNote,
   type AccountingContext,
   type AccountedInvoice,
+  accountBilling,
   addTime,
   buildOverbillingCredits,
   compareTime,
   countsTime,
   keyInvoiceCredits,
+  type InitiatorAccount,
   type OverbillingCredits,
-  remainingForOrder,
   scaleTime,
   type TimeAmount,
   unitsCreditedBefore,
@@ -756,9 +757,9 @@ export interface OrderInvoiceOfferContext {
  *   there is no organization-match rule, because billing a third party is a real
  *   pattern (13 imported invoices). A `draft` order is reserved by the create
  *   route before it is invoiced.
- * - `create_remaining_invoice` — `remainingForOrder` finds a line the remainder
- *   build would bill (`RemainingLine.bills`). An over-billed line is not one: it
- *   is `credit_overbilling`'s (core#120).
+ * - `create_remaining_invoice` — the account finds a line the remainder build
+ *   would bill (`LineAccount.remaining.bills`). An over-billed line is not one:
+ *   it is `credit_overbilling`'s (core#120).
  * - `create_replacement_invoice` — `replacement_units > 0`.
  * - `create_service_charge_invoice` — `on_request_units > 0`: cleaning and
  *   maintenance, billed as `service` lines on request (api-cloudrun#1163).
@@ -768,8 +769,9 @@ export interface OrderInvoiceOfferContext {
 export function orderInvoiceActionsFor(order: OfferOrder, ctx: OrderInvoiceOfferContext = {}): InvoiceActionOffer[] {
   const offers: InvoiceActionOffer[] = [];
   const open = order.status !== "canceled";
+  const account = orderAccount(order, ctx);
   if (open) offers.push({ key: "create_invoice", action: "create_invoice" });
-  if (open && remainingLines(order, ctx) !== 0) {
+  if (open && remainingLines(account) !== 0) {
     offers.push({ key: "create_remaining_invoice", action: "create_remaining_invoice" });
   }
   if (open && (ctx.replacement_units ?? 0) > 0) {
@@ -778,22 +780,26 @@ export function orderInvoiceActionsFor(order: OfferOrder, ctx: OrderInvoiceOffer
   if (open && (ctx.on_request_units ?? 0) > 0) {
     offers.push({ key: "create_service_charge_invoice", action: "create_service_charge_invoice" });
   }
-  if ((overbilling(order, ctx)?.notes.length ?? 0) > 0) {
+  if ((overbilling(account)?.notes.length ?? 0) > 0) {
     offers.push({ key: "credit_overbilling", action: "credit_overbilling" });
   }
   return offers;
 }
 
-/** Lines the remainder build would bill, or `null` when the invoices are unknown. */
-function remainingLines(order: OfferOrder, ctx: OrderInvoiceOfferContext): number | null {
+/** The order's billing account, or `null` when the invoices are unknown. */
+function orderAccount(order: OfferOrder, ctx: OrderInvoiceOfferContext): InitiatorAccount | null {
   if (!ctx.invoices || !ctx.accounting) return null;
-  return remainingForOrder(order.uid, order.items, ctx.invoices, order.destinations, ctx.accounting, ctx.creditNotes ?? []).lines
-    .filter((l) => l.bills).length;
+  return accountBilling("receivable", order, ctx.invoices, ctx.creditNotes ?? [], ctx.accounting);
 }
 
-function overbilling(order: OfferOrder, ctx: OrderInvoiceOfferContext): OverbillingCredits | null {
-  if (!ctx.invoices || !ctx.accounting) return null;
-  return buildOverbillingCredits(order, ctx.invoices, ctx.accounting, ctx.creditNotes ?? []);
+/** Lines the remainder build would bill, or `null` when the invoices are unknown. A refused account bills nothing. */
+function remainingLines(account: InitiatorAccount | null): number | null {
+  if (account === null) return null;
+  return account.refused ? 0 : account.lines.filter((l) => l.remaining.bills).length;
+}
+
+function overbilling(account: InitiatorAccount | null): OverbillingCredits | null {
+  return account === null ? null : buildOverbillingCredits(account);
 }
 
 /** What an operator route asks to do from an order. */

@@ -299,7 +299,7 @@ export interface CreditNoteDocLineItem {
    * 🔴 **This marker, and nothing else, is what lets a credit note NET against
    * what the invoices bill.** It is deliberately not inferred from `reason`:
    * `bad_debt` is a write-off and `order_adjustment` covers loss-and-damage, so
-   * netting by reason would make `remainingForOrder` offer to RE-BILL units that
+   * netting by reason would make the remaining invoice offer to RE-BILL units that
    * were written off rather than returned — CN-1009 alone credits ~35 lines at
    * full quantity. A reason says why money moved; only this says that the
    * BILLING was reversed.

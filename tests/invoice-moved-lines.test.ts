@@ -18,7 +18,6 @@ import {
   buildOrderScopedItems,
   carryForwardOverrides,
   computeInvoiceSyncStatus,
-  computeOrderInvoiceCoverage,
   type InvoiceDestinationPair,
   type InvoiceItem,
   invoiceItemDifferences,
@@ -28,9 +27,10 @@ import {
   syncOrderToInvoiceSelective,
 } from "../src/utils/invoices.ts";
 import type { LineItem } from "../src/utils/orders.ts";
-import { type AccountedInvoice, invoicedByPath, remainingForOrder } from "../src/utils/quantityAccounting.ts";
+import type { AccountedInvoice } from "../src/utils/quantityAccounting.ts";
 import { computeDocumentDiffs, type DocumentDiffMap } from "../src/utils/documentDiff.ts";
 
+import { billedAR, coverageOf, remainderView } from "./helpers/account.ts";
 const O = "Order1AAAAAAAAAAAAAA";
 const D = "0b6c3a51-6c1a-4f0e-9a51-6f1f2b9d0b01";
 const GRIP = "0b6c3a51-6c1a-4f0e-9a51-6f1f2b9d0b02";
@@ -233,14 +233,14 @@ const accounted = (scope: InvoiceDocItemType[]): AccountedInvoice => ({
 Deno.test("🔴 coverage: the moved line covers X — not uninvoiced, not an extra, and the remainder does not re-offer it", () => {
   const order = orderItems();
   const inv = accounted(movedInvoice());
-  const coverage = computeOrderInvoiceCoverage(O, order, [inv]);
+  const coverage = coverageOf(O, order, [inv]);
   assertEquals([coverage.unaligned, coverage.uninvoiced, coverage.unmatched], [[], [], []]);
 
-  const billed = invoicedByPath(O, order, [inv]);
+  const billed = billedAR(O, order, [inv]);
   assertEquals(billed.byPath.get(X.join("/"))?.quantity, 4);
   assertEquals(billed.byPath.has(AT.join("/")), false);
 
-  assertEquals(remainingForOrder(O, order, [inv], [pair()], { formulas: FORMULAS, holidays: [] }).lines, []);
+  assertEquals(remainderView(O, order, [inv], [pair()], { formulas: FORMULAS, holidays: [] }).lines, []);
 });
 
 Deno.test("coverage: claims are SUMMED — a split bills X in full, two copies over-bill it", () => {
@@ -248,11 +248,11 @@ Deno.test("coverage: claims are SUMMED — a split bills X in full, two copies o
   const own = buildOrderScopedItems(order, O).find((it) => it.uid === CSTAND)!;
   const split = [...movedInvoice(order, { quantity: 1 })];
   split.splice(2, 0, { ...own, quantity: 3 } as InvoiceDocItemType);
-  assertEquals(invoicedByPath(O, order, [accounted(split)]).byPath.get(X.join("/"))?.quantity, 4);
+  assertEquals(billedAR(O, order, [accounted(split)]).byPath.get(X.join("/"))?.quantity, 4);
 
   const copies = [...movedInvoice(order)];
   copies.splice(2, 0, own);
-  assertEquals(invoicedByPath(O, order, [accounted(copies)]).byPath.get(X.join("/"))?.quantity, 8);
+  assertEquals(billedAR(O, order, [accounted(copies)]).byPath.get(X.join("/"))?.quantity, 8);
 });
 
 Deno.test("🔴 alignment: X's emptied group gone from the invoice — aligned WITH the pointer, unaligned without", () => {
@@ -274,7 +274,7 @@ Deno.test("🔴 accounting: a moved line in an invoice-AUTHORED group (a split's
     { ...group(NEWG, "New Group"), path: [O, D, NEWG] } as unknown as InvoiceDocItemType,
     { ...own, quantity: 1, path: [O, D, NEWG, CSTAND], path_order_item: [...X] } as InvoiceDocItemType,
   ];
-  const billed = invoicedByPath(O, order, [accounted(scope)]);
+  const billed = billedAR(O, order, [accounted(scope)]);
   assertEquals([billed.unaligned, billed.byPath.get(X.join("/"))?.quantity], [[], 4]);
 });
 

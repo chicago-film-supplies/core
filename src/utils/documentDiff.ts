@@ -86,8 +86,8 @@
  *
  * - **how many units each document states** is ONE `quantity` entry per line —
  *   ordered / fulfilled / invoiced, with the money not yet invoiced for the
- *   missing units and for a date extension — computed by `invoicedByPath` /
- *   `accountLine` (`utils/quantityAccounting.ts`). A line no invoice carries is
+ *   missing units and for a date extension — read off the per-line account
+ *   (`accountInitiator` over `billedByPath`, `utils/quantityAccounting.ts`). A line no invoice carries is
  *   the same entry with `invoiced: 0`. See {@link DocumentQuantityEntry} for
  *   when it is emitted;
  * - **differences in a line's TERMS** — base price, discount rate, formula —
@@ -154,6 +154,7 @@ import type {
   PurchaseDocDestination,
   PurchaseDocumentItem,
   PurchaseItem,
+  Side,
   DocDestinationType,
   Fulfillment,
   FulfillmentItemType,
@@ -162,7 +163,6 @@ import type {
   InvoiceDocItemType,
   Order,
   OrderDocItemType,
-  OutOfService,
 } from "../schemas/mod.ts";
 import {
   billsOutOfService,
@@ -172,10 +172,6 @@ import {
   isDividerItemType,
   isFulfillableItemType,
   purchaseCreditPurchaseUid,
-  purchaseDocumentLines,
-  purchaseItemBasis,
-  purchaseLineKeyOf,
-  purchaseLines,
 } from "../schemas/mod.ts";
 import {
   canonicalizePayload,
@@ -184,7 +180,6 @@ import {
   type InvoiceItem,
   invoiceItemDifferences,
   invoiceAuthoredSubtrees,
-  invoiceScopeDividersMatch,
   isInExtensionSection,
   isInInvoiceAuthoredSubtree,
   orderInvoiceSharedFields,
@@ -194,17 +189,11 @@ import {
 import type { LineItem } from "./orders.ts";
 import {
   projectPurchaseLineForBill,
-  purchaseBillIsLive,
   purchaseBillSharedDocFields,
   purchaseBillSharedLineFields,
-  purchaseCreditIsLive,
-  purchaseCreditBilling,
-  purchaseDocumentBilling,
-  purchaseLineBilledNet,
-  purchaseLineKey,
 } from "./purchase-documents.ts";
-import { payableStoredMoney, priceFromFormula, sliceStoredMoney } from "./price-formulas.ts";
-import { lineCustodyAt, type PurchaseLineCustody } from "./bookings-inbound.ts";
+import { priceFromFormula } from "./price-formulas.ts";
+import type { PurchaseLineCustody } from "./bookings-inbound.ts";
 import { type PricingFormulas, statedChargeWindows } from "./price-document.ts";
 import {
   collectSubstitutionAnchors,
@@ -216,17 +205,32 @@ import {
   standInUnits,
   type SubstitutionAnchor,
 } from "./substitutions.ts";
-import { accountLine, type AccountedCreditNote, type AccountedCreditNoteItem, type AccountedInvoice, type InvoicedByPath, invoicedByPath, crmsAuthoredInvoices, orderLineWindow, substitutionCredit } from "./quantityAccounting.ts";
+import {
+  accountInitiator,
+  type AccountedCreditNote,
+  type AccountedCreditNoteItem,
+  type AccountedInitiator,
+  BILLING_FOLD,
+  type BilledByPath,
+  billedByPath,
+  type CustodyOnlyAccount,
+  type CustodyRow,
+  type DocumentDiffOutOfService,
+  fulfillmentCustody,
+  type InitiatorAccount,
+  type LineAccount,
+  orderOutOfServiceInputs,
+  type OutOfServiceInput,
+  purchaseCustody,
+  substitutionCredit,
+} from "./quantityAccounting.ts";
 import { orderFulfillmentSharedFields, type SharedField } from "./shared-fields.ts";
-import { bookingIdsByPath } from "./order-edit-delta.ts";
-import { parseBookingId } from "./booking-id.ts";
-import { BILLABLE_OOS_REASONS, billedOutOfService, type ReplacementBillingInvoice } from "./replacements.ts";
 
 /** The three document kinds a diff can be viewed from or sourced from. */
-export type DocumentKind = "order" | "fulfillment" | "invoice" | "purchase" | "bill" | "purchase_credit";
+export type DocumentKind = "order" | "fulfillment" | "invoice" | "purchase" | "bill" | "credit_note" | "purchase_credit";
 
-/** The kinds a diff can be VIEWED from. A credit is a source of netting, as a credit note is, never a view. */
-export type DocumentViewKind = Exclude<DocumentKind, "purchase_credit">;
+/** The kinds a diff can be VIEWED from. A credit document is a source of netting, never a view. */
+export type DocumentViewKind = Exclude<DocumentKind, "credit_note" | "purchase_credit">;
 
 /** Which document a diff entry is against — enough to link to it and to CAS a later sync. */
 export interface DocumentRef {
@@ -395,15 +399,19 @@ export interface DocumentQuantityEntry {
    */
   uid_out_of_service: string | null;
   /**
-   * The payable side's money, on a flat line only: Σ live bill line money less
-   * live credits, unfloored, and what `invoiced` units cost at the line's
-   * cumulative share. Absent on the receivable side, whose money is
-   * {@link quantity_cents}: a payable flat line states a total with no rate.
+   * On a STATED line only (its money is `price.stated_cents`), on both sides:
+   * what the billing documents bill for it, net of reversing credits and
+   * unfloored, and what the billed units should cost at the line's stated money
+   * (ruling 39). Absent on a rate line, whose money is {@link quantity_cents}.
    */
   billed_cents?: number;
   expected_cents?: number;
-  /** The live supplier credits netted out of `invoiced`. Absent on the receivable side. */
-  credit_sources?: DocumentRef[];
+  /**
+   * The live credit documents whose reversing rows took something back at this
+   * line, on both sides (a credit note, a supplier credit). Empty on a
+   * custody-only row and a lost/damaged record's entry.
+   */
+  credit_sources: DocumentRef[];
 }
 
 /** One entry at one key of the viewed document. Discriminated on `kind`. */
@@ -469,7 +477,7 @@ export interface DocumentDiffMap {
    * keyed like {@link lines}, in the VIEWED document's path space.
    *
    * 🔴 **An annotation, not an entry, and not a ninth kind.** It is filed even
-   * where {@link lines} has nothing: a REVERSING note nets in `invoicedByPath`,
+   * where {@link lines} has nothing: a REVERSING note nets in the billing fold,
    * which is exactly what clears the `quantity` entry, and the operator still
    * needs to see which note did it. A NON-reversing note is money given back,
    * not a statement that units were unbilled (`CreditNoteDocLineItem.reverses_billing`),
@@ -507,8 +515,8 @@ export interface DocumentCredit {
   /**
    * Whether the credited row bills an ORDER line at all. `false` for a row in an
    * invoice-authored subtree ({@link invoiceAuthoredSubtrees}) — a group the
-   * invoice added, or kept after the order deleted it — which `invoicedByPath`
-   * never counts, so netting has nothing to apply to and "not netted" says
+   * invoice added, or kept after the order deleted it — which the billing fold
+   * never counts against an order line, so netting has nothing to apply to and "not netted" says
    * nothing. `null` when the order was not passed and the question is open.
    */
   bills_order_line: boolean | null;
@@ -540,11 +548,6 @@ export interface DocumentDiffCreditNote extends AccountedCreditNote {
 
 /** A lifecycle mismatch no per-line comparison can show. */
 export type DocumentStatusIssue = "live_invoice_on_canceled_order";
-
-/** What the diff reads of an `out-of-service` record. */
-export type DocumentDiffOutOfService = Pick<OutOfService, "uid" | "reason" | "status" | "quantity" | "query_by_sources"> & {
-  breakdown: Pick<OutOfService["breakdown"], "returned_to_service">;
-};
 
 /** Documents the caller holds. Any may be absent or partial. */
 export interface DocumentDiffSources {
@@ -663,14 +666,6 @@ interface ScopedLines {
   claims: Map<string, string>;
 }
 
-function scopeOrder(order: Order): ScopedLines {
-  const byKey = new Map<string, LineItem>();
-  for (const it of order.items as readonly OrderDocItemType[]) {
-    if (isDividerItemType(it.type)) continue;
-    byKey.set(key(it.path), it as unknown as LineItem);
-  }
-  return { byKey, anchors: [], claims: new Map() };
-}
 
 function scopeFulfillment(fulfillment: Fulfillment): ScopedLines {
   const byKey = new Map<string, LineItem>();
@@ -681,31 +676,6 @@ function scopeFulfillment(fulfillment: Fulfillment): ScopedLines {
   return { byKey, anchors: collectSubstitutionAnchors(fulfillment.items as readonly FulfillmentItemType[]), claims: new Map() };
 }
 
-function scopeInvoice(invoice: Invoice, orderUid: string): ScopedLines {
-  const byKey = new Map<string, LineItem>();
-  const rel: MaybeSubstitution[] = [];
-  // A date-extension section bills days on lines the order has; its money is
-  // the `quantity` entry's (through `invoicedByPath`), so its lines are no line
-  // comparison's subject.
-  const extensionTargets = extensionSectionTargets(invoice.items as unknown as InvoiceItem[], orderUid);
-  for (const it of invoice.items as readonly InvoiceDocItemType[]) {
-    if (it.path[0] !== orderUid || isDividerItemType(it.type)) continue;
-    if (isInExtensionSection(it.path, orderUid, extensionTargets)) continue;
-    // A lost/damaged billing line is no presence row: it bills a RECORD, not an
-    // order line, and its record's `quantity` entry is its answer (decision 9).
-    // Keyed on the link (`billsOutOfService`), never on the `replacement` type.
-    if (billsOutOfService(it as InvoiceItem)) continue;
-    const relPath = it.path.slice(1);
-    byKey.set(key(relPath), it as unknown as LineItem);
-    const line = it as InvoiceItem;
-    rel.push({ path: relPath, substituted_for: line.substituted_for });
-  }
-  const claims = new Map<string, string>();
-  for (const [row, x] of orderLineClaims(invoice.items as unknown as InvoiceItem[], orderUid)) {
-    if (byKey.has(row)) claims.set(row, key(x));
-  }
-  return { byKey, anchors: collectSubstitutionAnchors(rel), claims };
-}
 
 /** The order uids an invoice carries a scope for. */
 function invoiceScopes(invoice: Invoice): string[] {
@@ -868,28 +838,6 @@ function push<K>(map: Map<K, DocumentDiffEntry[]>, k: K, entry: DocumentDiffEntr
 }
 
 /**
- * The invoice coverage of one order scope: what every aligned invoice, summed,
- * bills at each order-relative line key, and which invoices were checked.
- */
-interface InvoiceCoverage {
-  invoiced: InvoicedByPath;
-  invoices: DocumentRef[];
-  /**
-   * The invoice DOCUMENTS the sum was taken over — the aligned, non-void ones.
-   *
-   * ⚠️ Not the same as {@link invoices}, which is refs for display: a
-   * `DocumentRef` is `{kind, uid, number, version}` and carries no `crms_id`, so
-   * only this half can answer whether the over-billing offer refuses the order.
-   */
-  alignedInvoices: AccountedInvoice[];
-}
-
-/** Does some aligned invoice bill this order-relative line, directly or as a substitute? */
-function covers(coverage: InvoiceCoverage, rel: string): boolean {
-  return coverage.invoiced.byPath.has(rel);
-}
-
-/**
  * The document-level fields to compare between two document kinds, read off the
  * shared-field classification rather than listed here (G13).
  *
@@ -954,11 +902,6 @@ function pickSharedKeys(value: unknown, field: SharedField): unknown {
   // The document's own key order, so the reported value reads as stored.
   const shared = new Set(field.keys);
   return Object.fromEntries(Object.entries(value).filter(([k]) => shared.has(k)));
-}
-
-/** A line's `exchanged_for` is non-empty: it is an exchange unit, shown but never owed (see {@link computeDocumentDiffs}). */
-function isExchangeUnit(item: LineItem | undefined): boolean {
-  return item !== undefined && exchangedForOfLine(item).length > 0;
 }
 
 /**
@@ -1179,8 +1122,215 @@ function compareScope(
   }
 }
 
+/** What a view kind IS: the side its documents sit on and the role it plays (ruling 33). */
+const VIEW_ROLES: Readonly<Record<DocumentViewKind, { side: Side; role: "initiator" | "custody" | "billing" }>> = {
+  order: { side: "receivable", role: "initiator" },
+  fulfillment: { side: "receivable", role: "custody" },
+  invoice: { side: "receivable", role: "billing" },
+  purchase: { side: "payable", role: "initiator" },
+  bill: { side: "payable", role: "billing" },
+};
+
+type DiffInitiator = Order | Purchase;
+type DiffBilling = Invoice | PurchaseBill;
+
+/**
+ * **Everything that differs between the sides in the diff** — data, never an
+ * `if side` (ruling 84), on the pattern of `BILLING_FOLD`. Each entry reads the
+ * sources a caller passed for one side; the comparison, the account and the
+ * placement below are one pipeline over them.
+ */
+interface DiffSideData {
+  /** The document kind of each role, for a {@link DocumentRef}. A side with no custody document passes none. */
+  kinds: { initiator: DocumentKind; custody: DocumentKind; billing: DocumentKind; credit: DocumentKind };
+  initiators(sources: DocumentDiffSources): readonly DiffInitiator[];
+  /** The custody documents (a fulfillment's uid IS its order's). */
+  custodyDocs(sources: DocumentDiffSources): readonly Fulfillment[];
+  /** Every billing document passed, live or not. */
+  billing(sources: DocumentDiffSources): readonly DiffBilling[];
+  /** The credit documents on one initiator. */
+  credits(sources: DocumentDiffSources, initiatorUid: string): readonly unknown[];
+  /** The initiators a billing document carries a scope for. */
+  scopesOf(doc: DiffBilling): string[];
+  /** The custody input to the account, by initiator-relative key; `null` when not passed. */
+  custodyInput(initiator: DiffInitiator, custodyDoc: Fulfillment | undefined, sources: DocumentDiffSources): ReadonlyMap<string, CustodyRow> | null;
+  /** Lost/damaged records, pre-placed; empty when not passed. */
+  outOfServiceInput(initiator: DiffInitiator, custodyDoc: Fulfillment | undefined, sources: DocumentDiffSources): OutOfServiceInput[];
+}
+
+const DIFF_SIDES: Readonly<Record<Side, DiffSideData>> = {
+  receivable: {
+    kinds: { initiator: "order", custody: "fulfillment", billing: "invoice", credit: "credit_note" },
+    initiators: (s) => s.orders ?? [],
+    custodyDocs: (s) => s.fulfillments ?? [],
+    billing: (s) => s.invoices ?? [],
+    credits: (s) => s.creditNotes ?? [],
+    scopesOf: (doc) => invoiceScopes(doc as Invoice),
+    custodyInput: (_initiator, custodyDoc) => custodyDoc === undefined ? null : fulfillmentCustody(custodyDoc),
+    outOfServiceInput: (initiator, custodyDoc, s) =>
+      s.outOfService === undefined ? [] : orderOutOfServiceInputs(initiator as Order, custodyDoc, s.outOfService, s.invoices ?? []),
+  },
+  payable: {
+    kinds: { initiator: "purchase", custody: "fulfillment", billing: "bill", credit: "purchase_credit" },
+    initiators: (s) => s.purchases ?? [],
+    // No stored receipt is compared yet: AP custody is the movement journal's (`purchaseCustody`).
+    custodyDocs: () => [],
+    billing: (s) => s.bills ?? [],
+    credits: (s, uid) => (s.purchaseCredits ?? []).filter((c) => purchaseCreditPurchaseUid(c) === uid),
+    scopesOf: (doc) => deriveQueryByPurchases((doc as PurchaseBill).items),
+    custodyInput: (initiator, _custodyDoc, s) => purchaseCustody(initiator as Purchase, s.purchaseCustody?.get(initiator.uid)),
+    // Payable lost/damaged records are not compared (none is passed).
+    outOfServiceInput: () => [],
+  },
+};
+
+/** An initiator's lines, divider rows left out, by initiator-relative key. */
+function scopeInitiator(items: readonly { type: string; path: readonly string[] }[]): ScopedLines {
+  const byKey = new Map<string, LineItem>();
+  for (const it of items) {
+    if (isDividerItemType(it.type as OrderDocItemType["type"])) continue;
+    byKey.set(key(it.path), it as unknown as LineItem);
+  }
+  return { byKey, anchors: [], claims: new Map() };
+}
+
+/**
+ * One billing document's rows under one initiator scope, by initiator-relative
+ * key — the same rules on both sides: an extension section bills days on lines
+ * the initiator has and is the `quantity` entry's, not a line comparison's; a
+ * row billing a RECORD no initiator line carries is the record's (decision 9); a moved row's claim is
+ * read through the side's move pointer.
+ */
+function scopeBilling(side: Side, doc: DiffBilling, initiator: DiffInitiator): ScopedLines {
+  const initiatorUid = initiator.uid;
+  const initiatorKeys = new Set((initiator.items as readonly { path: readonly string[] }[]).map((it) => key(it.path)));
+  const items = doc.items as unknown as InvoiceItem[];
+  const byKey = new Map<string, LineItem>();
+  const rel: MaybeSubstitution[] = [];
+  const extensionTargets = extensionSectionTargets(items, initiatorUid);
+  for (const it of items) {
+    if (it.path[0] !== initiatorUid || isDividerItemType(it.type)) continue;
+    if (isInExtensionSection(it.path, initiatorUid, extensionTargets)) continue;
+    const relPath = it.path.slice(1);
+    // A row billing a RECORD that no initiator line carries (an invoice's L&D
+    // line) is the record's entry's, not a presence row. A payable line naming
+    // records IS its purchase line (W4R), and is compared as one. Keyed on the
+    // link (`billsOutOfService`), never on the `replacement` type.
+    if (billsOutOfService(it) && !initiatorKeys.has(key(relPath))) continue;
+    byKey.set(key(relPath), it as unknown as LineItem);
+    if ("substituted_for" in it) rel.push({ path: relPath, substituted_for: it.substituted_for });
+  }
+  const claims = new Map<string, string>();
+  for (const [row, x] of orderLineClaims(items, initiatorUid, BILLING_FOLD[side].pointerKey)) {
+    if (byKey.has(row)) claims.set(row, key(x));
+  }
+  return { byKey, anchors: collectSubstitutionAnchors(rel), claims };
+}
+
+/** The destination legs a billing document's scope authored itself (core#124), on both sides. */
+function authoredLegs(side: Side, doc: DiffBilling, initiator: DiffInitiator): Set<string> {
+  const scopeType = BILLING_FOLD[side].scopeType;
+  const scoped = (doc.items as unknown as InvoiceItem[]).filter((it) => it.path[0] === initiator.uid && it.type !== scopeType);
+  const roots = invoiceAuthoredSubtrees(scoped, initiator.items as unknown as LineItem[], initiator.uid);
+  const types = new Map(scoped.map((it) => [key(it.path.slice(1)), it.type]));
+  return new Set(roots.filter((r) => r.length === 1 && types.get(key(r)) === "destination").map((r) => r[0]));
+}
+
+/** One initiator's documents, its fold and its account — built once per initiator per call. */
+interface InitiatorScope {
+  initiator: DiffInitiator;
+  scoped: ScopedLines;
+  custodyDoc: Fulfillment | undefined;
+  /** Every billing document scoping it, live or not. */
+  billing: DiffBilling[];
+  account: InitiatorAccount;
+  /** The fold: what each initiator-relative path is billed by. */
+  fold: BilledByPath;
+  /** Refs of the compared (live, aligned) billing documents, in fold order. */
+  compared: DocumentRef[];
+}
+
+/** What a `quantity` entry is rendered from: a line's account, a custody-only row, or a lost/damaged record. */
+type QuantityRow =
+  | { of: "line"; line: LineAccount }
+  | { of: "custody_only"; row: CustodyOnlyAccount }
+  | { of: "out_of_service"; record: OutOfServiceInput };
+
+/**
+ * **Every `quantity` entry, from the account alone** (F9, ruling 92): the one
+ * place one is built (pinned by `tests/billing-fold-coverage.test.ts`). A line's
+ * is emitted iff the account says its documents disagree; a custody-only row's
+ * (ruling 35's exception) and a lost/damaged record's (decision 9) are what the
+ * account reports for them. Every figure is the account's; nothing is
+ * re-derived here, on either side.
+ */
+function entryOf(side: Side, scope: InitiatorScope, row: QuantityRow): DocumentQuantityEntry {
+  const entry: DocumentQuantityEntry = {
+    kind: "quantity",
+    invoices: scope.compared,
+    ordered: null,
+    fulfilled: null,
+    invoiced: 0,
+    quantity_cents: null,
+    extension_cents: null,
+    fulfilled_quantity_cents: null,
+    crms_blocked: scope.account.crms_blocked,
+    uid_out_of_service: null,
+    credit_sources: [],
+  };
+  switch (row.of) {
+    case "line": {
+      const { line } = row;
+      entry.ordered = line.ordered;
+      entry.fulfilled = line.custody?.quantity ?? null;
+      entry.invoiced = line.billed.quantity;
+      entry.quantity_cents = line.quantity_cents;
+      entry.extension_cents = line.extension.amount_cents;
+      entry.fulfilled_quantity_cents = line.custody?.quantity_cents ?? null;
+      entry.credit_sources = creditRefs(side, scope, line.credit_sources);
+      if (line.kind === "stated") {
+        entry.billed_cents = line.billed.amount_cents;
+        entry.expected_cents = line.expected_cents ?? 0;
+      }
+      return entry;
+    }
+    case "custody_only":
+      entry.fulfilled = row.row.custody;
+      entry.invoiced = row.row.billed;
+      return entry;
+    case "out_of_service":
+      entry.fulfilled = row.record.fulfilled;
+      entry.invoiced = row.record.invoiced;
+      entry.uid_out_of_service = row.record.uid;
+      return entry;
+  }
+}
+
+function creditRefs(side: Side, scope: InitiatorScope, uids: readonly string[]): DocumentRef[] {
+  return uids.map((uid) => {
+    const d = scope.account.documents.get(uid);
+    return { kind: DIFF_SIDES[side].kinds.credit, uid, number: d?.number ?? 0, version: d?.version ?? 0 };
+  });
+}
+
 /**
  * Every difference between the viewed document and the other documents passed in.
+ *
+ * **One pipeline for both sides** (ruling 33): the view's side and role come
+ * from {@link VIEW_ROLES}, each side's sources from {@link DIFF_SIDES}, and
+ * nothing below branches on the side. Per initiator, the account
+ * (`accountInitiator` over `billedByPath`) is built once, and every `quantity`
+ * entry is rendered from it (F9): emitted iff the account says the documents
+ * disagree, and PLACED per view —
+ *
+ * - the initiator's view: at each line;
+ * - the custody view: at each row it carries (a fulfillable line, or a row only
+ *   it carries);
+ * - a billing view: at each row the document bills, plus each initiator line it
+ *   leaves out that no sibling bills (ruling 91's "not billed here").
+ *
+ * Presence, legs, substitutions and moves are {@link compareScope}'s, and the
+ * field comparers are unchanged.
  *
  * @param sources - The documents the caller holds, the viewed one included
  * @param viewing - Which of them is being viewed
@@ -1197,291 +1347,168 @@ export function computeDocumentDiffs(
     lines: new Map(), pairs: new Map(), unaligned: [], status: [], doc: [], unplaced_out_of_service: [],
     credits: new Map(), unkeyed_credit_notes: [],
   };
-  if (viewing.kind === "purchase" || viewing.kind === "bill") {
-    payableDiffs(out, sources, { kind: viewing.kind, uid: viewing.uid }, context);
-    return out;
-  }
-  const creditNotes = sources.creditNotes ?? [];
-  const orders = sources.orders ?? [];
-  const fulfillments = sources.fulfillments ?? [];
-  // A void invoice bills nothing: dropped before any comparison (see the module doc).
-  const invoices = (sources.invoices ?? []).filter((i) => i.status !== "void");
-  const isCanceled = (order: Order | undefined) => order?.status === "canceled";
-  const orderByUid = new Map(orders.map((o) => [o.uid, o]));
-  const fulfillmentByUid = new Map(fulfillments.map((f) => [f.uid, f]));
+  const { side, role } = VIEW_ROLES[viewing.kind];
+  const data = DIFF_SIDES[side];
+  const kinds = data.kinds;
+  const initiatorByUid = new Map(data.initiators(sources).map((d) => [d.uid, d]));
+  const custodyByUid = new Map(data.custodyDocs(sources).map((d) => [d.uid, d]));
+  const allBilling = data.billing(sources);
+  const isLive = (doc: DiffBilling) => BILLING_FOLD[side].billingIsLive(doc as never);
+  const isCanceled = (initiator: DiffInitiator) => initiator.status === "canceled";
 
-  /** Is this invoice's scope for `orderUid` comparable at all? Needs the order. */
-  const aligned = (invoice: Invoice, orderUid: string): boolean => {
-    const order = orderByUid.get(orderUid);
-    if (order === undefined) return false;
-    const scoped = (invoice.items as readonly InvoiceDocItemType[]).filter((it) => it.path[0] === orderUid);
-    return invoiceScopeDividersMatch(scoped as unknown as InvoiceItem[], order.items as unknown as LineItem[], orderUid);
-  };
-
-  /** The destination legs an invoice's scope for `orderUid` authored itself (core#124). */
-  const invoiceLegsOf = (invoice: Invoice, orderUid: string): Set<string> => {
-    const order = orderByUid.get(orderUid);
-    if (order === undefined) return new Set();
-    const scoped = (invoice.items as readonly InvoiceDocItemType[]).filter((it) => it.path[0] === orderUid);
-    const roots = invoiceAuthoredSubtrees(scoped as unknown as InvoiceItem[], order.items as unknown as LineItem[], orderUid);
-    const types = new Map(scoped.map((it) => [key(it.path.slice(1)), it.type]));
-    return new Set(roots.filter((r) => r.length === 1 && types.get(key(r)) === "destination").map((r) => r[0]));
-  };
-
-  /** Every aligned invoice passed for `orderUid`, with what they bill summed per line. */
-  const coverageOf = (orderUid: string): InvoiceCoverage & { alignedInvoices: Invoice[] } => {
-    const refs: DocumentRef[] = [];
-    const alignedInvoices: Invoice[] = [];
-    for (const invoice of invoices) {
-      if (!invoiceScopes(invoice).includes(orderUid) || !aligned(invoice, orderUid)) continue;
-      alignedInvoices.push(invoice);
-      refs.push(refOf("invoice", invoice));
-    }
-    const invoiced = invoicedByPath(
-      orderUid,
-      (orderByUid.get(orderUid)?.items ?? []) as unknown as LineItem[],
-      alignedInvoices as unknown as AccountedInvoice[],
-      creditNotes,
+  const scopes = new Map<string, InitiatorScope>();
+  /** The initiator's account, built once. */
+  const scopeOf = (uid: string): InitiatorScope | undefined => {
+    const cached = scopes.get(uid);
+    if (cached) return cached;
+    const initiator = initiatorByUid.get(uid);
+    if (initiator === undefined) return undefined;
+    const custodyDoc = custodyByUid.get(uid);
+    const billing = allBilling.filter((b) => data.scopesOf(b).includes(uid));
+    const fold = billedByPath(
+      side,
+      { uid, items: initiator.items as unknown as LineItem[] },
+      billing as never[],
+      data.credits(sources, uid) as never[],
     );
-    return { invoiced, invoices: refs, alignedInvoices };
+    const account = accountInitiator(
+      side,
+      initiator as unknown as AccountedInitiator,
+      fold,
+      data.custodyInput(initiator, custodyDoc, sources),
+      data.outOfServiceInput(initiator, custodyDoc, sources),
+      { formulas: context.formulas, holidays: context.holidays },
+    );
+    const byUid = new Map(billing.map((b) => [b.uid, b]));
+    const compared = fold.compared.map((u) => refOf(kinds.billing, byUid.get(u)!));
+    const scope: InitiatorScope = { initiator, scoped: scopeInitiator(initiator.items), custodyDoc, billing, account, fold, compared };
+    scopes.set(uid, scope);
+    return scope;
   };
 
   const hasQuantityEntry = (viewedKey: string, uidOutOfService: string | null) =>
     out.lines.get(viewedKey)?.some((e) => e.kind === "quantity" && e.uid_out_of_service === uidOutOfService) ?? false;
-
-  /**
-   * One `quantity` entry at `viewedKey` for the order-relative line `rel`, when
-   * the three documents disagree about it (see {@link DocumentQuantityEntry}).
-   *
-   * ⚠️ **An exchange unit (a line carrying `exchanged_for`) is SHOWN, never OWED**
-   * (decision 8): it goes to the customer in place of a lost, damaged or dirty
-   * one, bills at $0 unless an operator prices it, and must not read as
-   * uninvoiced. Its presence and its fields are still compared.
-   */
-  const quantityEntry = (orderUid: string, coverage: InvoiceCoverage, rel: string, viewedKey: string) => {
-    if (coverage.invoices.length === 0) return;
-    if (hasQuantityEntry(viewedKey, null)) return;
-    const order = orderByUid.get(orderUid);
-    const orderLine = order === undefined ? undefined : scopeOrder(order).byKey.get(rel);
-    const fulfillment = fulfillmentByUid.get(orderUid);
-    const scoped = fulfillment === undefined ? undefined : scopeFulfillment(fulfillment);
-    let fulfilledLine = scoped?.byKey.get(rel);
-    if (isExchangeUnit(orderLine) || isExchangeUnit(fulfilledLine)) return;
-    // A substituted row's units moved between products; the `substituted` entry
-    // at that line is its answer, and a quantity here would double-report it.
-    if (scoped?.anchors.some((a) => key(a.path) === rel || key(a.substitutedFor) === rel)) fulfilledLine = undefined;
-    const at = coverage.invoiced.byPath.get(rel);
-    const invoiced = at?.quantity ?? 0;
-    const fulfilled = fulfilledLine === undefined ? null : fulfilledLine.quantity ?? 0;
-    const crms_blocked = crmsAuthoredInvoices(coverage.alignedInvoices).length > 0;
-
-    if (orderLine === undefined) {
-      // A row only the fulfillment carries (a picker add, a kept row).
-      if (fulfilled === null || fulfilled === invoiced) return;
-      push(out.lines, viewedKey, {
-        kind: "quantity", invoices: coverage.invoices, ordered: null, fulfilled, invoiced,
-        quantity_cents: null, extension_cents: null, fulfilled_quantity_cents: null,
-        crms_blocked, uid_out_of_service: null,
-      });
-      return;
-    }
-    const account = accountLine(
-      orderLine,
-      at,
-      orderLineWindow(order!.destinations ?? [], orderLine.path ?? []),
-      { formulas: context.formulas, holidays: context.holidays },
-      fulfilled ?? undefined,
-    );
-    const fulfilledDisagrees = fulfilled !== null && fulfilled !== account.ordered && fulfilled !== invoiced;
-    if (account.quantity === 0 && account.extension_cents === 0 && !fulfilledDisagrees) return;
-    push(out.lines, viewedKey, {
-      kind: "quantity",
-      invoices: coverage.invoices,
-      ordered: account.ordered,
-      fulfilled,
-      invoiced,
-      quantity_cents: account.quantity_cents,
-      extension_cents: account.extension_cents,
-      fulfilled_quantity_cents: account.fulfilled_quantity_cents ?? null,
-      // The builder's own condition, so the copy and the offer cannot refuse
-      // differently. `alignedInvoices` is what the sum was taken over.
-      crms_blocked,
-      uid_out_of_service: null,
-    });
+  const fileEntry = (viewedKey: string, entry: DocumentQuantityEntry) => {
+    if (!hasQuantityEntry(viewedKey, entry.uid_out_of_service)) push(out.lines, viewedKey, entry);
   };
 
-  /**
-   * Lost/damaged records for `orderUid`, each as a `quantity` entry at the row
-   * that owns its booking (decision 9).
-   *
-   * - `fulfilled` is the record's billable units: `quantity −
-   *   returned_to_service`, or 0 once the record is canceled. ⚠️ Deliberately
-   *   NOT net of `returned_to_supplier` (api-cloudrun#1360, D6): a rented unit
-   *   lost at the customer and settled to the supplier's account is still
-   *   billable to the customer, so a settle must not lower this count;
-   * - `invoiced` is what non-void invoices' `replacement` lines bill it
-   *   (`billedOutOfService`, the sum the api's over-bill advisory reads);
-   * - `ordered` does not apply.
-   *
-   * The row is found through {@link bookingIdsByPath}, the enumeration the
-   * order-edit keep uses, over the order first and then the fulfillment (a
-   * kept row's booking is on no order line). A record no row books goes in
-   * `unplaced_out_of_service`.
-   *
-   * @param keyOf - the viewed document's key for an order-relative row path
-   */
-  const outOfServiceEntries = (orderUid: string, coverage: InvoiceCoverage, keyOf: (rel: string) => string) => {
-    if (sources.outOfService === undefined || coverage.invoices.length === 0) return;
-    const orderKey = `orders:${orderUid}`;
-    const records = sources.outOfService.filter((r) =>
-      (BILLABLE_OOS_REASONS as readonly string[]).includes(r.reason) && r.query_by_sources.includes(orderKey)
-    );
-    if (records.length === 0) return;
-    const rowByBooking = new Map<string, string>();
-    const order = orderByUid.get(orderUid);
-    const fulfillment = fulfillmentByUid.get(orderUid);
-    for (const doc of [order, fulfillment]) {
-      if (doc === undefined) continue;
-      for (const { path, bookingId } of bookingIdsByPath(doc as unknown as Order)) {
-        if (!rowByBooking.has(bookingId)) rowByBooking.set(bookingId, key(path));
-      }
-    }
-    const invoicedByRecord = billedOutOfService(invoices as unknown as ReplacementBillingInvoice[]);
-    const crms_blocked = crmsAuthoredInvoices(coverage.alignedInvoices).length > 0;
-    for (const record of records) {
-      // ⚠️ Deliberately NOT every terminal bucket. A unit settled to its
-      // supplier (`returned_to_supplier`) was still lost or damaged at the
-      // customer, so it stays billable to them; only a unit back in service
-      // stops being owed (api-cloudrun#1360, D6).
-      const fulfilled = record.status === "canceled" ? 0 : record.quantity - record.breakdown.returned_to_service;
-      const invoiced = invoicedByRecord.get(record.uid) ?? 0;
-      if (fulfilled === invoiced) continue;
-      const entry: DocumentQuantityEntry = {
-        kind: "quantity", invoices: coverage.invoices, ordered: null, fulfilled, invoiced,
-        quantity_cents: null, extension_cents: null, fulfilled_quantity_cents: null,
-        crms_blocked, uid_out_of_service: record.uid,
-      };
-      const bookingId = record.query_by_sources
-        .filter((s) => s.startsWith("bookings:"))
-        .map((s) => s.slice("bookings:".length))
-        .find((id) => parseBookingId(id)?.orderUid === orderUid);
-      const rel = bookingId === undefined ? undefined : rowByBooking.get(bookingId);
-      if (rel === undefined) {
+  /** The entry for the initiator-relative key `rel`, if its documents disagree: a line's, or a custody-only row's. */
+  const entryAt = (scope: InitiatorScope, rel: string): DocumentQuantityEntry | null => {
+    const line = scope.account.lines.find((l) => key(l.path) === rel);
+    if (line !== undefined) return line.disagrees.size > 0 ? entryOf(side, scope, { of: "line", line }) : null;
+    const row = scope.account.custody_only.find((r) => key(r.path) === rel);
+    return row === undefined ? null : entryOf(side, scope, { of: "custody_only", row });
+  };
+
+  /** Lost/damaged records the account reports, at the row that books each (or unplaced). */
+  const fileOutOfService = (scope: InitiatorScope, keyOf: (rel: string) => string) => {
+    for (const record of scope.account.out_of_service) {
+      const entry = entryOf(side, scope, { of: "out_of_service", record });
+      if (record.rel === null) {
         if (!out.unplaced_out_of_service.some((e) => e.uid_out_of_service === record.uid)) out.unplaced_out_of_service.push(entry);
         continue;
       }
-      if (!hasQuantityEntry(keyOf(rel), record.uid)) push(out.lines, keyOf(rel), entry);
+      fileEntry(keyOf(record.rel), entry);
     }
   };
 
-  /** An order- or fulfillment-shaped viewed side against every invoice on its order. */
-  const againstInvoices = (viewed: DiffSide, orderUid: string) => {
-    if (isCanceled(orderByUid.get(orderUid))) {
-      for (const invoice of invoices) {
-        if (invoiceScopes(invoice).includes(orderUid)) {
-          out.status.push({ issue: "live_invoice_on_canceled_order", source: refOf("invoice", invoice) });
-        }
-      }
+  const billingSide = (doc: DiffBilling, scope: InitiatorScope): DiffSide => ({ kind: kinds.billing, doc, lines: scopeBilling(side, doc, scope.initiator) });
+  const initiatorSide = (scope: InitiatorScope): DiffSide => ({ kind: kinds.initiator, doc: scope.initiator, lines: scope.scoped });
+  const custodySide = (doc: Fulfillment): DiffSide => ({ kind: kinds.custody, doc, lines: scopeFulfillment(doc) });
+  const named = (scope: InitiatorScope) => (rel: string) => scope.fold.byPath.has(rel);
+
+  /** An initiator- or custody-shaped viewed side against every billing document on its initiator. */
+  const againstBilling = (viewed: DiffSide, scope: InitiatorScope) => {
+    const live = scope.billing.filter(isLive);
+    if (isCanceled(scope.initiator)) {
+      for (const doc of live) out.status.push({ issue: "live_invoice_on_canceled_order", source: refOf(kinds.billing, doc) });
       return;
     }
-    const coverage = coverageOf(orderUid);
-    for (const invoice of invoices) {
-      if (!invoiceScopes(invoice).includes(orderUid)) continue;
-      if (!coverage.alignedInvoices.includes(invoice)) {
-        out.unaligned.push({ scope: orderUid, source: refOf("invoice", invoice) });
+    for (const doc of live) {
+      if (!scope.fold.compared.includes(doc.uid)) {
+        out.unaligned.push({ scope: scope.initiator.uid, source: refOf(kinds.billing, doc) });
         continue;
       }
-      compareScope(
-        out,
-        viewed,
-        { kind: "invoice", doc: invoice, lines: scopeInvoice(invoice, orderUid) },
-        orderUid,
-        (rel) => covers(coverage, rel),
-        context,
-        () => {},
-        invoiceLegsOf(invoice, orderUid),
-      );
+      compareScope(out, viewed, billingSide(doc, scope), scope.initiator.uid, named(scope), context, () => {}, authoredLegs(side, doc, scope.initiator));
     }
-    if (coverage.alignedInvoices.length === 0) return;
     for (const [rel, item] of viewed.lines.byKey) {
-      // Against invoices a fulfillment answers for its fulfillable rows only.
-      if (viewed.kind === "fulfillment" && !isFulfillableItemType(item.type)) continue;
-      quantityEntry(orderUid, coverage, rel, rel);
+      // Against billing documents a custody document answers for its fulfillable rows only.
+      if (role === "custody" && !isFulfillableItemType(item.type)) continue;
+      const entry = entryAt(scope, rel);
+      if (entry !== null) fileEntry(rel, entry);
     }
-    outOfServiceEntries(orderUid, coverage, (rel) => rel);
+    fileOutOfService(scope, (rel) => rel);
   };
 
-  fileCredits(out, creditKeys(creditNotes, sources.invoices ?? [], orders), viewing, sources.invoices ?? []);
+  fileCredits(out, creditKeys(sources.creditNotes ?? [], sources.invoices ?? [], sources.orders ?? []), viewing, sources.invoices ?? []);
 
-  if (viewing.kind === "order") {
-    const order = orderByUid.get(viewing.uid);
-    if (order === undefined) return out;
-    const viewed: DiffSide = { kind: "order", doc: order, lines: scopeOrder(order) };
-    const fulfillment = fulfillmentByUid.get(order.uid);
-    if (fulfillment !== undefined) {
-      compareScope(out, viewed, { kind: "fulfillment", doc: fulfillment, lines: scopeFulfillment(fulfillment) }, order.uid, (rel) => covers(coverageOf(order.uid), rel), context, () => {});
+  if (role === "initiator") {
+    const scope = scopeOf(viewing.uid);
+    if (scope === undefined) return out;
+    const viewed = initiatorSide(scope);
+    if (scope.custodyDoc !== undefined) {
+      compareScope(out, viewed, custodySide(scope.custodyDoc), viewing.uid, named(scope), context, () => {});
     }
-    againstInvoices(viewed, order.uid);
+    againstBilling(viewed, scope);
     return out;
   }
 
-  if (viewing.kind === "fulfillment") {
-    const fulfillment = fulfillmentByUid.get(viewing.uid);
-    if (fulfillment === undefined) return out;
-    const viewed: DiffSide = { kind: "fulfillment", doc: fulfillment, lines: scopeFulfillment(fulfillment) };
-    const order = orderByUid.get(fulfillment.uid);
-    if (order !== undefined) {
-      compareScope(out, viewed, { kind: "order", doc: order, lines: scopeOrder(order) }, order.uid, (rel) => covers(coverageOf(order.uid), rel), context, () => {});
-    }
-    againstInvoices(viewed, fulfillment.uid);
+  if (role === "custody") {
+    const custodyDoc = custodyByUid.get(viewing.uid);
+    if (custodyDoc === undefined) return out;
+    const viewed = custodySide(custodyDoc);
+    const scope = scopeOf(custodyDoc.uid);
+    if (scope === undefined) return out;
+    compareScope(out, viewed, initiatorSide(scope), scope.initiator.uid, named(scope), context, () => {});
+    againstBilling(viewed, scope);
     return out;
   }
 
-  const invoice = invoices.find((i) => i.uid === viewing.uid);
-  if (invoice === undefined) return out;
-  for (const orderUid of invoiceScopes(invoice)) {
-    const viewed: DiffSide = { kind: "invoice", doc: invoice, lines: scopeInvoice(invoice, orderUid) };
-    const order = orderByUid.get(orderUid);
-    // Without the order there is no path space to compare in — not even
-    // against the fulfillment, which is joined THROUGH the order's paths. So
-    // nothing is said, rather than calling the fulfillment unaligned.
-    if (order === undefined) continue;
-    const fulfillment = fulfillmentByUid.get(orderUid);
-    if (isCanceled(order)) {
-      out.status.push({ issue: "live_invoice_on_canceled_order", source: refOf("order", order) });
+  // A dead billing document bills nothing and is not compared: its view is empty (the module doc).
+  const doc = allBilling.find((d) => d.uid === viewing.uid);
+  if (doc === undefined || !isLive(doc)) return out;
+  const scopeUids = data.scopesOf(doc);
+  // A row under no initiator scope is the document's own.
+  const firstInitiator = [...initiatorByUid.values()][0];
+  for (const it of doc.items as unknown as InvoiceItem[]) {
+    if (isDividerItemType(it.type) || scopeUids.includes(it.path[0])) continue;
+    if (firstInitiator !== undefined) push(out.lines, key(it.path), { kind: "not_on_source", source: refOf(kinds.initiator, firstInitiator), fields: [] });
+  }
+  for (const uid of scopeUids) {
+    const scope = scopeOf(uid);
+    // Without the initiator there is no path space to compare in — not even
+    // against the custody document, which is joined THROUGH its paths.
+    if (scope === undefined) continue;
+    if (isCanceled(scope.initiator)) {
+      out.status.push({ issue: "live_invoice_on_canceled_order", source: refOf(kinds.initiator, scope.initiator) });
       continue;
     }
-    if (!aligned(invoice, orderUid)) {
-      out.unaligned.push({ scope: orderUid, source: refOf("order", order) });
-      if (fulfillment !== undefined) out.unaligned.push({ scope: orderUid, source: refOf("fulfillment", fulfillment) });
+    if (!scope.fold.compared.includes(doc.uid)) {
+      out.unaligned.push({ scope: uid, source: refOf(kinds.initiator, scope.initiator) });
+      if (scope.custodyDoc !== undefined) out.unaligned.push({ scope: uid, source: refOf(kinds.custody, scope.custodyDoc) });
       continue;
     }
-    const coverage = coverageOf(orderUid);
-    const viewedKey = (rel: string) => (rel === "" ? orderUid : `${orderUid}/${rel}`);
-    const notInvoiced = (rel: string, k: string) => quantityEntry(orderUid, coverage, rel, k);
-    const invoiceLegs = invoiceLegsOf(invoice, orderUid);
-    compareScope(out, viewed, { kind: "order", doc: order, lines: scopeOrder(order) }, orderUid, (rel) => covers(coverage, rel), context, notInvoiced, invoiceLegs);
-    // Each row this invoice carries reports the sum for the order line it bills —
-    // its own path, or the line a substitute replaced.
-    for (const [rel, at] of coverage.invoiced.byPath) {
+    const viewed = billingSide(doc, scope);
+    const viewedKey = (rel: string) => (rel === "" ? uid : `${uid}/${rel}`);
+    /** Ruling 91: an initiator line this document leaves out and no sibling bills. */
+    const notBilledHere = (rel: string, k: string) => {
+      const entry = entryAt(scope, rel);
+      if (entry !== null) fileEntry(k, entry);
+    };
+    const legs = authoredLegs(side, doc, scope.initiator);
+    compareScope(out, viewed, initiatorSide(scope), uid, named(scope), context, notBilledHere, legs);
+    // Each row this document carries reports the sum for the initiator line it bills.
+    for (const [rel, at] of scope.fold.byPath) {
       for (const row of at.rows) {
-        if (row.invoiceUid === invoice.uid) quantityEntry(orderUid, coverage, rel, key(row.item.path));
+        if (row.documentUid !== doc.uid) continue;
+        const entry = entryAt(scope, rel);
+        if (entry !== null) fileEntry(key(row.item.path), entry);
       }
     }
-    // Invoice ↔ fulfillment goes through the order's path space, so it needs the same alignment.
-    if (fulfillment !== undefined) {
-      compareScope(
-        out,
-        viewed,
-        { kind: "fulfillment", doc: fulfillment, lines: scopeFulfillment(fulfillment) },
-        orderUid,
-        (rel) => covers(coverage, rel),
-        context,
-        notInvoiced,
-        invoiceLegs,
-      );
+    if (scope.custodyDoc !== undefined) {
+      compareScope(out, viewed, custodySide(scope.custodyDoc), uid, named(scope), context, notBilledHere, legs);
     }
-    outOfServiceEntries(orderUid, coverage, viewedKey);
+    fileOutOfService(scope, viewedKey);
   }
   return out;
 }
@@ -1561,173 +1588,7 @@ function payableLineFields(viewed: DiffSide, source: DiffSide, here: LineItem, t
   return viewingBill ? fields : fields.map((f) => ({ field: f.field, here: f.there, there: f.here }));
 }
 
-function scopePurchase(purchase: Purchase): ScopedLines {
-  const byKey = new Map<string, LineItem>();
-  for (const line of purchaseLines(purchase.items)) byKey.set(key(line.path), line as unknown as LineItem);
-  return { byKey, anchors: [], claims: new Map() };
-}
 
-function scopeBill(bill: PurchaseBill, uidPurchase: string): ScopedLines {
-  const byKey = new Map<string, LineItem>();
-  const rel: MaybeSubstitution[] = [];
-  for (const line of purchaseDocumentLines(bill.items)) {
-    if (line.path[0] !== uidPurchase) continue;
-    byKey.set(key(line.path.slice(1)), line as unknown as LineItem);
-    // A substitute (W5) is anchored in the purchase's path space, as an invoice's is in its order's.
-    if ("substituted_for" in line) rel.push({ path: line.path.slice(1), substituted_for: line.substituted_for });
-  }
-  const claims = new Map<string, string>();
-  for (const [row, x] of orderLineClaims(bill.items as unknown as InvoiceItem[], uidPurchase, "path_purchase_item")) {
-    if (byKey.has(row)) claims.set(row, key(x));
-  }
-  return { byKey, anchors: collectSubstitutionAnchors(rel), claims };
-}
-
-/**
- * A flat purchase line's units and money across every live bill, net of live
- * credits, or `null` when they agree with what was ordered.
- *
- * 🔴 **`fulfilled` (the units received) is stated and is NEVER a trigger**, unlike
- * the receivable entry: the owner bills before delivery as often as after, so a
- * difference there is routine. A short close lowers `ordered` to what came, so
- * billing past what was received then reads as billed ≠ ordered.
- *
- * Only once a live document names the line: a line nothing has billed is not a
- * difference. A live credit with no live bill left under it reads as a negative
- * `invoiced`, which is how a voided bill's stranded credit reaches the operator.
- */
-function payableQuantityEntry(
-  purchase: Purchase,
-  item: PurchaseItem,
-  bills: readonly PurchaseBill[],
-  credits: readonly PurchaseCredit[],
-  custody: ReadonlyMap<string, PurchaseLineCustody> | undefined,
-): DocumentQuantityEntry | null {
-  const k = key(item.path);
-  // A document names the line when it bills any of it, a substitute standing in for it included.
-  const names = (rows: PurchaseBill["items"]) => purchaseDocumentBilling(rows, purchase.uid, purchase.items).has(k);
-  // A credit names it when it UN-bills any of it: an unmarked line reverses nothing (ruling 84).
-  const unbills = (rows: PurchaseCredit["items"]) => purchaseCreditBilling(rows, purchase.uid, purchase.items).has(k);
-  const namingBills = bills.filter((b) => names(b.items));
-  const namingCredits = credits.filter((c) => unbills(c.items));
-  if (namingBills.length === 0 && namingCredits.length === 0) return null;
-  const net = purchaseLineBilledNet(item.path, {
-    uid_purchase: purchase.uid,
-    purchase_items: purchase.items,
-    bills: namingBills,
-    credits: namingCredits,
-  });
-  const ordered = item.quantity;
-  // What the billed units should cost: the line's stored money sliced at the net billed count (D7).
-  const expected_cents = sliceStoredMoney(payableStoredMoney(item), 0, Math.max(0, net.quantity)).net_cents;
-  if (net.quantity === ordered && net.amount_cents === expected_cents) return null;
-  return {
-    kind: "quantity",
-    invoices: namingBills.map((b) => refOf("bill", b)),
-    ordered,
-    fulfilled: item.type === "service" || item.type === "replacement" || custody === undefined
-      ? null
-      : lineCustodyAt(custody, item.path).received,
-    invoiced: net.quantity,
-    quantity_cents: null,
-    extension_cents: null,
-    fulfilled_quantity_cents: null,
-    crms_blocked: false,
-    uid_out_of_service: null,
-    billed_cents: net.amount_cents,
-    expected_cents,
-    credit_sources: namingCredits.map((c) => refOf("purchase_credit", c)),
-  };
-}
-
-/**
- * The diff from a purchase or a bill: the same comparison as the receivable side,
- * over the payable documents. A TIME line's remainder is the bill writer's
- * (`remainingTimeCounts`) and has no `quantity` entry yet; none is stored.
- */
-function payableDiffs(
-  out: DocumentDiffMap,
-  sources: DocumentDiffSources,
-  viewing: { kind: "purchase" | "bill"; uid: string },
-  context: DocumentDiffContext,
-): void {
-  const purchases = sources.purchases ?? [];
-  const bills = sources.bills ?? [];
-  const liveBills = bills.filter(purchaseBillIsLive);
-  const liveCredits = (sources.purchaseCredits ?? []).filter(purchaseCreditIsLive);
-  const scopesOf = (bill: PurchaseBill) => deriveQueryByPurchases(bill.items);
-  // The `purchase` divider is the scope itself, as an invoice's `order` divider
-  // is; the predicates below compare what sits under it.
-  const scopedRows = (bill: PurchaseBill, uid: string) =>
-    bill.items.filter((r) => r.path[0] === uid && r.type !== "purchase") as unknown as InvoiceItem[];
-  const alignedTo = (bill: PurchaseBill, purchase: Purchase) =>
-    invoiceScopeDividersMatch(scopedRows(bill, purchase.uid), purchase.items as unknown as LineItem[], purchase.uid, "path_purchase_item");
-  const legsOf = (bill: PurchaseBill, purchase: Purchase) => {
-    const roots = invoiceAuthoredSubtrees(scopedRows(bill, purchase.uid), purchase.items as unknown as LineItem[], purchase.uid);
-    const types = new Map(scopedRows(bill, purchase.uid).map((r) => [key((r.path ?? []).slice(1)), r.type]));
-    return new Set(roots.filter((r) => r.length === 1 && types.get(key(r)) === "destination").map((r) => r[0]));
-  };
-  const isFlat = (item: PurchaseItem) => purchaseItemBasis(item) === "flat";
-  const billsOf = (uidPurchase: string) => liveBills.filter((b) => scopesOf(b).includes(uidPurchase));
-  const creditsOf = (uidPurchase: string) => liveCredits.filter((c) => purchaseCreditPurchaseUid(c) === uidPurchase);
-
-  if (viewing.kind === "purchase") {
-    const purchase = purchases.find((p) => p.uid === viewing.uid);
-    if (purchase === undefined) return;
-    const viewed: DiffSide = { kind: "purchase", doc: purchase, lines: scopePurchase(purchase) };
-    for (const bill of billsOf(purchase.uid)) {
-      if (!alignedTo(bill, purchase)) {
-        out.unaligned.push({ scope: purchase.uid, source: refOf("bill", bill) });
-        continue;
-      }
-      const source: DiffSide = { kind: "bill", doc: bill, lines: scopeBill(bill, purchase.uid) };
-      compareScope(out, viewed, source, purchase.uid, () => true, context, () => {}, legsOf(bill, purchase));
-    }
-    for (const item of purchaseLines(purchase.items)) {
-      if (!isFlat(item)) continue;
-      const entry = payableQuantityEntry(
-        purchase, item, billsOf(purchase.uid), creditsOf(purchase.uid), sources.purchaseCustody?.get(purchase.uid),
-      );
-      if (entry !== null) push(out.lines, key(item.path), entry);
-    }
-    return;
-  }
-
-  // A voided bill is still viewable; it is just not summed.
-  const bill = bills.find((b) => b.uid === viewing.uid);
-  if (bill === undefined) return;
-  const scopes = new Set(scopesOf(bill));
-  for (const line of purchaseDocumentLines(bill.items)) {
-    // A line under no purchase divider is the bill's own.
-    if (!scopes.has(line.path[0])) {
-      const ref = purchases[0];
-      if (ref !== undefined) push(out.lines, key(line.path), { kind: "not_on_source", source: refOf("purchase", ref), fields: [] });
-    }
-  }
-  for (const uidPurchase of scopes) {
-    const purchase = purchases.find((p) => p.uid === uidPurchase);
-    if (purchase === undefined) continue;
-    if (!alignedTo(bill, purchase)) {
-      out.unaligned.push({ scope: uidPurchase, source: refOf("purchase", purchase) });
-      continue;
-    }
-    const viewed: DiffSide = { kind: "bill", doc: bill, lines: scopeBill(bill, uidPurchase) };
-    const source: DiffSide = { kind: "purchase", doc: purchase, lines: scopePurchase(purchase) };
-    // A purchase line this bill leaves out is no difference: bills are routinely partial.
-    compareScope(out, viewed, source, uidPurchase, () => true, context, () => {}, legsOf(bill, purchase));
-    const byKey = new Map(purchaseLines(purchase.items).map((i) => [purchaseLineKey(uidPurchase, i.path), i]));
-    for (const line of purchaseDocumentLines(bill.items)) {
-      if (line.path[0] !== uidPurchase) continue;
-      const lineKey = purchaseLineKeyOf(line);
-      const item = lineKey === null ? undefined : byKey.get(lineKey);
-      if (item === undefined || !isFlat(item)) continue;
-      const entry = payableQuantityEntry(
-        purchase, item, billsOf(uidPurchase), creditsOf(uidPurchase), sources.purchaseCustody?.get(uidPurchase),
-      );
-      if (entry !== null) push(out.lines, key(line.path), entry);
-    }
-  }
-}
 
 /** Every keyable credit, per invoice row, plus the notes that could not be keyed. */
 interface CreditKeys {

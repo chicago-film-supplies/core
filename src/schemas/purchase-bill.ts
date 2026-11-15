@@ -98,7 +98,6 @@ import {
   type DestinationExchangeType,
   DestinationPairCore,
   DestinationPairInputCore,
-  type OrderDocDestinationItemType,
   type OrderDocGroupItemType,
   PairCore,
   type PairCoreType,
@@ -110,7 +109,9 @@ import {
   TaxRef,
 } from "./order.ts";
 import { LedgerPostingCore, LineItemCore, LineTaxCore, PayableKitLedgerAccount } from "./_items.ts";
-import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
+import { DestinationSectionDividerArm, GroupDividerArm } from "./_dividers.ts";
+import { extendChecked } from "./_extend.ts";
+import type { InvoiceDocDestinationItemType } from "./invoice.ts";
 import { PriceFormulaRefSchema, RateKey, RateSnapshotSchema, TierCountSchema, type TierCountType } from "./price-formula.ts";
 import { deriveInvoiceStatus } from "./_invoice-freeze.ts";
 import {
@@ -407,7 +408,9 @@ export const PurchaseDocPurchaseItem: z.ZodType<PurchaseDocPurchaseItemType> = P
 export type PurchaseDocumentRow =
   | PurchaseDocumentItem
   | PurchaseDocPurchaseItemType
-  | OrderDocDestinationItemType
+  // The billing destination divider, `path_extension_for` included (ruling 89):
+  // a bill bills extra time as an extension section, as an invoice does.
+  | InvoiceDocDestinationItemType
   | OrderDocGroupItemType;
 
 /** A bill or credit line that bills and posts: never a kit header. */
@@ -578,7 +581,7 @@ export const PurchaseDocumentItemSchema: z.ZodType<PurchaseDocumentItem> = z.dis
 /** Zod schema for any {@link PurchaseDocumentRow}. */
 export const PurchaseDocumentRowSchema: z.ZodType<PurchaseDocumentRow> = z.discriminatedUnion("type", [
   PurchaseDocPurchaseItemInner,
-  DestinationDividerArm,
+  DestinationSectionDividerArm,
   GroupDividerArm,
   PurchaseDocumentProductItemInner,
   PurchaseDocumentServiceItemInner,
@@ -1107,8 +1110,9 @@ export const PurchaseDocumentItemInput: z.ZodType<PurchaseDocumentItemInputType>
  *   by nature, so the line stores `discount: null`.
  * - **time** — credited by COUNTS, as an AR credit note is (0b ruling 3):
  *   `quantity` units over `counts`, priced `rates × counts` like the bill line
- *   it reverses. Absent `counts`, the writer credits everything the line is
- *   billed for, net (`purchaseLineBilledCounts`). The per-unit windows this
+ *   it reverses. Absent `counts`, the writer takes the line's billed time
+ *   newest first and states its quantity-weighted mean (`creditTimeCounts`,
+ *   6e-0b2 F5). The per-unit windows this
  *   input used to take retired with the unit charge windows
  *   (one-document-model Phase 3).
  */
@@ -1382,6 +1386,12 @@ export interface PurchaseBillDividerInputType {
   uid: string;
   path: string[];
   name?: string;
+  /**
+   * On a DESTINATION divider only: the purchase-relative path of the purchase
+   * destination it extends — the section bills extra time (ruling 89,
+   * `InvoiceDocDestinationItemType.path_extension_for`).
+   */
+  path_extension_for?: string[];
 }
 
 /**
@@ -1484,6 +1494,10 @@ export const PurchaseBillDestinationInput: z.ZodType<PurchaseBillDestinationInpu
 
 const billDividerInput = (type: "purchase" | "destination" | "group") =>
   z.object({ type: z.literal(type), uid: ItemUid, path: z.array(ItemUid).min(1), name: LineItemCore.name.optional() });
+/** A destination divider input: the shape above, and the extension-section key (ruling 89). */
+const billDestinationDividerInput = extendChecked(billDividerInput("destination"), {
+  path_extension_for: z.array(ItemUid).min(1).optional(),
+});
 
 const billLineShape = (type: SharedLineType) => ({
   type: z.literal(type),
@@ -1526,7 +1540,7 @@ const billLineInput = (type: SharedLineType) => z.object(billLineShape(type)).su
 /** Zod schema for one {@link PurchaseBillRowInputType}. */
 export const PurchaseBillRowInput: z.ZodType<PurchaseBillRowInputType> = z.discriminatedUnion("type", [
   billDividerInput("purchase"),
-  billDividerInput("destination"),
+  billDestinationDividerInput,
   billDividerInput("group"),
   billLineInput("sale"),
   billLineInput("rental"),

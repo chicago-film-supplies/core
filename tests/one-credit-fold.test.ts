@@ -3,11 +3,12 @@
  * companion asserted to DISAGREE (`cfs-money`'s sweep discipline): an oracle
  * that only ever agrees with the implementation proves nothing.
  *
- * - **AR units**: {@link invoicedByPath} over random orders, invoices and
+ * - **AR units**: `billedByPath` over random orders, invoices and
  *   credit notes ≡ an independent per-path sum (billed − reversed, unfloored).
  *   Companion: the retired per-row clamp (`min(reversed, billed)`) disagrees
  *   exactly on over-credits (R2).
- * - **AP money**: a credit of a substitute root splits its own amount into
+ * - **AP money**: a credit of a substitute root splits its own amount, through
+ *   the billing fold, into
  *   stand-in and own shares that sum to it EXACTLY, and each stand-in share
  *   differs from the bill's share of the same units by at most one cent.
  *
@@ -16,11 +17,12 @@
 import { assert, assertEquals } from "@std/assert";
 import { buildOrderScopedItems, type InvoiceItem } from "../src/utils/invoices.ts";
 import type { LineItem } from "../src/utils/orders.ts";
-import { type AccountedCreditNote, type AccountedInvoice, invoicedByPath } from "../src/utils/quantityAccounting.ts";
-import { purchaseCreditBilling } from "../src/utils/purchase-documents.ts";
+import type { AccountedCreditNote, AccountedInvoice } from "../src/utils/quantityAccounting.ts";
+import { billedNetAP } from "./helpers/account.ts";
 import { lineUnitsCents, statedLine } from "../src/utils/price-formulas.ts";
 import { sliceSubstitutedFor } from "../src/utils/substitutions.ts";
 import type { PurchaseDocumentRow } from "../src/schemas/mod.ts";
+import type { PurchaseBilledDocuments } from "../src/utils/purchase-documents.ts";
 import { FIVE_DAY_WEEK, fdwCounts } from "./helpers/formulas.ts";
 
 /** Seeded LCG — deterministic, never `Math.random()`. */
@@ -28,6 +30,7 @@ function lcg(seed: number): () => number {
   let s = seed;
   return () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
 }
+import { billedAR } from "./helpers/account.ts";
 const int = (rand: () => number, n: number) => Math.floor(rand() * n);
 
 const O = "order-1";
@@ -88,7 +91,7 @@ Deno.test("one credit fold sweep: AR units ≡ billed − reversed per path, unf
         if (reversed > q) overCredited++;
       }
     }
-    const fold = invoicedByPath(O, order, invoices, notes);
+    const fold = billedAR(O, order, invoices, notes);
     for (const [k, perRow] of rows) {
       cases++;
       const oracle = perRow.reduce((t, [b, r]) => t + b - r, 0);
@@ -121,16 +124,27 @@ Deno.test("one credit fold sweep: AP — a substitute root credit's shares sum t
       type: "sale", uid: "y", path: [PU, D, "y"], quantity: n, amount_cents: amount,
       price: { counts: [], stated_cents: amount }, reverses_billing: true, ...(slice.length ? { substituted_for: slice } : {}),
     } as unknown as PurchaseDocumentRow;
-    const purchaseItems = [{ type: "sale", path: [D, "x"], quantity: Q }, { type: "sale", path: [D, "y"], quantity: Q }];
-    const folded = purchaseCreditBilling([row], PU, purchaseItems);
-    const total = [...folded.values()].reduce((t, b) => t + b.amount_cents, 0);
+    const purchaseItems = [
+      { type: "destination", uid: D, path: [D] },
+      { type: "sale", uid: "x", path: [D, "x"], quantity: Q },
+      { type: "sale", uid: "y", path: [D, "y"], quantity: Q },
+    ] as unknown as PurchaseBilledDocuments["purchase_items"];
+    // The credit alone, through the billing fold: it nets at sign −1, so each
+    // path's figure is minus what the credit un-bills there.
+    const credit = {
+      uid: "testcred000000000001", status: "issued", destinations: [],
+      items: [{ type: "purchase", uid: PU, path: [PU] }, { type: "destination", uid: D, path: [PU, D] }, row],
+    } as unknown as PurchaseBilledDocuments["credits"][number];
+    const docs: PurchaseBilledDocuments = { uid_purchase: PU, purchase_items: purchaseItems, bills: [], credits: [credit] };
+    const unbilled = (path: string[]) => -billedNetAP(path, docs).amount_cents;
+    const total = unbilled([D, "x"]) + unbilled([D, "y"]);
     assertEquals(total, amount, `draw ${draw}: the parts sum to the credit's amount exactly`);
     const e = slice[0]?.quantity ?? 0;
     if (e === 0) continue;
     cases++;
     // The bill's own share of those same units: (c, c + e] of Y's amount.
     const billShare = lineUnitsCents(statedLine(A, Q), c, c + e);
-    const diff = Math.abs((folded.get(`${D}/x`)?.amount_cents ?? 0) - billShare);
+    const diff = Math.abs(unbilled([D, "x"]) - billShare);
     worst = Math.max(worst, diff);
     if (diff > 0) off++;
   }

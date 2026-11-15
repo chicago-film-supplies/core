@@ -151,6 +151,11 @@ export interface MeterInput {
    * whose decision compares money (Q14). Required for a capped formula.
    */
   rates?: readonly MeterRate[] | null;
+  /**
+   * `false` skips the formula's minimum (an extension section's own window: its
+   * minimum was charged on the billing that window extends). Default `true`.
+   */
+  minimum?: boolean;
 }
 
 /** One rate a `cap` decision reads: `price.rates`' shape. */
@@ -499,7 +504,7 @@ export function meterUnits(
     }));
   }
 
-  const min = minimumDays(formula);
+  const min = input.minimum === false ? 0 : minimumDays(formula);
   const extras = perWindow.map(() => 0);
   if (min > 0 && perWindow.length > 0) {
     if (formula.minimum!.scope === "window") {

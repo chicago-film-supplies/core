@@ -1176,3 +1176,14 @@ Deno.test("ratesForFormula: a shared key keeps its whole history, a new key open
   ]);
   assertEquals(ratesForFormula([], FIXED, "2026-10-21T15:00:00.000Z", mint("row-f"))[0].amount_cents, 0);
 });
+
+Deno.test("meterUnits: `minimum: false` meters a window with no floor (an extension section's own window, 6e-0b2 F5)", () => {
+  // Tue 2026-11-17 to Wed 2026-11-18: two business days.
+  const windows = [{ start: "2026-11-17T08:00:00.000-06:00", end: "2026-11-18T16:00:00.000-06:00" }];
+  const floored = meterUnits(FIVE_DAY_WEEK, { windows, holidays: [] }).tiers;
+  const bare = meterUnits(FIVE_DAY_WEEK, { windows, holidays: [], minimum: false }).tiers;
+  assertEquals(floored, [{ rate_key: "week", num: 1, den: 1 }], "control: the window minimum floors to a week");
+  assertEquals(bare, [{ rate_key: "week", num: 2, den: 5 }], "no floor: two business days");
+  // Absent is the floor, so no existing caller changes.
+  assertEquals(meterUnits(FIVE_DAY_WEEK, { windows, holidays: [], minimum: true }).tiers, floored);
+});

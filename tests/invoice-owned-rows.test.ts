@@ -15,7 +15,6 @@ import type { DocDestinationType, Invoice, InvoiceDocItemType, Order } from "../
 import {
   buildOrderScopedItems,
   computeInvoiceItemPaths,
-  computeOrderInvoiceCoverage,
   type InvoiceDestinationPair,
   type InvoiceItem,
   invoiceAuthoredSubtrees,
@@ -25,10 +24,11 @@ import {
   syncOrderToInvoiceSelective,
 } from "../src/utils/invoices.ts";
 import type { LineItem } from "../src/utils/orders.ts";
-import { type AccountedInvoice, invoicedByPath, remainingForOrder } from "../src/utils/quantityAccounting.ts";
+import type { AccountedInvoice } from "../src/utils/quantityAccounting.ts";
 import { computeDocumentDiffs, type DocumentDiffMap } from "../src/utils/documentDiff.ts";
 import { interleaveStoredOnlyRows } from "../src/utils/stored-only-rows.ts";
 
+import { billedAR, coverageOf, remainderView } from "./helpers/account.ts";
 const O = "order-1";
 // Bare UUIDs, as stored dividers are.
 const D = "0b6c3a51-6c1a-4f0e-9a51-6f1f2b9d0a01";
@@ -249,18 +249,20 @@ Deno.test("🔴 accounting: an authored subtree credits NOTHING, and the remaind
     ...authoredGroup(),
     ...authoredLeg().items,
   ];
-  const billed = invoicedByPath(O, order, [accounted("a", scope)]);
+  const billed = billedAR(O, order, [accounted("a", scope)]);
   assertEquals([billed.compared, billed.unaligned], [["a"], []]);
   assertEquals([...billed.byPath.keys()].sort(), [`${D}/${G}/${LIGHT}`, `${D}/${TRIPOD}`]);
 
-  const remaining = remainingForOrder(O, order, [accounted("a", scope)], [pair(D)], { formulas: FORMULAS, holidays: [] });
+  const remaining = remainderView(O, order, [accounted("a", scope)], [pair(D)], { formulas: FORMULAS, holidays: [] });
   assertEquals(remaining.unaligned, []);
   assertEquals(remaining.lines.map((l) => [l.path.join("/"), l.quantity]), [[`${D}/${G}/${LIGHT}`, 1]]);
 
-  const coverage = computeOrderInvoiceCoverage(O, order, [accounted("a", scope)]);
+  const coverage = coverageOf(O, order, [accounted("a", scope)]);
   assertEquals(coverage.unaligned, []);
+  // A placed line at its ORDER-relative path; the row under the authored leg names
+  // no order leg, so it is counted at its INVOICE path (document_only's `skipped`).
   assertEquals(coverage.unmatched.map((u) => u.item.path!.join("/")).sort(), [
-    `${O}/${D}/${G_INV}/${STAND}`, `${O}/${D_INV}/${STAND}`,
+    `${D}/${G_INV}/${STAND}`, `${O}/${D_INV}/${STAND}`,
   ], "authored lines are extras");
 });
 
@@ -434,7 +436,7 @@ Deno.test("🔴 1b accounting: a declined leg's lines read UNBILLED and the rema
     items: [divider, ...(buildOrderScopedItems(orderItems(), O) as unknown as InvoiceItem[])],
     destinations: [scoped(pair(D))] as never,
   };
-  const { lines, unaligned } = remainingForOrder(O, order, [billed], [pair(D), pair(D2)], { formulas: FORMULAS, holidays: [] });
+  const { lines, unaligned } = remainderView(O, order, [billed], [pair(D), pair(D2)], { formulas: FORMULAS, holidays: [] });
   assertEquals(unaligned, []);
   assertEquals(lines.map((l) => [l.path.join("/"), l.quantity]), [[`${D2}/${G2}/${TRIPOD}`, 1]]);
 });

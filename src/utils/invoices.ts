@@ -91,6 +91,7 @@ import { closestAncestor, mapPathsAcrossRebuild, pairItemsAcrossRebuild } from "
 import { interleaveStoredOnlyRows } from "./stored-only-rows.ts";
 import type { COARevenueType, CreditNoteStatusType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDatesType, OrderDocDestinationItemType, SettlementReasonType, SettlementTargetType, SettlementTypeType, SubstitutedForEntryType, PurchaseCreditStatusType } from "../schemas/mod.ts";
 import { fitOutOfServiceEntries } from "./replacements.ts";
+import type { InitiatorAccount } from "./quantityAccounting.ts";
 import {
   billsOutOfService,
   type OutOfServiceEntryType,
@@ -298,6 +299,16 @@ export function invoiceFieldIsFrozen(
  */
 export function purchaseBillIsLive(bill: { status: InvoiceStatusType }): boolean {
   return bill.status !== "void";
+}
+
+/**
+ * **Is this supplier credit live — not voided?** The twin of
+ * {@link purchaseBillIsLive}, declared here for the same reason: the one billing
+ * fold (`billedByPath`, `utils/quantityAccounting.ts`) reads both, and
+ * `utils/purchase-documents.ts` (which re-exports it) imports that module.
+ */
+export function purchaseCreditIsLive(credit: { status: PurchaseCreditStatusType }): boolean {
+  return credit.status !== "void";
 }
 
 /**
@@ -862,7 +873,7 @@ function stripOrderPrefix(path: string[], orderDividerUid: string): string[] {
  *
  * An extension section bills MONEY on lines another invoice already billed, so
  * every order-relative reader has to decide what to do with it: alignment and
- * `invoicedByPath` read it as the divider it extends ({@link toOrderRelativePath}),
+ * the billing fold (`billedByPath`) read it as the divider it extends ({@link toOrderRelativePath}),
  * while the line-drift readers skip it ({@link isInExtensionSection}).
  *
  * @param scopedItems - Items of one order scope, or a whole invoice
@@ -1811,8 +1822,9 @@ function refitOutOfService<R>(row: R): R {
  * substitute stands in for a purchase line exactly as an invoice's does for an
  * order line, and {@link ScopedSyncSide.requantify} is how a side whose money
  * does not follow quantity keeps a row's money with its units
- * (one-document-model W5). The date-extension arm (`path_extension_for`) keys
- * on a field no payable row carries, so on a bill it finds nothing. The
+ * (one-document-model W5). The date-extension arm (`path_extension_for`) runs
+ * on both sides too: a bill bills owed time as an extension section, as an
+ * invoice does (6e-0b2 F5, ruling 89), and the sync carries it as written. The
  * lost/damaged arm (`out_of_service`) applies to both sides as written: a
  * line billing a record is the billing document's own row.
  */
@@ -3000,8 +3012,8 @@ export function invoiceScopeDividersMatch(
  * earlier edit kept after the order deleted it (core#124).
  *
  * Everything at or below a root is the invoice's own. Its lines bill no order
- * line, so they credit no order path ({@link invoicedByPath}), count as extras
- * in coverage, and are ignored by the alignment predicate
+ * line, so they credit no order path (the billing fold, `billedByPath`), are
+ * document-only in coverage, and are ignored by the alignment predicate
  * ({@link invoiceScopeDividersMatch}) — one definition, read by all three, so
  * they cannot disagree about which rows are the invoice's.
  *
@@ -3503,7 +3515,7 @@ export function computeInvoiceSyncStatus(
 
 /** An invoice line with no counterpart on the order it is scoped to. */
 export interface UnmatchedInvoiceLine {
-  /** The invoice the line was read from — an order can be billed by several. */
+  /** The first invoice billing it — an order can be billed by several. */
   invoiceUid: string;
   item: InvoiceItem;
 }
@@ -3511,13 +3523,16 @@ export interface UnmatchedInvoiceLine {
 /** @see {@link computeOrderInvoiceCoverage} */
 export interface OrderInvoiceCoverage {
   /**
-   * Order LINE items that no compared invoice carries at the same path, in the
-   * order's own document order.
+   * Order LINE items with units that no live billing row or reversing credit
+   * names, in the order's own document order.
    */
   uninvoiced: LineItem[];
   /**
-   * Lines the invoices carry under this order's divider that the order does not
-   * have, deduplicated by path across invoices. `transaction_fee` is excluded.
+   * The account's `document_only` lines: what the invoices bill under this
+   * order's divider that the order does not carry, one per ORDER-relative path,
+   * quantity summed across invoices (`invoiceUid` is the first invoice billing
+   * it) — then each row `document_only` could name no leg for (`skipped`), at its
+   * INVOICE path, so none is dropped from the count.
    */
   unmatched: UnmatchedInvoiceLine[];
   /** Invoice uids that contributed to the answer. */
@@ -3548,122 +3563,49 @@ export interface OrderInvoiceCoverage {
  * 2026-08-25 the corpus carries 1,653 drifted lines against 177 uninvoiced ones,
  * so folding the two would bury this answer in the other's.
  *
+ * **A reader of the account** (one-document-model 6e-0b2 F9): `uninvoiced` is
+ * every order line with units that no live billing row or reversing credit
+ * NAMES (`LineAccount.named`, among lines with `ordered > 0`), and `unmatched` is
+ * the account's `document_only` lines — so the banner, the diff, the remainder
+ * and the over-billing offer read one fold and cannot disagree about which rows
+ * are the order's. A substituted line is named by its substitute, a moved line
+ * by the row that claims it, and a fully credited line by its credit.
+ *
  * ⚠️ **`void` invoices are skipped, drafts are NOT.** A draft states the intent
  * to bill and is one click from doing so; measured on the whole prod corpus,
  * excluding drafts changes the answer on **0** orders, so the simpler rule costs
  * nothing. Voiding, by contrast, un-bills — counting a void invoice's lines as
  * covered is how an order reads fully invoiced while nobody is being charged.
  *
- * 🔴 **Every scope is gated on {@link invoiceScopeDividersMatch} FIRST, and that
- * gate is the difference between a signal and an artifact.** This comparison is
- * keyed on `path`, so where the two trees disagree structurally no pair is ever
- * compared and EVERY order line reports uninvoiced while EVERY invoice line
- * reports unmatched. That is not hypothetical: **966 of 969 prod pairs were
- * unaligned on 2026-08-10** (CRMS-authored invoices carried none of their
- * order's `group` dividers), `repair-invoice-structure.ts` took it to 0, one
- * reappeared on 2026-08-12, and the corpus reads 989 aligned / 0 unaligned on
- * 2026-08-25. **Alignment is a measurement, not a property.**
+ * 🔴 **Fail-closed on alignment, and that gate is the difference between a
+ * signal and an artifact.** The comparison is keyed on `path`, so where the two
+ * trees disagree structurally no pair is ever compared and EVERY order line
+ * would report uninvoiced. **966 of 969 prod pairs were unaligned on 2026-08-10**
+ * (CRMS-authored invoices carried none of their order's `group` dividers), and
+ * `repair-invoice-structure.ts` took it to 0: alignment is a measurement, not a
+ * property. If ANY linked scope is unaligned, both lists come back **empty** and
+ * the uid is in `unaligned`, so the caller renders "not computed". A partial
+ * union fails in the dangerous direction: an unaligned scope's lines read UNBILLED.
  *
- * So the gate is fail-closed rather than advisory: if ANY linked scope is
- * unaligned, `uninvoiced` and `unmatched` come back **empty** and the uid is in
- * `unaligned` — the caller renders "not computed" and cannot render a number.
- * Returning a partial union beside an `unaligned` list the caller might not read
- * would be the same policing this repo keeps replacing with unrepresentability,
- * and it fails in the dangerous direction: an unaligned scope's lines are
- * uncounted, so every line it bills reads UNBILLED.
+ * ⚠️ **`unmatched` is not a defect count**, and it is the fulfillment projection's
+ * input, not every row the order lacks: a `replacement`, an out-of-service charge,
+ * a `transaction_fee`, an extension row and a substitute are billed on purpose
+ * and are not in it. Nothing in the stored state separates "the order dropped
+ * this line after it was billed" from "an operator added it on the invoice on
+ * purpose". `custom-` uids are NOT filtered — that is a presentation judgment.
  *
- * ⚠️ **`unmatched` is not a defect count.** Nothing in the stored state separates
- * "the order dropped this line after it was billed" from "an operator added it
- * on the invoice on purpose", and the second is ordinary: of 190 such lines on
- * prod, 143 are `replacement` charges raised at billing time. Only
- * `transaction_fee` is excluded, because it is a document-level charge
- * (`pricing: "from_total"`) that has no order counterpart by construction.
- * `custom-` uids are NOT filtered — that is a presentation judgment, and this
- * returns the item so the caller can make it.
- *
- * An invoice whose scope holds no items at all is `compared` and contributes
- * nothing; that is an order this invoice does not bill, not a structural
- * disagreement, so it must not suppress the answer the way `unaligned` does.
- *
- * @param orderUid The source order's uid — which IS its divider's uid on every
- *   invoice that bills it (Option B; the transitional `uid_order` field is gone).
- * @param orderItems The order's full `items` array, dividers included — the
- *   alignment predicate reads them.
- * @param invoices Every invoice linked to the order, live or void.
+ * @param account - `accountBilling("receivable", …)` over every invoice linked to the order (live or void) and their credit notes
  */
-export function computeOrderInvoiceCoverage(
-  orderUid: string,
-  orderItems: LineItem[],
-  invoices: ReadonlyArray<{ uid: string; status: InvoiceStatusType; items: InvoiceItem[] }>,
-): OrderInvoiceCoverage {
-  const orderLineKeys = new Set<string>();
-  for (const item of orderItems) {
-    if (!isLineItemType(item.type)) continue;
-    orderLineKeys.add(itemPathKey(item.path ?? []));
-  }
-
-  const compared: string[] = [];
-  const unaligned: string[] = [];
-  const covered = new Set<string>();
-  const unmatched: UnmatchedInvoiceLine[] = [];
-  const unmatchedSeen = new Set<string>();
-  // Every compared invoice's live substitutions, pooled — an order can be
-  // billed by several, and a line substituted on ANY of them is not uninvoiced.
-  const allAnchors: SubstitutionAnchor[] = [];
-
-  for (const invoice of invoices) {
-    if (invoice.status === "void") continue;
-    const scoped = getOrderScopedItems(invoice.items ?? [], orderUid);
-    // An empty scope has no dividers to disagree about. Running the predicate on
-    // it would report a structural conflict where there is simply no content.
-    if (scoped.length > 0 && !invoiceScopeDividersMatch(scoped, orderItems, orderUid)) {
-      unaligned.push(invoice.uid);
-      continue;
-    }
-    compared.push(invoice.uid);
-    const anchors = liveInvoiceAnchors(scoped, orderItems, orderUid);
-    allAnchors.push(...anchors);
-    const extensionTargets = extensionSectionTargets(scoped, orderUid);
-    const claims = orderLineClaims(scoped, orderUid);
-    for (const item of scoped) {
-      if (!isLineItemType(item.type)) continue;
-      // An extension line bills days on a line billed elsewhere; it neither
-      // covers that line nor stands unmatched.
-      if (isInExtensionSection(item.path ?? [], orderUid, extensionTargets)) continue;
-      const relPath = stripOrderPrefix(item.path ?? [], orderUid);
-      const relKey = itemPathKey(relPath);
-      // A moved line (core#125) covers the order line it IS, not its own path.
-      const claim = claims.get(relKey);
-      if (claim !== undefined) {
-        covered.add(itemPathKey(claim));
-        continue;
-      }
-      covered.add(relKey);
-      if (item.type === "transaction_fee") continue;
-      if (orderLineKeys.has(relKey) || unmatchedSeen.has(relKey)) continue;
-      // 🔴 A substituted line legitimately matches no order line — that is what
-      // the substitution IS. Without this the operator's own edit is reported
-      // back as an anomaly on every read, and `substituted_for` names the
-      // order line it stands in for, so the join is not actually missing.
-      if (isSubstitutionRow(relPath, anchors)) continue;
-      unmatchedSeen.add(relKey);
-      unmatched.push({ invoiceUid: invoice.uid, item });
-    }
-  }
-
-  // Fail closed: a partial union cannot be told apart from a complete one by
-  // looking at `uninvoiced`, and the partial answer over-reports.
+export function computeOrderInvoiceCoverage(account: InitiatorAccount): OrderInvoiceCoverage {
+  const { compared, unaligned } = account;
   if (unaligned.length > 0) return { uninvoiced: [], unmatched: [], compared, unaligned };
-
-  const uninvoiced = orderItems.filter(
-    (item) =>
-      isLineItemType(item.type) &&
-      !covered.has(itemPathKey(item.path ?? [])) &&
-      // Substituted away, and therefore never to be billed AS ITSELF. Y carries
-      // the money instead; reporting X uninvoiced is a nag no action can clear.
-      !isRemovedBySubstitution(item.path ?? [], allAnchors),
-  );
-
+  const uninvoiced = account.lines.filter((line) => !line.named && line.ordered > 0).map((line) => line.item);
+  const { lines, documentUids, skipped } = account.document_only;
+  const unmatched: UnmatchedInvoiceLine[] = [
+    ...lines.map((item) => ({ invoiceUid: documentUids.get(itemPathKey(item.path ?? []))?.[0] ?? "", item: item as InvoiceItem })),
+    // A row no leg could be named for is still billed beyond the order: counted, at its document path.
+    ...skipped.map((s) => ({ invoiceUid: s.documentUid, item: s.item })),
+  ];
   return { uninvoiced, unmatched, compared, unaligned };
 }
 

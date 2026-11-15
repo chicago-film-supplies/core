@@ -80,7 +80,7 @@ const ctx = (over: Partial<PriceDocumentContext> = {}): PriceDocumentContext => 
 });
 const LINE_PAIRS: PriceDocumentContext["charge_windows"] = [];
 const priceDoc = (items: LineItem[], c: PriceDocumentContext) =>
-  priceDocument(items, c.charge_windows === LINE_PAIRS ? { ...c, charge_windows: linePairs(items, c.extensions) } : c);
+  priceDocument(items, c.charge_windows === LINE_PAIRS ? { ...c, charge_windows: linePairs(items, invoiceExtensionSections(items as unknown as Parameters<typeof invoiceExtensionSections>[0])) } : c);
 
 let uidSeq = 0;
 function line(over: Partial<LineItem> = {}, price: Record<string, unknown> = {}): LineItem {
@@ -153,19 +153,14 @@ Deno.test("priceDocument: an extension line bills its OWN added days with the we
     // The section's writer STATES the added days, minimum skipped.
     const rental = line({ path: ["dest-ext", "r1"] }, { base_cents: 10000, counts: addedDays === null ? [] : fdwCounts(addedDays, { stated: true }) });
     const items = [divider, rental];
-    return priceDoc(items, ctx({
-      document: { kind: "invoice", status: "draft", has_settlement: false },
-      extensions: invoiceExtensionSections(items as unknown as Parameters<typeof invoiceExtensionSections>[0]),
-    }));
+    // The section is read off the divider by `priceDocument` itself (6e-0b2 F5).
+    return priceDoc(items, ctx({ document: { kind: "invoice", status: "draft", has_settlement: false } }));
   };
   // 10000 × days ÷ 5, then 15% tax. Billed 3 days, order now 7: the writer stored 2.
   assertEquals([p(section(2).items[1]).subtotal_cents, p(section(2).items[1]).total_cents], [4000, 4600]);
   assertEquals(section(2).totals.total_cents, 4600);
   // Idempotent: a re-price of the stored line reproduces the same money.
-  assertEquals(p(priceDoc(section(2).items, ctx({
-    document: { kind: "invoice", status: "draft", has_settlement: false },
-    extensions: [{ divider_path: ["dest-ext"] }],
-  })).items[1]).subtotal_cents, 4000);
+  assertEquals(p(priceDoc(section(2).items, ctx({ document: { kind: "invoice", status: "draft", has_settlement: false } })).items[1]).subtotal_cents, 4000);
   // The same line outside a section is charged its week minimum: 2 days → 10000.
   assertEquals(p(priceDoc([line({}, { chargeable_days: 2 })], ctx()).items[0]).subtotal_cents, 10000);
   // A section line with no counts has nothing to extend by.
@@ -189,11 +184,9 @@ Deno.test("priceDocument: an extension line prices at its stated counts, whateve
   // A flat line in a section states `[{ flat, 1, 1 }]` like anywhere else; the
   // section writer never builds one, but pricing it is not a refusal (ruling 8:
   // the counts are the line's, not the section's).
-  const r = priceDoc(
-    [line({ type: "sale", path: ["dx", "s"] }, { formula: "fixed", base_cents: 700 })],
-    ctx({ extensions: [{ divider_path: ["dx"] }] }),
-  );
-  assertEquals(p(r.items[0]).subtotal_cents, 700);
+  const divider = { ...lineItemBase, uid: "dx", type: "destination", name: "", path: ["dx"], path_extension_for: ["d"] } as unknown as LineItem;
+  const r = priceDoc([divider, line({ type: "sale", path: ["dx", "s"] }, { formula: "fixed", base_cents: 700 })], ctx());
+  assertEquals(p(r.items[1]).subtotal_cents, 700);
 });
 
 Deno.test("priceDocument: a settled invoice is refused (D3)", () => {

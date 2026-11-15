@@ -6520,24 +6520,11 @@ const InvoiceDocDestinationItem: z.ZodType<InvoiceDocDestinationItemType>;
 
 ### `InvoiceDocDestinationItemType`
 
-An invoice destination divider: the order's divider, plus the one key only an
-invoice can carry.
-
-`path_extension_for` marks a **date-extension section** (api-cloudrun#680 R1).
-Owner decisions, 2026-09-13:
-
-- **Dates and destinations ride together**, so a second date range is a second
-  destination section even at the same address. An extension section bills
-  from the previously billed end + 1 to the order's current end, and its pair
-  (`destinations[i].uid === this divider's uid`) states that window.
-- **The link is by PATH**: the value is the ORDER-relative path of the order
-  destination divider this section extends. Alignment and `invoicedByPath`
-  read an extension section as that divider, so its lines bill the order's
-  lines there.
-- **The no-minimum rule is DERIVED from the section, never stored on the
-  line.** `priceDocument` prices every line under an extension section at the
-  line's own stated `counts` — the ADDED time — with the formula's minimum
-  skipped (`invoiceExtensionSections`, `@cfs/core/utils/price-document`).
+A BILLING document's destination divider: the initiator's divider, plus the
+one key only a billing document can carry, `path_extension_for`, which marks a
+**date-extension section**. The schema arm and its rules are declared once for
+both sides (`DestinationSectionDividerArm`, `schemas/_dividers.ts`): an
+invoice's rows and a bill's or supplier credit's rows take it.
 
 ⚠️ Absent on every divider stored before 2026-09-15, and on every full-window
 section after it. There is no `null`: a divider either extends a section or
@@ -11298,6 +11285,7 @@ interface PurchaseBillDividerInputType {
   uid: string;
   path: string[];
   name?: string;
+  path_extension_for?: string[];
 }
 ```
 
@@ -11469,8 +11457,9 @@ bill line (one-document-model 6d), and what it un-bills.
   by nature, so the line stores `discount: null`.
 - **time** — credited by COUNTS, as an AR credit note is (0b ruling 3):
   `quantity` units over `counts`, priced `rates × counts` like the bill line
-  it reverses. Absent `counts`, the writer credits everything the line is
-  billed for, net (`purchaseLineBilledCounts`). The per-unit windows this
+  it reverses. Absent `counts`, the writer takes the line's billed time
+  newest first and states its quantity-weighted mean (`creditTimeCounts`,
+  6e-0b2 F5). The per-unit windows this
   input used to take retired with the unit charge windows
   (one-document-model Phase 3).
 
@@ -11834,7 +11823,7 @@ Any row of a bill's or supplier credit's `items[]`: a line, or a
 purchase / destination / group divider (`PURCHASE_DOCUMENT_ITEM_LEVELS`).
 
 ```ts
-type PurchaseDocumentRow = PurchaseDocumentItem | PurchaseDocPurchaseItemType | OrderDocDestinationItemType | OrderDocGroupItemType;
+type PurchaseDocumentRow = PurchaseDocumentItem | PurchaseDocPurchaseItemType | InvoiceDocDestinationItemType | OrderDocGroupItemType;
 ```
 
 ### `PurchaseDocumentRowSchema`
@@ -24645,24 +24634,11 @@ const InvoiceDocDestinationItem: z.ZodType<InvoiceDocDestinationItemType>;
 
 ### `InvoiceDocDestinationItemType`
 
-An invoice destination divider: the order's divider, plus the one key only an
-invoice can carry.
-
-`path_extension_for` marks a **date-extension section** (api-cloudrun#680 R1).
-Owner decisions, 2026-09-13:
-
-- **Dates and destinations ride together**, so a second date range is a second
-  destination section even at the same address. An extension section bills
-  from the previously billed end + 1 to the order's current end, and its pair
-  (`destinations[i].uid === this divider's uid`) states that window.
-- **The link is by PATH**: the value is the ORDER-relative path of the order
-  destination divider this section extends. Alignment and `invoicedByPath`
-  read an extension section as that divider, so its lines bill the order's
-  lines there.
-- **The no-minimum rule is DERIVED from the section, never stored on the
-  line.** `priceDocument` prices every line under an extension section at the
-  line's own stated `counts` — the ADDED time — with the formula's minimum
-  skipped (`invoiceExtensionSections`, `@cfs/core/utils/price-document`).
+A BILLING document's destination divider: the initiator's divider, plus the
+one key only a billing document can carry, `path_extension_for`, which marks a
+**date-extension section**. The schema arm and its rules are declared once for
+both sides (`DestinationSectionDividerArm`, `schemas/_dividers.ts`): an
+invoice's rows and a bill's or supplier credit's rows take it.
 
 ⚠️ Absent on every divider stored before 2026-09-15, and on every full-window
 section after it. There is no `null`: a divider either extends a section or
@@ -29154,7 +29130,8 @@ Every item snapshots the formula it is priced by
 - **time** — commits nothing on the purchase (`amount_cents` and
   `quantity_billed` null, money zero); each bill meters it from its
   destination pair's charge windows as an order line is metered, and bills in
-  parts by COUNTS (`remainingTimeCounts`, one-document-model Phase 3).
+  parts by COUNTS: never-billed units over their pair, owed time as an
+  extension section (`splitBillTime`, one-document-model 6e-0b2 F5).
 
 Either way the line's `price` carries the money `priceDocument` computes —
 see {@link PurchaseLinePrice}.
@@ -30532,6 +30509,7 @@ interface PurchaseBillDividerInputType {
   uid: string;
   path: string[];
   name?: string;
+  path_extension_for?: string[];
 }
 ```
 
@@ -30695,8 +30673,9 @@ bill line (one-document-model 6d), and what it un-bills.
   by nature, so the line stores `discount: null`.
 - **time** — credited by COUNTS, as an AR credit note is (0b ruling 3):
   `quantity` units over `counts`, priced `rates × counts` like the bill line
-  it reverses. Absent `counts`, the writer credits everything the line is
-  billed for, net (`purchaseLineBilledCounts`). The per-unit windows this
+  it reverses. Absent `counts`, the writer takes the line's billed time
+  newest first and states its quantity-weighted mean (`creditTimeCounts`,
+  6e-0b2 F5). The per-unit windows this
   input used to take retired with the unit charge windows
   (one-document-model Phase 3).
 
@@ -30971,7 +30950,7 @@ Any row of a bill's or supplier credit's `items[]`: a line, or a
 purchase / destination / group divider (`PURCHASE_DOCUMENT_ITEM_LEVELS`).
 
 ```ts
-type PurchaseDocumentRow = PurchaseDocumentItem | PurchaseDocPurchaseItemType | OrderDocDestinationItemType | OrderDocGroupItemType;
+type PurchaseDocumentRow = PurchaseDocumentItem | PurchaseDocPurchaseItemType | InvoiceDocDestinationItemType | OrderDocGroupItemType;
 ```
 
 ### `PurchaseDocumentRowSchema`
@@ -41477,14 +41456,6 @@ interface DocumentDiffMap {
 }
 ```
 
-### `DocumentDiffOutOfService`
-
-What the diff reads of an `out-of-service` record.
-
-```ts
-type DocumentDiffOutOfService = Pick<OutOfService, "uid" | "reason" | "status" | "quantity" | "query_by_sources"> & typeLiteral;
-```
-
 ### `DocumentDiffSources`
 
 Documents the caller holds. Any may be absent or partial.
@@ -41508,7 +41479,7 @@ interface DocumentDiffSources {
 The three document kinds a diff can be viewed from or sourced from.
 
 ```ts
-type DocumentKind = "order" | "fulfillment" | "invoice" | "purchase" | "bill" | "purchase_credit";
+type DocumentKind = "order" | "fulfillment" | "invoice" | "purchase" | "bill" | "credit_note" | "purchase_credit";
 ```
 
 ### `DocumentMovedEntry`
@@ -41586,7 +41557,7 @@ interface DocumentQuantityEntry {
   uid_out_of_service: string | null;
   billed_cents?: number;
   expected_cents?: number;
-  credit_sources?: DocumentRef[];
+  credit_sources: DocumentRef[];
 }
 ```
 
@@ -41666,15 +41637,31 @@ interface DocumentUnkeyedCredit {
 
 ### `DocumentViewKind`
 
-The kinds a diff can be VIEWED from. A credit is a source of netting, as a credit note is, never a view.
+The kinds a diff can be VIEWED from. A credit document is a source of netting, never a view.
 
 ```ts
-type DocumentViewKind = Exclude<DocumentKind, "purchase_credit">;
+type DocumentViewKind = Exclude<DocumentKind, "credit_note" | "purchase_credit">;
 ```
 
 ### `computeDocumentDiffs(sources: DocumentDiffSources, viewing: typeLiteral, context: DocumentDiffContext): DocumentDiffMap`
 
 Every difference between the viewed document and the other documents passed in.
+
+**One pipeline for both sides** (ruling 33): the view's side and role come
+from {@link VIEW_ROLES}, each side's sources from {@link DIFF_SIDES}, and
+nothing below branches on the side. Per initiator, the account
+(`accountInitiator` over `billedByPath`) is built once, and every `quantity`
+entry is rendered from it (F9): emitted iff the account says the documents
+disagree, and PLACED per view —
+
+- the initiator's view: at each line;
+- the custody view: at each row it carries (a fulfillable line, or a row only
+  it carries);
+- a billing view: at each row the document bills, plus each initiator line it
+  leaves out that no sibling bills (ruling 91's "not billed here").
+
+Presence, legs, substitutions and moves are {@link compareScope}'s, and the
+field comparers are unchanged.
 
 **Parameters**
 
@@ -41700,8 +41687,8 @@ drift — the `Order.invoices[]` status-drift class. A `quantity_invoiced` field
 on order lines was rejected for exactly that reason.
 
 Its readers: `computeDocumentDiffs`'s "billed N of M" entry, the
-remaining-invoice create mode (via {@link remainingForOrder}), and the
-coverage census.
+remaining-invoice create mode (via {@link buildRemainingInvoice}), the
+over-billing offer and the coverage banner — all reading {@link accountInitiator}.
 
 ## Substitutions (D2, manager#414)
 
@@ -41745,7 +41732,7 @@ each window's bounds.
 is the point.** The rule it replaced compared only where the LAST window ended,
 so dropping or shrinking a MIDDLE window moved no end and reported nothing at
 all. The two questions — *did the window move?* and *by how much, which way?* —
-are now asked separately in {@link extensionGroups}; the first is answered by
+are now asked separately in {@link groupExtensions}; the first is answered by
 dates ({@link sameWindowDates}) and the second by day counts.
 
 Both cuts reverse the first one, which read the line's stored days on both sides.
@@ -41770,10 +41757,10 @@ The D7 day count floors each SIDE at the week instead, and skips the floor on
 the difference. A `fixed` row never read its days and extends by nothing.
 
 **A bill of the extension nets it out.** A line in an invoice's
-date-extension section (`path_extension_for`) reaches {@link invoicedByPath} as
+date-extension section (`path_extension_for`) reaches {@link billedByPath} as
 an `extension` row at the path it extends: it adds no units, and
-{@link accountLine} subtracts its money, priced at its own added days, from
-what the order's days add to the unit rows.
+{@link groupExtensions} moves the units it extends onto its window, so the
+account ({@link accountInitiator}) owes no extension once it is billed.
 
 ⚠️ **A billed line is read for its RATE terms and formula only**, never for
 the extension's counts — see above.
@@ -41792,10 +41779,11 @@ reports it rather than clamping it away.
 
 ## A remainder refuses CRMS-authored invoices (owner, 2026-09-16)
 
-Both {@link remainingForOrder} and {@link buildRemainingInvoice} fail closed
-when any LIVE invoice on the order carries a `crms_id`, naming those uids in
-`crms_authored`, exactly as they do on an unaligned scope. The sum itself
-({@link invoicedByPath}) is unaffected, so a diff still reads them.
+The account ({@link InitiatorAccount.refused}), and so {@link buildRemainingInvoice}
+and {@link buildOverbillingCredits}, fail closed when any LIVE invoice on the
+order carries a `crms_id`, naming those uids in `crms_authored`, exactly as on
+an unaligned scope. The fold itself ({@link billedByPath}) is unaffected, so a
+diff still reads them.
 
 The 2026-09-16 census (`api-cloudrun/scripts/audit-order-invoice-coverage.ts`,
 prod and dev identical): every one of the 103 orders the button was offered
@@ -41817,6 +41805,8 @@ interface AccountedCreditNote {
   uid: string;
   status: CreditNoteStatusType;
   items: readonly AccountedCreditNoteItem[];
+  number?: number;
+  version?: number;
   sources?: readonly typeLiteral[];
 }
 ```
@@ -41836,6 +41826,18 @@ interface AccountedCreditNoteItem {
 }
 ```
 
+### `AccountedInitiator`
+
+The initiator as {@link accountInitiator} reads it.
+
+```ts
+interface AccountedInitiator {
+  uid: string;
+  items: readonly LineItem[];
+  destinations: readonly typeLiteral[];
+}
+```
+
 ### `AccountedInvoice`
 
 The invoice shape these functions read — every linked invoice, live or void.
@@ -41846,6 +41848,7 @@ interface AccountedInvoice {
   status: InvoiceStatusType;
   items: InvoiceItem[];
   number?: number;
+  version?: number;
   amount_due_cents?: number;
   destinations?: readonly InvoiceDocDestinationType[];
   crms_id?: number | string | null;
@@ -41864,6 +41867,98 @@ interface AccountingContext {
 }
 ```
 
+### `BILLING_FOLD`
+
+The two sides' fold data. Typed per side, so a caller's documents are its side's.
+
+```ts
+const BILLING_FOLD: mapped;
+```
+
+### `BilledAtPath`
+
+What the billing documents bill at one initiator-relative path.
+
+```ts
+interface BilledAtPath {
+  quantity: number;
+  amount_cents: number;
+  rows: BilledRow[];
+  time_credits?: BilledTimeCredit[];
+  credit_documents?: string[];
+}
+```
+
+### `BilledByPath`
+
+```ts
+interface BilledByPath {
+  byPath: Map<string, BilledAtPath>;
+  document_only: DocumentOnlyLines;
+  compared: string[];
+  unaligned: string[];
+  credits_unkeyed: string[];
+  documents: Map<string, BilledDocument>;
+}
+```
+
+### `BilledDocument`
+
+**A billing or credit document's header** — what a caller that ACTS on the
+fold reads besides its rows: the refusal (`status`, `crms_id`), the over-billing
+offer's order (`amount_due_cents`, `number`), and a diff's reference (`number`,
+`version`). One per document passed, live or not.
+
+```ts
+interface BilledDocument {
+  uid: string;
+  role: "billing" | "credit";
+  live: boolean;
+  status: string;
+  number: number | null;
+  version: number | null;
+  crms_id: number | string | null;
+  amount_due_cents: number | null;
+}
+```
+
+### `BilledRow`
+
+One row that bills an initiator path — an invoice or bill row, read by
+{@link billedByPath}, on both sides.
+
+```ts
+interface BilledRow {
+  documentUid: string;
+  item: InvoiceItem;
+  via: "direct" | "substitute" | "extension";
+  quantity: number;
+  amount_cents: number;
+  window: BilledWindow | null;
+}
+```
+
+### `BilledTimeCredit`
+
+One reversing TIME credit (R3), netted against the extension group of the billing row it credits.
+
+```ts
+interface BilledTimeCredit {
+  documentUid: string;
+  path: readonly string[];
+  quantity: number;
+  counts: readonly TierCount[];
+}
+```
+
+### `BilledTimeGroup`
+
+A group of billed units and the time billed on them, before any comparison with the initiator's window.
+
+```ts
+type BilledTimeGroup = Omit<ExtensionGroup, "extension_counts" | "extension_direction">;
+```
+
 ### `BilledWindow`
 
 A pair's charge windows, as an extension compares them: where the last one ends, and each one's bounds.
@@ -41875,9 +41970,126 @@ interface BilledWindow {
 }
 ```
 
-### `ExtensionGroup`
+### `BillingFoldDocuments`
 
-Units billed at one cumulative day count, still owed (or over-billed) an extension.
+The documents {@link billedByPath} takes on each side.
+
+```ts
+interface BillingFoldDocuments {
+  receivable: typeLiteral;
+  payable: typeLiteral;
+}
+```
+
+### `BillingFoldInitiator`
+
+An initiator, as the fold reads it: its uid (its scope divider's uid on every billing document) and CURRENT rows.
+
+```ts
+interface BillingFoldInitiator {
+  uid: string;
+  items: readonly LineItem[];
+}
+```
+
+### `BillingFoldSide`
+
+**Everything that differs between the sides in the billing fold** — data,
+never an `if side` (ruling 84), on the pattern of {@link ScopedSyncSide}.
+The last two entries (how a credit reaches the row it reverses, and whose
+anchors and time test it reads) are ruling 34's to collapse into one keyer
+`(uid_billing, path_billing_item)`; until then they are named here.
+
+```ts
+interface BillingFoldSide {
+  scopeType: "order" | "purchase";
+  pointerKey: keyof MovePointerCarrier;
+  pairScopeKey: "uid_order" | "uid_purchase";
+  billingIsLive(doc: B): boolean;
+  creditIsLive(doc: C): boolean;
+  billingHeader(doc: B): Omit<BilledDocument, "role" | "live">;
+  creditHeader(doc: C): Omit<BilledDocument, "role" | "live">;
+  billingRows(doc: B): typeLiteral;
+  rowNetCents(row: InvoiceItem): number;
+  partCents(row: InvoiceItem, before: number, after: number): number;
+  placeCredits(billing: ReadonlyMap<string, FoldContext>, credits: readonly C[], unkeyed: Set<string>, scopeUid: string, initiatorPaths: ReadonlySet<string>): FoldContext[];
+}
+```
+
+### `CustodyOnlyAccount`
+
+A row only the custody document carries (ruling 35's exception), against what is billed at its path.
+
+```ts
+interface CustodyOnlyAccount {
+  path: string[];
+  item: LineItem | null;
+  custody: number;
+  billed: number;
+}
+```
+
+### `CustodyRow`
+
+A custody document's row at one initiator-relative path: a fulfillment row
+(AR) or a receipt row's received units (AP). `item` is the custody row, read
+for an exchange unit and for a row the initiator does not carry.
+
+```ts
+interface CustodyRow {
+  quantity: number;
+  item: LineItem | null;
+}
+```
+
+### `Disagreement`
+
+Why a line's documents disagree. Empty set ⇔ no quantity entry.
+
+```ts
+type Disagreement = "quantity" | "extension" | "money";
+```
+
+### `DocumentDiffOutOfService`
+
+What the account reads of an `out-of-service` record.
+
+```ts
+type DocumentDiffOutOfService = Pick<OutOfService, "uid" | "reason" | "status" | "quantity" | "query_by_sources"> & typeLiteral;
+```
+
+### `DocumentOnlyLines`
+
+**The lines the billing documents bill that the initiator does not carry** —
+the input to the fulfillment's invoice-only projection (api-cloudrun#1188), on
+both sides, with each line's money. Not document-only: a row at a path the
+initiator carries, a moved row, an extension row, a substitute (or its
+components), an out-of-service charge, a `replacement` and a `transaction_fee`.
+
+```ts
+interface DocumentOnlyLines {
+  lines: LineItem[];
+  amount_cents: Map<string, number>;
+  dividers: LineItem[];
+  documentUids: Map<string, string[]>;
+  skipped: DocumentOnlySkip[];
+}
+```
+
+### `DocumentOnlySkip`
+
+Why {@link billedByPath} could not place a document-only row on the initiator's legs.
+
+```ts
+interface DocumentOnlySkip {
+  documentUid: string;
+  path: string[];
+  reason: "no_leg" | "authored_destination";
+  item: InvoiceItem;
+}
+```
+
+### `ExtensionGroup`
 
 ```ts
 interface ExtensionGroup {
@@ -41894,66 +42106,22 @@ interface ExtensionGroup {
 }
 ```
 
-### `InvoiceOnlyLines`
+### `InitiatorAccount`
 
 ```ts
-interface InvoiceOnlyLines {
-  lines: LineItem[];
-  dividers: LineItem[];
-  invoiceUids: Map<string, string[]>;
-  compared: string[];
-  unaligned: string[];
-  skipped: InvoiceOnlySkip[];
-  credits_unkeyed: string[];
-}
-```
-
-### `InvoiceOnlySkip`
-
-Why {@link invoiceOnlyLines} could not place an invoice line on the order's legs.
-
-```ts
-interface InvoiceOnlySkip {
-  invoiceUid: string;
-  path: string[];
-  reason: "no_leg" | "authored_destination";
-}
-```
-
-### `InvoicedAtPath`
-
-What the invoices bill at one order-relative path.
-
-```ts
-interface InvoicedAtPath {
-  quantity: number;
-  rows: InvoicedRow[];
-  time_credits?: TimeCredit[];
-}
-```
-
-### `InvoicedByPath`
-
-```ts
-interface InvoicedByPath {
-  byPath: Map<string, InvoicedAtPath>;
+interface InitiatorAccount {
+  side: Side;
+  initiatorUid: string;
+  lines: LineAccount[];
+  custody_only: CustodyOnlyAccount[];
+  out_of_service: OutOfServiceInput[];
+  document_only: DocumentOnlyLines;
   compared: string[];
   unaligned: string[];
   credits_unkeyed: string[];
-}
-```
-
-### `InvoicedRow`
-
-One invoice row that bills an order path.
-
-```ts
-interface InvoicedRow {
-  invoiceUid: string;
-  item: InvoiceItem;
-  via: "direct" | "substitute" | "extension";
-  quantity: number;
-  window: BilledWindow | null;
+  documents: Map<string, BilledDocument>;
+  crms_blocked: boolean;
+  refused: boolean;
 }
 ```
 
@@ -41998,16 +42166,42 @@ interface KeyedInvoiceRow {
 
 ### `LineAccount`
 
+**One initiator line's account** — every quantity and money figure the diff,
+the remaining invoice, the over-billing offer, the coverage banner and the
+payable writers read about it, decided once (ruling 92).
+
 ```ts
 interface LineAccount {
+  path: string[];
+  item: LineItem;
+  kind: "rate" | "stated" | "exchange";
+  named: boolean;
+  naming: string[];
+  credit_sources: string[];
   ordered: number;
-  invoiced: number;
+  billed: typeLiteral;
   quantity: number;
   quantity_cents: number;
-  extension_cents: number;
-  fulfilled?: number;
-  fulfilled_quantity?: number;
-  fulfilled_quantity_cents?: number;
+  extension: typeLiteral;
+  expected_cents: number | null;
+  custody: typeLiteral | null;
+  remaining: typeLiteral;
+  overbilled: typeLiteral;
+  credit: typeLiteral;
+  disagrees: ReadonlySet<Disagreement>;
+}
+```
+
+### `OutOfServiceInput`
+
+A lost or damaged record, pre-placed by the caller at the row that books it (or `null`).
+
+```ts
+interface OutOfServiceInput {
+  uid: string;
+  fulfilled: number;
+  invoiced: number;
+  rel: string | null;
 }
 ```
 
@@ -42017,6 +42211,7 @@ One credit-note line the offer would raise.
 
 ```ts
 interface OverbillingCreditLine {
+  uid_billing?: string;
   path_invoice_item: string[];
   uid_invoice_item: string;
   order_path: string[];
@@ -42050,16 +42245,36 @@ interface OverbillingCredits {
 }
 ```
 
-### `RemainingForOrder`
+### `PAYABLE_BILLING_FOLD`
+
+The payable side: purchases, bills, supplier credits.
 
 ```ts
-interface RemainingForOrder {
-  lines: RemainingLine[];
-  compared: string[];
-  unaligned: string[];
-  crms_authored: string[];
-  credits_unkeyed: string[];
-}
+const PAYABLE_BILLING_FOLD: BillingFoldSide<PayableFoldBill, PayableFoldCredit>;
+```
+
+### `PayableFoldBill`
+
+A bill, as the fold reads it.
+
+```ts
+type PayableFoldBill = Pick<PurchaseBill, "uid" | "status" | "items" | "destinations"> & Partial<Pick<PurchaseBill, "number" | "version">> & typeLiteral;
+```
+
+### `PayableFoldCredit`
+
+A supplier credit, as the fold reads it.
+
+```ts
+type PayableFoldCredit = Pick<PurchaseCredit, "uid" | "status" | "items" | "destinations"> & Partial<Pick<PurchaseCredit, "number" | "version">>;
+```
+
+### `RECEIVABLE_BILLING_FOLD`
+
+The receivable side: orders, invoices, credit notes.
+
+```ts
+const RECEIVABLE_BILLING_FOLD: BillingFoldSide<AccountedInvoice, AccountedCreditNote>;
 ```
 
 ### `RemainingInvoice`
@@ -42081,19 +42296,6 @@ An invoice as {@link buildRemainingInvoice} reads it: its lines, and the pairs t
 
 ```ts
 type RemainingInvoiceSource = AccountedInvoice;
-```
-
-### `RemainingLine`
-
-One order line with something left to bill, or billed beyond the order.
-
-```ts
-interface RemainingLine {
-  path: string[];
-  item: LineItem;
-  new: boolean;
-  bills: boolean;
-}
 ```
 
 ### `RemainingOrderSource`
@@ -42120,19 +42322,6 @@ interface TimeAmount {
 }
 ```
 
-### `TimeCredit`
-
-One reversing TIME credit, netted against the extension group of the row it credits.
-
-```ts
-interface TimeCredit {
-  invoiceUid: string;
-  path: readonly string[];
-  quantity: number;
-  counts: readonly TierCount[];
-}
-```
-
 ### `WindowBounds`
 
 One charge window's bounds, as the shortening gate compares them.
@@ -42144,23 +42333,88 @@ interface WindowBounds {
 }
 ```
 
-### `accountLine(orderLine: LineItem, billed: InvoicedAtPath | undefined, orderWindow: BilledWindow | null, ctx: AccountingContext, fulfilled?: number): LineAccount`
+### `accountBilling(side: S, initiator: AccountedInitiator, billing: readonly indexedAccess[], credits: readonly indexedAccess[], ctx: AccountingContext): InitiatorAccount`
 
-Account for one order line against what the invoices bill at its path.
+**The account over the billing and credit documents alone** — no custody
+document, no out-of-service record: what the remainder
+({@link buildRemainingInvoice}), the over-billing offer
+({@link buildOverbillingCredits}) and the coverage banner read. The one door,
+so no caller folds and accounts with different documents.
 
 **Parameters**
 
-- `orderLine` — The order line, at its current quantity
-- `billed` — {@link invoicedByPath}'s entry for the line's path, if any
-- `orderWindow` — {@link orderLineWindow} for the line; `null` extends nothing
-- `ctx` — the formulas and holidays the extension meters with
-- `fulfilled` — the FULFILLMENT row's quantity at this line's path, if one exists
+- `billing` — EVERY billing document linked to the initiator, live or not, never a page
+- `credits` — EVERY credit document against them
+
+### `accountInitiator(side: Side, initiator: AccountedInitiator, fold: BilledByPath, custody: ReadonlyMap<string, CustodyRow> | null, outOfService: readonly OutOfServiceInput[], ctx: AccountingContext): InitiatorAccount`
+
+**The one per-line account** (one-document-model 6e-0b2 F9, ruling 92): every
+initiator line's quantity and money facts, read off {@link billedByPath}, on
+both sides. Every caller that decides "is it billed", "what is left", "what
+was over-billed" or "show a quantity entry" reads this, never the fold:
+
+- **`disagrees`** is built here and nowhere else: `quantity` once any live
+  billing document is compared (ruling 90) or a live credit document took
+  something back at the line, any extension group (36, 89), or a STATED line
+  whose billed money differs from what its billed units cost (39).
+  Custody never adds a reason (35), and an exchange unit never disagrees.
+- **`remaining` / `overbilled` / `credit`** are what the remainder and the
+  over-billing offer assemble; their refusals (`refused`) are the initiator's.
+
+**Parameters**
+
+- `side` — Which side's documents the fold read
+- `initiator` — The order or purchase, with its CURRENT rows and pairs
+- `fold` — {@link billedByPath} over the same initiator
+- `custody` — The custody document's rows by initiator-relative key; `null` when not passed
+- `outOfService` — Lost/damaged records, pre-placed; empty when not compared
+- `ctx` — formulas and holidays the extension meters with
 
 ### `addTime(a: TimeAmount, b: TimeAmount): TimeAmount`
 
 `a + b`, exact.
 
-### `buildOverbillingCredits(order: RemainingOrderSource, invoices: readonly AccountedInvoice[], ctx: AccountingContext, _: unknown): OverbillingCredits`
+### `billedByPath(side: S, initiator: BillingFoldInitiator, billing: readonly indexedAccess[], _: unknown): BilledByPath`
+
+**The one billing fold** (one-document-model 6e-0b2, rulings 84 and 86–89):
+what an initiator's billing documents bill at each initiator path — units,
+rows, money and time credits — net of reversing credits, on BOTH sides, and
+what they bill that the initiator does not carry.
+
+It replaced the AR fold, its invoice-only pass and the per-document payable
+fold (deleted in beta F) with one set of rules, each written once (F2):
+
+1. **Alignment on both sides.** A billing document whose scope hangs on
+   another divider skeleton is left out and named in `unaligned`.
+2. **A moved row** (its move pointer names initiator line X) bills X, at X's
+   terms, before the authored test.
+3. **A row under a divider the document authored** bills no initiator line; it
+   goes to `document_only`. A document-added row under an INITIATOR divider is
+   keyed at its own path AND reported in `document_only`.
+4. **An extension row** (under a destination carrying `path_extension_for`) is
+   `via: "extension"` at the extended path, adds no units, and carries its window.
+5. **A substitute's** live entries take its first units, in stored order; each
+   entry's units bill X (a root's directly, a component's through the ratio
+   walk), and every entry's share of the money lands on X. The rest is the
+   row's own, at its own path.
+6. **The ratio walk is SUMMED** (ruling 87): stand-in units across every live
+   document, credits at sign −1, then `substitutionCredit` once.
+7. **Money** is each row's STORED net, never re-derived; the only part priced
+   is a substitute's share ({@link BillingFoldSide.partCents}).
+8. **A credit row nets only when `reverses_billing === true`**, at sign −1,
+   placed per side ({@link BillingFoldSide.placeCredits}); a time credit nets
+   counts and money, never units (R3).
+
+The per-side data is {@link BILLING_FOLD}; nothing here branches on the side.
+
+**Parameters**
+
+- `side` — Which side's documents these are
+- `initiator` — The order or purchase, with its CURRENT rows
+- `billing` — Every billing document linked to it, live or not, WHOLE
+- `credits` — Every credit document on it. The fold drops dead ones itself.
+
+### `buildOverbillingCredits(account: InitiatorAccount): OverbillingCredits`
 
 **Build the credit notes that give back what an order's invoices over-billed
 it** (api-cloudrun#1028). The ONE author of the offer: the server rebuilds it
@@ -42190,8 +42444,9 @@ a divider uid rather than a line.
 
 ## Refusals
 
-Fails closed exactly as {@link remainingForOrder} does — an unaligned scope or a
-live CRMS-authored invoice — **plus**, per path:
+Fails closed on the account's shared refusal ({@link InitiatorAccount.refused}:
+an unaligned scope or a live CRMS-authored invoice) — **plus**, per path, the
+refusals each {@link LineAccount.credit} carries:
 
 - a **draft** invoice among the billers: a draft has billed nothing to give
   back, and crediting one is not a correction but a reason to edit it;
@@ -42200,12 +42455,14 @@ live CRMS-authored invoice — **plus**, per path:
   several X paths, and the cap is Y's full quantity, so a credit raised there
   could exceed what any single X was billed.
 
+Every per-line decision is the account's ({@link LineAccount.credit}); this
+only groups the lines one note per billing document and orders the notes.
+
 ⚠️ **Preview cents come from the ROW the note will be priced from**, not from
-{@link accountLine}. `accountLine.quantity_cents` prices at the ORDER line's
-terms, while `priceCreditNote` prices the stored INVOICE line — and where the
+{@link LineAccount.quantity_cents}, which prices at the ORDER line's terms, while `priceCreditNote` prices the stored INVOICE line — and where the
 two disagree, the second is what the operator will be asked to approve.
 
-### `buildRemainingInvoice(order: RemainingOrderSource, invoices: readonly RemainingInvoiceSource[], creditNotes: readonly AccountedCreditNote[], ctx: AccountingContext, _: unknown): RemainingInvoice`
+### `buildRemainingInvoice(order: RemainingOrderSource, account: InitiatorAccount, _: unknown): RemainingInvoice`
 
 Build the invoice that bills what is left on an order: new lines whole,
 quantity increases at their own path, and each extension of dates as a
@@ -42222,7 +42479,7 @@ manager's preview.
   nothing of its own left (owner, 2026-09-15). `path` is resolved from the
   parent, so a component without its kit would bill a different path.
 - **One extension section per billed window**: per order destination, the
-  groups of {@link extensionGroups} that share their billed days. Its divider
+  line's owed {@link LineAccount.extension} groups that share their billed days. Its divider
   is a new uid carrying `path_extension_for`; each line in it is the billed
   row's terms at the group's added days. A path already in the section (the
   same product billed on different terms) opens another section.
@@ -42234,19 +42491,22 @@ manager's preview.
   that ends before the order's, so the section never starts after it ends.
 - **Over-billing is never netted in.** A negative quantity or extension is
   returned in `overbilled`, for the credit-note flow.
-- **Credit notes net exactly as in {@link remainingForOrder}** (core#121,
-  owner 2026-10-01). A `reverses_billing` line means "billed beyond the
-  order" — its only writer is the over-billing offer — so units it gave back
-  are unbilled, and an order that grows to need them again bills them again.
-  🔴 Required, not defaulted: a caller that forgot them would build against a
-  different `billed` than the offer counted, the defect this closes.
+- **Credit notes net through the account** (core#121, owner 2026-10-01). A
+  `reverses_billing` line means "billed beyond the order" — its only writer is
+  the over-billing offer — so units it gave back are unbilled, and an order
+  that grows to need them again bills them again. 🔴 Build the account from
+  EVERY credit note: one built without them answers a different `billed` than
+  the offer counted, the defect this closes.
 
-🔴 Fails closed on an unaligned scope or a live CRMS-authored invoice, exactly
-as {@link remainingForOrder}.
+Every per-line decision is read from {@link LineAccount.remaining} and
+{@link LineAccount.overbilled} (6e-0b2 F9), never re-derived here.
+
+🔴 Fails closed on the account's shared refusal ({@link InitiatorAccount.refused}:
+an unaligned scope or a live CRMS-authored invoice), building nothing.
 
 **Parameters**
 
-- `creditNotes` — EVERY credit note against the invoices — all of them, never a page
+- `account` — {@link accountBilling} over EVERY invoice and credit note on the order, never a page
 
 ### `compareTime(a: TimeAmount, b: TimeAmount): number`
 
@@ -42271,138 +42531,12 @@ The magnitude of a count delta — every tier's sign flipped when the direction 
 
 The uids of the LIVE invoices CRMS authored — a remainder refuses when any exist.
 
-### `extensionGroups(orderLine: LineItem, billed: InvoicedAtPath | undefined, orderWindow: BilledWindow | null, ctx: AccountingContext): ExtensionGroup[]`
+### `fulfillmentCustody(fulfillment: Fulfillment): Map<string, CustodyRow>`
 
-The extension still owed on an order line, as groups of billed units that
-share their terms and their cumulative billed days (api-cloudrun#680 R1).
-
-The walk: every time-formula unit row on a known {@link BilledWindow}
-starts a group at its pair's billable days and end. Each extension row then moves its
-quantity from the groups whose window ENDS earliest (then fewest days), in
-invoice order, to `billed days + the extension pair's days`, ending where the
-extension's pair ends. A remainder invoice brings every group to the order's
-window at once, so a later remainder always extends from a single cumulative
-window; the earliest-first rule only has to choose for an extension built by
-hand. Extension quantity beyond the units billed is ignored.
-
-## Two questions, not one (api-cloudrun#1028)
-
-The gate used to be a single test — *does the day delta's sign agree with the
-direction the LAST window's end moved?* — which is two questions wearing one
-hat, and it answered the second one only for the last window. Dropping or
-shrinking a MIDDLE window leaves the last end where it was, so a genuine
-shortening reported nothing at all. They are now asked separately:
-
-1. **Did the window move?** {@link sameWindowDates} compares the order pair's
-   windows against the group's {@link ExtensionGroup.billed_set}, window for
-   window, as Chicago calendar dates. Identical ⇒ no extension,
-   whatever the day counts say. 🔴 This is the holiday-recount guard, and it is
-   why the comparison is of DATES and not of `days`: a stored `days` is frozen
-   at write while the order's is recounted, so a delta under an identical date
-   set is always an artefact of the recount.
-2. **How much, and which way?** `meter(order pair windows) − billed_counts`,
-   sign and all. Negative is a shortening — over-billing, for the credit-note
-   flow — and positive is an extension still owed.
-
-⚠️ **There is deliberately no sub-cover test.** A window set that shrinks by
-date while the metered count RISES (one window split into several, each floored to
-a week) is a genuine extension, and by owner ruling an invoice stating its own
-windows is never over-billing — so a bill inside a narrower or split cover
-credits nothing.
-
-A `fixed` row never read its days, so it forms no group; nor does a row on no
-known window. A group whose extension is zero is dropped.
-
-### `invoiceOnlyLines(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[], _: unknown): InvoiceOnlyLines`
-
-**The lines the invoices bill that the order does not carry** (api-cloudrun#1188),
-as order-relative lines a fulfillment can hold.
-
-CFS deducts what was FULFILLED and Xero takes what was INVOICED, so a stock
-line an operator added on an invoice alone has to reach the fulfillment to
-reach the shelf. This is the INPUT to that projection; it decides nothing
-about it.
-
-## Why it is its own pass
-
-It reads the same primitives as {@link invoicedByPath} and
-`computeOrderInvoiceCoverage` — alignment, extension sections, `path_order_item`
-claims, live substitution anchors, credit reversals — so it cannot disagree
-with either about which rows are the order's. It is not built ON either:
-`invoicedByPath` skips an invoice-authored subtree by design (it credits no
-order line) and coverage keeps one row per path rather than the sum, and this
-needs both the authored subtree and the sum.
-
-## What is NOT invoice-only
-
-- a row at a path the order carries (a raised quantity is a surfaced diff, never projected);
-- a moved row — it bills order line X ({@link orderLineClaims}, core#125);
-- an extension row, a substitute (or its components), an out-of-service
-  charge, a `replacement` and a `transaction_fee`;
-- anything on a `void` or unaligned invoice.
-
-## The leg
-
-A booking takes its pair — and so its dates — from the leg, which on an order
-is `path[0]`. A row directly under the order divider carries none; it is
-placed on the order's sole destination, and where the order has several it is
-reported in `skipped` rather than guessed at. A row under a destination the
-invoice authored is skipped for the same reason.
-
-**Parameters**
-
-- `orderUid` — The order's uid, which is its divider's uid on every invoice that bills it
-- `orderItems` — The order's `items`, dividers included
-- `invoices` — Every invoice linked to the order, live or void
-- `creditNotes` — Credit notes on those invoices; a `reverses_billing` line nets its row ({@link invoicedByPath}'s rule; the summed quantity is floored here, where it acts)
-
-### `invoicedByPath(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[], _: unknown): InvoicedByPath`
-
-How much each order path is billed, summed across every non-void, aligned
-invoice (D3).
-
-⚠️ **An unaligned scope is left out of the sum and named in `unaligned`**;
-this does not fail closed on its own, because `computeDocumentDiffs`
-reports an unaligned scope as its own entry and still compares the aligned
-ones. A caller about to ACT on the sum — {@link remainingForOrder} — must
-refuse when `unaligned` is non-empty: an unaligned scope's lines are
-uncounted, so everything it bills reads unbilled.
-
-An invoice line at a path the order does not carry is still keyed here; it is
-the order's absence, not the sum's, that makes it unmatched.
-
-## A credit row is a billing row of sign −1 (ruling 84)
-
-A reversing credit-note line ({@link keyInvoiceCredits}' reversed view) enters
-the fold at the PLACEMENT of the invoice row it credits, so taking the
-over-billing offer clears the offer rather than leaving it standing for ever:
-
-- **Root vs component is judged from the INVOICE's anchors, never the
-  credit's.** A note credits single lines with no kit copy, so judged alone a
-  credited component would read as a root and un-bill X itself (the
-  api-cloudrun#1475 class).
-- **On a substitute ROOT** each copied `substituted_for` entry takes its units
-  back from X, before the ratio walk, so X's components follow the order's own
-  ratio; the rest of the line takes units from Y's own path.
-- **On a COMPONENT** of a substitute, the copied entries are its stamped share
-  of the root's: they stand in for nothing on their own, so only the rest of
-  the line nets, at the component's path. X stays billed until the root is
-  credited (R5: AR accepts any subset of a kit).
-- **Unfloored (R2).** Over-crediting a row reads negative at its path and is
-  surfaced, never dropped. A caller that ACTS on the figure floors where it
-  acts.
-- **A time credit nets COUNTS, never units (R3).** It is carried to
-  {@link extensionGroups} in `time_credits`, which subtracts its counts from
-  the group of the row it credits.
-- A credit of an extension-section row nets nothing here: that row bills days
-  on units other rows billed, and no writer credits one.
-
-**Parameters**
-
-- `orderUid` — The order's uid, which is its divider's uid on every invoice
-- `orderItems` — The order's CURRENT `items`, dividers included
-- `invoices` — Every invoice linked to the order, live or void
-- `creditNotes` — Every credit note on those invoices. Omitted ⇒ nothing nets.
+**A fulfillment's rows as the account's custody input** (F9): each fulfillable
+line by its order-relative key. A row a substitution explains is left out —
+its `substituted` entry is that row's answer, and a custody figure there would
+report it twice.
 
 ### `keyInvoiceCredits(rows: readonly R[], lines: readonly L[], opts: typeLiteral): typeLiteral`
 
@@ -42412,7 +42546,7 @@ row of `rows` it credits, with its kind. Both views read it:
 - **credited** — the cap ({@link creditableLines}' budget,
   {@link unitsCreditedBefore}): every non-void note, marker-free, with the
   legacy `uid_invoice_item` fallback (`fallback: true`);
-- **reversed** — netting ({@link invoicedByPath}): issued or applied notes,
+- **reversed** — netting ({@link billedByPath}): issued or applied notes,
   `reverses_billing === true` lines, by `path_invoice_item` only.
 
 The caller has already chosen the notes of ONE invoice. A line it cannot
@@ -42422,33 +42556,21 @@ match is returned in `unmatched`.
 
 The window of the order pair an order line hangs under (`path[0]`), or `null`.
 
+### `orderOutOfServiceInputs(order: Order, fulfillment: Fulfillment | undefined, records: readonly DocumentDiffOutOfService[], invoices: readonly Invoice[]): OutOfServiceInput[]`
+
+**An order's lost/damaged records as the account's input** (decision 9): each
+billable record's units and what non-void invoices bill it, placed at the row
+that owns its booking (the order first, then the fulfillment), or `null`.
+
 ### `pairWindow(pair: typeLiteral | undefined): BilledWindow | null`
 
 A pair's {@link BilledWindow}, or `null` when it has no windows.
 
-### `remainingForOrder(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[], orderDestinations: readonly DocDestinationType[], ctx: AccountingContext, _: unknown): RemainingForOrder`
+### `purchaseCustody(purchase: Purchase, custody: ReadonlyMap<string, PurchaseLineCustody> | undefined): Map<string, CustodyRow> | null`
 
-What is left to bill on an order: new lines in full, quantity deltas at
-existing paths, and date-extension money on rows already billed (D4).
-
-🔴 **Fails closed on any unaligned scope** — `lines` comes back empty and the
-uids are in `unaligned`. A remainder built over a partial sum bills again
-whatever the unaligned invoice already billed.
-
-🔴 **Fails closed on any live CRMS-authored invoice**, the same way, naming it
-in `crms_authored` — see the module header.
-
-Every order LINE is considered, dividers never. A line whose quantity and
-extension are both zero is omitted unless {@link RemainingLine.bills}; a
-negative one (over-billing) is returned with `bills: false`, for the caller to
-route to a credit note rather than a remainder.
-
-**Parameters**
-
-- `orderUid` — The order's uid
-- `orderItems` — The order's CURRENT `items`, dividers included
-- `invoices` — Every invoice linked to the order, live or void — ALL of them, never a page
-- `orderDestinations` — The order's CURRENT pairs, which date every extension
+**A purchase's received units as the account's custody input** (F9): every
+booking line (not a service or replacement line) at its path, from the
+movements' custody. Absent custody ⇒ `null`, unknown rather than a wrong 0.
 
 ### `sameWindowDates(a: readonly WindowBounds[], b: readonly WindowBounds[]): boolean`
 
@@ -42470,7 +42592,7 @@ it directly, plus its kit parent's credit scaled by the ORDER's own component
 ratio (`credit × component quantity ÷ kit quantity`, rounded half-up once per
 level — never the catalog, D1/D2).
 
-The one walk `invoicedByPath`, `computeDocumentDiffs`'s D2 quantity check and
+The one walk the billing fold (`billedByPath`), `computeDocumentDiffs`'s D2 quantity check and
 the invoice sync (`syncOrderToInvoiceSelective`, `computeInvoiceSyncStatus`) read. A path under a credited kit is present even at 0.
 
 A path named directly that the order does not carry (a dangling anchor) keeps
@@ -43066,8 +43188,9 @@ The substitution arm (`substituted_for`) runs on both sides: a bill's
 substitute stands in for a purchase line exactly as an invoice's does for an
 order line, and {@link ScopedSyncSide.requantify} is how a side whose money
 does not follow quantity keeps a row's money with its units
-(one-document-model W5). The date-extension arm (`path_extension_for`) keys
-on a field no payable row carries, so on a bill it finds nothing. The
+(one-document-model W5). The date-extension arm (`path_extension_for`) runs
+on both sides too: a bill bills owed time as an extension section, as an
+invoice does (6e-0b2 F5, ruling 89), and the sync carries it as written. The
 lost/damaged arm (`out_of_service`) applies to both sides as written: a
 line billing a record is the billing document's own row.
 
@@ -43552,7 +43675,7 @@ parents): a parent and its full subtree occupy a contiguous index range, so
 alone. A correctly-pathed document is a fixed point. Unconditionally: every
 returned `path` is non-empty and ends in the item's own uid.
 
-### `computeOrderInvoiceCoverage(orderUid: string, orderItems: LineItem[], invoices: ReadonlyArray<typeLiteral>): OrderInvoiceCoverage`
+### `computeOrderInvoiceCoverage(account: InitiatorAccount): OrderInvoiceCoverage`
 
 **Is this order fully invoiced?** — the ORDER-first, union-across-invoices
 question, and the complement of {@link computeInvoiceSyncStatus}.
@@ -43572,50 +43695,40 @@ line is covered here and is `computeInvoiceSyncStatus`'s subject; measured
 2026-08-25 the corpus carries 1,653 drifted lines against 177 uninvoiced ones,
 so folding the two would bury this answer in the other's.
 
+**A reader of the account** (one-document-model 6e-0b2 F9): `uninvoiced` is
+every order line with units that no live billing row or reversing credit
+NAMES (`LineAccount.named`, among lines with `ordered > 0`), and `unmatched` is
+the account's `document_only` lines — so the banner, the diff, the remainder
+and the over-billing offer read one fold and cannot disagree about which rows
+are the order's. A substituted line is named by its substitute, a moved line
+by the row that claims it, and a fully credited line by its credit.
+
 ⚠️ **`void` invoices are skipped, drafts are NOT.** A draft states the intent
 to bill and is one click from doing so; measured on the whole prod corpus,
 excluding drafts changes the answer on **0** orders, so the simpler rule costs
 nothing. Voiding, by contrast, un-bills — counting a void invoice's lines as
 covered is how an order reads fully invoiced while nobody is being charged.
 
-🔴 **Every scope is gated on {@link invoiceScopeDividersMatch} FIRST, and that
-gate is the difference between a signal and an artifact.** This comparison is
-keyed on `path`, so where the two trees disagree structurally no pair is ever
-compared and EVERY order line reports uninvoiced while EVERY invoice line
-reports unmatched. That is not hypothetical: **966 of 969 prod pairs were
-unaligned on 2026-08-10** (CRMS-authored invoices carried none of their
-order's `group` dividers), `repair-invoice-structure.ts` took it to 0, one
-reappeared on 2026-08-12, and the corpus reads 989 aligned / 0 unaligned on
-2026-08-25. **Alignment is a measurement, not a property.**
+🔴 **Fail-closed on alignment, and that gate is the difference between a
+signal and an artifact.** The comparison is keyed on `path`, so where the two
+trees disagree structurally no pair is ever compared and EVERY order line
+would report uninvoiced. **966 of 969 prod pairs were unaligned on 2026-08-10**
+(CRMS-authored invoices carried none of their order's `group` dividers), and
+`repair-invoice-structure.ts` took it to 0: alignment is a measurement, not a
+property. If ANY linked scope is unaligned, both lists come back **empty** and
+the uid is in `unaligned`, so the caller renders "not computed". A partial
+union fails in the dangerous direction: an unaligned scope's lines read UNBILLED.
 
-So the gate is fail-closed rather than advisory: if ANY linked scope is
-unaligned, `uninvoiced` and `unmatched` come back **empty** and the uid is in
-`unaligned` — the caller renders "not computed" and cannot render a number.
-Returning a partial union beside an `unaligned` list the caller might not read
-would be the same policing this repo keeps replacing with unrepresentability,
-and it fails in the dangerous direction: an unaligned scope's lines are
-uncounted, so every line it bills reads UNBILLED.
-
-⚠️ **`unmatched` is not a defect count.** Nothing in the stored state separates
-"the order dropped this line after it was billed" from "an operator added it
-on the invoice on purpose", and the second is ordinary: of 190 such lines on
-prod, 143 are `replacement` charges raised at billing time. Only
-`transaction_fee` is excluded, because it is a document-level charge
-(`pricing: "from_total"`) that has no order counterpart by construction.
-`custom-` uids are NOT filtered — that is a presentation judgment, and this
-returns the item so the caller can make it.
-
-An invoice whose scope holds no items at all is `compared` and contributes
-nothing; that is an order this invoice does not bill, not a structural
-disagreement, so it must not suppress the answer the way `unaligned` does.
+⚠️ **`unmatched` is not a defect count**, and it is the fulfillment projection's
+input, not every row the order lacks: a `replacement`, an out-of-service charge,
+a `transaction_fee`, an extension row and a substitute are billed on purpose
+and are not in it. Nothing in the stored state separates "the order dropped
+this line after it was billed" from "an operator added it on the invoice on
+purpose". `custom-` uids are NOT filtered — that is a presentation judgment.
 
 **Parameters**
 
-- `orderUid` — The source order's uid — which IS its divider's uid on every
-invoice that bills it (Option B; the transitional `uid_order` field is gone).
-- `orderItems` — The order's full `items` array, dividers included — the
-alignment predicate reads them.
-- `invoices` — Every invoice linked to the order, live or void.
+- `account` — `accountBilling("receivable", …)` over every invoice linked to the order (live or void) and their credit notes
 
 ### `computePurchaseDocumentItemPaths(items: T[]): T[]`
 
@@ -43756,7 +43869,7 @@ extends (`path_extension_for`).
 
 An extension section bills MONEY on lines another invoice already billed, so
 every order-relative reader has to decide what to do with it: alignment and
-`invoicedByPath` read it as the divider it extends ({@link toOrderRelativePath}),
+the billing fold (`billedByPath`) read it as the divider it extends ({@link toOrderRelativePath}),
 while the line-drift readers skip it ({@link isInExtensionSection}).
 
 **Parameters**
@@ -43906,8 +44019,8 @@ at all — a group or destination an operator added on the invoice, or one an
 earlier edit kept after the order deleted it (core#124).
 
 Everything at or below a root is the invoice's own. Its lines bill no order
-line, so they credit no order path ({@link invoicedByPath}), count as extras
-in coverage, and are ignored by the alignment predicate
+line, so they credit no order path (the billing fold, `billedByPath`), are
+document-only in coverage, and are ignored by the alignment predicate
 ({@link invoiceScopeDividersMatch}) — one definition, read by all three, so
 they cannot disagree about which rows are the invoice's.
 
@@ -44324,6 +44437,13 @@ export it rather than to keep re-deriving it. Paired with
 **Is this bill live — not voided?** The ONE liveness rule, for every "already
 billed" reader. Declared here rather than in `utils/purchase-documents.ts`
 (which re-exports it) because that module imports this one.
+
+### `purchaseCreditIsLive(credit: typeLiteral): boolean`
+
+**Is this supplier credit live — not voided?** The twin of
+{@link purchaseBillIsLive}, declared here for the same reason: the one billing
+fold (`billedByPath`, `utils/quantityAccounting.ts`) reads both, and
+`utils/purchase-documents.ts` (which re-exports it) imports that module.
 
 ### `recomputePurchaseBillTotals(totalCents: number, settlements: readonly typeLiteral[]): typeLiteral`
 
@@ -45281,9 +45401,9 @@ Every invoicing action the UI may offer on this order.
   there is no organization-match rule, because billing a third party is a real
   pattern (13 imported invoices). A `draft` order is reserved by the create
   route before it is invoiced.
-- `create_remaining_invoice` — `remainingForOrder` finds a line the remainder
-  build would bill (`RemainingLine.bills`). An over-billed line is not one: it
-  is `credit_overbilling`'s (core#120).
+- `create_remaining_invoice` — the account finds a line the remainder build
+  would bill (`LineAccount.remaining.bills`). An over-billed line is not one:
+  it is `credit_overbilling`'s (core#120).
 - `create_replacement_invoice` — `replacement_units > 0`.
 - `create_service_charge_invoice` — `on_request_units > 0`: cleaning and
   maintenance, billed as `service` lines on request (api-cloudrun#1163).
@@ -45455,8 +45575,8 @@ handed in as inputs: a picker substitution (`itemsWithSubstitutions` in
 exchange leg (`withExchangeLegs` in `api-cloudrun/src/lib/exchangeLegs.ts`).
 A third kind of row reaches neither and therefore books nothing: a line the
 fulfillment carries at a path the order lacks — a picker addition, or an
-invoice-only line projected onto the fulfillment (`invoiceOnlyLines` in
-`utils/quantityAccounting.ts`). CFS deducts what was FULFILLED, so those rows
+invoice-only line projected onto the fulfillment (`billedByPath`'s
+`document_only` in `utils/quantityAccounting.ts`). CFS deducts what was FULFILLED, so those rows
 have to be able to book.
 
 ## Which rows
@@ -48341,7 +48461,7 @@ reason is carried verbatim: it is why the units come back, not where.
 
 The `substituted_for` entries that units `(from, to]` of a row carry, when the
 row's stand-in units are its FIRST units, entry by entry in stored order — the
-order `purchaseDocumentBilling` reads them in (`collectSubstitutionAnchors`).
+order the billing fold reads them in (`billedByPath`, `collectSubstitutionAnchors`).
 
 A credit that copies a bill row (one-document-model 6d, ruling 23) takes the
 slice of the units it credits, so its own fold subtracts from each X exactly
@@ -48380,7 +48500,7 @@ it directly, plus its kit parent's credit scaled by the ORDER's own component
 ratio (`credit × component quantity ÷ kit quantity`, rounded half-up once per
 level — never the catalog, D1/D2).
 
-The one walk `invoicedByPath`, `computeDocumentDiffs`'s D2 quantity check and
+The one walk the billing fold (`billedByPath`), `computeDocumentDiffs`'s D2 quantity check and
 the invoice sync (`syncOrderToInvoiceSelective`, `computeInvoiceSyncStatus`) read. A path under a credited kit is present even at 0.
 
 A path named directly that the order does not carry (a dangling anchor) keeps
@@ -51931,7 +52051,6 @@ Everything {@link priceDocument} reads besides the items.
 interface PriceDocumentContext {
   document: ReceivableDocumentKind;
   tax: DocumentTaxContext;
-  extensions?: readonly PriceDocumentExtension[];
   charge_windows: readonly PairChargeWindows[];
   formulas: PricingFormulas;
   holidays: readonly string[];
@@ -52091,7 +52210,7 @@ api-cloudrun#1154) and is simply absent from the context; a time-formula line
 under it is refused where it is priced ({@link lineCounts}), which names the
 line rather than the pair.
 
-### `chargeWindowPairViolations(items: readonly LineItem[], ctx: Pick<PriceDocumentContext, "document" | "charge_windows" | "extensions" | "formulas" | "holidays">): ChargeWindowPairViolation[]`
+### `chargeWindowPairViolations(items: readonly LineItem[], ctx: Pick<PriceDocumentContext, "document" | "charge_windows" | "formulas" | "holidays">): ChargeWindowPairViolation[]`
 
 **The charge-window pair invariant, checked (core#113):** in a pair holding
 two or more charge windows, every time-formula line outside an extension
@@ -52136,9 +52255,10 @@ The formula uids a set of lines name — what a caller must load into {@link Pri
 The date-extension sections of an invoice's items: one per destination
 divider carrying `path_extension_for`.
 
-The one derivation of {@link PriceDocumentContext.extensions}, shared by every
-invoice writer and the manager's optimistic recompute — a caller that forgets
-to pass it re-meters extension lines from their window, minimum included.
+The one derivation, run by {@link priceDocument} itself over the items it
+prices, on both sides (an invoice's and a bill's sections alike). It was a
+caller's input until 6e-0b2 F5, and a caller that forgot it re-metered
+extension lines from their window, minimum included.
 
 ### `invoiceRepriceRefusal(document: PriceDocumentKind): string | null`
 
@@ -52147,7 +52267,7 @@ invoice is retracted, and a paid or settled one is agreed. The rule
 `priceDocument` refuses on, exported so the manager reads it instead of
 restating it (`invoiceIsRepriceable`). An order always reprices.
 
-### `lineCounts(item: LineItem, ctx: Pick<PriceDocumentContext, "charge_windows" | "extensions" | "formulas" | "holidays">, carried: ReadonlyMap<LineItem, readonly TierCount[]>): TierCount[]`
+### `lineCounts(item: LineItem, ctx: Pick<PriceDocumentContext, "charge_windows" | "formulas" | "holidays"> & typeLiteral, carried: ReadonlyMap<LineItem, readonly TierCount[]>): TierCount[]`
 
 **A line's `counts`, the one derivation of them** (ruling 8).
 
@@ -52164,7 +52284,7 @@ Five-day week's per-window minimum is the formula's own (`minimum.scope:
 "window"`), so a 2+ window line stores Σ `max(days, 5)` business days ÷ 5 and
 its own numbers multiply out to its subtotal.
 
-### `meteredLineCounts(item: LineItem, ctx: Pick<PriceDocumentContext, "charge_windows" | "formulas" | "holidays">): TierCount[] | null`
+### `meteredLineCounts(item: LineItem | PayableLine, ctx: Pick<PriceDocumentContext, "charge_windows" | "formulas" | "holidays">, _: unknown): TierCount[] | null`
 
 **What a line's formula meters from its pair's windows** — `null` when the
 line hangs under no pair with windows. A flat formula meters no time and
@@ -52174,6 +52294,9 @@ answers `[{ flat, 1, 1 }]` wherever the line sits.
 counts they STATE. {@link lineCounts} owns that; this is the window half,
 split out so the invoice sync comparator can ask the same question
 (core#112).
+
+`opts.minimum: false` meters without the formula's minimum: a bill edit
+re-metering an extension row over its own (extension) pair (6e-0b2 F5).
 
 ### `priceCreditNote(selection: readonly CreditSelectionLine[], taxes: Tax[], extensions: readonly PriceDocumentExtension[]): PricedCreditNote`
 
@@ -52215,8 +52338,8 @@ The snapshot a line stores for `formula` — `{ uid, name, basis }`.
 
 **Stage 2 for one line: the line pricer.** `priceDocument` prices every line
 through it, and so does the one reader that must price a line outside a
-document — `accountLine` (`./quantityAccounting.ts`), which prices a
-remainder and a billed row's extension (#997 D11).
+document — the per-line account (`accountInitiator`, `./quantityAccounting.ts`),
+which prices a remainder and a billed row's extension (#997 D11).
 
 The line must already carry its `counts` ({@link lineCounts}). `extension`
 marks a line whose counts are the days an extension section ADDS, stated with
@@ -52413,6 +52536,7 @@ interface MeterInput {
   span?: MeterRange | null;
   holidays: readonly string[];
   rates?: readonly MeterRate[] | null;
+  minimum?: boolean;
 }
 ```
 
@@ -52910,11 +53034,11 @@ what live credits naming it already took (`billLineCredited`), and takes them
 from ONE SEGMENT (owner, 2026-11-11). A substitute Y's first units stand in
 for its X's (W5), one segment per `substituted_for` entry in stored order;
 the rest are the row's own, one more segment. So `units` is the rest of the
-current segment, capped by the pool behind it (`purchaseLineBilledNet`): the
+current segment, capped by the pool behind it (`purchaseBillingFold`): the
 entry's X for a stand-in segment, the row's own join for the own one.
 
 Why one segment: a credit row's fold splits ITS money over its entries
-(`purchaseDocumentBilling`), so a credit spanning two segments could
+(`billedByPath`), so a credit spanning two segments could
 attribute a cent to one line that the bill gave the other. Within one
 segment, successive credits sum exactly to the bill's share (the credit is
 priced first-come, `billLineCreditMoney`, and the shares telescope).
@@ -53114,6 +53238,17 @@ lived here (`unitWindowsForLine`, `coversForUnit`, `billedUnitCoverage`,
 `seedPurchaseLinesForWindows`) retired in one-document-model Phase 3, unused
 in either environment (Phase 0b census).
 
+### `BillExtensionTake`
+
+One purchase line's owed time a bill takes: the line and {@link splitBillTime}'s extensions for it.
+
+```ts
+interface BillExtensionTake {
+  item: PurchaseItem;
+  extensions: indexedAccess;
+}
+```
+
 ### `BillLineCreditPart`
 
 One bill row a supplier credit copies: {@link billLineCreditParts}' element.
@@ -53139,6 +53274,17 @@ What live supplier credits have already taken from one bill line.
 interface BillLineCredited {
   quantity: number;
   amount_cents: number;
+}
+```
+
+### `BillTimeSplit`
+
+{@link splitBillTime}'s answer: where a bill's units of one TIME purchase line go.
+
+```ts
+interface BillTimeSplit {
+  own: number;
+  extensions: typeLiteral[];
 }
 ```
 
@@ -53239,31 +53385,8 @@ bill several purchases, so `uid_purchase` says whose lines to read.
 interface PurchaseBilledDocuments {
   uid_purchase: string;
   purchase_items: readonly CreditableRow[];
-  bills: readonly Pick<PurchaseBill, "uid" | "number" | "totals" | "items" | "status">[];
-  credits: readonly Pick<PurchaseCredit, "status" | "items">[];
-}
-```
-
-### `PurchaseLineBilledNet`
-
-What the live documents bill of one purchase line, net of credits.
-
-```ts
-interface PurchaseLineBilledNet {
-  quantity: number;
-  amount_cents: number;
-}
-```
-
-### `PurchaseLineBilling`
-
-What one document bills of one purchase line: {@link purchaseDocumentBilling}'s value.
-
-```ts
-interface PurchaseLineBilling {
-  quantity: number;
-  amount_cents: number;
-  parts: typeLiteral[];
+  bills: readonly parenthesized[];
+  credits: readonly PayableFoldCredit[];
 }
 ```
 
@@ -53277,21 +53400,6 @@ interface RekeyablePayableRow {
   uid: string;
   path: readonly string[];
   uid_product?: string;
-}
-```
-
-### `RemainingTimeCountsArgs`
-
-{@link remainingTimeCounts}' inputs.
-
-```ts
-interface RemainingTimeCountsArgs {
-  purchase: Pick<Purchase, "uid" | "destinations">;
-  item: PurchaseItem;
-  documents: PurchaseBilledDocuments;
-  formulas: PricingFormulas;
-  holidays: readonly string[];
-  metered_over?: typeLiteral;
 }
 ```
 
@@ -53309,6 +53417,28 @@ interface SyncPurchaseToBillsArgs {
   linked_cleared?: ReadonlySet<string>;
 }
 ```
+
+### `billExtensionSections(purchase: Pick<Purchase, "uid" | "items" | "destinations">, takes: readonly BillExtensionTake[], _: unknown): typeLiteral`
+
+**A bill's date-extension sections** (ruling 89; F5): the extra time a bill
+takes on lines earlier bills already billed, as the receivable remainder
+builds it. One section per destination and billed window: a destination
+divider at `[purchase, E]` carrying `path_extension_for: [destination]`, the
+group dividers above each line, and each line at `[purchase, E, ...its path
+below the destination]` with `quantity` the units taken and `counts` the
+group's `extension_counts` (priced with no minimum: `priceDocument` reads the
+section off the divider). Its pair is the destination's, windowed from the day
+after the group's `billed_end` to the end of the destination's CLIPPED
+windows.
+
+**Parameters**
+
+- `purchase` — The purchase with its open hires clipped at the bill date (the bill's pairs)
+- `takes` — Per line, the owed groups {@link splitBillTime} took
+- `mintUid` — Mints each section divider's uid
+
+**Returns** — Rows to append to the purchase's block (dividers first, in path
+order), and the pairs their sections name; empty when nothing is taken
 
 ### `billLineCreditMoney(args: typeLiteral): CreditMoney`
 
@@ -53359,20 +53489,21 @@ the twin of AR's `creditableLines` prior-note sum.
 
 **The CREDITED view of the one credit fold** (ruling 84): marker-free, every
 non-void credit — the same liveness the AR cap reads (`creditableLines`). The
-REVERSED view is {@link purchaseCreditBilling}, gated on `reverses_billing`.
+REVERSED view is the billing fold's ({@link purchaseBillingFold}), gated on `reverses_billing`.
 A supplier credit has no draft state, so non-void is "issued or applied",
 exactly AR's netting liveness.
 
 ⚠️ Keyed on the pointer as written, which goes stale when the bill row moves
 (owner ruling 22, as `path_invoice_item` does on AR): a credit raised before a
 move then no longer counts against the row. The pool cap
-(`purchaseLineBilledNet`) still sees it.
+({@link purchaseBillingFold}) still sees it.
 
 ### `billedPoolCreditMoney(args: typeLiteral): CreditMoney`
 
 **What a supplier credit of `n` flat units is worth, when it names no bill
 line** (api-cloudrun#1439) — a share of the line's billed POOL
-(`purchaseLineBilledNet`: live bills less live credits), never of the PO line,
+(the fold's `{ quantity, amount_cents }` at the line, {@link purchaseBillingFold}:
+live bills less live credits), never of the PO line,
 so an edited bill strands nothing.
 
 - The pool's LAST `n` units of a PSEUDO-line, the pool's net over its units
@@ -53383,6 +53514,23 @@ so an edited bill strands nothing.
 
 A credit that names a bill line is priced by {@link billLineCreditParts}
 instead (one-document-model 6d): from that line, not the pool.
+
+### `creditTimeCounts(line: LineAccount, quantity: number): TierCount[] | null`
+
+**The counts a supplier credit of `quantity` units of one TIME purchase line
+takes back by default** (owner 2026-11-15, "newest time first"): the line's
+billed groups ({@link LineAccount.extension}`.billed`), most recently billed
+first, take the credited units, and the credit row states their
+QUANTITY-WEIGHTED MEAN counts (`meanTierCounts`). One row prices
+`rates × mean × quantity`, which is exactly the sum over the groups taken,
+because counts are rationals; a row per group would collide at the line's one
+path. Units past everything billed take the mean too (an over-credit, which
+the diff shows).
+
+Build the account over the purchase CLIPPED at the credit date, as the bill
+writer does, or an open hire's pair meters nothing and no group is billed.
+
+**Returns** — `null` when no time is billed on the line: there is nothing to take back
 
 ### `partMoney(line: PayableMoneyLineLike & typeLiteral, from: number, to: number): PartMoney`
 
@@ -53433,8 +53581,8 @@ The line's price is built by `flatPayablePrice` (the stated-total arm), so
 the projection parses on its own; the writer prices the whole document with
 `priceDocument`, which states the same money and the line's `taxes_base`.
 
-A TIME line projects unpriced, with the caller's `counts` seed
-({@link remainingTimeCounts}); the writer's `priceDocument` prices it.
+A TIME line projects unpriced, with the caller's `counts` seed, if any
+({@link ProjectBillLineOptions.counts}); the writer's `priceDocument` prices it.
 
 ### `projectPurchaseRowForBill(row: PurchaseRow, uidPurchase: string): PurchaseDocumentRow`
 
@@ -53467,48 +53615,22 @@ The line fields the purchase → bill merge follows, read off the two schemas
 
 The pair fields the purchase → bill merge follows, read off the two schemas.
 
-### `purchaseCreditBilling(rows: readonly PurchaseDocumentRow[], uidPurchase: string, purchaseItems: readonly CreditableRow[]): Map<string, PurchaseLineBilling>`
+### `purchaseBillingFold(documents: PurchaseBilledDocuments): BilledByPath`
 
-**What one supplier credit UN-bills of each line of purchase `uidPurchase`** —
-{@link purchaseDocumentBilling}'s fold over the credit's rows, read as rows of
-sign −1 (ruling 84). The caller subtracts it. Two differences, both the one
-credit fold's rules on both sides:
+**The billing fold over one purchase's documents** (6e-0b2 F3): what every
+bill and supplier credit bills at each purchase-relative path, net of credits,
+UNFLOORED — `billedByPath("payable", …)`, the AR fold's rules on this side.
+Read `byPath.get(path.join("/"))` for a line's `{ quantity, amount_cents }`:
+lines join on the full path under the purchase, because one product may sit on
+two lines. A negative is a credit with no live bill left under it, which the
+diff has to be able to show. Liveness is the fold's.
 
-- **Only a `reverses_billing: true` line nets** (ruling 38). An unmarked line —
-  a goodwill or freight credit — is money given back, not billing reversed.
-- **A time credit nets COUNTS and money, never units** (R3): a line carrying
-  `counts` adds its parts and amount and no quantity.
+### `purchaseCreditIsLive(credit: typeLiteral): boolean`
 
-Root vs component is the credit's own anchors, and that is the bill's by
-construction: a credit of a substitute kit copies its root WITH its subtree
-and refuses a bare component (`billLineCreditParts`, `creditableBillLines`),
-so the copied anchors are the bill's. No stored credit carries
-`substituted_for` (prod 2, dev 6 lines on 2026-11-13).
-
-### `purchaseCreditIsLive(credit: Pick<PurchaseCredit, "status">): boolean`
-
-Is this credit live — not voided? Every "already billed" reader asks it.
-
-### `purchaseDocumentBilling(rows: readonly PurchaseDocumentRow[], uidPurchase: string, purchaseItems: readonly CreditableRow[]): Map<string, PurchaseLineBilling>`
-
-**What one document bills of each line of purchase `uidPurchase`**, keyed by
-the line's path relative to the purchase, joined with `/`. Every "already
-billed" reader goes through it.
-
-- A row bills the line its join names (`purchaseLineKeyOf`: its own path, or
-  its move pointer).
-- 🔴 **A substitute Y bills the X it stands in for** (W5, `substituted_for`),
-  as an invoice's does on AR (`invoicedByPath`): each live entry credits X
-  with its units and their share of Y's money and counts, and the rest of Y
-  stays at Y's own join. The stand-in units take Y's FIRST units' share
-  (`lineUnitsCents`), so the parts sum to exactly Y's amount.
-- An entry is live while the purchase still carries X (`purchase_items`);
-  a spent one bills nothing for X, and its units count at Y's own join.
-- X's kit components are credited through the PURCHASE's own ratio
-  (`substitutionCredit`), in units only: the money a substitute stands in for
-  is X's whole subtree's, and it lands on X. That holds whichever of Y's rows
-  carries it: a component's stamped entries move its stand-in share of its
-  money to X too, units staying with the ratio walk (api-cloudrun#1475).
+**Is this supplier credit live — not voided?** The twin of
+{@link purchaseBillIsLive}, declared here for the same reason: the one billing
+fold (`billedByPath`, `utils/quantityAccounting.ts`) reads both, and
+`utils/purchase-documents.ts` (which re-exports it) imports that module.
 
 ### `purchaseDocumentScope(purchase: Pick<Purchase, "uid" | "number" | "items" | "destinations">, lines: readonly PurchaseDocumentItem[], _: unknown): typeLiteral`
 
@@ -53535,33 +53657,13 @@ bill. The line goes at the end of its parent's direct lines (ahead of a
 destination's first group, as a divider closes every level below it), so the
 credit shows the bill's tree.
 
-### `purchaseDocumentsBefore(bill: Pick<PurchaseBill, "uid" | "date" | "number">, purchase: typeLiteral, bills: readonly B[], credits: readonly C[]): typeLiteral`
+### `purchaseInitiator(purchase: Pick<Purchase, "uid" | "items" | "destinations">): AccountedInitiator`
 
-**The documents of one purchase dated before `bill`** — by date, then number —
-with `bill` itself left out. A time line re-seeded on `bill` is billed for its
-pair's time less what THESE documents bill (one-document-model item 5): a later
-document's billing does not limit what an earlier one may bill. The bill writer
-and the manager's optimistic reprice both read it, so the two cannot disagree.
-
-### `purchaseLineBilledCounts(path: readonly string[], documents: PurchaseBilledDocuments): TierCount[]`
-
-**The counts the live documents bill of one TIME purchase line, net of
-credits** — Σ live bill `counts` − Σ live credit `counts`, tier by tier
-(`combineTierCounts`), joined on the purchase line key as
-{@link purchaseLineBilledNet} is. Unfloored, like it.
-
-The rows of ONE document that bill the line fold first, into their
-quantity-weighted mean (`meanTierCounts`), so a split reads as one billing:
-4 units split 2 + 2 over 30 days have billed 30 days, not 60. Summing across
-documents is unchanged (core#149 tracks what that means for a partial bill).
-
-### `purchaseLineBilledNet(path: readonly string[], documents: PurchaseBilledDocuments): PurchaseLineBilledNet`
-
-**What the purchase line at `path` is billed, net of credits, UNFLOORED.** The
-one sum behind {@link recomputePurchaseQuantityBilled} and the diff's `billed`
-entry: lines join on the full path under the purchase, because one product
-may sit on two lines. A negative is a credit with no live bill left under
-it, which the diff has to be able to show.
+**A purchase as the billing account reads it** (`accountBilling("payable", …)`,
+`accountInitiator`): its uid, its rows and its pairs. A purchase row is not an
+order line by type, though the fold reads only what both carry, so the one
+cast lives here rather than at every payable caller. Pass the purchase with
+its open hires CLIPPED at the document date when the account must meter them.
 
 ### `purchaseLineCovers(purchase: Pick<Purchase, "status">, item: PurchaseItem): boolean`
 
@@ -53580,8 +53682,8 @@ A purchase's `purchase` divider on a bill or credit — named `PO-n`, its uid th
 ### `recomputePurchaseQuantityBilled(purchase: Pick<Purchase, "items">, documents: PurchaseBilledDocuments): PurchaseRow[]`
 
 **A purchase's rows with each line's `quantity_billed` recounted** from its
-documents (api-cloudrun#1441). A flat line's count is
-{@link purchaseLineBilledNet} floored at 0, because the schema's bucket is
+documents (api-cloudrun#1441). A flat line's count is the fold's
+({@link purchaseBillingFold}) floored at 0, because the schema's bucket is
 `.min(0)`; the diff keeps the unfloored number. A time line and a divider
 come back as they went in.
 
@@ -53626,17 +53728,21 @@ line's `path_purchase_item` and `substituted_for`, and a movement's
 `path_source_item` (one-document-model ruling 65a), take the PURCHASE's; a credit's `path_bill_item` takes
 the BILL's.
 
-### `remainingTimeCounts(args: RemainingTimeCountsArgs): TierCount[] | null`
+### `splitBillTime(line: LineAccount, quantity: number): BillTimeSplit | null`
 
-**What is left to bill of a TIME purchase line, in counts** (0b ruling 3,
-the AR rule `extensionGroups` applies to an order): the line metered over its
-PAIR's `charge_windows` through its formula, less what live bills already
-bill there net of credits ({@link purchaseLineBilledCounts}), each tier
-floored at 0. Billing in parts therefore never totals more than metering the
-whole, and an over-billed line seeds nothing (the diff reports it).
+**Split a bill's `quantity` of one TIME purchase line** by the line's account
+(one-document-model 6e-0b2 F5; owner 2026-11-15, "unbilled first"): the
+line's never-billed units first ({@link LineAccount.remaining}`.units`), then
+its owed extension groups, oldest `billed_end` first, each taking at most its
+own units. Units past both bill at the line's own path: over-billing is legal
+(D5) and the diff reports it.
 
-`null` when the line's pair states no charge windows — there is no time to
-bill, which the bill writer refuses by name.
+The account must be built over the purchase with its open hires CLIPPED at
+the bill date (the bill's pairs), or an open hire's pair meters nothing and
+nothing is ever owed.
+
+**Returns** — `null` when neither covers a single unit: there is nothing unbilled,
+which the bill writer refuses by name
 
 ### `substituteKitSubtree(rows: readonly PurchaseDocumentRow[], path: readonly string[]): PurchaseDocumentItem[]`
 

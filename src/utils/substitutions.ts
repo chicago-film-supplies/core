@@ -232,7 +232,7 @@ export function standInUnits(row: MaybeSubstitution, liveX: ReadonlySet<string>)
 /**
  * The `substituted_for` entries that units `(from, to]` of a row carry, when the
  * row's stand-in units are its FIRST units, entry by entry in stored order — the
- * order `purchaseDocumentBilling` reads them in (`collectSubstitutionAnchors`).
+ * order the billing fold reads them in (`billedByPath`, `collectSubstitutionAnchors`).
  *
  * A credit that copies a bill row (one-document-model 6d, ruling 23) takes the
  * slice of the units it credits, so its own fold subtracts from each X exactly
@@ -372,7 +372,7 @@ export interface CreditableRow {
  * ratio (`credit × component quantity ÷ kit quantity`, rounded half-up once per
  * level — never the catalog, D1/D2).
  *
- * The one walk `invoicedByPath`, `computeDocumentDiffs`'s D2 quantity check and
+ * The one walk the billing fold (`billedByPath`), `computeDocumentDiffs`'s D2 quantity check and
  * the invoice sync (`syncOrderToInvoiceSelective`, `computeInvoiceSyncStatus`) read. A path under a credited kit is present even at 0.
  *
  * A path named directly that the order does not carry (a dangling anchor) keeps

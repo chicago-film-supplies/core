@@ -626,7 +626,7 @@ const reconcileOrderFromInvoicesRules: CollectionRule[] = [
         source: ["items"],
         target: ["items"],
         transform:
-          "invoiceOnlyLines(order, invoices) — lines at paths the order lacks, quantity summed across invoices, at their order-relative path",
+          "billedByPath(\"receivable\", order, invoices, creditNotes).document_only — lines at paths the order lacks, quantity summed across invoices, at their order-relative path",
       },
     ],
   },

@@ -11,17 +11,17 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
   PAYABLE_LINE_CLAIMS,
-  purchaseDocumentsBefore,
-  purchaseLineBilledCounts,
-  remainingTimeCounts,
+  billExtensionSections,
+  creditTimeCounts,
+  purchaseBillingFold,
+  purchaseInitiator,
+  splitBillTime,
   type PurchaseBilledDocuments,
   projectPurchaseLineToBillLine,
   purchaseBillIsLive,
   purchaseBillSharedLineFields,
   purchaseCreditIsLive,
   purchaseDocumentScope,
-  purchaseCreditBilling,
-  purchaseLineBilledNet,
   billedPoolCreditMoney,
   billLineCreditMoney,
   partMoney,
@@ -58,6 +58,7 @@ import {
   isPurchaseLine,
 } from "../src/schemas/mod.ts";
 import { computeItemPaths } from "../src/utils/orders.ts";
+import { accountBilling } from "../src/utils/quantityAccounting.ts";
 import { purchaseLineMoneyIssues, purchaseTotalsIssues } from "../src/schemas/purchase.ts";
 import { applyDateEdit } from "../src/utils/dates.ts";
 import { orderLineClaimIssues } from "../src/utils/invoices.ts";
@@ -67,6 +68,7 @@ import { FIXED, VISION } from "./helpers/formulas.ts";
 import { mockTimestamp, tsAt } from "./helpers/timestamp.ts";
 
 /** The tax class every payable test line is stamped with: exempt on this side, so it prices nothing. */
+import { billedNetAP } from "./helpers/account.ts";
 const TAX_CLASS = "TaxClassResale000000";
 
 /** An empty catalog: no class resolves a rate, so an exempt line's `taxes_base` is `[]`. */
@@ -131,6 +133,13 @@ const SCOPE: PurchaseDocumentRow[] = [
   { ...purchaseDivider(DIV), path: [PURCHASE, DIV] },
 ];
 
+/**
+ * The purchase's own divider rows, at purchase-relative paths: what a reader of
+ * the billing fold must be handed, or the bill's destination divider reads as
+ * one the bill authored and nothing under it bills a purchase line (F2 rule 3).
+ */
+const PURCHASE_DIVIDERS: PurchaseBilledDocuments["purchase_items"] = [purchaseDivider(DIV)];
+
 /** A bill of `items` (lines at their purchase paths) under the purchase's dividers. */
 function billDoc(number: number, items: PurchaseDocumentItem[], over: Partial<PurchaseBill> = {}): PurchaseBill {
   const total = items.reduce((s, i) => s + i.amount_cents, 0);
@@ -161,7 +170,7 @@ function billDoc(number: number, items: PurchaseDocumentItem[], over: Partial<Pu
   };
 }
 
-const NONE: PurchaseBilledDocuments = { uid_purchase: PURCHASE, purchase_items: [], bills: [], credits: [] };
+const NONE: PurchaseBilledDocuments = { uid_purchase: PURCHASE, purchase_items: PURCHASE_DIVIDERS, bills: [], credits: [] };
 /** The bill line projected from `item` for `quantity` units — at its path, with its uid. (`_n` is legacy.) */
 const project = (item: PurchaseItem, _n = 10, quantity = 1) =>
   projectPurchaseLineToBillLine(item, { uid_purchase: PURCHASE, quantity });
@@ -357,31 +366,28 @@ Deno.test("priceDocument (payable): a pushed time line with no counts and no win
   assertThrows(() => priceDocument([timeBillLine()], bare), PriceRefusalError, "no destination pair with charge windows");
 });
 
-Deno.test("remainingTimeCounts: the pair metered, less what live bills bill net of credits, floored at 0 (0b ruling 3)", () => {
-  const purchase = { uid: PURCHASE, destinations: [chargedPair()] };
-  const args = (documents: Omit<PurchaseBilledDocuments, "uid_purchase" | "purchase_items">) => ({
-    purchase,
-    item: visionLine(),
-    documents: { uid_purchase: PURCHASE, purchase_items: [], ...documents },
-    formulas: FORMULAS,
-    holidays: [],
-  });
-  const billed = (counts: typeof WEEK_1, over: Partial<PurchaseBill> = {}) =>
-    billDoc(1, [{ ...timeBillLine(counts), amount_cents: 9000 }], over);
-  assertEquals(remainingTimeCounts(args({ bills: [], credits: [] })), WEEK_2, "nothing billed: the whole fortnight");
-  assertEquals(remainingTimeCounts(args({ bills: [billed(WEEK_1)], credits: [] })), WEEK_1, "one week billed: one left");
-  assertEquals(remainingTimeCounts(args({ bills: [billed(WEEK_2)], credits: [] })), [
-    { rate_key: "month", num: 0, den: 1 },
-    { rate_key: "week", num: 0, den: 1 },
-  ], "billed in full");
-  const over = remainingTimeCounts(args({ bills: [billed(WEEK_2), billed(WEEK_1, { uid: "testbill000000000002" })], credits: [] }));
-  assertEquals(over?.find((t) => t.rate_key === "week")?.num, 0, "over-billed seeds nothing, never a negative");
-  const voided = billed(WEEK_1, { status: "void", voided_at: mockTimestamp });
-  assertEquals(remainingTimeCounts(args({ bills: [voided], credits: [] })), WEEK_2, "a void bill bills nothing");
-  const creditLine = { ...timeBillLine(WEEK_1), amount_cents: 9000 };
-  assertEquals(remainingTimeCounts(args({ bills: [billed(WEEK_2)], credits: [credit([creditLine])] })), WEEK_1, "a credit un-bills its counts");
-  assertEquals(remainingTimeCounts({ ...args({ bills: [], credits: [] }), purchase: { uid: PURCHASE, destinations: [purchasePair(DIV)] } }), null);
+/** The Vision line's account over `bills` and `credits`, the purchase's pair the fortnight (6e-0b2 F5). */
+function timeLineAccount(bills: PurchaseBill[], credits: PurchaseCredit[] = [], item = visionLine()) {
+  const purchase = { uid: PURCHASE, items: [purchaseDivider(DIV), item], destinations: [chargedPair()] };
+  const account = accountBilling("payable", purchaseInitiator(purchase), bills, credits, { formulas: FORMULAS, holidays: [] });
+  return account.lines.find((l) => l.path.join("/") === item.path.join("/"))!;
+}
+/** A bill of the Vision line over the purchase's fortnight. */
+const fortnightBill = (rows: PurchaseDocumentItem[], over: Partial<PurchaseBill> = {}) =>
+  billDoc(1, rows, { destinations: [{ uid_purchase: PURCHASE, ...chargedPair() }], ...over });
+
+Deno.test("splitBillTime over the account (F5): unbilled units first, a fortnight billed owes nothing, a void bill bills nothing", () => {
+  const billed = (over: Partial<PurchaseBill> = {}) => fortnightBill([{ ...timeBillLine(WEEK_2), amount_cents: 18000 }], over);
+  assertEquals(splitBillTime(timeLineAccount([]), 2), { own: 2, extensions: [] }, "nothing billed: both units at the line's own path");
+  assertEquals(splitBillTime(timeLineAccount([billed()]), 2), null, "billed in full: nothing unbilled");
+  assertEquals(splitBillTime(timeLineAccount([billed()]), 3)?.own ?? null, null, "past both, still nothing unbilled to start from");
+  const voided = billed({ status: "void", voided_at: mockTimestamp });
+  assertEquals(splitBillTime(timeLineAccount([voided]), 2), { own: 2, extensions: [] }, "a void bill bills nothing");
+  // Over-billing is legal (D5): one unit unbilled, the rest past it at the own path.
+  const one = fortnightBill([{ ...project(visionLine(), 10, 1), price: { ...timeBillLine(WEEK_2).price }, quantity: 1, amount_cents: 9000 } as PurchaseDocumentItem]);
+  assertEquals(splitBillTime(timeLineAccount([one]), 3), { own: 3, extensions: [] }, "1 unbilled, 2 over-billed, all at the own path");
 });
+
 
 Deno.test("syncPurchaseToBills: a TIME line's quantity follows on its own and the bill re-meters; an overridden one stays", () => {
   const prevItem = visionLine();
@@ -1038,24 +1044,24 @@ Deno.test("recomputePurchaseQuantityBilled: live bills net of live credits, floo
   const bill = (n: number, quantity: number) => billDoc(n, [docLine(item, quantity)]);
   const cases: [string, PurchaseBilledDocuments, number][] = [
     ["nothing billed", NONE, 0],
-    ["a bill edited 5→3 counts 3", { uid_purchase: PURCHASE, purchase_items: [], bills: [bill(1, 3)], credits: [] }, 3],
-    ["…and voiding it releases 3, not the 5 it was created with", { uid_purchase: PURCHASE, purchase_items: [], bills: [voidedBill(bill(1, 3))], credits: [] }, 0],
-    ["a bill edited 5→8 beside a bill of 2 counts 10", { uid_purchase: PURCHASE, purchase_items: [], bills: [bill(1, 8), bill(2, 2)], credits: [] }, 10],
-    ["…bill B voided leaves the edited A", { uid_purchase: PURCHASE, purchase_items: [], bills: [bill(1, 8), voidedBill(bill(2, 2))], credits: [] }, 8],
-    ["…then A voided leaves nothing", { uid_purchase: PURCHASE, purchase_items: [], bills: [voidedBill(bill(1, 8)), voidedBill(bill(2, 2))], credits: [] }, 0],
-    ["bill 5, credit 2", { uid_purchase: PURCHASE, purchase_items: [], bills: [bill(1, 5)], credits: [credit([docLine(item, 2)])] }, 3],
-    ["…void the bill: the credit strands, and the count floors", { uid_purchase: PURCHASE, purchase_items: [], bills: [voidedBill(bill(1, 5))], credits: [credit([docLine(item, 2)])] }, 0],
-    ["…then void the credit too", { uid_purchase: PURCHASE, purchase_items: [], bills: [voidedBill(bill(1, 5))], credits: [credit([docLine(item, 2)], "void")] }, 0],
-    ["a void credit counts nothing, so its units read billed again", { uid_purchase: PURCHASE, purchase_items: [], bills: [bill(1, 5)], credits: [credit([docLine(item, 2)], "void")] }, 5],
-    ["an applied credit still counts", { uid_purchase: PURCHASE, purchase_items: [], bills: [bill(1, 5)], credits: [credit([docLine(item, 2)], "applied")] }, 3],
+    ["a bill edited 5→3 counts 3", { uid_purchase: PURCHASE, purchase_items: PURCHASE_DIVIDERS, bills: [bill(1, 3)], credits: [] }, 3],
+    ["…and voiding it releases 3, not the 5 it was created with", { uid_purchase: PURCHASE, purchase_items: PURCHASE_DIVIDERS, bills: [voidedBill(bill(1, 3))], credits: [] }, 0],
+    ["a bill edited 5→8 beside a bill of 2 counts 10", { uid_purchase: PURCHASE, purchase_items: PURCHASE_DIVIDERS, bills: [bill(1, 8), bill(2, 2)], credits: [] }, 10],
+    ["…bill B voided leaves the edited A", { uid_purchase: PURCHASE, purchase_items: PURCHASE_DIVIDERS, bills: [bill(1, 8), voidedBill(bill(2, 2))], credits: [] }, 8],
+    ["…then A voided leaves nothing", { uid_purchase: PURCHASE, purchase_items: PURCHASE_DIVIDERS, bills: [voidedBill(bill(1, 8)), voidedBill(bill(2, 2))], credits: [] }, 0],
+    ["bill 5, credit 2", { uid_purchase: PURCHASE, purchase_items: PURCHASE_DIVIDERS, bills: [bill(1, 5)], credits: [credit([docLine(item, 2)])] }, 3],
+    ["…void the bill: the credit strands, and the count floors", { uid_purchase: PURCHASE, purchase_items: PURCHASE_DIVIDERS, bills: [voidedBill(bill(1, 5))], credits: [credit([docLine(item, 2)])] }, 0],
+    ["…then void the credit too", { uid_purchase: PURCHASE, purchase_items: PURCHASE_DIVIDERS, bills: [voidedBill(bill(1, 5))], credits: [credit([docLine(item, 2)], "void")] }, 0],
+    ["a void credit counts nothing, so its units read billed again", { uid_purchase: PURCHASE, purchase_items: PURCHASE_DIVIDERS, bills: [bill(1, 5)], credits: [credit([docLine(item, 2)], "void")] }, 5],
+    ["an applied credit still counts", { uid_purchase: PURCHASE, purchase_items: PURCHASE_DIVIDERS, bills: [bill(1, 5)], credits: [credit([docLine(item, 2)], "applied")] }, 3],
     [
       "a $0 voided bill: its void folds to 0, and the stamp is what stops it counting",
-      { uid_purchase: PURCHASE, purchase_items: [], bills: [voidedBill(billDoc(1, [docLine(item, 4, 0)]))], credits: [] },
+      { uid_purchase: PURCHASE, purchase_items: PURCHASE_DIVIDERS, bills: [voidedBill(billDoc(1, [docLine(item, 4, 0)]))], credits: [] },
       0,
     ],
-    ["a $0 bill not voided still counts", { uid_purchase: PURCHASE, purchase_items: [], bills: [billDoc(1, [docLine(item, 4, 0)])], credits: [] }, 4],
+    ["a $0 bill not voided still counts", { uid_purchase: PURCHASE, purchase_items: PURCHASE_DIVIDERS, bills: [billDoc(1, [docLine(item, 4, 0)])], credits: [] }, 4],
     ["an unstamped bill folded void, as every bill before the stamp is", {
-      uid_purchase: PURCHASE, purchase_items: [],
+      uid_purchase: PURCHASE, purchase_items: PURCHASE_DIVIDERS,
       bills: [billDoc(1, [docLine(item, 4)], { status: "void", totals: { total_cents: 1000, amount_paid_cents: 0, amount_credited_cents: 0, amount_void_cents: 1000, amount_due_cents: 0 } })],
       credits: [],
     }, 0],
@@ -1066,63 +1072,65 @@ Deno.test("recomputePurchaseQuantityBilled: live bills net of live credits, floo
 
   await t.step("a time line stays null, whatever names it", () => {
     const time = visionLine();
-    assertEquals(recounted(time, { uid_purchase: PURCHASE, purchase_items: [], bills: [billDoc(1, [docLine(time, 2)])], credits: [] }), null);
+    assertEquals(recounted(time, { uid_purchase: PURCHASE, purchase_items: PURCHASE_DIVIDERS, bills: [billDoc(1, [docLine(time, 2)])], credits: [] }), null);
   });
 
   await t.step("the join is the full path: one product on two lines (two groups, W4K) keeps two counts", () => {
     const other = buyLine({ path: [DIV, iuid(77), item.uid], quantity: 10, amount_cents: 10000 });
     const items = [item, other];
-    const documents = { uid_purchase: PURCHASE, purchase_items: [], bills: [billDoc(1, [docLine(item, 2), docLine(other, 7)])], credits: [credit([docLine(other, 1)])] };
+    const documents = { uid_purchase: PURCHASE, purchase_items: PURCHASE_DIVIDERS, bills: [billDoc(1, [docLine(item, 2), docLine(other, 7)])], credits: [credit([docLine(other, 1)])] };
     assertEquals(item.uid, other.uid);
     assertEquals(recomputePurchaseQuantityBilled({ items }, documents).map((i) => (i as PurchaseItem).quantity_billed), [2, 6]);
   });
 
   await t.step("a document-only line names no purchase line and moves nothing", () => {
     const documentOnly = { type: "service", path: [iuid(55)], quantity: 9, amount_cents: 1000 } as unknown as PurchaseDocumentItem;
-    assertEquals(recounted(item, { uid_purchase: PURCHASE, purchase_items: [], bills: [billDoc(1, [documentOnly])], credits: [] }), 0);
+    assertEquals(recounted(item, { uid_purchase: PURCHASE, purchase_items: PURCHASE_DIVIDERS, bills: [billDoc(1, [documentOnly])], credits: [] }), 0);
   });
 });
 
-Deno.test("purchaseLineBilledNet: the count the recount floors, and the money beside it, unfloored", () => {
+Deno.test("payable fold (billedNetAP): the count the recount floors, and the money beside it, unfloored", () => {
   const item = buyLine({ quantity: 10, amount_cents: 10000 });
   const documents = {
     uid_purchase: PURCHASE,
-    purchase_items: [],
+    purchase_items: PURCHASE_DIVIDERS,
     bills: [voidedBill(billDoc(1, [docLine(item, 5, 5000)]))],
     credits: [credit([docLine(item, 2, 2000)])],
   };
-  assertEquals(purchaseLineBilledNet(item.path, documents), { quantity: -2, amount_cents: -2000 });
+  assertEquals(billedNetAP(item.path, documents), { quantity: -2, amount_cents: -2000 });
 });
 
 Deno.test("one credit fold (AP): only a reverses_billing line un-bills — a goodwill line is money given back, not billing reversed (ruling 38)", () => {
   const item = buyLine({ quantity: 10, amount_cents: 10000 });
   const bills = [billDoc(1, [docLine(item, 5, 5000)])];
   const net = (reverses: boolean) =>
-    purchaseLineBilledNet(item.path, {
+    billedNetAP(item.path, {
       uid_purchase: PURCHASE,
-      purchase_items: [],
+      purchase_items: PURCHASE_DIVIDERS,
       bills,
       credits: [credit([{ ...docLine(item, 2, 2000), reverses_billing: reverses }])],
     });
   assertEquals(net(true), { quantity: 3, amount_cents: 3000 }, "control: a reversing line nets units and money");
   assertEquals(net(false), { quantity: 5, amount_cents: 5000 }, "an unmarked line nets nothing");
   // The diff's naming follows the same rule: an unmarked credit names no line.
-  assertEquals(purchaseCreditBilling([{ ...docLine(item, 2, 2000), reverses_billing: false }], PURCHASE, []).size, 0);
+  const unmarked = { uid_purchase: PURCHASE, purchase_items: PURCHASE_DIVIDERS, bills: [], credits: [credit([{ ...docLine(item, 2, 2000), reverses_billing: false }])] };
+  assertEquals(purchaseBillingFold(unmarked).byPath.size, 0);
 });
 
 Deno.test("one credit fold (AP): a TIME credit un-bills counts and money, never units (R3)", () => {
-  const purchase = { uid: PURCHASE, destinations: [chargedPair()] };
   const documents = {
     uid_purchase: PURCHASE,
-    purchase_items: [],
+    purchase_items: PURCHASE_DIVIDERS,
     bills: [billDoc(1, [{ ...timeBillLine(WEEK_2), amount_cents: 18000 }])],
     credits: [credit([{ ...timeBillLine(WEEK_1), amount_cents: 9000 }])],
   };
   const path = visionLine().path;
   // Units: the bill's, untouched. Money: net of the credit.
-  assertEquals(purchaseLineBilledNet(path, documents), { quantity: timeBillLine(WEEK_2).quantity, amount_cents: 9000 });
-  // Counts: the credited week comes back to bill.
-  assertEquals(remainingTimeCounts({ purchase, item: visionLine(), documents, formulas: FORMULAS, holidays: [] }), WEEK_1);
+  assertEquals(billedNetAP(path, documents), { quantity: timeBillLine(WEEK_2).quantity, amount_cents: 9000 });
+  // Time: the credited week is no longer billed time, so the newest-first default has
+  // only the bill's fortnight less the credited week to take back.
+  const line = timeLineAccount([fortnightBill([{ ...timeBillLine(WEEK_2), amount_cents: 18000 }])], [credit([{ ...timeBillLine(WEEK_1), amount_cents: 9000 }])]);
+  assertEquals(creditTimeCounts(line, 2), WEEK_1);
 });
 
 Deno.test("purchaseBillIsLive reads the status; purchaseCreditIsLive reads the status", () => {
@@ -1155,6 +1163,71 @@ Deno.test("diff: a live credit with no live bill left under it reads as a negati
   // A voided credit beside it leaves nothing to say.
   const quiet = { ...sources, credits: [credit([creditLine], "void")] };
   assertEquals(poDiffs(quiet).lines.size, 0);
+});
+
+// ── One renderer for both sides (one-document-model 6e-0b2 F9, rulings 33, 90, 91) ──
+
+const BATTERY = lid(3);
+/** A purchase of 3 radios and 2 batteries, the radios billed in full on bill 1. */
+function partlyBilled() {
+  const radio = buyLine({ quantity_billed: 3 });
+  const battery = buyLine({ uid: BATTERY, name: "Battery", quantity: 2 });
+  const bill = billDoc(1, [project(buyLine(), 10, 3)]);
+  return { radio, battery, bill, sources: { purchase: purchaseDoc([radio, battery]), bills: [bill], credits: [] } };
+}
+
+Deno.test("diff (ruling 90): once a live bill exists, a line no bill names reports on the purchase — as an unbilled order line does", () => {
+  const { battery, bill, sources } = partlyBilled();
+  const lines = poDiffs(sources).lines;
+  assertEquals([...lines.keys()], [battery.path.join("/")]);
+  const entry = lines.get(battery.path.join("/"))![0] as DocumentQuantityEntry;
+  assertEquals([entry.ordered, entry.invoiced, entry.fulfilled], [2, 0, 2]);
+  // `invoices` is every compared bill, as on the receivable side — not only those naming the line.
+  assertEquals(entry.invoices.map((r) => r.uid), [bill.uid]);
+  // Ruling 39's money fields are stated on both sides now.
+  assertEquals(typeof entry.quantity_cents, "number");
+  assertEquals(entry.credit_sources, []);
+  // With no live bill at all, nothing is billed to disagree with.
+  assertEquals(poDiffs({ ...sources, bills: [] }).lines.size, 0);
+});
+
+Deno.test("diff (ruling 91): a bill's own view lists the purchase lines it leaves out that no sibling bills", () => {
+  const { radio, battery, bill, sources } = partlyBilled();
+  const onBill = billDiffs(bill.uid, sources).lines;
+  // At the battery's key in the BILL's path space, not on the radio row the bill carries.
+  assertEquals([...onBill.keys()], [`${PURCHASE}/${battery.path.join("/")}`]);
+  assertEquals(onBill.get(`${PURCHASE}/${battery.path.join("/")}`)!.map((e) => e.kind), ["quantity"]);
+  assertEquals(onBill.has(`${PURCHASE}/${radio.path.join("/")}`), false);
+  // A sibling bill that bills the batteries leaves bill 1 nothing to say.
+  const sibling = billDoc(2, [project(buyLine({ uid: BATTERY, name: "Battery", quantity: 2 }), 11, 2)]);
+  const both = { ...sources, bills: [bill, sibling] };
+  assertEquals(billDiffs(bill.uid, both).lines.size, 0);
+  assertEquals(poDiffs(both).lines.size, 0);
+});
+
+Deno.test("diff: a VOID bill's view is empty on the payable side, as a void invoice's is", () => {
+  const item = buyLine({ quantity_billed: 3 });
+  const line = { ...project(buyLine(), 10, 3), ledger_account: 6500 };
+  const live = billDoc(1, [line]);
+  const sources = { purchase: purchaseDoc([item]), bills: [live], credits: [] };
+  assertEquals(billDiffs(live.uid, sources).lines.size, 1);
+  const dead = voidedBill(live);
+  const map = billDiffs(dead.uid, { ...sources, bills: [dead] });
+  assertEquals([map.lines.size, map.pairs.size, map.unaligned.length, map.status.length], [0, 0, 0, 0]);
+});
+
+Deno.test("diff: a CANCELED purchase with a live bill is one status entry per view, never a line comparison — as a canceled order's is", () => {
+  const item = buyLine({ quantity_billed: 3 });
+  const line = { ...project(buyLine(), 10, 2), ledger_account: 6500 };
+  const bill = billDoc(1, [line]);
+  const purchase = { ...purchaseDoc([item]), status: "canceled" } as Purchase;
+  const sources = { purchase, bills: [bill], credits: [] };
+  const onPurchase = poDiffs(sources);
+  assertEquals([onPurchase.lines.size, onPurchase.status.map((s) => [s.issue, s.source.kind, s.source.uid])], [0, [["live_invoice_on_canceled_order", "bill", bill.uid]]]);
+  const onBill = billDiffs(bill.uid, sources);
+  assertEquals([onBill.lines.size, onBill.status.map((s) => [s.source.kind, s.source.uid])], [0, [["purchase", PURCHASE]]]);
+  // A void bill on it is consistent: nothing.
+  assertEquals(poDiffs({ ...sources, bills: [voidedBill(bill)] }).status.length, 0);
 });
 
 // ── Kits: a `none` parent is a row, not a line (one-document-model Phase 6a-K) ──
@@ -1295,41 +1368,25 @@ Deno.test("a stored bill may hold a plain split: two rows billing one purchase l
   parses(bill);
 });
 
-Deno.test("purchaseLineBilledCounts: a split's rows read as ONE billing, by quantity-weighted mean", () => {
-  const counts = [{ rate_key: "week", num: 2, den: 1 }];
-  const row = (quantity: number, c = counts, uid = lid(1)) => ({
-    ...project(visionLine(), 10, quantity), uid, quantity, price: { ...project(visionLine(), 10, quantity).price, counts: c },
-  }) as PurchaseDocumentItem;
+Deno.test("a split's rows bill the line's units ONCE over its pair: nothing owed, and the credit default reads the pair's counts", () => {
+  const item = visionLine({ quantity: 4 });
+  const row = (quantity: number) => ({ ...project(item, 10, quantity), quantity }) as PurchaseDocumentItem;
   const split = (a: number, b: number) => {
-    const first = row(a);
-    const second = { ...row(b), path: [PURCHASE, DIV, GROUP, lid(1)], path_purchase_item: [DIV, lid(1)] } as PurchaseDocumentItem;
-    return { ...billDoc(1, []), items: [...SCOPE, first, groupRow, second] } as PurchaseBill;
+    const second = { ...row(b), path: [PURCHASE, DIV, GROUP, item.uid], path_purchase_item: [DIV, item.uid] } as PurchaseDocumentItem;
+    return { ...fortnightBill([]), items: [...SCOPE, row(a), groupRow, second] } as PurchaseBill;
   };
-  const docs = (bills: PurchaseBill[]) => ({ uid_purchase: PURCHASE, purchase_items: [], bills, credits: [] });
-  const path = visionLine().path;
-  assertEquals(purchaseLineBilledCounts(path, docs([split(2, 2)])), counts, "2 + 2");
-  assertEquals(purchaseLineBilledCounts(path, docs([split(3, 1)])), counts, "3 + 1");
-  // Companion: uneven counts are weighted, so an unweighted sum could not pass this.
-  const uneven = split(3, 1);
-  uneven.items = uneven.items.map((r) =>
-    r.path.length === 4 && r.type === "rental" ? { ...r, price: { ...r.price, counts: [{ rate_key: "week", num: 6, den: 1 }] } } as PurchaseDocumentRow : r
-  );
-  assertEquals(purchaseLineBilledCounts(path, docs([uneven])), [{ rate_key: "week", num: 3, den: 1 }], "(3×2 + 1×6) ÷ 4 = 3 weeks");
-  // Across documents the sum stands (core#149).
-  const single = (n: number) => ({ ...billDoc(n, [row(4)]) });
-  assertEquals(purchaseLineBilledCounts(path, docs([single(1), single(2)])), [{ rate_key: "week", num: 4, den: 1 }]);
+  for (const [a, b] of [[2, 2], [3, 1]]) {
+    const line = timeLineAccount([split(a, b)], [], item);
+    assertEquals(line.billed.quantity, 4, `${a} + ${b}: four units billed`);
+    assertEquals(splitBillTime(line, 1), null, `${a} + ${b}: nothing unbilled`);
+    // Every unit was billed over the fortnight, so the time a credit takes back is the fortnight's.
+    assertEquals(creditTimeCounts(line, 4), WEEK_2, `${a} + ${b}`);
+  }
+  // Companion: an unbilled line has no billed time to take back.
+  assertEquals(creditTimeCounts(timeLineAccount([], [], item), 4), null);
 });
 
-Deno.test("remainingTimeCounts: a fully billed time line that was split leaves nothing to bill", () => {
-  const item = visionLine({ quantity: 4 });
-  const prev = { ...purchaseDoc([item]), destinations: [chargedPair()] };
-  const billed = remainingTimeCounts({ purchase: prev, item, documents: NONE, formulas: FORMULAS, holidays: [] })!;
-  const row = (quantity: number) => ({ ...project(item, 10, quantity), quantity, price: { ...project(item, 10, quantity).price, counts: billed } }) as PurchaseDocumentItem;
-  const second = { ...row(2), path: [PURCHASE, DIV, GROUP, item.uid], path_purchase_item: [DIV, item.uid] } as PurchaseDocumentItem;
-  const bill = { ...billDoc(1, []), items: [...SCOPE, row(2), groupRow, second] } as PurchaseBill;
-  const left = remainingTimeCounts({ purchase: prev, item, documents: { uid_purchase: PURCHASE, purchase_items: [], bills: [bill], credits: [] }, formulas: FORMULAS, holidays: [] })!;
-  assert(left.every((t) => t.num === 0), JSON.stringify(left));
-});
+
 
 Deno.test("orderLineClaimIssues, payable: a closed (removed) line cannot be claimed; a live one can; the receivable reader is unchanged", () => {
   const open = buyLine();
@@ -1506,39 +1563,7 @@ Deno.test("syncPurchaseToBills: an overridden row whose line was closed out stay
   assertEquals((still as { path_purchase_item?: string[] }).path_purchase_item, undefined, "a later edit leaves it the bill's own");
 });
 
-Deno.test("remainingTimeCounts: metered_over bills the BILL's pair, and a later document is the caller's to leave out", () => {
-  const item = visionLine({ quantity: 1 });
-  const purchase = { ...purchaseDoc([item]), destinations: [chargedPair()] };
-  const base = { purchase, item, documents: NONE, formulas: FORMULAS, holidays: [] as string[] };
-  const onPurchase = remainingTimeCounts(base)!;
-  const longer = chargedPair();
-  const windows = longer.dates.charge_windows!;
-  const stretched = { ...longer, dates: { ...longer.dates, charge_windows: [{ ...windows[0], end: jan(28) }] } };
-  const onBill = remainingTimeCounts({
-    ...base,
-    metered_over: { path: [PURCHASE, DIV, item.uid], destinations: [{ uid_purchase: PURCHASE, ...stretched }] },
-  })!;
-  assert(JSON.stringify(onBill) !== JSON.stringify(onPurchase), "the bill's window is the one metered");
-  // Companion: a window the bill does not state meters nothing, where the purchase's would.
-  assertEquals(remainingTimeCounts({ ...base, metered_over: { path: [PURCHASE, DIV, item.uid], destinations: [] } }), null);
-});
 
-Deno.test("purchaseDocumentsBefore: earlier by date, then by number on the same date; the bill itself and later ones are out", () => {
-  const d = (uid: string, date: string, number: number) => ({ uid, date, number });
-  const bill = d("this", "2026-11-10T00:00:00.000-06:00", 20);
-  const bills = [
-    d("earlier", "2026-11-09T00:00:00.000-06:00", 30),
-    d("same-day-lower", "2026-11-10T00:00:00.000-06:00", 19),
-    d("same-day-higher", "2026-11-10T00:00:00.000-06:00", 21),
-    d("this", "2026-11-10T00:00:00.000-06:00", 20),
-    d("later", "2026-11-11T00:00:00.000-06:00", 1),
-  ];
-  const credits = [d("c-early", "2026-11-01T00:00:00.000-05:00", 1), d("c-late", "2026-12-01T00:00:00.000-06:00", 2)];
-  const out = purchaseDocumentsBefore(bill, { uid: "po", items: [] }, bills, credits);
-  assertEquals(out.uid_purchase, "po");
-  assertEquals(out.bills.map((b) => b.uid), ["earlier", "same-day-lower"]);
-  assertEquals(out.credits.map((c) => c.uid), ["c-early"]);
-});
 
 // ── Substitutes (one-document-model W5) ─────────────────────────────
 
@@ -1558,39 +1583,39 @@ Deno.test("W5 billing: a substitute bills X its stand-in units and their share o
   const x = subX();
   const bill = billDoc(1, [project(x, 10, 3), subY(x, 2, 20000, 2)]);
   const docs = billedOf(purchaseDoc([x]), [bill]);
-  assertEquals(purchaseLineBilledNet(x.path, docs), { quantity: 5, amount_cents: 50000 });
+  assertEquals(billedNetAP(x.path, docs), { quantity: 5, amount_cents: 50000 });
   const recounted = recomputePurchaseQuantityBilled(purchaseDoc([x]), docs).find((r) => r.uid === x.uid) as PurchaseItem;
   assertEquals(recounted.quantity_billed, 5);
-  assertEquals(purchaseLineBilledNet([DIV, ALT], docs), { quantity: 0, amount_cents: 0 }, "a whole stand-in leaves nothing at Y's own path");
+  assertEquals(billedNetAP([DIV, ALT], docs), { quantity: 0, amount_cents: 0 }, "a whole stand-in leaves nothing at Y's own path");
 });
 
 Deno.test("W5 billing: a merged Y splits — stand-in units take its FIRST units' share, the rest stays at Y; the parts sum to its amount", () => {
   const x = subX();
   const bill = billDoc(1, [subY(x, 3, 10000, 2)]);
   const docs = billedOf(purchaseDoc([x]), [bill]);
-  assertEquals(purchaseLineBilledNet(x.path, docs), { quantity: 2, amount_cents: frozenFlatShareCents(10000, 3, 0, 2) });
-  assertEquals(purchaseLineBilledNet([DIV, ALT], docs), { quantity: 1, amount_cents: 10000 - frozenFlatShareCents(10000, 3, 0, 2) });
+  assertEquals(billedNetAP(x.path, docs), { quantity: 2, amount_cents: frozenFlatShareCents(10000, 3, 0, 2) });
+  assertEquals(billedNetAP([DIV, ALT], docs), { quantity: 1, amount_cents: 10000 - frozenFlatShareCents(10000, 3, 0, 2) });
 });
 
 Deno.test("W5 billing: an entry is spent once the purchase no longer carries X — X is not billed through it", () => {
   const x = subX();
   const bill = billDoc(1, [subY(x, 2, 20000, 2)]);
   const docs = billedOf(purchaseDoc([]), [bill]);
-  assertEquals(purchaseLineBilledNet(x.path, docs), { quantity: 0, amount_cents: 0 });
-  assertEquals(purchaseLineBilledNet([DIV, ALT], docs), { quantity: 2, amount_cents: 20000 });
+  assertEquals(billedNetAP(x.path, docs), { quantity: 0, amount_cents: 0 });
+  assertEquals(billedNetAP([DIV, ALT], docs), { quantity: 2, amount_cents: 20000 });
 });
 
 Deno.test("W5 billing: substituting a kit credits its components by the PURCHASE's ratio, in units only", () => {
   const kit = [DIV, iuid(40)];
   const purchase_items = [
-    { type: "destination", path: [DIV] },
-    { type: "sale", path: kit, quantity: 2 },
-    { type: "sale", path: [...kit, iuid(41)], quantity: 4 },
+    { type: "destination", uid: DIV, path: [DIV] },
+    { type: "sale", uid: iuid(40), path: kit, quantity: 2 },
+    { type: "sale", uid: iuid(41), path: [...kit, iuid(41)], quantity: 4 },
   ];
   const y = { ...subY(subX(), 1, 9000, 1), substituted_for: [{ path: kit, quantity: 1 }] } as PurchaseDocumentItem;
   const docs: PurchaseBilledDocuments = { uid_purchase: PURCHASE, purchase_items, bills: [billDoc(1, [y])], credits: [] };
-  assertEquals(purchaseLineBilledNet(kit, docs), { quantity: 1, amount_cents: 9000 });
-  assertEquals(purchaseLineBilledNet([...kit, iuid(41)], docs), { quantity: 2, amount_cents: 0 });
+  assertEquals(billedNetAP(kit, docs), { quantity: 1, amount_cents: 9000 });
+  assertEquals(billedNetAP([...kit, iuid(41)], docs), { quantity: 2, amount_cents: 0 });
 });
 
 Deno.test("W5 sync: a PO quantity edit re-offsets a partly substituted X at its share; Y keeps its units and money", () => {
@@ -1604,7 +1629,7 @@ Deno.test("W5 sync: a PO quantity edit re-offsets a partly substituted X at its 
   assertEquals(out.bill.totals.total_cents, 70000);
   parses(out.bill);
   const docs = billedOf(purchaseDoc([next]), [out.bill]);
-  assertEquals(purchaseLineBilledNet(x.path, docs).quantity, 6, "X still reads billed in full");
+  assertEquals(billedNetAP(x.path, docs).quantity, 6, "X still reads billed in full");
 });
 
 Deno.test("W5 sync: an X the operator re-priced keeps its row — the substitution does not make it follow", () => {
@@ -1902,4 +1927,44 @@ Deno.test("syncPurchaseToBills (D7): an untouched PART follows a purchase discou
   const [stays] = sync(prev, next, [billDoc(2, [termed])]);
   const [t] = linesOf(stays.bill) as PurchaseDocumentItem[];
   assertEquals([t.amount_cents, t.price.discount?.rate], [47_500, 5]);
+});
+
+Deno.test("syncPurchaseToBills: a bill's extension section rides a purchase edit through, its stated counts kept (F5, ruling 89)", () => {
+  // The hire grew from a fortnight to three weeks; the first bill billed the fortnight.
+  const threeWeeks = () => {
+    const pair = chargedPair();
+    return { ...pair, dates: { ...pair.dates, charge_windows: [{ start: jan(1), end: jan(22) }] } };
+  };
+  const item = visionLine();
+  const purchase = { ...purchaseDoc([item]), destinations: [threeWeeks()] };
+  const [own] = priceDocument([timeBillLine()], billCtx("pushed")).items;
+  const first = { ...billDoc(1, [own]), destinations: [{ uid_purchase: PURCHASE, ...chargedPair() }] };
+  const account = accountBilling("payable", purchaseInitiator(purchase), [first], [], { formulas: FORMULAS, holidays: [] });
+  const line = account.lines.find((l) => l.path.join("/") === item.path.join("/"))!;
+  const split = splitBillTime(line, 2)!;
+  assertEquals(split.own, 0, "both units were billed: the bill takes only owed time");
+  const sections = billExtensionSections(purchase, [{ item, extensions: split.extensions }], () => "eeeeeeee-0000-4000-8000-000000000001");
+  const priced = priceDocument([...SCOPE, ...sections.items], {
+    ...billCtx("pushed"),
+    time: { formulas: FORMULAS, holidays: [], charge_windows: chargeWindowContext([{ uid_purchase: PURCHASE, ...threeWeeks() }, ...sections.destinations]) },
+  }).items;
+  const total = priced.filter(isPurchaseLine).reduce((t, l) => t + (l as PurchaseDocumentItem).amount_cents, 0);
+  const second = {
+    ...billDoc(2, []),
+    items: priced,
+    destinations: [{ uid_purchase: PURCHASE, ...threeWeeks() }, ...sections.destinations],
+    totals: { total_cents: total, amount_paid_cents: 0, amount_credited_cents: 0, amount_void_cents: 0, amount_due_cents: total },
+  } as PurchaseBill;
+  parses(second);
+  const extensionRow = () => linesOf(second).find((l) => l.path[1] !== DIV)!;
+  const stated = extensionRow().price.counts;
+  assertEquals(stated, WEEK_1, "the third week, the extension's own");
+
+  const next = { ...purchase, items: purchase.items.map((r) => (r.uid === item.uid ? { ...r, description: "renamed" } : r)) } as Purchase;
+  const [out] = syncPurchaseToBills({ prev: purchase, next, bills: [second], tax: TAX, time: { formulas: FORMULAS, holidays: [] } });
+  const divider = out.bill.items.flatMap((r) => (r.type === "destination" && r.path_extension_for !== undefined ? [r] : []))[0];
+  assertEquals(divider?.path_extension_for, [DIV], "the extension divider survives the sync");
+  const kept = linesOf(out.bill).find((l) => l.path[1] === divider!.uid);
+  assertEquals(kept?.price.counts, stated, "its stated counts are kept, never re-metered over its own window");
+  parses(out.bill);
 });
