@@ -213,6 +213,9 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "heldDelta", // conservation arithmetic over a line
     "movementHeldDelta", // ditto, over a movement
     "costOfUnits", // basis arithmetic — money math, not presentation
+    // The movement id's author and parser (ruling 99): a write mints ids; a render reads none.
+    "movementId",
+    "parseMovementId",
     "allocationSide", // maps a type to the side an allocation lands on
     // The Xero posting table. A ledger-seam decision, not presentation: it
     // answers "which accounts does this movement post to, and does it post at
@@ -656,6 +659,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // render context holds.
     "custodyRows",
     "orderOutOfServiceInputs",
+    "purchaseOutOfServiceInputs",
     // The remainder and the over-billing offer assembled from that account.
     "buildOverbillingCredits",
     "buildRemainingInvoice",
@@ -741,6 +745,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "inboundLiveCustody",
     "inboundReceived",
     "inboundReturned",
+    // A record's cause, read off its id (ruling 99): the diff's question, not a render's.
+    "isReceivedDamagedRecord",
     "isInboundBookingClosed",
     "lineCustodyAt",
     "sumInboundBreakdown",

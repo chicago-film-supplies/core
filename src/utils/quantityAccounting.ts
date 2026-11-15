@@ -134,6 +134,7 @@ import type {
   InvoiceStatusType,
   Order,
   OutOfService,
+  Purchase,
   PurchaseBill,
   PurchaseCredit,
   PurchaseDocumentItem,
@@ -170,6 +171,7 @@ import {
 import { BILLABLE_OOS_REASONS, billedOutOfService, type ReplacementBillingInvoice } from "./replacements.ts";
 import { bookingIdsByPath } from "./order-edit-delta.ts";
 import { parseBookingId } from "./booking-id.ts";
+import { inboundBookingIdFor, isReceivedDamagedRecord, PAYABLE_OOS_REASONS } from "./bookings-inbound.ts";
 
 export { substitutionCredit };
 import { chargeEnvelope, chicagoDayAtTimeOf, toChicagoYmd } from "./dates.ts";
@@ -1398,6 +1400,63 @@ export function orderOutOfServiceInputs(
       uid: record.uid,
       fulfilled,
       invoiced: invoicedByRecord.get(record.uid) ?? 0,
+      rel: bookingId === undefined ? null : rowByBooking.get(bookingId) ?? null,
+    };
+  });
+}
+
+/**
+ * **A purchase's lost/damaged records as the account's input** (one-document-model
+ * F12, rulings 96–99): the payable twin of {@link orderOutOfServiceInputs}.
+ *
+ * - **Which records:** every record naming `purchases:<uid>` whose reason a
+ *   supplier settles ({@link PAYABLE_OOS_REASONS}) — the cause does not filter
+ *   (ruling 97), so a supplier charging for its own damage is seen.
+ * - **`fulfilled`, what the supplier is expected to bill, depends on the CAUSE**
+ *   (ruling 97): a unit lost or damaged on CFS's watch is its billable units, as
+ *   on the receivable side; a unit RECEIVED damaged is the supplier's fault and
+ *   expects 0. The cause is read off the record's id ({@link isReceivedDamagedRecord},
+ *   ruling 99).
+ * - **`invoiced`**: what the non-void bills' lines naming it bill (`out_of_service`, W4R).
+ * - **`rel`**: the purchase (then receipt) row owning its inbound booking
+ *   (`bookings-inbound:<uid>`, ruling 98), kept only when that id parses to THIS
+ *   purchase; else `null` (unplaced).
+ *
+ * A record may also name an order (a customer's loss of a subrented unit); it
+ * then surfaces on both initiators, each against its own billing documents.
+ */
+export function purchaseOutOfServiceInputs(
+  purchase: Pick<Purchase, "uid" | "items">,
+  receipt: Pick<PurchaseReceipt, "items"> | undefined,
+  records: readonly DocumentDiffOutOfService[],
+  bills: readonly PurchaseBill[],
+): OutOfServiceInput[] {
+  const purchaseKey = `purchases:${purchase.uid}`;
+  const settled = records.filter((r) =>
+    (PAYABLE_OOS_REASONS as readonly string[]).includes(r.reason) && r.query_by_sources.includes(purchaseKey)
+  );
+  if (settled.length === 0) return [];
+  const rowByBooking = new Map<string, string>();
+  for (const items of [purchase.items, receipt?.items ?? []]) {
+    for (const row of items as readonly { uid: string; type: string; path: readonly string[] }[]) {
+      if (isDividerItemType(row.type)) continue;
+      const bookingId = inboundBookingIdFor(purchase.uid, row);
+      if (!rowByBooking.has(bookingId)) rowByBooking.set(bookingId, row.path.join("/"));
+    }
+  }
+  const billedByRecord = billedOutOfService(bills as unknown as ReplacementBillingInvoice[]);
+  return settled.map((record) => {
+    const fulfilled = record.status === "canceled" || isReceivedDamagedRecord(record)
+      ? 0
+      : record.quantity - record.breakdown.returned_to_service;
+    const bookingId = record.query_by_sources
+      .filter((s) => s.startsWith("bookings-inbound:"))
+      .map((s) => s.slice("bookings-inbound:".length))
+      .find((id) => parseBookingId(id)?.orderUid === purchase.uid);
+    return {
+      uid: record.uid,
+      fulfilled,
+      invoiced: billedByRecord.get(record.uid) ?? 0,
       rel: bookingId === undefined ? null : rowByBooking.get(bookingId) ?? null,
     };
   });

@@ -29,7 +29,13 @@ import type {
   StoreBreakdownEntry,
   StoreBreakdownLocation,
 } from "../schemas/mod.ts";
-import { getTransactionMultiplier, hasCosts, isSubrentMovementType, MOVEMENT_CONTRACTS } from "../schemas/mod.ts";
+import {
+  getTransactionMultiplier,
+  hasCosts,
+  isSubrentMovementType,
+  MOVEMENT_CONTRACTS,
+  MOVEMENT_TYPES,
+} from "../schemas/mod.ts";
 import { perUnitCostAt4dp, roundDivHalfUp } from "./money.ts";
 
 // ── Money ───────────────────────────────────────────────────────────
@@ -125,6 +131,61 @@ function reversalReliefCents(
  */
 export function isReversing(m: Pick<Movement, "type" | "reverses">): boolean {
   return m.reverses !== null || MOVEMENT_CONTRACTS[m.type].undoes !== null;
+}
+
+// ── The movement id ─────────────────────────────────────────────────
+
+/**
+ * **The deterministic movement id, `{uuid_session}|{type}|{subject}`** — the ONE
+ * author (one-document-model ruling 99; moved here from api-cloudrun's
+ * `src/lib/movementBuild.ts`, which re-exports it, so the format and
+ * {@link parseMovementId} cannot drift).
+ *
+ * The separator is `|` and not `:` because a booking id is itself `a:b:c[:d]`,
+ * so a colon-joined id would carry a variable number of colons no
+ * `split(":")` can disambiguate. The `type` segment is load-bearing: one
+ * operator action produces several types against one subject ("return 2, mark
+ * 1 damaged" is two actions on one booking), so session and subject alone
+ * would collide.
+ *
+ * An out-of-service record's id IS its mark movement's id, so the parser reads
+ * the cause of a record off its id (ruling 99).
+ *
+ * @param uuidSession - The operator session (or a derived sub-session)
+ * @param type - The movement type
+ * @param subject - The booking, product or record the movement acts on
+ * @returns The movement's document id
+ */
+export function movementId(uuidSession: string, type: MovementTypeType, subject: string): string {
+  return `${uuidSession}|${type}|${subject}`;
+}
+
+/** A movement id read back into its three segments. @see {@link parseMovementId} */
+export interface ParsedMovementId {
+  uuidSession: string;
+  type: MovementTypeType;
+  subject: string;
+}
+
+/**
+ * **Read a {@link movementId} back**, or `null` for any id not of that shape:
+ * exactly three non-empty `|`-separated segments whose middle one is a
+ * {@link MOVEMENT_TYPES} member. A Firestore auto-id (a legacy record minted
+ * before records were keyed on their mark) has no `|` and reads `null`.
+ *
+ * Reads the TYPE for a caller that has only an id, an out-of-service record's
+ * cause above all (ruling 99: a record whose id names `receive_flag` was
+ * received damaged). A caller holding the movement itself asks the movement.
+ *
+ * @param id - A document id
+ * @returns The segments, or `null`
+ */
+export function parseMovementId(id: string): ParsedMovementId | null {
+  const parts = id.split("|");
+  if (parts.length !== 3 || parts.some((p) => p.length === 0)) return null;
+  const [uuidSession, type, subject] = parts;
+  if (!(MOVEMENT_TYPES as readonly string[]).includes(type)) return null;
+  return { uuidSession, type: type as MovementTypeType, subject };
 }
 
 // ── Standalone reversal (core#130 row 8) ────────────────────────────

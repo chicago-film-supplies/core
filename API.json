@@ -18095,6 +18095,12 @@
           "doc": "No custody at all: a line nothing has been received for."
         },
         {
+          "kind": "variable",
+          "name": "PAYABLE_OOS_REASONS",
+          "declaration": "const PAYABLE_OOS_REASONS: readonly OOSReasonType[];",
+          "doc": "**The out-of-service reasons a supplier settles** (one-document-model F12): the\nreasons the inbound ladder holds as keys (`lost`, `damaged`), i.e. those a\n`return_to_supplier` settle can carry. A purchase compares a record of one of\nthese against its bills.\n\n⚠️ Deliberately NOT `BILLABLE_OOS_REASONS` (`utils/replacements.ts`), which\nmeans \"a CUSTOMER is billed for this mark\". The two sets are equal today and\nanswer different questions, so a cleaning reason becoming customer-billable\nnever reaches the purchase."
+        },
+        {
           "kind": "interface",
           "name": "PurchaseLineCustody",
           "declaration": "interface PurchaseLineCustody {\n  received: number;\n  returned: number;\n}",
@@ -18215,6 +18221,19 @@
           "doc": "Is `mark` a `receive_damaged` flag — the mark of an out-of-service record a\nunit RECEIVED damaged opened (ruling 80)? The forward flag only\n(`{none → damaged}`) naming its inbound booking; a clearing one is an undo and\nopens nothing. A record's mark is the movement sharing its id.\n\nThe ONE author, read by the api's record PUT (reason edit, settle) and by the\nmanager's record page, so the page never offers an edit the api refuses. Such\na record names `purchases:` and `bookings-inbound:`, never `bookings:`, so\n`recordOwner` reads it as standalone; ask this instead.",
           "paramTags": [],
           "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isReceivedDamagedRecord",
+          "signature": "isReceivedDamagedRecord(record: typeLiteral): boolean",
+          "doc": "Was this out-of-service record opened by a unit RECEIVED damaged (ruling 80)?\nRead off the record's id, which IS its mark movement's id (ruling 99), through\nthe one parser — a received-damaged record's reason cannot move, so it never\nsplits, and its id keeps naming its `receive_flag` mark even once settled.\nA legacy auto-id record reads `false`.",
+          "paramTags": [
+            {
+              "name": "record",
+              "doc": "The record, by its uid"
+            }
+          ],
+          "returnsTag": "Whether its mark was a `receive_flag`"
         },
         {
           "kind": "function",
@@ -19939,6 +19958,14 @@
           "name": "pairWindow",
           "signature": "pairWindow(pair: typeLiteral | undefined): BilledWindow | null",
           "doc": "A pair's {@link BilledWindow}, or `null` when it has no windows.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "purchaseOutOfServiceInputs",
+          "signature": "purchaseOutOfServiceInputs(purchase: Pick<Purchase, \"uid\" | \"items\">, receipt: Pick<PurchaseReceipt, \"items\"> | undefined, records: readonly DocumentDiffOutOfService[], bills: readonly PurchaseBill[]): OutOfServiceInput[]",
+          "doc": "**A purchase's lost/damaged records as the account's input** (one-document-model\nF12, rulings 96–99): the payable twin of {@link orderOutOfServiceInputs}.\n\n- **Which records:** every record naming `purchases:<uid>` whose reason a\n  supplier settles ({@link PAYABLE_OOS_REASONS}) — the cause does not filter\n  (ruling 97), so a supplier charging for its own damage is seen.\n- **`fulfilled`, what the supplier is expected to bill, depends on the CAUSE**\n  (ruling 97): a unit lost or damaged on CFS's watch is its billable units, as\n  on the receivable side; a unit RECEIVED damaged is the supplier's fault and\n  expects 0. The cause is read off the record's id ({@link isReceivedDamagedRecord},\n  ruling 99).\n- **`invoiced`**: what the non-void bills' lines naming it bill (`out_of_service`, W4R).\n- **`rel`**: the purchase (then receipt) row owning its inbound booking\n  (`bookings-inbound:<uid>`, ruling 98), kept only when that id parses to THIS\n  purchase; else `null` (unplaced).\n\nA record may also name an order (a customer's loss of a subrented unit); it\nthen surfaces on both initiators, each against its own billing documents.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -23293,6 +23320,12 @@
         },
         {
           "kind": "interface",
+          "name": "ParsedMovementId",
+          "declaration": "interface ParsedMovementId {\n  uuidSession: string;\n  type: MovementTypeType;\n  subject: string;\n}",
+          "doc": "A movement id read back into its three segments. @see {@link parseMovementId}"
+        },
+        {
+          "kind": "interface",
           "name": "PriorUndo",
           "declaration": "interface PriorUndo {\n  original: string;\n  quantity: number;\n}",
           "doc": "An undo already recorded against a forward: how many of its units are spoken for."
@@ -23444,11 +23477,45 @@
         },
         {
           "kind": "function",
+          "name": "movementId",
+          "signature": "movementId(uuidSession: string, type: MovementTypeType, subject: string): string",
+          "doc": "**The deterministic movement id, `{uuid_session}|{type}|{subject}`** — the ONE\nauthor (one-document-model ruling 99; moved here from api-cloudrun's\n`src/lib/movementBuild.ts`, which re-exports it, so the format and\n{@link parseMovementId} cannot drift).\n\nThe separator is `|` and not `:` because a booking id is itself `a:b:c[:d]`,\nso a colon-joined id would carry a variable number of colons no\n`split(\":\")` can disambiguate. The `type` segment is load-bearing: one\noperator action produces several types against one subject (\"return 2, mark\n1 damaged\" is two actions on one booking), so session and subject alone\nwould collide.\n\nAn out-of-service record's id IS its mark movement's id, so the parser reads\nthe cause of a record off its id (ruling 99).",
+          "paramTags": [
+            {
+              "name": "uuidSession",
+              "doc": "The operator session (or a derived sub-session)"
+            },
+            {
+              "name": "type",
+              "doc": "The movement type"
+            },
+            {
+              "name": "subject",
+              "doc": "The booking, product or record the movement acts on"
+            }
+          ],
+          "returnsTag": "The movement's document id"
+        },
+        {
+          "kind": "function",
           "name": "negateLines",
           "signature": "negateLines(lines: readonly MovementLineType[]): MovementLineType[]",
           "doc": "Swap every line's `from` and `to`. This is the whole of a reversal: because a\nline carries both sides, negating it needs no knowledge of the movement type,\nand the per-kind contract makes the result either valid or rejected rather\nthan silently lopsided.",
           "paramTags": [],
           "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "parseMovementId",
+          "signature": "parseMovementId(id: string): ParsedMovementId | null",
+          "doc": "**Read a {@link movementId} back**, or `null` for any id not of that shape:\nexactly three non-empty `|`-separated segments whose middle one is a\n{@link MOVEMENT_TYPES} member. A Firestore auto-id (a legacy record minted\nbefore records were keyed on their mark) has no `|` and reads `null`.\n\nReads the TYPE for a caller that has only an id, an out-of-service record's\ncause above all (ruling 99: a record whose id names `receive_flag` was\nreceived damaged). A caller holding the movement itself asks the movement.",
+          "paramTags": [
+            {
+              "name": "id",
+              "doc": "A document id"
+            }
+          ],
+          "returnsTag": "The segments, or `null`"
         },
         {
           "kind": "function",

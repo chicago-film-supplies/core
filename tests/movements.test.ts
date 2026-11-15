@@ -18,7 +18,9 @@ import {
   heldDelta,
   isReversing,
   movementHeldDelta,
+  movementId,
   negateLines,
+  parseMovementId,
   replayStartsUncounted,
   xeroPostingFor,
 } from "../src/utils/movements.ts";
@@ -1967,4 +1969,14 @@ Deno.test("subrent property companion: a fold averaging over HELD would disagree
   const hired = applyMovementToLedger(steamer(), hireIn(10), placements, mockTimestamp).ledger;
   const heldAverage = Number(BigInt(hired.total_cost_basis_cents) * 10000n / BigInt(hired.quantity_held ?? 1)) / 10000;
   assertEquals(heldAverage === hired.average_unit_cost, false);
+});
+
+Deno.test("parseMovementId: round-trips every movement type, and refuses an id not of the three-segment shape", () => {
+  for (const type of MOVEMENT_TYPES) {
+    const id = movementId("sess", type, "a:b:c");
+    assertEquals(parseMovementId(id), { uuidSession: "sess", type, subject: "a:b:c" });
+  }
+  for (const bad of ["", "testoosLegacy0000000", "sess|mark_lost", "sess|not_a_type|x", "sess||x", "|mark_lost|x", "sess|mark_lost|", "a|mark_lost|b|c"]) {
+    assertEquals(parseMovementId(bad), null, bad);
+  }
 });

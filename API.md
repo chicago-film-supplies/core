@@ -39208,6 +39208,22 @@ No custody at all: a line nothing has been received for.
 const NO_LINE_CUSTODY: PurchaseLineCustody;
 ```
 
+### `PAYABLE_OOS_REASONS`
+
+**The out-of-service reasons a supplier settles** (one-document-model F12): the
+reasons the inbound ladder holds as keys (`lost`, `damaged`), i.e. those a
+`return_to_supplier` settle can carry. A purchase compares a record of one of
+these against its bills.
+
+⚠️ Deliberately NOT `BILLABLE_OOS_REASONS` (`utils/replacements.ts`), which
+means "a CUSTOMER is billed for this mark". The two sets are equal today and
+answer different questions, so a cleaning reason becoming customer-billable
+never reaches the purchase.
+
+```ts
+const PAYABLE_OOS_REASONS: readonly OOSReasonType[];
+```
+
 ### `PurchaseLineCustody`
 
 What a purchase line has received and returned — the two co-written buckets
@@ -39393,6 +39409,20 @@ The ONE author, read by the api's record PUT (reason edit, settle) and by the
 manager's record page, so the page never offers an edit the api refuses. Such
 a record names `purchases:` and `bookings-inbound:`, never `bookings:`, so
 `recordOwner` reads it as standalone; ask this instead.
+
+### `isReceivedDamagedRecord(record: typeLiteral): boolean`
+
+Was this out-of-service record opened by a unit RECEIVED damaged (ruling 80)?
+Read off the record's id, which IS its mark movement's id (ruling 99), through
+the one parser — a received-damaged record's reason cannot move, so it never
+splits, and its id keeps naming its `receive_flag` mark even once settled.
+A legacy auto-id record reads `false`.
+
+**Parameters**
+
+- `record` — The record, by its uid
+
+**Returns** — Whether its mark was a `receive_flag`
 
 ### `lineCustodyAt(custody: ReadonlyMap<string, PurchaseLineCustody>, path: readonly string[]): PurchaseLineCustody`
 
@@ -42582,6 +42612,27 @@ that owns its booking (the order first, then the fulfillment), or `null`.
 ### `pairWindow(pair: typeLiteral | undefined): BilledWindow | null`
 
 A pair's {@link BilledWindow}, or `null` when it has no windows.
+
+### `purchaseOutOfServiceInputs(purchase: Pick<Purchase, "uid" | "items">, receipt: Pick<PurchaseReceipt, "items"> | undefined, records: readonly DocumentDiffOutOfService[], bills: readonly PurchaseBill[]): OutOfServiceInput[]`
+
+**A purchase's lost/damaged records as the account's input** (one-document-model
+F12, rulings 96–99): the payable twin of {@link orderOutOfServiceInputs}.
+
+- **Which records:** every record naming `purchases:<uid>` whose reason a
+  supplier settles ({@link PAYABLE_OOS_REASONS}) — the cause does not filter
+  (ruling 97), so a supplier charging for its own damage is seen.
+- **`fulfilled`, what the supplier is expected to bill, depends on the CAUSE**
+  (ruling 97): a unit lost or damaged on CFS's watch is its billable units, as
+  on the receivable side; a unit RECEIVED damaged is the supplier's fault and
+  expects 0. The cause is read off the record's id ({@link isReceivedDamagedRecord},
+  ruling 99).
+- **`invoiced`**: what the non-void bills' lines naming it bill (`out_of_service`, W4R).
+- **`rel`**: the purchase (then receipt) row owning its inbound booking
+  (`bookings-inbound:<uid>`, ruling 98), kept only when that id parses to THIS
+  purchase; else `null` (unplaced).
+
+A record may also name an order (a customer's loss of a subrented unit); it
+then surfaces on both initiators, each against its own billing documents.
 
 ### `sameWindowDates(a: readonly WindowBounds[], b: readonly WindowBounds[]): boolean`
 
@@ -48984,6 +49035,18 @@ interface LocationPlacement {
 }
 ```
 
+### `ParsedMovementId`
+
+A movement id read back into its three segments. @see {@link parseMovementId}
+
+```ts
+interface ParsedMovementId {
+  uuidSession: string;
+  type: MovementTypeType;
+  subject: string;
+}
+```
+
 ### `PriorUndo`
 
 An undo already recorded against a forward: how many of its units are spoken for.
@@ -49306,12 +49369,54 @@ rental rewind — there is no cost, so nothing reads differently.
 
 A movement's total effect on `quantity_held`.
 
+### `movementId(uuidSession: string, type: MovementTypeType, subject: string): string`
+
+**The deterministic movement id, `{uuid_session}|{type}|{subject}`** — the ONE
+author (one-document-model ruling 99; moved here from api-cloudrun's
+`src/lib/movementBuild.ts`, which re-exports it, so the format and
+{@link parseMovementId} cannot drift).
+
+The separator is `|` and not `:` because a booking id is itself `a:b:c[:d]`,
+so a colon-joined id would carry a variable number of colons no
+`split(":")` can disambiguate. The `type` segment is load-bearing: one
+operator action produces several types against one subject ("return 2, mark
+1 damaged" is two actions on one booking), so session and subject alone
+would collide.
+
+An out-of-service record's id IS its mark movement's id, so the parser reads
+the cause of a record off its id (ruling 99).
+
+**Parameters**
+
+- `uuidSession` — The operator session (or a derived sub-session)
+- `type` — The movement type
+- `subject` — The booking, product or record the movement acts on
+
+**Returns** — The movement's document id
+
 ### `negateLines(lines: readonly MovementLineType[]): MovementLineType[]`
 
 Swap every line's `from` and `to`. This is the whole of a reversal: because a
 line carries both sides, negating it needs no knowledge of the movement type,
 and the per-kind contract makes the result either valid or rejected rather
 than silently lopsided.
+
+### `parseMovementId(id: string): ParsedMovementId | null`
+
+**Read a {@link movementId} back**, or `null` for any id not of that shape:
+exactly three non-empty `|`-separated segments whose middle one is a
+{@link MOVEMENT_TYPES} member. A Firestore auto-id (a legacy record minted
+before records were keyed on their mark) has no `|` and reads `null`.
+
+Reads the TYPE for a caller that has only an id, an out-of-service record's
+cause above all (ruling 99: a record whose id names `receive_flag` was
+received damaged). A caller holding the movement itself asks the movement.
+
+**Parameters**
+
+- `id` — A document id
+
+**Returns** — The segments, or `null`
 
 ### `reclassPairReversal(requested: M, partner: M): typeLiteral | typeLiteral`
 

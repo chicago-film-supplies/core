@@ -228,6 +228,7 @@ import {
   type InitiatorAccount,
   type LineAccount,
   orderOutOfServiceInputs,
+  purchaseOutOfServiceInputs,
   type OutOfServiceInput,
   substitutionCredit,
 } from "./quantityAccounting.ts";
@@ -1253,8 +1254,11 @@ const DIFF_SIDES: Readonly<Record<Side, DiffSideData>> = {
     credits: (s, uid) => (s.purchaseCredits ?? []).filter((c) => purchaseCreditPurchaseUid(c) === uid),
     scopesOf: (doc) => deriveQueryByPurchases((doc as PurchaseBill).items),
     custodyInput: (custodyDoc) => custodyDoc === undefined ? null : custodyRows(custodyDoc),
-    // Payable lost/damaged records are not compared yet: ruling 96's slice.
-    outOfServiceInput: () => [],
+    // Ruling 97: every lost/damaged record naming the purchase, expected billed by its cause.
+    outOfServiceInput: (initiator, custodyDoc, s) =>
+      s.outOfService === undefined
+        ? []
+        : purchaseOutOfServiceInputs(initiator as Purchase, custodyDoc as PurchaseReceipt | undefined, s.outOfService, s.bills ?? []),
     line: {
       // Fitted to the bill row's quantity, unlike the sync's whole-line
       // projection: the diff ignores the `flat_money` group, so a partial

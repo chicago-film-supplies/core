@@ -39,6 +39,9 @@ import {
   type DocumentDiffSources,
   type DocumentQuantityEntry,
 } from "../src/utils/documentDiff.ts";
+import { type DocumentDiffOutOfService, purchaseOutOfServiceInputs } from "../src/utils/quantityAccounting.ts";
+import { inboundBookingIdFor, isReceivedDamagedRecord, PAYABLE_OOS_REASONS } from "../src/utils/bookings-inbound.ts";
+import { movementId } from "../src/utils/movements.ts";
 import { priceFormulaRefOf } from "../src/utils/price-formulas.ts";
 import { frozenCumulativeShareCents, frozenFlatShareCents } from "./helpers/frozen-line-money.ts";
 import { applyDiscountTerms, lineUnitsCents, statedLine as pseudoLine } from "../src/utils/price-formulas.ts";
@@ -2098,4 +2101,97 @@ Deno.test("F11 R7 + finding C: an extra receipt row is a custody-only entry once
   const exchange = { ...extra, type: "rental", exchanged_for: [{ path: item.path, quantity: 2, reason: "damaged" }] };
   const swapped = receiptDiffs(s, receiptWith(purchase, (rows) => [...rows, exchange]));
   assertEquals(swapped.lines.get(pathKey(extra))?.map((e) => e.kind), ["not_on_source"]);
+});
+
+// ── F12: payable out-of-service records in the diff (rulings 96–99) ──
+
+const SESSION = "9a1b2c3d-0000-4000-8000-00000000f120";
+const BUY_BOOKING = inboundBookingIdFor(PURCHASE, buyLine());
+/** A record naming the purchase and its Buy row's inbound booking, keyed on its mark movement (ruling 99). */
+function payableRecord(mark: "mark_lost" | "receive_flag", quantity: number, extra: Record<string, unknown> = {}): DocumentDiffOutOfService {
+  return {
+    uid: movementId(SESSION, mark, mark === "receive_flag" ? BUY_BOOKING : `${PURCHASE}:${lid(2)}:outbound`),
+    reason: mark === "receive_flag" ? "damaged" : "lost",
+    status: "active",
+    quantity,
+    breakdown: { returned_to_service: 0 },
+    query_by_sources: [`purchases:${PURCHASE}`, `bookings-inbound:${BUY_BOOKING}`],
+    ...extra,
+  } as unknown as DocumentDiffOutOfService;
+}
+/** The purchase's quantity entries naming a record, by row key, plus the unplaced ones. */
+function oosEntriesOf(diff: ReturnType<typeof computeDocumentDiffs>) {
+  const placed: Record<string, string[]> = {};
+  for (const [key, entries] of diff.lines) {
+    for (const e of entries) {
+      const q = e as DocumentQuantityEntry;
+      if (e.kind === "quantity" && q.uid_out_of_service !== null) (placed[key] ??= []).push(`f${q.fulfilled} i${q.invoiced}`);
+    }
+  }
+  return { placed, unplaced: diff.unplaced_out_of_service.map((e) => `f${e.fulfilled} i${e.invoiced}`) };
+}
+/** The Buy line, billed in full on bill 1, plus whatever extra bill rows a case needs. */
+function oosSources(records: DocumentDiffOutOfService[], purchaseExtra: PurchaseItem[] = [], billExtra: PurchaseDocumentItem[] = []) {
+  const purchase = purchaseDoc([buyLine(), ...purchaseExtra]);
+  const bill = billDoc(1, [project(buyLine(), 10, 3), ...billExtra]);
+  return { ...docsOf({ purchase, bills: [bill], credits: [] }), outOfService: records };
+}
+const BUY_KEY = [DIV, lid(2)].join("/");
+
+Deno.test("F12: a record lost on CFS's watch reports `out_of_service` (its units, billed 0) at its inbound booking's row, on the purchase and receipt views", () => {
+  const sources = oosSources([payableRecord("mark_lost", 2)]);
+  assertEquals(oosEntriesOf(computeDocumentDiffs(sources, { kind: "purchase", uid: PURCHASE }, DIFF_CTX)), {
+    placed: { [BUY_KEY]: ["f2 i0"] },
+    unplaced: [],
+  });
+  assertEquals(oosEntriesOf(computeDocumentDiffs(sources, { kind: "receipt", uid: PURCHASE }, DIFF_CTX)).placed, { [BUY_KEY]: ["f2 i0"] });
+});
+
+Deno.test("F12: a bill line charging the record's full count clears it", () => {
+  const record = payableRecord("mark_lost", 2);
+  const charge = lossLine({ quantity: 2, amount_cents: 20000, out_of_service: [{ uid: record.uid, quantity: 2 }] });
+  const sources = oosSources([record], [charge], [project(charge, 11, 2)]);
+  assertEquals(oosEntriesOf(computeDocumentDiffs(sources, { kind: "purchase", uid: PURCHASE }, DIFF_CTX)), { placed: {}, unplaced: [] });
+});
+
+Deno.test("F12: a unit RECEIVED damaged expects nothing billed (ruling 97); a bill line charging for it reports billed > expected 0", () => {
+  const record = payableRecord("receive_flag", 1);
+  assertEquals(oosEntriesOf(computeDocumentDiffs(oosSources([record]), { kind: "purchase", uid: PURCHASE }, DIFF_CTX)), { placed: {}, unplaced: [] });
+  const charge = lossLine({ quantity: 1, amount_cents: 10000, out_of_service: [{ uid: record.uid, quantity: 1 }] });
+  const sources = oosSources([record], [charge], [project(charge, 11, 1)]);
+  assertEquals(oosEntriesOf(computeDocumentDiffs(sources, { kind: "purchase", uid: PURCHASE }, DIFF_CTX)).placed, { [BUY_KEY]: ["f0 i1"] });
+});
+
+Deno.test("F12: a record with no `bookings-inbound:` of THIS purchase is unplaced, never dropped; one naming no purchase or a cleaning reason is not compared", () => {
+  const bare = payableRecord("mark_lost", 1, { query_by_sources: [`purchases:${PURCHASE}`] });
+  const elsewhere = payableRecord("mark_lost", 1, {
+    uid: movementId(SESSION, "mark_lost", "elsewhere"),
+    query_by_sources: [`purchases:${PURCHASE}`, `bookings-inbound:testpurch20000000000:${lid(2)}:${DIV}`],
+  });
+  const otherPo = payableRecord("mark_lost", 1, { uid: movementId(SESSION, "mark_lost", "other"), query_by_sources: ["purchases:testpurch20000000000"] });
+  const cleaning = payableRecord("mark_lost", 1, { uid: movementId(SESSION, "mark_cleaning", "c"), reason: "cleaning" });
+  // A record naming ANOTHER purchase's inbound booking first is still placed by THIS one's.
+  const both = payableRecord("mark_lost", 1, {
+    uid: movementId(SESSION, "mark_lost", "both"),
+    query_by_sources: [`purchases:${PURCHASE}`, `bookings-inbound:testpurch20000000000:${lid(2)}:${DIV}`, `bookings-inbound:${BUY_BOOKING}`],
+  });
+  const diff = computeDocumentDiffs(oosSources([bare, elsewhere, otherPo, cleaning, both]), { kind: "purchase", uid: PURCHASE }, DIFF_CTX);
+  assertEquals(oosEntriesOf(diff), { placed: { [BUY_KEY]: ["f1 i0"] }, unplaced: ["f1 i0", "f1 i0"] });
+});
+
+Deno.test("F12: the cause is read off the record's id — a legacy auto-id reads as CFS's watch, and a canceled record owes nothing", () => {
+  const legacy = payableRecord("mark_lost", 1, { uid: "testoosLegacy0000000", reason: "damaged" });
+  assertEquals(isReceivedDamagedRecord(legacy), false);
+  assertEquals(isReceivedDamagedRecord(payableRecord("receive_flag", 1)), true);
+  const purchase = purchaseDoc([buyLine()]);
+  const bill = billDoc(1, [project(buyLine(), 10, 3)]);
+  const [legacyInput, canceledInput] = purchaseOutOfServiceInputs(purchase, undefined, [legacy, payableRecord("mark_lost", 2, { status: "canceled" })], [bill]);
+  assertEquals([legacyInput.fulfilled, legacyInput.rel], [1, BUY_KEY]);
+  assertEquals(canceledInput.fulfilled, 0);
+  // A void bill bills nothing.
+  const record = payableRecord("mark_lost", 2);
+  const charge = lossLine({ quantity: 2, amount_cents: 20000, out_of_service: [{ uid: record.uid, quantity: 2 }] });
+  const voided = billDoc(2, [project(charge, 11, 2)], { status: "void" });
+  assertEquals(purchaseOutOfServiceInputs(purchase, undefined, [record], [voided])[0].invoiced, 0);
+  assertEquals(PAYABLE_OOS_REASONS, ["lost", "damaged"]);
 });

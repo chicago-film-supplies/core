@@ -22,6 +22,7 @@ import {
   type InboundUnitSetsType,
   type MovementTypeType,
   type OOSReasonType,
+  OUT_OF_SERVICE_KEYS,
   INBOUND_BREAKDOWN_KEYS,
   INBOUND_HISTORY_KEYS,
   INBOUND_RECEIVED_KEYS,
@@ -39,6 +40,7 @@ import {
   type PurchaseStatusType,
 } from "../schemas/mod.ts";
 import { CustodyRefusal } from "./custody.ts";
+import { parseMovementId } from "./movements.ts";
 import { buildBookingIdFromSignature, componentSignatureHash } from "./booking-id.ts";
 
 /** The movement type a RECEIVED-damaged out-of-service record's mark is (ruling 80). */
@@ -60,6 +62,35 @@ export function isReceiveDamagedMark(
 ): mark is Pick<Movement, "type" | "service"> & { uid_booking: string } {
   return mark !== null && mark.type === RECEIVE_DAMAGED_MARK && mark.service?.from === null &&
     mark.service?.to === "damaged" && typeof mark.uid_booking === "string";
+}
+
+/**
+ * **The out-of-service reasons a supplier settles** (one-document-model F12): the
+ * reasons the inbound ladder holds as keys (`lost`, `damaged`), i.e. those a
+ * `return_to_supplier` settle can carry. A purchase compares a record of one of
+ * these against its bills.
+ *
+ * ⚠️ Deliberately NOT `BILLABLE_OOS_REASONS` (`utils/replacements.ts`), which
+ * means "a CUSTOMER is billed for this mark". The two sets are equal today and
+ * answer different questions, so a cleaning reason becoming customer-billable
+ * never reaches the purchase.
+ */
+export const PAYABLE_OOS_REASONS: readonly OOSReasonType[] = OUT_OF_SERVICE_KEYS.filter((k) =>
+  (INBOUND_BREAKDOWN_KEYS as readonly string[]).includes(k)
+);
+
+/**
+ * Was this out-of-service record opened by a unit RECEIVED damaged (ruling 80)?
+ * Read off the record's id, which IS its mark movement's id (ruling 99), through
+ * the one parser — a received-damaged record's reason cannot move, so it never
+ * splits, and its id keeps naming its `receive_flag` mark even once settled.
+ * A legacy auto-id record reads `false`.
+ *
+ * @param record - The record, by its uid
+ * @returns Whether its mark was a `receive_flag`
+ */
+export function isReceivedDamagedRecord(record: { uid: string }): boolean {
+  return parseMovementId(record.uid)?.type === RECEIVE_DAMAGED_MARK;
 }
 
 /**
