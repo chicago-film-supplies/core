@@ -11163,7 +11163,6 @@ interface Purchase {
   notes: string | null;
   items: PurchaseRow[];
   destinations: PurchaseDestination[];
-  total_cents?: number;
   totals: InitiatorTotalsType;
   query_by_products: string[];
   query_by_orders: string[];
@@ -29437,7 +29436,6 @@ interface Purchase {
   notes: string | null;
   items: PurchaseRow[];
   destinations: PurchaseDestination[];
-  total_cents?: number;
   totals: InitiatorTotalsType;
   query_by_products: string[];
   query_by_orders: string[];
@@ -35474,6 +35472,9 @@ stay through the expand so every step is manager-first: the default column
 moves to `totals.total_cents` in beta D, once this index is live, and v7 drops
 the old pair with the stored key. Beta D moved the default column; the
 schema is unchanged, so no reindex.
+
+v7 (one-document-model D5 beta E): the old `total_cents` pair goes with the
+stored key (purged 2026-11-14); `totals.total_cents` is the purchase's total.
 
 ```ts
 const purchases: TypesenseCollectionConfig;

@@ -51,15 +51,18 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  * moves to `totals.total_cents` in beta D, once this index is live, and v7 drops
  * the old pair with the stored key. Beta D moved the default column; the
  * schema is unchanged, so no reindex.
+ *
+ * v7 (one-document-model D5 beta E): the old `total_cents` pair goes with the
+ * stored key (purged 2026-11-14); `totals.total_cents` is the purchase's total.
  */
 export const purchases: TypesenseCollectionConfig = {
   alias: "purchases",
-  version: 6,
+  version: 7,
   firestoreCollection: "purchases",
-  collectionName: "purchases_v6",
+  collectionName: "purchases_v7",
   enabled: true,
   schema: {
-    name: "purchases_v6",
+    name: "purchases_v7",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -86,8 +89,6 @@ export const purchases: TypesenseCollectionConfig = {
       { name: "credits.uid", type: "string[]", optional: true },
       { name: "credits.number", type: "int64[]", optional: true },
       { name: "credits.status", type: "string[]", facet: true, optional: true },
-      { name: "total_cents", type: "int64", sort: true, optional: true, money: true },
-      { name: "total_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
       // D5: optional, as every field is through an expand.
       { name: "totals", type: "object", optional: true },
       { name: "totals.total_cents", type: "int64", sort: true, optional: true, money: true },

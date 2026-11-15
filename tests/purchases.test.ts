@@ -382,7 +382,7 @@ Deno.test("PurchaseSchema accepts a valid purchase", () => {
 
 Deno.test("PurchaseSchema accepts every arm on ONE purchase — the kind is per item (D3)", () => {
   const items = [line(), hireLine(), freight()];
-  assertEquals(issuePaths(PurchaseSchema, withItems(items, { total_cents: 140985 + 50_000 + 1_500 })), []);
+  assertEquals(issuePaths(PurchaseSchema, withItems(items)), []);
   assertEquals(deriveQueryByItemTypes(items), ["sale", "rental", "service"]);
 });
 
@@ -462,12 +462,11 @@ Deno.test("PurchaseSchema: totals is the Σ of the lines' stored money, and requ
   assertEquals(issuePaths(PurchaseSchema, { ...base, totals: { ...flatTotals(total, 45_000), amount_due_cents: 0 } }), ["totals"]);
 });
 
-Deno.test("PurchaseSchema: the old total_cents is optional, and refused only where it disagrees with totals (D5 beta D)", () => {
-  const items = [line(), freight()];
-  const base = withItems(items);
-  assertEquals(issuePaths(PurchaseSchema, base), [], "absent: no writer states it since beta D");
-  assertEquals(issuePaths(PurchaseSchema, { ...base, total_cents: 140985 + 1_500 }), [], "a stored purchase before the purge");
-  assertEquals(issuePaths(PurchaseSchema, { ...base, total_cents: 140985 }), ["total_cents"]);
+Deno.test("PurchaseSchema: the old top-level total_cents is gone, so a stored one is refused (D5 beta E)", () => {
+  const base = withItems([line(), freight()]);
+  assertEquals(issuePaths(PurchaseSchema, base), []);
+  // Even agreeing with totals: the purge emptied it everywhere, and the object is strict.
+  assertEquals(issuePaths(PurchaseSchema, { ...base, total_cents: 140985 + 1_500 }), [""]);
 });
 
 Deno.test("PurchaseSchema: the status is the inbound bookings', so the document refines none of it (7a, ruling 55)", () => {

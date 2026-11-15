@@ -1333,19 +1333,14 @@ export interface Purchase {
    */
   destinations: PurchaseDestination[];
   /**
-   * The old committed total, retired by D5 (ruling 62) for {@link totals}. No
-   * writer states it since beta D; refined equal to `totals.total_cents` while a
-   * stored purchase still carries it, and deleted in beta E after the purge.
-   */
-  total_cents?: number;
-  /**
    * The order's `totals`, one initiator shape on both sides (one-document-model
    * ruling 62, D5): the sum of the lines' stored money, as `priceDocument`'s
    * stage 5 writes it. `taxes` and `transaction_fees` are always `[]` (the side is
    * exempt, and a purchase has no fee line); `replacement_total_cents` sums the
    * subrent lines' `replacement_cents × quantity`. A time line contributes 0, so
-   * `total_cents` here is the committed amount `total_cents` above has always
-   * been. Refined against the lines ({@link purchaseTotalsIssues}).
+   * `total_cents` here is the committed amount the retired top-level
+   * `total_cents` always was (deleted by D5 beta E after its purge, 2026-11-14).
+   * Refined against the lines ({@link purchaseTotalsIssues}).
    *
    * Required since D5 beta D (backfilled 2026-11-15: prod 317 of 317, `test` 300
    * of 300, dev through the mirror); every writer states it from `purchaseTotals`.
@@ -1455,14 +1450,6 @@ function checkPurchase(p: Purchase, ctx: z.RefinementCtx): void {
   }
 
   for (const issue of purchaseTotalsIssues(p.items, p.totals)) ctx.addIssue({ code: "custom", ...issue });
-  // D5 contract: the old key no writer states any more, until the purge empties it.
-  if (p.total_cents !== undefined && p.total_cents !== p.totals.total_cents) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["total_cents"],
-      message: `total_cents ${p.total_cents} must equal totals.total_cents ${p.totals.total_cents}`,
-    });
-  }
 }
 
 /**
@@ -1530,10 +1517,6 @@ export const PurchaseSchema: z.ZodType<Purchase> = z.strictObject({
   // before; this is what lets a corpus re-parse see a stored violation.
   items: z.array(PurchaseRowSchema).min(1).meta({ label: "Item" }).superRefine(checkZeroPricedComponents),
   destinations: z.array(PurchaseDestinationSchema).min(1).superRefine(checkExchangePairs).meta({ label: "Destination" }),
-  // D5 contract (beta D): optional, written by nothing, and no longer a column;
-  // `totals.total_cents` is the purchase's "Total". The purge empties it and
-  // beta E deletes the key.
-  total_cents: z.int().min(0).optional().meta(homonym),
   // The initiator's totals, `derived` as the order's are (which also tags the key
   // the bill shares by name). Required since beta D.
   totals: InitiatorTotals.meta({ derived: true }),
