@@ -134,13 +134,14 @@ import type {
   InvoiceStatusType,
   Order,
   OutOfService,
-  Purchase,
   PurchaseBill,
   PurchaseCredit,
   PurchaseDocumentItem,
+  PurchaseReceipt,
+  PurchaseReceiptItemType,
   Side,
 } from "../schemas/mod.ts";
-import { billsOutOfService, isDividerItemType, isLineItemType, purchaseLines } from "../schemas/mod.ts";
+import { billsOutOfService, isDividerItemType, isLineItemType } from "../schemas/mod.ts";
 import { type LineMoneyLike, lineUnitsCents, payableStoredMoney, sliceStoredMoney } from "../schemas/_line-money.ts";
 import {
   extensionSectionTargets,
@@ -159,8 +160,13 @@ import {
   toInvoiceDestinationPair,
   toOrderRelativePath,
 } from "./invoices.ts";
-import { collectSubstitutionAnchors, isAtOrBelow, standInUnits, substitutionCredit } from "./substitutions.ts";
-import { lineCustodyAt, type PurchaseLineCustody } from "./bookings-inbound.ts";
+import {
+  collectSubstitutionAnchors,
+  isAtOrBelow,
+  type MaybeSubstitution,
+  standInUnits,
+  substitutionCredit,
+} from "./substitutions.ts";
 import { BILLABLE_OOS_REASONS, billedOutOfService, type ReplacementBillingInvoice } from "./replacements.ts";
 import { bookingIdsByPath } from "./order-edit-delta.ts";
 import { parseBookingId } from "./booking-id.ts";
@@ -1330,14 +1336,20 @@ export type DocumentDiffOutOfService = Pick<OutOfService, "uid" | "reason" | "st
 };
 
 /**
- * **A fulfillment's rows as the account's custody input** (F9): each fulfillable
- * line by its order-relative key. A row a substitution explains is left out —
- * its `substituted` entry is that row's answer, and a custody figure there would
- * report it twice.
+ * **A custody document's rows as the account's custody input** (F9, F11): each
+ * line of the fulfillment (AR) or the purchase receipt (AP) by its
+ * initiator-relative key — both sides' custody documents share their
+ * initiator's path space, so one function reads either. The figure is the
+ * document's own stated count (the picker's or the receiver's), never the
+ * movement journal's: custody is SHOWN, never a reason (ruling 35).
+ *
+ * A row a substitution explains is left out — its `substituted` entry is that
+ * row's answer, and a custody figure there would report it twice. A receipt
+ * carries no substitution, so the skip is vacuous there.
  */
-export function fulfillmentCustody(fulfillment: Fulfillment): Map<string, CustodyRow> {
-  const items = fulfillment.items as readonly FulfillmentItemType[];
-  const anchors = collectSubstitutionAnchors(items);
+export function custodyRows(doc: Fulfillment | PurchaseReceipt): Map<string, CustodyRow> {
+  const items = doc.items as readonly (FulfillmentItemType | PurchaseReceiptItemType)[];
+  const anchors = collectSubstitutionAnchors(items as readonly MaybeSubstitution[]);
   const out = new Map<string, CustodyRow>();
   for (const it of items) {
     if (isDividerItemType(it.type)) continue;
@@ -1345,24 +1357,6 @@ export function fulfillmentCustody(fulfillment: Fulfillment): Map<string, Custod
     if (anchors.some((a) => a.path.join("/") === rel || a.substitutedFor.join("/") === rel)) continue;
     const item = it as unknown as LineItem;
     out.set(rel, { quantity: item.quantity ?? 0, item });
-  }
-  return out;
-}
-
-/**
- * **A purchase's received units as the account's custody input** (F9): every
- * booking line (not a service or replacement line) at its path, from the
- * movements' custody. Absent custody ⇒ `null`, unknown rather than a wrong 0.
- */
-export function purchaseCustody(
-  purchase: Purchase,
-  custody: ReadonlyMap<string, PurchaseLineCustody> | undefined,
-): Map<string, CustodyRow> | null {
-  if (custody === undefined) return null;
-  const out = new Map<string, CustodyRow>();
-  for (const item of purchaseLines(purchase.items)) {
-    if (item.type === "service" || item.type === "replacement") continue;
-    out.set(item.path.join("/"), { quantity: lineCustodyAt(custody, item.path).received, item: item as unknown as LineItem });
   }
   return out;
 }
@@ -1605,6 +1599,9 @@ export function accountInitiator(
   for (const [k, row] of anyCompared ? custody ?? [] : []) {
     if (initiatorKeys.has(k)) continue;
     if (row.item !== null && !isLineItemType(row.item.type)) continue;
+    // An exchange unit is shown, never owed (decision 8), here as on a line:
+    // a row under a custody-authored exchange leg (ruling 82) bills nothing.
+    if (isExchangeLine(row.item)) continue;
     const billed = fold.byPath.get(k)?.quantity ?? 0;
     if (row.quantity === billed) continue;
     custodyOnly.push({ path: k === "" ? [] : k.split("/"), item: row.item, custody: row.quantity, billed });

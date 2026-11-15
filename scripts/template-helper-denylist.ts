@@ -651,11 +651,11 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // credit document of an initiator, which no render context holds.
     "accountInitiator",
     "accountBilling",
-    // The account's inputs: a custody document, the order's out-of-service
-    // records and every invoice, none of which a render context holds.
-    "fulfillmentCustody",
+    // The account's inputs: a custody document (a fulfillment or a receipt),
+    // the order's out-of-service records and every invoice, none of which a
+    // render context holds.
+    "custodyRows",
     "orderOutOfServiceInputs",
-    "purchaseCustody",
     // The remainder and the over-billing offer assembled from that account.
     "buildOverbillingCredits",
     "buildRemainingInvoice",

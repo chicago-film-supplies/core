@@ -41475,16 +41475,22 @@ interface DocumentDiffSources {
   purchases?: readonly Purchase[];
   bills?: readonly PurchaseBill[];
   purchaseCredits?: readonly PurchaseCredit[];
-  purchaseCustody?: ReadonlyMap<string, ReadonlyMap<string, PurchaseLineCustody>>;
+  purchaseReceipts?: readonly PurchaseReceipt[];
 }
 ```
 
 ### `DocumentKind`
 
-The three document kinds a diff can be viewed from or sourced from.
+The document kinds a diff can be viewed from or sourced from, by role and
+side: initiator `order` / `purchase`, custody `fulfillment` / `receipt`,
+billing `invoice` / `bill`, credit `credit_note` / `purchase_credit`.
+
+⚠️ `receipt` and `bill` are short for `purchase-receipts` and
+`purchase-bills`; core's other closed unions spell them `purchase_receipt` /
+`purchase_bill`. `receipt` follows its billing twin in THIS union (F11).
 
 ```ts
-type DocumentKind = "order" | "fulfillment" | "invoice" | "purchase" | "bill" | "credit_note" | "purchase_credit";
+type DocumentKind = "order" | "fulfillment" | "invoice" | "purchase" | "receipt" | "bill" | "credit_note" | "purchase_credit";
 ```
 
 ### `DocumentMovedEntry`
@@ -42536,12 +42542,18 @@ The magnitude of a count delta — every tier's sign flipped when the direction 
 
 The uids of the LIVE invoices CRMS authored — a remainder refuses when any exist.
 
-### `fulfillmentCustody(fulfillment: Fulfillment): Map<string, CustodyRow>`
+### `custodyRows(doc: Fulfillment | PurchaseReceipt): Map<string, CustodyRow>`
 
-**A fulfillment's rows as the account's custody input** (F9): each fulfillable
-line by its order-relative key. A row a substitution explains is left out —
-its `substituted` entry is that row's answer, and a custody figure there would
-report it twice.
+**A custody document's rows as the account's custody input** (F9, F11): each
+line of the fulfillment (AR) or the purchase receipt (AP) by its
+initiator-relative key — both sides' custody documents share their
+initiator's path space, so one function reads either. The figure is the
+document's own stated count (the picker's or the receiver's), never the
+movement journal's: custody is SHOWN, never a reason (ruling 35).
+
+A row a substitution explains is left out — its `substituted` entry is that
+row's answer, and a custody figure there would report it twice. A receipt
+carries no substitution, so the skip is vacuous there.
 
 ### `keyInvoiceCredits(rows: readonly R[], lines: readonly L[], opts: typeLiteral): typeLiteral`
 
@@ -42570,12 +42582,6 @@ that owns its booking (the order first, then the fulfillment), or `null`.
 ### `pairWindow(pair: typeLiteral | undefined): BilledWindow | null`
 
 A pair's {@link BilledWindow}, or `null` when it has no windows.
-
-### `purchaseCustody(purchase: Purchase, custody: ReadonlyMap<string, PurchaseLineCustody> | undefined): Map<string, CustodyRow> | null`
-
-**A purchase's received units as the account's custody input** (F9): every
-booking line (not a service or replacement line) at its path, from the
-movements' custody. Absent custody ⇒ `null`, unknown rather than a wrong 0.
 
 ### `sameWindowDates(a: readonly WindowBounds[], b: readonly WindowBounds[]): boolean`
 

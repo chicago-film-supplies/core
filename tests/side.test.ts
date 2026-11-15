@@ -12,6 +12,7 @@ import {
   COA_COST_CODES,
   COA_EXPENSED_ASSET_CODES,
   FULFILLMENT_LINE_ITEM_TYPES,
+  isFulfillableItemType,
   ITEM_CONTRACTS,
   MOVEMENT_CONTRACTS,
   PRE_TAX_ITEM_TYPES,
@@ -21,6 +22,7 @@ import {
   PurchaseDocumentItemSchema,
   PurchaseItemSchema,
   SHARED_LINE_TYPES,
+  type SharedLineType,
   SIDE_CONTRACTS,
   SIDES,
   SUBSTITUTABLE_ITEM_TYPES,
@@ -58,6 +60,16 @@ Deno.test("receivable custody is ITEM_CONTRACTS.fulfillable, restated literally 
   assertEquals([...FULFILLMENT_LINE_ITEM_TYPES].sort(), ["rental", "sale", "service"]);
   assertEquals([...SUBSTITUTABLE_ITEM_TYPES].sort(), ["rental", "sale"]);
   assertEquals([...PRE_TAX_ITEM_TYPES].sort(), ["rental", "replacement", "sale", "service", "surcharge"]);
+});
+
+Deno.test("the diff's custody read equals isFulfillableItemType on the receivable side, over EVERY item type (F11)", () => {
+  // `custodyCarries` (utils/documentDiff.ts) reads the table with an absent key
+  // as not-custody; the table covers the four shared types only.
+  for (const t of Object.keys(ITEM_CONTRACTS)) {
+    const fromTable = SIDE_CONTRACTS.receivable.custody[t as SharedLineType] === "custody";
+    assertEquals(fromTable, isFulfillableItemType(t), t);
+  }
+  assertEquals(isFulfillableItemType("not_a_type"), SIDE_CONTRACTS.receivable.custody["not_a_type" as SharedLineType] === "custody");
 });
 
 Deno.test("payable custody is exactly the arms that ORDER a product", () => {

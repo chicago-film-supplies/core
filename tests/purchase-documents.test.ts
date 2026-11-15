@@ -33,7 +33,12 @@ import { chargeWindowContext, flatPayablePrice, priceDocument, PriceRefusalError
 import type { PricingFormulas } from "../src/utils/price-formulas.ts";
 import type { TaxCatalog } from "../src/utils/tax-classes.ts";
 import { asCreditRows, hireDates, payablePrice, purchaseDivider, purchasePair, payableLine, withPayableMoney } from "./helpers/payable.ts";
-import { computeDocumentDiffs, type DocumentDiffContext, type DocumentQuantityEntry } from "../src/utils/documentDiff.ts";
+import {
+  computeDocumentDiffs,
+  type DocumentDiffContext,
+  type DocumentDiffSources,
+  type DocumentQuantityEntry,
+} from "../src/utils/documentDiff.ts";
 import { priceFormulaRefOf } from "../src/utils/price-formulas.ts";
 import { frozenCumulativeShareCents, frozenFlatShareCents } from "./helpers/frozen-line-money.ts";
 import { applyDiscountTerms, lineUnitsCents, statedLine as pseudoLine } from "../src/utils/price-formulas.ts";
@@ -48,6 +53,7 @@ import {
   type PurchaseDocumentItem,
   type PurchaseDocumentRow,
   type PurchaseItem,
+  type PurchaseReceipt,
   type PurchaseRentalItem,
   purchaseDocumentLines,
   PurchaseItemInput,
@@ -952,11 +958,20 @@ const credit = (items: PurchaseDocumentItem[], status: PurchaseCredit["status"] 
 // The payable diff reads no receivable context; the shared engine still takes one.
 const DIFF_CTX = { formulas: {}, holidays: [] } as unknown as DocumentDiffContext;
 type DiffSources = { purchase: Purchase; bills: PurchaseBill[]; credits: PurchaseCredit[] };
-/** Each fixture line has received what it ordered: the diff's `fulfilled` reads row custody (C8). */
-const receivedInFull = (p: Purchase) =>
-  new Map([[p.uid, new Map(purchaseLines(p.items).map((l) => [l.path.join("/"), { received: l.quantity, returned: 0 }]))]]);
-const docsOf = (s: DiffSources) =>
-  ({ purchases: [s.purchase], bills: s.bills, purchaseCredits: s.credits, purchaseCustody: receivedInFull(s.purchase) });
+/**
+ * The purchase's receipt with every row received in full: its dividers and its
+ * Buy/Subrent rows at the purchase's quantity, as the receipt writer projects
+ * them (C9). The diff's `fulfilled` reads the receipt row (F11).
+ */
+const receiptOf = (p: Purchase): PurchaseReceipt =>
+  ({
+    ...p,
+    items: p.items
+      .filter((it) => it.type === "destination" || it.type === "group" || it.type === "sale" || it.type === "rental")
+      .map((it) => it.type === "sale" || it.type === "rental" ? { ...it, quantity_ordered: it.quantity } : it),
+  }) as unknown as PurchaseReceipt;
+const docsOf = (s: DiffSources): DocumentDiffSources =>
+  ({ purchases: [s.purchase], bills: s.bills, purchaseCredits: s.credits, purchaseReceipts: [receiptOf(s.purchase)] });
 const poDiffs = (s: DiffSources) => computeDocumentDiffs(docsOf(s), { kind: "purchase", uid: s.purchase.uid }, DIFF_CTX);
 const billDiffs = (uid: string, s: DiffSources) => computeDocumentDiffs(docsOf(s), { kind: "bill", uid }, DIFF_CTX);
 
@@ -1990,4 +2005,97 @@ Deno.test("syncPurchaseToBills: a bill's extension section rides a purchase edit
   const kept = linesOf(out.bill).find((l) => l.path[1] === divider!.uid);
   assertEquals(kept?.price.counts, stated, "its stated counts are kept, never re-metered over its own window");
   parses(out.bill);
+});
+
+// ── F11: the receipt is the payable custody document in the diff (ruling 94) ──
+
+const receiptDiffs = (s: DiffSources, receipt: PurchaseReceipt) =>
+  computeDocumentDiffs({ ...docsOf(s), purchaseReceipts: [receipt] }, { kind: "receipt", uid: receipt.uid }, DIFF_CTX);
+const withReceipt = (s: DiffSources, receipt: PurchaseReceipt, view: { kind: "purchase" | "bill"; uid: string }) =>
+  computeDocumentDiffs({ ...docsOf(s), purchaseReceipts: [receipt] }, view, DIFF_CTX);
+/** The receipt with row `path` set to `quantity` (the receiver's edit). */
+const receiptWith = (p: Purchase, edit: (rows: Record<string, unknown>[]) => Record<string, unknown>[]): PurchaseReceipt => {
+  const r = receiptOf(p);
+  return { ...r, items: edit(r.items as unknown as Record<string, unknown>[]) } as unknown as PurchaseReceipt;
+};
+const pathKey = (it: { path: string[] }) => it.path.join("/");
+
+Deno.test("F11 R1: a short receipt row is a `differs` on quantity, on the purchase AND the receipt view, against the receipt", () => {
+  const item = buyLine();
+  const purchase = purchaseDoc([item]);
+  const receipt = receiptWith(purchase, (rows) => rows.map((r) => (r.uid === item.uid ? { ...r, quantity: 2 } : r)));
+  const s = { purchase, bills: [], credits: [] };
+  const onPurchase = withReceipt(s, receipt, { kind: "purchase", uid: PURCHASE }).lines.get(pathKey(item));
+  assertEquals(onPurchase?.map((e) => [e.kind, (e as { source: { kind: string } }).source.kind]), [["differs", "receipt"]]);
+  assertEquals((onPurchase![0] as { fields: unknown }).fields, [{ field: "quantity", here: 3, there: 2 }]);
+  const onReceipt = receiptDiffs(s, receipt).lines.get(pathKey(item));
+  assertEquals(onReceipt?.map((e) => [e.kind, (e as { source: { kind: string } }).source.kind]), [["differs", "purchase"]]);
+  assertEquals((onReceipt![0] as { fields: unknown }).fields, [{ field: "quantity", here: 2, there: 3 }]);
+});
+
+Deno.test("F11 R3: a kept and an extra receipt row are `only_on_source` on the purchase view and `not_on_source` on the receipt view", () => {
+  const item = buyLine();
+  const purchase = purchaseDoc([item]);
+  const kept = { ...item, uid: lid(8), path: [DIV, lid(8)], quantity: 1, quantity_ordered: 0 };
+  const extra = { ...item, uid: lid(9), path: [DIV, lid(9)], quantity: 2, quantity_ordered: null };
+  const receipt = receiptWith(purchase, (rows) => [...rows, kept, extra]);
+  const s = { purchase, bills: [], credits: [] };
+  const onPurchase = withReceipt(s, receipt, { kind: "purchase", uid: PURCHASE });
+  const onReceipt = receiptDiffs(s, receipt);
+  for (const row of [kept, extra]) {
+    assertEquals(onPurchase.lines.get(pathKey(row))?.map((e) => e.kind), ["only_on_source"]);
+    assertEquals(onReceipt.lines.get(pathKey(row))?.map((e) => e.kind), ["not_on_source"]);
+  }
+  assertEquals(onPurchase.lines.size, 2);
+});
+
+Deno.test("F11: a purchase Charge (service) line books nothing, so it reports nothing against the receipt", () => {
+  const charge = payableLine("service", { uid: `custom-${lid(31)}`, path: [DIV, `custom-${lid(31)}`], name: "Freight" }, DIV) as PurchaseItem;
+  const purchase = purchaseDoc([buyLine(), charge]);
+  const s = { purchase, bills: [], credits: [] };
+  assertEquals(withReceipt(s, receiptOf(purchase), { kind: "purchase", uid: PURCHASE }).lines.size, 0);
+  assertEquals(receiptDiffs(s, receiptOf(purchase)).lines.size, 0);
+});
+
+Deno.test("F11: the bill view reports a billed custody row the receipt lacks as `not_on_source` against the receipt", () => {
+  const item = buyLine();
+  const purchase = purchaseDoc([item]);
+  const bill = billDoc(1, [project(item, 10, 3)]);
+  const receipt = receiptWith(purchase, (rows) => rows.filter((r) => r.uid !== item.uid));
+  const s = { purchase, bills: [bill], credits: [] };
+  const onBill = withReceipt(s, receipt, { kind: "bill", uid: bill.uid }).lines.get([PURCHASE, ...item.path].join("/"));
+  assertEquals(onBill?.map((e) => [e.kind, (e as { source: { kind: string } }).source.kind]), [["not_on_source", "receipt"]]);
+});
+
+Deno.test("F11 R6: a payable `quantity` entry's `fulfilled` is the receipt row's stated count", () => {
+  const item = buyLine();
+  const purchase = purchaseDoc([item]);
+  const receipt = receiptWith(purchase, (rows) => rows.map((r) => (r.uid === item.uid ? { ...r, quantity: 2 } : r)));
+  const s = { purchase, bills: [billDoc(1, [project(item, 10, 1)])], credits: [] };
+  const entry = withReceipt(s, receipt, { kind: "purchase", uid: PURCHASE }).lines.get(pathKey(item))!
+    .find((e) => e.kind === "quantity") as DocumentQuantityEntry;
+  assertEquals([entry.ordered, entry.fulfilled, entry.invoiced], [3, 2, 1]);
+  // Without the receipt, custody is unknown, never a wrong 0.
+  const bare = poDiffs(s).lines.get(pathKey(item))!.find((e) => e.kind === "quantity") as DocumentQuantityEntry;
+  assertEquals(bare.fulfilled, 3);
+  const none = computeDocumentDiffs({ purchases: [purchase], bills: s.bills, purchaseCredits: [] }, { kind: "purchase", uid: PURCHASE }, DIFF_CTX)
+    .lines.get(pathKey(item))!.find((e) => e.kind === "quantity") as DocumentQuantityEntry;
+  assertEquals(none.fulfilled, null);
+});
+
+Deno.test("F11 R7 + finding C: an extra receipt row is a custody-only entry once a bill is compared; an EXCHANGE unit never is", () => {
+  const item = buyLine();
+  const purchase = purchaseDoc([item]);
+  const bill = billDoc(1, [project(item, 10, 3)]);
+  const extra = { ...item, uid: lid(9), path: [DIV, lid(9)], quantity: 2, quantity_ordered: null };
+  const s = { purchase, bills: [bill], credits: [] };
+  // Filed on the custody view, as AR's fulfillment-only row is; the purchase view has it as `only_on_source`.
+  const plain = receiptDiffs(s, receiptWith(purchase, (rows) => [...rows, extra]));
+  assertEquals(plain.lines.get(pathKey(extra))?.map((e) => e.kind), ["not_on_source", "quantity"]);
+  const entry = plain.lines.get(pathKey(extra))!.find((e) => e.kind === "quantity") as DocumentQuantityEntry;
+  assertEquals([entry.ordered, entry.fulfilled, entry.invoiced], [null, 2, 0]);
+  // An exchange unit on a custody-authored leg is shown, never owed (decision 8).
+  const exchange = { ...extra, type: "rental", exchanged_for: [{ path: item.path, quantity: 2, reason: "damaged" }] };
+  const swapped = receiptDiffs(s, receiptWith(purchase, (rows) => [...rows, exchange]));
+  assertEquals(swapped.lines.get(pathKey(extra))?.map((e) => e.kind), ["not_on_source"]);
 });

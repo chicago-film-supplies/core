@@ -19428,14 +19428,14 @@
         {
           "kind": "interface",
           "name": "DocumentDiffSources",
-          "declaration": "interface DocumentDiffSources {\n  orders?: readonly Order[];\n  fulfillments?: readonly Fulfillment[];\n  invoices?: readonly Invoice[];\n  outOfService?: readonly DocumentDiffOutOfService[];\n  creditNotes?: readonly DocumentDiffCreditNote[];\n  purchases?: readonly Purchase[];\n  bills?: readonly PurchaseBill[];\n  purchaseCredits?: readonly PurchaseCredit[];\n  purchaseCustody?: ReadonlyMap<string, ReadonlyMap<string, PurchaseLineCustody>>;\n}",
+          "declaration": "interface DocumentDiffSources {\n  orders?: readonly Order[];\n  fulfillments?: readonly Fulfillment[];\n  invoices?: readonly Invoice[];\n  outOfService?: readonly DocumentDiffOutOfService[];\n  creditNotes?: readonly DocumentDiffCreditNote[];\n  purchases?: readonly Purchase[];\n  bills?: readonly PurchaseBill[];\n  purchaseCredits?: readonly PurchaseCredit[];\n  purchaseReceipts?: readonly PurchaseReceipt[];\n}",
           "doc": "Documents the caller holds. Any may be absent or partial."
         },
         {
           "kind": "typeAlias",
           "name": "DocumentKind",
-          "declaration": "type DocumentKind = \"order\" | \"fulfillment\" | \"invoice\" | \"purchase\" | \"bill\" | \"credit_note\" | \"purchase_credit\";",
-          "doc": "The three document kinds a diff can be viewed from or sourced from."
+          "declaration": "type DocumentKind = \"order\" | \"fulfillment\" | \"invoice\" | \"purchase\" | \"receipt\" | \"bill\" | \"credit_note\" | \"purchase_credit\";",
+          "doc": "The document kinds a diff can be viewed from or sourced from, by role and\nside: initiator `order` / `purchase`, custody `fulfillment` / `receipt`,\nbilling `invoice` / `bill`, credit `credit_note` / `purchase_credit`.\n\n⚠️ `receipt` and `bill` are short for `purchase-receipts` and\n`purchase-bills`; core's other closed unions spell them `purchase_receipt` /\n`purchase_bill`. `receipt` follows its billing twin in THIS union (F11)."
         },
         {
           "kind": "interface",
@@ -19904,9 +19904,9 @@
         },
         {
           "kind": "function",
-          "name": "fulfillmentCustody",
-          "signature": "fulfillmentCustody(fulfillment: Fulfillment): Map<string, CustodyRow>",
-          "doc": "**A fulfillment's rows as the account's custody input** (F9): each fulfillable\nline by its order-relative key. A row a substitution explains is left out —\nits `substituted` entry is that row's answer, and a custody figure there would\nreport it twice.",
+          "name": "custodyRows",
+          "signature": "custodyRows(doc: Fulfillment | PurchaseReceipt): Map<string, CustodyRow>",
+          "doc": "**A custody document's rows as the account's custody input** (F9, F11): each\nline of the fulfillment (AR) or the purchase receipt (AP) by its\ninitiator-relative key — both sides' custody documents share their\ninitiator's path space, so one function reads either. The figure is the\ndocument's own stated count (the picker's or the receiver's), never the\nmovement journal's: custody is SHOWN, never a reason (ruling 35).\n\nA row a substitution explains is left out — its `substituted` entry is that\nrow's answer, and a custody figure there would report it twice. A receipt\ncarries no substitution, so the skip is vacuous there.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -19939,14 +19939,6 @@
           "name": "pairWindow",
           "signature": "pairWindow(pair: typeLiteral | undefined): BilledWindow | null",
           "doc": "A pair's {@link BilledWindow}, or `null` when it has no windows.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
-          "name": "purchaseCustody",
-          "signature": "purchaseCustody(purchase: Purchase, custody: ReadonlyMap<string, PurchaseLineCustody> | undefined): Map<string, CustodyRow> | null",
-          "doc": "**A purchase's received units as the account's custody input** (F9): every\nbooking line (not a service or replacement line) at its path, from the\nmovements' custody. Absent custody ⇒ `null`, unknown rather than a wrong 0.",
           "paramTags": [],
           "returnsTag": null
         },

@@ -152,7 +152,7 @@ Deno.test("billingFoldCoverage — documentDiff names none of the account's inpu
 
 /** A comparison of a document kind against a literal: `.kind === "invoice"`, either way round. */
 export const KIND_COMPARISON_RE =
-  /\bkind\s*[!=]==?\s*"(?:order|fulfillment|invoice|purchase|bill)"|"(?:order|fulfillment|invoice|purchase|bill)"\s*[!=]==?\s*[\w.]*\bkind\b/;
+  /\bkind\s*[!=]==?\s*"(?:order|fulfillment|invoice|purchase|receipt|bill)"|"(?:order|fulfillment|invoice|purchase|receipt|bill)"\s*[!=]==?\s*[\w.]*\bkind\b/;
 
 /**
  * The one named exception, until ruling 34 gives both credit documents one
@@ -179,6 +179,25 @@ Deno.test("billingFoldCoverage — documentDiff compares roles, never a document
   for (const s of spans) assertEquals(hits.some((h) => h.line > s.start && h.line < s.end), true, "an allowlisted function no longer compares a kind: drop it");
 });
 
+// ── 6. Which lines a custody document carries is side DATA (F11) ──────
+
+/**
+ * `isFulfillableItemType` is the RECEIVABLE answer: a payable `service` line (a
+ * Charge) books nothing and has no receipt row. The diff reads
+ * `SIDE_CONTRACTS[side].custody` through `custodyCarries` instead.
+ */
+export const RECEIVABLE_CUSTODY_RE = /\bisFulfillableItemType\b/;
+
+Deno.test("billingFoldCoverage — documentDiff asks the side which lines its custody document carries (F11)", async () => {
+  const hits = grepContent("src/utils/documentDiff.ts", await readSrc("utils/documentDiff.ts"), RECEIVABLE_CUSTODY_RE);
+  assertEquals(
+    show(hits),
+    "",
+    "utils/documentDiff.ts reads the receivable-only fulfillable set. Which lines a custody document " +
+      "carries is per side: read it through `custodyCarries(side, type)` (`SIDE_CONTRACTS[side].custody`):\n",
+  );
+});
+
 // ── Non-vacuity: every scan reaches something and every regex bites ──
 
 Deno.test("billingFoldCoverage — the scans bite (non-vacuity)", async () => {
@@ -201,6 +220,10 @@ Deno.test("billingFoldCoverage — the scans bite (non-vacuity)", async () => {
   assertEquals(KIND_COMPARISON_RE.test('const v = "invoice" !== source.kind;'), true, "kind RE missed a reversed compare");
   assertEquals(KIND_COMPARISON_RE.test('.filter((it) => it.type === "order")'), false, "kind RE flags an ITEM type");
   assertEquals(KIND_COMPARISON_RE.test('kinds: { initiator: "order", billing: "invoice" },'), false, "kind RE flags the DIFF_SIDES table");
+  assertEquals(KIND_COMPARISON_RE.test('if (view.kind === "receipt") return;'), true, "kind RE misses the receipt (F11)");
+
+  assertEquals(RECEIVABLE_CUSTODY_RE.test("return !involvesCustody || isFulfillableItemType(item.type);"), true, "custody RE stopped matching");
+  assertEquals(RECEIVABLE_CUSTODY_RE.test("custodyCarries(side.side, item.type)"), false, "custody RE flags the side read");
 
   // The scans reach the files they claim to read.
   const qa = await readSrc("utils/quantityAccounting.ts");

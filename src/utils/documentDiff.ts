@@ -8,6 +8,11 @@
  * is the ONE author of that answer, so the three views cannot disagree with each
  * other, and the API can recompute it before a sync write.
  *
+ * **The payable side is the same pipeline** (one-document-model ruling 33): a
+ * purchase, its receipt and its bills play the order's, the fulfillment's and
+ * the invoices' roles (`VIEW_ROLES`, `DIFF_SIDES`), and everything below holds
+ * for them unless it names a side. The receipt is compared since F11 (ruling 94).
+ *
  * ⚠️ **Named *diff*, never *divergence*** — manager's store already uses that
  * word for unsaved local edits against the server snapshot.
  *
@@ -157,6 +162,9 @@ import type {
   PurchaseCredit,
   PurchaseDocumentItem,
   PurchaseItem,
+  PurchaseReceipt,
+  PurchaseReceiptItemType,
+  SharedLineType,
   Side,
   DocDestinationType,
   Fulfillment,
@@ -173,8 +181,8 @@ import {
   exchangedForKey,
   exchangedForOf,
   isDividerItemType,
-  isFulfillableItemType,
   purchaseCreditPurchaseUid,
+  SIDE_CONTRACTS,
 } from "../schemas/mod.ts";
 import {
   canonicalizePayload,
@@ -194,7 +202,6 @@ import {
   purchaseBillSharedLineFields,
 } from "./purchase-documents.ts";
 import { formulaMoneyMismatch } from "../schemas/_line-money.ts";
-import type { PurchaseLineCustody } from "./bookings-inbound.ts";
 import type { PricingFormulas } from "./price-document.ts";
 import {
   collectSubstitutionAnchors,
@@ -216,19 +223,34 @@ import {
   billedByPath,
   type CustodyOnlyAccount,
   type CustodyRow,
+  custodyRows,
   type DocumentDiffOutOfService,
-  fulfillmentCustody,
   type InitiatorAccount,
   type LineAccount,
   orderOutOfServiceInputs,
   type OutOfServiceInput,
-  purchaseCustody,
   substitutionCredit,
 } from "./quantityAccounting.ts";
-import { orderFulfillmentSharedFields, type SharedField } from "./shared-fields.ts";
+import { orderFulfillmentSharedFields, purchaseReceiptSharedFields, type SharedField } from "./shared-fields.ts";
 
-/** The three document kinds a diff can be viewed from or sourced from. */
-export type DocumentKind = "order" | "fulfillment" | "invoice" | "purchase" | "bill" | "credit_note" | "purchase_credit";
+/**
+ * The document kinds a diff can be viewed from or sourced from, by role and
+ * side: initiator `order` / `purchase`, custody `fulfillment` / `receipt`,
+ * billing `invoice` / `bill`, credit `credit_note` / `purchase_credit`.
+ *
+ * ⚠️ `receipt` and `bill` are short for `purchase-receipts` and
+ * `purchase-bills`; core's other closed unions spell them `purchase_receipt` /
+ * `purchase_bill`. `receipt` follows its billing twin in THIS union (F11).
+ */
+export type DocumentKind =
+  | "order"
+  | "fulfillment"
+  | "invoice"
+  | "purchase"
+  | "receipt"
+  | "bill"
+  | "credit_note"
+  | "purchase_credit";
 
 /** The kinds a diff can be VIEWED from. A credit document is a source of netting, never a view. */
 export type DocumentViewKind = Exclude<DocumentKind, "credit_note" | "purchase_credit">;
@@ -578,13 +600,13 @@ export interface DocumentDiffSources {
   /** Their supplier credits; a live credit nets out of `invoiced`. */
   purchaseCredits?: readonly PurchaseCredit[];
   /**
-   * Each purchase's row custody, keyed by purchase uid: `custodyBySourceItem`
-   * over that purchase's movements (one-document-model C8 — the line no longer
-   * carries `quantity_received`). It fills a payable entry's `fulfilled`, which
-   * is stated and never a trigger. Absent ⇒ `fulfilled: null`, unknown rather
-   * than a wrong 0.
+   * The purchases' receipts (a receipt's uid IS its purchase's), the payable
+   * custody documents, as `fulfillments` are the receivable ones (F11). A
+   * receipt fills a payable `quantity` entry's `fulfilled` with its row's
+   * stated count, which is shown and never a trigger (ruling 35). Absent ⇒ no
+   * receipt is compared and `fulfilled` is `null`, unknown rather than a wrong 0.
    */
-  purchaseCustody?: ReadonlyMap<string, ReadonlyMap<string, PurchaseLineCustody>>;
+  purchaseReceipts?: readonly PurchaseReceipt[];
 }
 
 /**
@@ -606,15 +628,17 @@ export interface DocumentDiffContext {
 const PAIR_IDENTITY_FIELDS: ReadonlySet<string> = new Set(["uid", "uid_order", "uid_purchase"]);
 
 /**
- * Pair fields a FULFILLMENT does not own, skipped whenever one is on either side.
+ * Pair fields a CUSTODY document does not own, skipped whenever one is on
+ * either side.
  *
- * `jurisdiction` is a tax fact: it prices lines, and a fulfillment carries no
- * price. The fulfillment stores it only because `destinations[]` is projected
+ * `jurisdiction` is a tax fact: it prices lines, and a custody document (a
+ * fulfillment or a receipt) carries no price; a purchase pair has no
+ * `jurisdiction` at all. The fulfillment stores it only because `destinations[]` is projected
  * whole from the order; it is server-managed and read-only there. A mismatch
  * (16 prod pairs on 2026-09-13) is therefore not a difference a fulfillment can
  * have an opinion about (owner ruling, 2026-09-13).
  */
-const FULFILLMENT_UNOWNED_PAIR_FIELDS: ReadonlySet<string> = new Set(["jurisdiction"]);
+const CUSTODY_UNOWNED_PAIR_FIELDS: ReadonlySet<string> = new Set(["jurisdiction"]);
 
 const key = (path: readonly string[]): string => path.join("/");
 
@@ -641,13 +665,15 @@ interface ScopedLines {
 }
 
 
-function scopeFulfillment(fulfillment: Fulfillment): ScopedLines {
+/** A custody document's lines (a fulfillment, or a receipt), in its initiator's path space. */
+function scopeCustody(doc: DiffCustody): ScopedLines {
+  const items = doc.items as readonly (FulfillmentItemType | PurchaseReceiptItemType)[];
   const byKey = new Map<string, LineItem>();
-  for (const it of fulfillment.items as readonly FulfillmentItemType[]) {
+  for (const it of items) {
     if (isDividerItemType(it.type)) continue;
     byKey.set(key(it.path), it as unknown as LineItem);
   }
-  return { byKey, anchors: collectSubstitutionAnchors(fulfillment.items as readonly FulfillmentItemType[]), claims: new Map() };
+  return { byKey, anchors: collectSubstitutionAnchors(items as readonly MaybeSubstitution[]), claims: new Map() };
 }
 
 
@@ -669,7 +695,7 @@ type DiffSide = {
   kind: DocumentKind;
   role: DiffRole;
   side: Side;
-  doc: Order | Fulfillment | Invoice | Purchase | PurchaseBill;
+  doc: DiffInitiator | DiffCustody | DiffBilling;
   lines: ScopedLines;
 };
 
@@ -678,10 +704,22 @@ const isBilling = (side: DiffSide): boolean => side.role === "billing";
 const isInitiator = (side: DiffSide): boolean => side.role === "initiator";
 const isCustody = (side: DiffSide): boolean => side.role === "custody";
 
-/** Only fulfillable lines take part in a comparison that involves a custody document. */
+/**
+ * Does a line of this type move custody on this side, so that the side's custody
+ * document carries it? Read off `SIDE_CONTRACTS[side].custody` (F11): a
+ * receivable `service` line is fulfilled, a payable one (a Charge) books
+ * nothing. The table covers the four shared line types; any other type (a
+ * `surcharge`, a `transaction_fee`, a divider) is an absent key, which is NOT
+ * custody. On the receivable side this is exactly `isFulfillableItemType`.
+ */
+function custodyCarries(side: Side, type: string): boolean {
+  return SIDE_CONTRACTS[side].custody[type as SharedLineType] === "custody";
+}
+
+/** Only the lines its custody document carries take part in a comparison that involves one. */
 function comparable(side: DiffSide, other: DiffSide, item: LineItem): boolean {
   const involvesCustody = isCustody(side) || isCustody(other);
-  return !involvesCustody || isFulfillableItemType(item.type);
+  return !involvesCustody || custodyCarries(side.side, item.type);
 }
 
 /** The compared fields two same-path lines disagree on. `here` belongs to `viewed`. */
@@ -1107,10 +1145,10 @@ function compareScope(
     const h = here as unknown as Record<string, unknown>;
     const t = there as unknown as Record<string, unknown>;
     const fields: DocumentDiffField[] = [];
-    const involvesFulfillment = isCustody(viewed) || isCustody(source);
+    const involvesCustody = isCustody(viewed) || isCustody(source);
     for (const field of [...new Set([...Object.keys(h), ...Object.keys(t)])].sort()) {
       if (PAIR_IDENTITY_FIELDS.has(field)) continue;
-      if (involvesFulfillment && FULFILLMENT_UNOWNED_PAIR_FIELDS.has(field)) continue;
+      if (involvesCustody && CUSTODY_UNOWNED_PAIR_FIELDS.has(field)) continue;
       if (JSON.stringify(canonicalizePayload(h[field])) !== JSON.stringify(canonicalizePayload(t[field]))) {
         fields.push({ field, here: h[field] ?? null, there: t[field] ?? null });
       }
@@ -1125,11 +1163,14 @@ const VIEW_ROLES: Readonly<Record<DocumentViewKind, { side: Side; role: "initiat
   fulfillment: { side: "receivable", role: "custody" },
   invoice: { side: "receivable", role: "billing" },
   purchase: { side: "payable", role: "initiator" },
+  receipt: { side: "payable", role: "custody" },
   bill: { side: "payable", role: "billing" },
 };
 
 type DiffInitiator = Order | Purchase;
 type DiffBilling = Invoice | PurchaseBill;
+/** A custody document: its uid IS its initiator's, and its rows share the initiator's path space. */
+type DiffCustody = Fulfillment | PurchaseReceipt;
 
 /**
  * **Everything that differs between the sides in the diff** — data, never an
@@ -1141,8 +1182,8 @@ interface DiffSideData {
   /** The document kind of each role, for a {@link DocumentRef}. A side with no custody document passes none. */
   kinds: { initiator: DocumentKind; custody: DocumentKind; billing: DocumentKind; credit: DocumentKind };
   initiators(sources: DocumentDiffSources): readonly DiffInitiator[];
-  /** The custody documents (a fulfillment's uid IS its order's). */
-  custodyDocs(sources: DocumentDiffSources): readonly Fulfillment[];
+  /** The custody documents (a fulfillment's uid IS its order's, a receipt's its purchase's). */
+  custodyDocs(sources: DocumentDiffSources): readonly DiffCustody[];
   /** Every billing document passed, live or not. */
   billing(sources: DocumentDiffSources): readonly DiffBilling[];
   /** The credit documents on one initiator. */
@@ -1150,9 +1191,9 @@ interface DiffSideData {
   /** The initiators a billing document carries a scope for. */
   scopesOf(doc: DiffBilling): string[];
   /** The custody input to the account, by initiator-relative key; `null` when not passed. */
-  custodyInput(initiator: DiffInitiator, custodyDoc: Fulfillment | undefined, sources: DocumentDiffSources): ReadonlyMap<string, CustodyRow> | null;
+  custodyInput(custodyDoc: DiffCustody | undefined): ReadonlyMap<string, CustodyRow> | null;
   /** Lost/damaged records, pre-placed; empty when not passed. */
-  outOfServiceInput(initiator: DiffInitiator, custodyDoc: Fulfillment | undefined, sources: DocumentDiffSources): OutOfServiceInput[];
+  outOfServiceInput(initiator: DiffInitiator, custodyDoc: DiffCustody | undefined, sources: DocumentDiffSources): OutOfServiceInput[];
   /** What {@link billingLineFields} reads per side: the data, never the rule. */
   line: {
     /** An initiator line in its billing row's shape, over the shared keys. */
@@ -1163,7 +1204,7 @@ interface DiffSideData {
     ownMoney(billingLine: LineItem, billingDoc: DiffBilling): DocumentDiffField[];
   };
   /** The document-level fields the initiator shares with each derived role; `null` for none. */
-  docFields: { billing(): readonly SharedField[]; custody(): readonly SharedField[] | null };
+  docFields: { billing(): readonly SharedField[]; custody(): readonly SharedField[] };
 }
 
 /**
@@ -1191,9 +1232,11 @@ const DIFF_SIDES: Readonly<Record<Side, DiffSideData>> = {
     billing: (s) => s.invoices ?? [],
     credits: (s) => s.creditNotes ?? [],
     scopesOf: (doc) => invoiceScopes(doc as Invoice),
-    custodyInput: (_initiator, custodyDoc) => custodyDoc === undefined ? null : fulfillmentCustody(custodyDoc),
+    custodyInput: (custodyDoc) => custodyDoc === undefined ? null : custodyRows(custodyDoc),
     outOfServiceInput: (initiator, custodyDoc, s) =>
-      s.outOfService === undefined ? [] : orderOutOfServiceInputs(initiator as Order, custodyDoc, s.outOfService, s.invoices ?? []),
+      s.outOfService === undefined
+        ? []
+        : orderOutOfServiceInputs(initiator as Order, custodyDoc as Fulfillment | undefined, s.outOfService, s.invoices ?? []),
     line: {
       projectLine: (initiatorLine, _billingLine, initiatorUid) =>
         projectOrderItemToInvoiceItem(initiatorLine, initiatorUid) as unknown as LineItem,
@@ -1203,15 +1246,14 @@ const DIFF_SIDES: Readonly<Record<Side, DiffSideData>> = {
     docFields: { billing: () => orderInvoiceSharedFields().doc, custody: () => orderFulfillmentSharedFields().doc },
   },
   payable: {
-    kinds: { initiator: "purchase", custody: "fulfillment", billing: "bill", credit: "purchase_credit" },
+    kinds: { initiator: "purchase", custody: "receipt", billing: "bill", credit: "purchase_credit" },
     initiators: (s) => s.purchases ?? [],
-    // No stored receipt is compared yet: AP custody is the movement journal's (`purchaseCustody`).
-    custodyDocs: () => [],
+    custodyDocs: (s) => s.purchaseReceipts ?? [],
     billing: (s) => s.bills ?? [],
     credits: (s, uid) => (s.purchaseCredits ?? []).filter((c) => purchaseCreditPurchaseUid(c) === uid),
     scopesOf: (doc) => deriveQueryByPurchases((doc as PurchaseBill).items),
-    custodyInput: (initiator, _custodyDoc, s) => purchaseCustody(initiator as Purchase, s.purchaseCustody?.get(initiator.uid)),
-    // Payable lost/damaged records are not compared (none is passed).
+    custodyInput: (custodyDoc) => custodyDoc === undefined ? null : custodyRows(custodyDoc),
+    // Payable lost/damaged records are not compared yet: ruling 96's slice.
     outOfServiceInput: () => [],
     line: {
       // Fitted to the bill row's quantity, unlike the sync's whole-line
@@ -1222,8 +1264,7 @@ const DIFF_SIDES: Readonly<Record<Side, DiffSideData>> = {
       sharedLineFields: purchaseBillSharedLineFields,
       ownMoney: linkedTimeLineMoney,
     },
-    // No stored receipt is compared yet (custodyDocs above).
-    docFields: { billing: purchaseBillSharedDocFields, custody: () => null },
+    docFields: { billing: purchaseBillSharedDocFields, custody: () => purchaseReceiptSharedFields().doc },
   },
 };
 
@@ -1283,7 +1324,7 @@ function authoredLegs(side: Side, doc: DiffBilling, initiator: DiffInitiator): S
 interface InitiatorScope {
   initiator: DiffInitiator;
   scoped: ScopedLines;
-  custodyDoc: Fulfillment | undefined;
+  custodyDoc: DiffCustody | undefined;
   /** Every billing document scoping it, live or not. */
   billing: DiffBilling[];
   account: InitiatorAccount;
@@ -1418,7 +1459,7 @@ export function computeDocumentDiffs(
       side,
       initiator as unknown as AccountedInitiator,
       fold,
-      data.custodyInput(initiator, custodyDoc, sources),
+      data.custodyInput(custodyDoc),
       data.outOfServiceInput(initiator, custodyDoc, sources),
       { formulas: context.formulas, holidays: context.holidays },
     );
@@ -1457,7 +1498,7 @@ export function computeDocumentDiffs(
 
   const billingSide = (doc: DiffBilling, scope: InitiatorScope): DiffSide => ({ kind: kinds.billing, role: "billing", side, doc, lines: scopeBilling(side, doc, scope.initiator) });
   const initiatorSide = (scope: InitiatorScope): DiffSide => ({ kind: kinds.initiator, role: "initiator", side, doc: scope.initiator, lines: scope.scoped });
-  const custodySide = (doc: Fulfillment): DiffSide => ({ kind: kinds.custody, role: "custody", side, doc, lines: scopeFulfillment(doc) });
+  const custodySide = (doc: DiffCustody): DiffSide => ({ kind: kinds.custody, role: "custody", side, doc, lines: scopeCustody(doc) });
   const named = (scope: InitiatorScope) => (rel: string) => scope.fold.byPath.has(rel);
 
   /** An initiator- or custody-shaped viewed side against every billing document on its initiator. */
@@ -1475,8 +1516,8 @@ export function computeDocumentDiffs(
       compareScope(out, viewed, billingSide(doc, scope), scope.initiator.uid, named(scope), () => {}, authoredLegs(side, doc, scope.initiator));
     }
     for (const [rel, item] of viewed.lines.byKey) {
-      // Against billing documents a custody document answers for its fulfillable rows only.
-      if (role === "custody" && !isFulfillableItemType(item.type)) continue;
+      // Against billing documents a custody document answers for the rows it carries only.
+      if (role === "custody" && !custodyCarries(side, item.type)) continue;
       const entry = entryAt(scope, rel);
       if (entry !== null) fileEntry(rel, entry);
     }
