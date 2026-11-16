@@ -179,7 +179,6 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
       },
       ledger_account: 1999,
       uid_tracking_category: null,
-      quantity_billed: 0,
       landed_costs: [],
     }],
   },

@@ -12252,7 +12252,6 @@ interface PurchaseRentalItem {
   type: "rental";
   amount_cents: number | null;
   price: PurchaseLinePrice;
-  quantity_billed?: number | null;
   uid_orders: string[];
   exchanged_for?: ExchangedForEntryType[];
 }
@@ -12374,7 +12373,6 @@ interface PurchaseSaleItem {
   ledger_account: COACodeType | null;
   amount_cents: number;
   price: PurchaseLinePrice;
-  quantity_billed?: number;
   landed_costs: PurchaseLandedCost[];
 }
 ```
@@ -12429,7 +12427,6 @@ interface PurchaseServiceItem {
   type: "service";
   amount_cents: number | null;
   price: PurchaseLinePrice;
-  quantity_billed?: number | null;
 }
 ```
 
@@ -29806,7 +29803,6 @@ interface PurchaseRentalItem {
   type: "rental";
   amount_cents: number | null;
   price: PurchaseLinePrice;
-  quantity_billed?: number | null;
   uid_orders: string[];
   exchanged_for?: ExchangedForEntryType[];
 }
@@ -29928,7 +29924,6 @@ interface PurchaseSaleItem {
   ledger_account: COACodeType | null;
   amount_cents: number;
   price: PurchaseLinePrice;
-  quantity_billed?: number;
   landed_costs: PurchaseLandedCost[];
 }
 ```
@@ -29983,7 +29978,6 @@ interface PurchaseServiceItem {
   type: "service";
   amount_cents: number | null;
   price: PurchaseLinePrice;
-  quantity_billed?: number | null;
 }
 ```
 

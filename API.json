@@ -5439,7 +5439,7 @@
         {
           "kind": "interface",
           "name": "PurchaseRentalItem",
-          "declaration": "interface PurchaseRentalItem {\n  ledger_account: COACodeType | null;\n  type: \"rental\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  quantity_billed?: number | null;\n  uid_orders: string[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface PurchaseRentalItem {\n  ledger_account: COACodeType | null;\n  type: \"rental\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  uid_orders: string[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "A RENTAL (Subrent) item — `quantity` units borrowed for a hire window and given back. Flat or time."
         },
         {
@@ -5499,7 +5499,7 @@
         {
           "kind": "interface",
           "name": "PurchaseSaleItem",
-          "declaration": "interface PurchaseSaleItem {\n  type: \"sale\";\n  ledger_account: COACodeType | null;\n  amount_cents: number;\n  price: PurchaseLinePrice;\n  quantity_billed?: number;\n  landed_costs: PurchaseLandedCost[];\n}",
+          "declaration": "interface PurchaseSaleItem {\n  type: \"sale\";\n  ledger_account: COACodeType | null;\n  amount_cents: number;\n  price: PurchaseLinePrice;\n  landed_costs: PurchaseLandedCost[];\n}",
           "doc": "A SALE (Buy) item — ownership of `quantity` units of one product. Always flat."
         },
         {
@@ -5523,7 +5523,7 @@
         {
           "kind": "interface",
           "name": "PurchaseServiceItem",
-          "declaration": "interface PurchaseServiceItem {\n  type: \"service\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  quantity_billed?: number | null;\n}",
+          "declaration": "interface PurchaseServiceItem {\n  type: \"service\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n}",
           "doc": "A SERVICE (Charge) item — something CFS pays for with no custody: a carrier\nline on a device CFS owns (Verizon), freight, a fee, Vision's standing history\nline. Flat (freight: one amount) or time (a carrier line).\n\nIts uid is its catalog SERVICE product's when it has one, as an order or\ninvoice service line's is, else `custom-` ({@link payableLineUid}). There is\nno attribution key and no unit list (rulings 70–73, 2026-11-11): a charge that\ncosts a product sits as a ROW beneath that product's row, as a kit component\ndoes, and a top-level charge costs its own product\n(`costedProductUid`, `utils/purchases.ts`). Which units a charge covers is not\na fact this line states: a service product is never serialized, and a carrier\nline follows the device it is placed under (api-cloudrun#1489 tracks a\nunit-level installed-component link)."
         },
         {
@@ -13908,7 +13908,7 @@
         {
           "kind": "interface",
           "name": "PurchaseRentalItem",
-          "declaration": "interface PurchaseRentalItem {\n  ledger_account: COACodeType | null;\n  type: \"rental\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  quantity_billed?: number | null;\n  uid_orders: string[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface PurchaseRentalItem {\n  ledger_account: COACodeType | null;\n  type: \"rental\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  uid_orders: string[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "A RENTAL (Subrent) item — `quantity` units borrowed for a hire window and given back. Flat or time."
         },
         {
@@ -13968,7 +13968,7 @@
         {
           "kind": "interface",
           "name": "PurchaseSaleItem",
-          "declaration": "interface PurchaseSaleItem {\n  type: \"sale\";\n  ledger_account: COACodeType | null;\n  amount_cents: number;\n  price: PurchaseLinePrice;\n  quantity_billed?: number;\n  landed_costs: PurchaseLandedCost[];\n}",
+          "declaration": "interface PurchaseSaleItem {\n  type: \"sale\";\n  ledger_account: COACodeType | null;\n  amount_cents: number;\n  price: PurchaseLinePrice;\n  landed_costs: PurchaseLandedCost[];\n}",
           "doc": "A SALE (Buy) item — ownership of `quantity` units of one product. Always flat."
         },
         {
@@ -13992,7 +13992,7 @@
         {
           "kind": "interface",
           "name": "PurchaseServiceItem",
-          "declaration": "interface PurchaseServiceItem {\n  type: \"service\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  quantity_billed?: number | null;\n}",
+          "declaration": "interface PurchaseServiceItem {\n  type: \"service\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n}",
           "doc": "A SERVICE (Charge) item — something CFS pays for with no custody: a carrier\nline on a device CFS owns (Verizon), freight, a fee, Vision's standing history\nline. Flat (freight: one amount) or time (a carrier line).\n\nIts uid is its catalog SERVICE product's when it has one, as an order or\ninvoice service line's is, else `custom-` ({@link payableLineUid}). There is\nno attribution key and no unit list (rulings 70–73, 2026-11-11): a charge that\ncosts a product sits as a ROW beneath that product's row, as a kit component\ndoes, and a top-level charge costs its own product\n(`costedProductUid`, `utils/purchases.ts`). Which units a charge covers is not\na fact this line states: a service product is never serialized, and a carrier\nline follows the device it is placed under (api-cloudrun#1489 tracks a\nunit-level installed-component link)."
         },
         {

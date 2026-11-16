@@ -690,13 +690,6 @@ export interface PurchaseSaleItem extends Omit<PurchaseItemBase, "ledger_account
    * 415 of 415 buy lines in prod, 415 of 415 dev, 405 of 405 `test`).
    */
   price: PurchaseLinePrice;
-  /**
-   * ⚠️ **RETIRED (ruling 42).** What a line has billed is the billing fold over
-   * its bills and credits (`purchaseBillingFold`, `actedBilledUnits`); nothing
-   * writes or reads this. Optional only so the deployed build parses the corpus
-   * until the purge empties it; the next beta deletes the key.
-   */
-  quantity_billed?: number;
   /** Freight, duty and fees spread onto the units still to arrive ({@link PurchaseLandedCost}). */
   landed_costs: PurchaseLandedCost[];
 }
@@ -709,13 +702,6 @@ export interface PurchaseRentalItem extends Omit<PurchaseItemBase, "ledger_accou
   /** Net whole cost on a flat line; `null` on a time line (its bills decide it). */
   amount_cents: number | null;
   price: PurchaseLinePrice;
-  /**
-   * ⚠️ **RETIRED (ruling 42).** What a line has billed is the billing fold over
-   * its bills and credits (`purchaseBillingFold`, `actedBilledUnits`); nothing
-   * writes or reads this. Optional only so the deployed build parses the corpus
-   * until the purge empties it; the next beta deletes the key.
-   */
-  quantity_billed?: number | null;
   /**
    * The orders this item was raised for, possibly none. For margin and for
    * raising a subrent from an order's shortage; it is NOT a reservation, and
@@ -756,13 +742,6 @@ export interface PurchaseServiceItem extends PurchaseItemBase {
   /** Net whole cost on a flat line; `null` on a time line. */
   amount_cents: number | null;
   price: PurchaseLinePrice;
-  /**
-   * ⚠️ **RETIRED (ruling 42).** What a line has billed is the billing fold over
-   * its bills and credits (`purchaseBillingFold`, `actedBilledUnits`); nothing
-   * writes or reads this. Optional only so the deployed build parses the corpus
-   * until the purge empties it; the next beta deletes the key.
-   */
-  quantity_billed?: number | null;
 }
 
 /**
@@ -857,9 +836,6 @@ const itemShape = {
 // `≥ 1`: a line closed to 0 is removed (ruling 47), never stored at 0.
 const quantityKey = z.int().min(1).meta({ column: true, label: "Quantity", ...flatMoney });
 const amountKey = z.int().min(0).meta({ column: true, label: "Amount", ...flatMoney });
-// Retired (ruling 42): written by nothing, read by nothing, purged, then deleted.
-// No column and no label (D5 beta D's precedent for `total_cents`).
-const billedKey = z.int().min(0);
 
 /**
  * May a payable line of `type` post to `account`? The class is
@@ -948,7 +924,6 @@ const SaleItemInner = z.strictObject({
   ledger_account: PayableKitLedgerAccount,
   amount_cents: amountKey,
   price: PurchaseLinePriceSchema,
-  quantity_billed: billedKey.optional(),
   landed_costs: z.array(PurchaseLandedCostSchema).meta({ label: "Landed Cost" }),
 }).superRefine((item, ctx) => {
   storedUidIssue(item, ctx);
@@ -986,7 +961,6 @@ const RentalItemInner = z.strictObject({
   ledger_account: PayableKitLedgerAccount,
   amount_cents: amountKey.nullable(),
   price: PurchaseLinePriceSchema,
-  quantity_billed: billedKey.nullable().optional(),
   uid_orders: z.array(FirestoreId),
   // See the interface docblock. `seed: false`: a seeded `[]` would claim a
   // take-back list on a line under no exchange pair, which `checkExchangedFor` refuses.
@@ -1005,7 +979,6 @@ const noCustodyShape = {
   ...itemShape,
   amount_cents: amountKey.nullable(),
   price: PurchaseLinePriceSchema,
-  quantity_billed: billedKey.nullable().optional(),
 } as const;
 
 function noCustodyIssues(

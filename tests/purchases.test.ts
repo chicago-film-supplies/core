@@ -393,15 +393,12 @@ Deno.test("PurchaseSchema: the retired custody buckets and line status are refus
   assertEquals(issuePaths(PurchaseSchema, legacy), ["uid_store", ""]);
 });
 
-Deno.test("PurchaseSchema: the retired quantity_billed parses absent or as the corpus holds it, and no refine reads it (ruling 42, beta G1)", () => {
-  // Absent: what every writer writes from G1.
+Deno.test("PurchaseSchema: a line states no billed count — quantity_billed is deleted (ruling 42, beta G2)", () => {
+  // What a line has billed is the fold over its bills and credits. The corpus was
+  // purged in the G1 window, so the strict line arms refuse the key now.
   assertEquals(issuePaths(PurchaseSchema, withItems([line({ quantity: 2 })])), []);
-  // Present: what the corpus holds until the purge. Over-billed, a null on a flat
-  // line and a count on a time line all parse: nothing checks the retired key.
-  assertEquals(issuePaths(PurchaseSchema, withItems([line({ quantity: 2, quantity_billed: 3 })])), []);
-  assertEquals(issuePaths(PurchaseSchema, withItems([freight({ quantity_billed: null })])), []);
-  assertEquals(issuePaths(PurchaseSchema, withItems([timeHire({ quantity_billed: 0 })])), []);
-  assertEquals(issuePaths(PurchaseSchema, withItems([line({ quantity_billed: -1 })])), ["items.1.quantity_billed"], "still a count while it exists");
+  assert(issuePaths(PurchaseSchema, withItems([{ ...line(), quantity_billed: 0 } as PurchaseItem])).length > 0, "a buy line refuses the deleted key");
+  assert(issuePaths(PurchaseSchema, withItems([{ ...freight(), quantity_billed: null } as PurchaseItem])).length > 0, "a charge line refuses it too");
 });
 
 Deno.test("PurchaseSchema: one product may sit on two items (D2), in two groups (W4K); row identity is the PATH", () => {

@@ -486,7 +486,6 @@ const pline = (over: Partial<PurchaseRentalItem> = {}): PurchaseRentalItem => {
     uid_tax_class: "TaxClassResale000000",
     amount_cents: 50_000,
     price: payablePrice(50_000),
-    quantity_billed: 0,
     uid_orders: [],
     ...over,
   }, PAIR);
@@ -506,7 +505,6 @@ const bline: PurchaseSaleItem = {
   ledger_account: 1400,
   uid_tracking_category: null,
   uid_tax_class: "TaxClassResale000000",
-  quantity_billed: 0,
   landed_costs: [],
 };
 
@@ -521,7 +519,7 @@ Deno.test("computeCardStatusFromPurchase / computeCardActionFromPurchase — the
     ["partly returned", "active", {}, [10, 4], "active", "return_to_supplier"],
     ["all received returned, more to come", "active", {}, [6, 6], "planned", null],
     ["all returned, the rest closed off the line", "active", { quantity: 6 }, [6, 6], "complete", null],
-    ["all returned and billed", "complete", { quantity_billed: 10 }, [10, 10], "complete", null],
+    ["all returned", "complete", {}, [10, 10], "complete", null],
     ["canceled outright", "canceled", {}, [0, 0], "canceled", null],
   ];
   for (const [name, status, over, [received, returned], want, action] of cases) {
