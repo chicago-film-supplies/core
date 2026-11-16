@@ -17,10 +17,8 @@ import { getInitialValues } from "../src/schemas/initial.ts";
 import {
   buildOrderScopedItems,
   carryForwardOverrides,
-  computeInvoiceSyncStatus,
   type InvoiceDestinationPair,
   type InvoiceItem,
-  invoiceItemDifferences,
   invoiceScopeDividersMatch,
   orderLineClaimIssues,
   orderLineClaims,
@@ -346,25 +344,10 @@ Deno.test("🔴 D3: a pointer must sit in an order block and name a LINE of that
   assertEquals(orderLineClaimIssues(standalone, lines).map((i) => i.reason), ["outside_order_block"]);
 });
 
-// ── The sync badge ──────────────────────────────────────────────────
-
-Deno.test("🔴 badge: the moved row is compared against X where it stands; X gets no phantom entry", () => {
-  const order = orderItems();
-  const context = { taxNameByUid: new Map<string, string>(), orderFrozen: false, invoiceChargeWindows: [] };
-  const status = computeInvoiceSyncStatus(movedInvoice(order) as InvoiceItem[], order, O, context as never);
-  assertEquals(status.get([O, ...AT].join("/")), "in_sync");
-  assertEquals(status.has([O, ...X].join("/")), false);
-
-  const renamed = movedInvoice(order).map((it) => it.uid === CSTAND ? { ...it, name: "Operator's" } : it);
-  assertEquals(computeInvoiceSyncStatus(renamed as InvoiceItem[], order, O, context as never).get([O, ...AT].join("/")), "out_of_sync");
-});
-
 // ── The field ───────────────────────────────────────────────────────
 
-Deno.test("field: the comparator ignores it, and a uid-keyed carry-forward does NOT spread it to another occurrence", () => {
+Deno.test("field: a uid-keyed carry-forward does NOT spread it to another occurrence", () => {
   const stored = byKey(movedInvoice(), AT)!;
-  const { path_order_item: _, ...bare } = stored;
-  assertEquals(invoiceItemDifferences(bare as InvoiceItem, stored), []);
   const rebuilt = buildOrderScopedItems(orderItems(), O);
   const carried = carryForwardOverrides(rebuilt, [stored]).find((it) => it.uid === CSTAND)!;
   assertEquals(pointer(carried), undefined);

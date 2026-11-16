@@ -14,10 +14,9 @@
  * | `api-cloudrun/src/services/fulfillmentEdits.ts` — the counterpart guard | a SUBMITTED row with no order line | is it strictly below some substitution's own path? |
  * | `api-cloudrun/scripts/audit-fulfillment-diff.ts` | an ORDER line with no fulfillment row | is it at or below some entry's X? |
  * | {@link syncOrderToInvoiceSelective} | an ORDER line the invoice does not carry | is it at or below some entry's X? |
- * | {@link computeInvoiceSyncStatus} | both sides of a substituted pair | is the divergence tracked rather than drift? |
  * | {@link computeOrderInvoiceCoverage} | an order line with no invoice line | is it at or below some entry's X? |
  *
- * Four of the six are the same question, and the wire boundary, the audit and
+ * Four of the five are the same question, and the wire boundary, the audit and
  * the projection **must** answer it identically — an audit stricter than the
  * guard reports correct data as a finding, and one that is looser certifies
  * what the guard would have refused. Sharing the predicate is what makes "the
@@ -373,7 +372,7 @@ export interface CreditableRow {
  * level — never the catalog, D1/D2).
  *
  * The one walk the billing fold (`billedByPath`), `computeDocumentDiffs`'s D2 quantity check and
- * the invoice sync (`syncOrderToInvoiceSelective`, `computeInvoiceSyncStatus`) read. A path under a credited kit is present even at 0.
+ * the invoice sync (`syncOrderToInvoiceSelective`) read. A path under a credited kit is present even at 0.
  *
  * A path named directly that the order does not carry (a dangling anchor) keeps
  * its direct credit; the walk only reaches paths the order has.

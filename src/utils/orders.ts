@@ -1636,7 +1636,7 @@ function pickDeclared(keys: Record<string, true>, price: DeclaredPriceInput): Re
  *
  * ⚠️ **Every order line therefore carries `base_percent`** — `null` on all but a
  * percent-of-total fee line. That matches what `buildOrderLineFromProduct` already
- * stages, and `invoicePriceDifferences` drops null keys before comparing.
+ * stages.
  */
 export function declaredOrderPrice(price: DeclaredPriceInput): OrderDeclaredPrice {
   return pickDeclared(ORDER_DECLARED_PRICE_KEYS, price) as unknown as OrderDeclaredPrice;

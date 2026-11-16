@@ -45,7 +45,6 @@ export {
   validateItemPaths,
   validateItemUniqueness,
 } from "./orders.ts";
-import { meteredLineCounts, type PairChargeWindows, priceLine, type PricingFormulas } from "./price-document.ts";
 
 /**
  * The **shared document sub-interface** — helpers a template partial may call
@@ -81,9 +80,7 @@ export {
 import {
   collectSubstitutionAnchors,
   isAtOrBelow,
-  isRemovedBySubstitution,
   isStrictlyBelow,
-  isSubstitutionRow,
   type SubstitutionAnchor,
   substitutionResync,
 } from "./substitutions.ts";
@@ -119,7 +116,6 @@ import {
 import { agingBucketOf, type InvoiceAging } from "../schemas/mod.ts";
 import {
   computeItemPaths,
-  isTaxableCoa,
   type ItemPathIssue,
   type ItemUniquenessIssue,
   type LineItem,
@@ -758,9 +754,9 @@ export function xeroAccrecLineRefs(
  * ({@link pickInvoiceOnlyFields}) and the carry-forward
  * ({@link carryForwardOverrides}) are all derived from it — because four
  * hand-maintained copies of one fact is how `crms_id` came to be absent from
- * every one of them while {@link invoiceItemsMatch} compared key sets
- * before values and reported the ENTIRE CRMS-authored corpus `out_of_sync`,
- * with nothing thrown.
+ * every one of them while the retired sync badge's comparator compared key
+ * sets before values and reported the ENTIRE CRMS-authored corpus
+ * `out_of_sync`, with nothing thrown.
  *
  * ⚠️ Five literals, no spread. core#43 is the standing case where JSR's npm
  * `.d.ts` emit TRUNCATED a spread inside an `as const`, and no core gate could
@@ -769,9 +765,7 @@ export function xeroAccrecLineRefs(
  * ⭐ **`substituted_for` is a member, and it is the only one that is not
  * merely an override.** The other four are values an invoice may hold instead of
  * its order's; this one is the record that the invoice deliberately bills a
- * DIFFERENT product. Being in the list buys the same two things either way —
- * {@link invoiceItemDifferences} filters it out of both key sets, so a
- * substituted line is not reported as drift on the field that explains it, and
+ * DIFFERENT product. Being in the list buys the same thing either way —
  * {@link carryForwardOverrides} preserves it across a rebuild. What it does NOT
  * buy is survival of the row itself; that is
  * {@link syncOrderToInvoiceSelective}'s anchor handling.
@@ -798,38 +792,13 @@ const INVOICE_ONLY_ITEM_FIELDS = [
   // invoice has and the order does not" computes a different list.
   //
   // What CAN be checked is that every member is really a key of the invoice's
-  // stored line item. A member that is not silently filters nothing:
-  // `invoiceItemDifferences` compares KEY SETS, so a typo here would leave the
-  // field in both sets and report every paired line permanently out of sync —
-  // which has happened three times (`base_percent`, `crms_id`,
-  // `price.discount_percent`: 8,015 of 8,978 paired lines).
+  // stored line item. A member that is not silently carries nothing across a
+  // rebuild.
   //
   // A `satisfies` rather than a test because it costs nothing and cannot be
   // skipped, and because exporting the list purely to assert it from `tests/`
   // would widen `@cfs/core/utils/invoices` for a guard.
 ] as const satisfies readonly (keyof InvoiceDocLineItemType)[];
-
-/**
- * Invoice-owned keys that state where a row sits relative to the ORDER, and so
- * are never carried by uid (core#125).
- *
- * 🔴 Kept out of {@link INVOICE_ONLY_ITEM_FIELDS} on purpose. That tuple drives
- * {@link carryForwardOverrides}, the hard resync's carry-forward, and the
- * resync rebuilds every row AT ITS ORDER LINE'S OWN PATH. A pointer is a fact
- * about a row that sat ELSEWHERE, so after the rebuild there is no such row:
- * the moved row's pair — ancestry-first since core#129, but the same answer by
- * any key — is order line X's own row, and carrying the pointer onto it writes
- * a self-claim (or, where a uid falls back to `(uid, k)`, a false claim on
- * another occurrence). The comparator still has to ignore it, which is the only
- * thing this list is for.
- */
-const INVOICE_ROW_POINTER_FIELDS = ["path_order_item"] as const satisfies readonly (keyof InvoiceDocLineItemType)[];
-
-/** Keys {@link invoiceItemDifferences} never compares: the override policy plus the row pointers. */
-const INVOICE_OWNED_ITEM_FIELD_SET: ReadonlySet<string> = new Set<string>([
-  ...INVOICE_ONLY_ITEM_FIELDS,
-  ...INVOICE_ROW_POINTER_FIELDS,
-]);
 
 /**
  * Return the intersection of two key arrays, minus any keys in the exclude set.
@@ -963,8 +932,9 @@ export function buildInvoiceDestinationDivider(
  * backfilled first** — stage two of `manager#421`, landed 2026-09-10 by
  * api-cloudrun/scripts/backfill-zero-priced-projections.ts (a done one-shot, deleted 2026-11-01; in api-cloudrun's git history).
  *
- * ⚠️ **The order of those two was forced, and the reason is
- * `invoiceItemDifferences` comparing top-level KEY SETS.** `buildOrderLine`
+ * ⚠️ **The order of those two was forced, and the reason was the sync badge's
+ * comparator (retired with one-document-model ruling 93) comparing top-level
+ * KEY SETS.** `buildOrderLine`
  * writes `zero_priced: null` explicitly on every order line — see its own
  * comment, *"the server writes both as an explicit `null` so the optimistic row
  * matches the echo"* — so the key is present on every order line without
@@ -1007,8 +977,7 @@ export function buildInvoiceDestinationDivider(
  * prices invented a phantom `taxes_base: 8,360` difference across the corpus,
  * because `taxes_base` is order-only and never reaches an invoice line. There is
  * no way to reimplement this faithfully outside the module, so the answer is to
- * export it rather than to keep re-deriving it. Paired with
- * {@link invoiceItemDifferences}, which is the other half a probe needs.
+ * export it rather than to keep re-deriving it.
  */
 export function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: string): InvoiceDocItemType {
   const basePath = item.path ?? [];
@@ -1058,10 +1027,9 @@ export function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: s
       // The would-be-taxed snapshot inherits, so an exempt invoice records
       // what it was exempt FROM the way its order does. Spread
       // CONDITIONALLY, twice over: an explicit `undefined` trips
-      // `validateBeforeWrite`'s no-undefined guard, and `invoicePriceDifferences`
-      // compares price KEY SETS — emitting the key unconditionally would make
-      // every pre-2026-08 invoice line differ from its order line on a field
-      // neither of them ever set.
+      // `validateBeforeWrite`'s no-undefined guard, and emitting the key
+      // unconditionally would widen the stored key set of every pre-2026-08
+      // invoice line on a field neither it nor its order line ever set.
       ...(p.taxes_base !== undefined ? { taxes_base: p.taxes_base } : {}),
       total_cents: p.total_cents ?? 0,
     },
@@ -1161,518 +1129,6 @@ function pickInvoiceOnlyFields(item: InvoiceItem): InvoiceOnlyOverrides {
   return result as InvoiceOnlyOverrides;
 }
 
-// ── The one item comparator ─────────────────────────────────────
-
-/**
- * `JSON.stringify` with object keys sorted, recursively — array order is
- * preserved, because an items array's order is meaning.
- *
- * The plain form is **key-order sensitive**, and both sides of every comparison
- * here come from somewhere that picks its own order: a projection emits keys in
- * source order, while a Firestore map comes back sorted. Two documents that are
- * deeply equal must compare equal, so the stringification has to be canonical.
- */
-function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "undefined";
-  if (Array.isArray(value)) return "[" + value.map(stableStringify).join(",") + "]";
-  return "{" + Object.entries(value as Record<string, unknown>)
-    .filter(([, v]) => v !== undefined)
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([k, v]) => JSON.stringify(k) + ":" + stableStringify(v))
-    .join(",") + "}";
-}
-
-/**
- * Which `price` keys two price objects differ on, compared **structurally**, key
- * by key — `[]` when they agree. Members are returned already qualified
- * (`price.taxes`, `price.total_cents`), so the caller never re-prefixes them;
- * the whole-value fallback below returns the bare `price`.
- *
- * ⚠️ **This is the half that made the sync badge lie for the whole corpus.**
- * `price` used to be compared as one `JSON.stringify` blob, so ANY key
- * difference inside it failed the whole line — and every CRMS-authored line
- * carried `price.discount_percent`, which no projection emitted. Measured
- * 2026-08-10 over 8,978 unambiguously paired prod lines: 8,015 failed on that
- * key alone, i.e. the badge was reporting a field's presence as a price change.
- * (That key is gone from the schema and the corpus as of api-cloudrun#480; the
- * structural comparison is what makes the NEXT such key a non-event.)
- * The `base_percent` encoding split — the projection emits an explicit `null`,
- * a stored CRMS line omits the key, and `InvoiceDocItemPrice` blesses
- * both (`.nullable().optional()`) — is the same class.
- *
- * **Absent ≡ null, with no list of which keys it applies to.** A null-valued
- * key is dropped from both sides before comparing, so the rule holds for every
- * nullable price key there is or will be (`base_percent`, `price_formula`,
- * `discount`) and cannot go stale. It is safe for the rest by construction: a
- * key that is not nullable cannot hold `null`, so dropping nulls can never
- * erase one of its values. A key present on one side and absent on the other
- * with a NON-null value is still a mismatch, which is the whole point.
- *
- * `discount_percent` was deliberately never normalized away here — it was
- * removed from the schema and from the corpus instead (api-cloudrun#480, landed
- * once both envs measured zero residue), because an exclusion list polices a
- * defect class that can be made unrepresentable. Keep it that way: the fix for
- * a future legacy key is a contraction, not an entry in a skip list.
- */
-function invoicePriceDifferences(expected: unknown, current: unknown): string[] {
-  const normalize = (p: unknown): Record<string, unknown> | null => {
-    if (p === null || typeof p !== "object" || Array.isArray(p)) return null;
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(p as Record<string, unknown>)) {
-      if (v === undefined || v === null) continue;
-      out[k] = v;
-    }
-    return out;
-  };
-
-  const e = normalize(expected);
-  const c = normalize(current);
-  // One side isn't a price object at all (a divider, or a malformed line) —
-  // fall back to whole-value equality rather than pretending they agree. There
-  // is no sub-key to name in that case, so the difference is the whole field.
-  if (e === null || c === null) {
-    return stableStringify(expected) === stableStringify(current) ? [] : ["price"];
-  }
-
-  const differing = new Set<string>();
-  for (const k of Object.keys(e)) {
-    if (!(k in c)) differing.add(`price.${k}`);
-    else if (stableStringify(e[k]) !== stableStringify(c[k])) differing.add(`price.${k}`);
-  }
-  // A key the CURRENT line carries and the projection does not is equally a
-  // difference — the count check this replaced caught it only in aggregate, and
-  // a histogram has to be able to name it.
-  for (const k of Object.keys(c)) if (!(k in e)) differing.add(`price.${k}`);
-  return [...differing];
-}
-
-/**
- * **Which fields two invoice-shaped items differ on** — the substrate of
- * {@link invoiceItemsMatch}, and the reason there is only one comparator.
- *
- * Returns sorted, qualified field names (`name`, `price.taxes`,
- * `price.counts`); `[]` means the rows agree. Invoice-only fields
- * ({@link INVOICE_ONLY_ITEM_FIELDS}) are filtered out of both sides first, so an
- * override is never a difference.
- *
- * ⚠️ **This exists because the boolean could not be bucketed** (api-cloudrun#481).
- * The badge reported thousands of `out_of_sync` lines with no way to say what
- * they differed ON, so the question *"which of these are real drift?"* could only
- * be answered by a probe reimplementing the comparison — and a reimplementation
- * is what invented a phantom `taxes_base` slice across the whole corpus. A
- * histogram taken through this function agrees with the badge **by construction**,
- * because the badge is defined in terms of it.
- *
- * Both arguments must already be invoice-shaped, with full (divider-scoped)
- * paths — project an order item with {@link projectOrderItemToInvoiceItem} first.
- * Comparison is:
- *
- * - **top-level keys** present on one side and not the other, minus the
- *   invoice-only fields (a key whose value is `undefined` does not count as
- *   present — Firestore stores no such value, so it can only come from a
- *   caller's partially-built object);
- * - **`price` structurally** ({@link invoicePriceDifferences}), with absent ≡
- *   null on the keys the schema blesses both encodings of;
- * - **every other key by canonical value** ({@link stableStringify}).
- */
-export function invoiceItemDifferences(expected: InvoiceItem, current: InvoiceItem): string[] {
-  const comparableKeys = (it: InvoiceItem) => {
-    const rec = it as unknown as Record<string, unknown>;
-    return new Set(Object.keys(rec).filter((k) => !INVOICE_OWNED_ITEM_FIELD_SET.has(k) && rec[k] !== undefined));
-  };
-  const eKeys = comparableKeys(expected);
-  const cKeys = comparableKeys(current);
-
-  const e = expected as unknown as Record<string, unknown>;
-  const c = current as unknown as Record<string, unknown>;
-  const differing = new Set<string>();
-
-  for (const k of eKeys) if (!cKeys.has(k)) differing.add(k);
-  for (const k of cKeys) if (!eKeys.has(k)) differing.add(k);
-
-  for (const k of eKeys) {
-    if (!cKeys.has(k)) continue; // already reported as a key-set difference
-    if (k === "price") {
-      for (const pk of invoicePriceDifferences(e[k], c[k])) differing.add(pk);
-      continue;
-    }
-    if (stableStringify(e[k]) !== stableStringify(c[k])) differing.add(k);
-  }
-  return [...differing].sort();
-}
-
-/**
- * **The one comparator.** Are two invoice-shaped items the same row, ignoring
- * the fields an invoice OWNS ({@link INVOICE_ONLY_ITEM_FIELDS})?
- *
- * It replaced two near-duplicate comparisons — the private
- * `invoiceProjectionMatches` behind {@link computeInvoiceSyncStatus}, and
- * `isItemSynced`'s order-shaped one behind the draft mirror — which had drifted
- * into disagreeing about what "the same line" means.
- *
- * ⚠️ `isItemSynced` is GONE (retired with the whole-row sync mode): a whole-row
- * verdict is exactly what the per-field rule replaced, so leaving the predicate
- * exported would have invited a caller back into G1. This comparator survives
- * because {@link computeInvoiceSyncStatus} still asks a row-level question for
- * the sync BADGE, which is a display, not a write decision.
- *
- * The comparison rules live in {@link invoiceItemDifferences}; this is that
- * function's emptiness. Keeping the boolean as the derived half rather than the
- * other way round is deliberate — two implementations of "the same row" is the
- * exact defect this function was created to remove, and a separate boolean pass
- * would be a second one.
- */
-export function invoiceItemsMatch(expected: InvoiceItem, current: InvoiceItem): boolean {
-  return invoiceItemDifferences(expected, current).length === 0;
-}
-
-/**
- * What {@link computeInvoiceSyncStatus} needs in order to EXPLAIN a difference
- * rather than merely report it (api-cloudrun#481).
- *
- * Required, never defaulted. An optional context would mean a caller that
- * forgot it silently gets the naive comparator back — which is the exact
- * regression this exists to remove, and it would be invisible.
- */
-export interface InvoiceSyncContext {
-  /**
-   * Tax uid → its `name`. Two taxes sharing a name are two *versions* of one
-   * tax, which is what makes a rate-version difference distinguishable from a
-   * genuinely different tax. A uid missing from the map is treated as its own
-   * name, so an unknown tax can never be explained away.
-   */
-  taxNameByUid: ReadonlyMap<string, string>;
-  /**
-   * Whether the SOURCE ORDER is frozen, i.e. no longer repriceable.
-   *
-   * ⚠️ **The date-version arm REQUIRES this, and that is a tightening, not
-   * bookkeeping.** Both writers now resolve a tax by name at the delivery date,
-   * so a same-name/different-version difference is expected history on a frozen
-   * order and is **genuine drift on a live one**. The audit that first measured
-   * this bucket only *observed* that all 5,119 prod lines sat on frozen orders;
-   * requiring it is what stops the explanation from covering a case it was
-   * never true of.
-   */
-  orderFrozen: boolean;
-  /**
-   * **The INVOICE's own destination pairs' charge windows** — build it with
-   * `chargeWindowContext(invoice.destinations)` (`utils/price-document.ts`), the
-   * same call the invoice's own pricer makes. It is what the `invoice_windows`
-   * arm re-prices the projected order line at.
-   *
-   * ⚠️ **The invoice's, never the order's.** The projection is ALREADY priced at
-   * the order's windows, so passing those makes the arm a tautology that
-   * reproduces `expected` and explains nothing — a silent no-op rather than a
-   * loud failure.
-   *
-   * Required and never defaulted, for the reason on this interface: an optional
-   * context is a caller that forgot it silently getting the naive comparator
-   * back. An invoice whose pairs carry no windows yields an empty array, and the
-   * arm then never fires.
-   */
-  invoiceChargeWindows: readonly PairChargeWindows[];
-  /**
-   * Every formula the invoice's lines name, and the holiday list — what
-   * re-metering a line at the invoice's windows reads (ruling 8: a window no
-   * longer stores a count).
-   */
-  formulas: PricingFormulas;
-  holidays: readonly string[];
-}
-
-/** Whole-cent tax a line carries. Integer addition — closed under the quantum, exact. */
-function taxAmountCents(item: InvoiceItem): number {
-  const price = (item as unknown as { price?: { taxes?: Array<{ amount_cents?: number }> } }).price;
-  return (price?.taxes ?? []).reduce((n, t) => n + (t.amount_cents ?? 0), 0);
-}
-
-/** A line's tax identity — which tax at which rate, order-insensitive. */
-function taxIdentity(item: InvoiceItem): string[] {
-  const price = (item as unknown as { price?: { taxes?: Array<{ uid?: string; rate?: number }> } }).price;
-  return (price?.taxes ?? []).map((t) => `${t.uid}@${t.rate}`).sort();
-}
-
-/** The same identity with each uid replaced by its NAME — the version-blind form. */
-function taxNames(item: InvoiceItem, taxNameByUid: ReadonlyMap<string, string>): string[] {
-  const price = (item as unknown as { price?: { taxes?: Array<{ uid?: string }> } }).price;
-  return (price?.taxes ?? [])
-    .map((t) => taxNameByUid.get(t.uid ?? "") ?? `unknown:${t.uid}`)
-    .sort();
-}
-
-const sameList = (a: readonly string[], b: readonly string[]) =>
-  a.length === b.length && a.every((v, i) => v === b[i]);
-
-/** The price fields a TAX explanation is allowed to cover. */
-const TAX_EXPLAINABLE_FIELDS = new Set(["price.taxes", "price.taxes_base", "price.total_cents"]);
-
-/**
- * The price fields a CHARGE-WINDOW explanation is allowed to cover: the day
- * count, and the money that follows from it.
- *
- * Bounded rather than "whatever the reprojection reproduces", for the reason the
- * tax arm is bounded: the reprojection only ever rewrites `price`, so a `name` or
- * `quantity` difference could not agree anyway — but an arm that says which
- * fields it owns cannot silently grow one when something upstream changes what
- * it rewrites.
- */
-const WINDOW_EXPLAINABLE_FIELDS = new Set([
-  "price.counts",
-  "price.subtotal_cents",
-  "price.subtotal_discounted_cents",
-  "price.discount",
-  "price.taxes",
-  "price.total_cents",
-]);
-
-/** Do two items agree on one `price.*` key, with absent ≡ null as {@link invoicePriceDifferences} has it? */
-function priceKeyAgrees(a: InvoiceItem, b: InvoiceItem, field: string): boolean {
-  const key = field.slice("price.".length);
-  const read = (it: InvoiceItem) => {
-    const v = (it as unknown as { price?: Record<string, unknown> }).price?.[key];
-    return v === undefined || v === null ? undefined : v;
-  };
-  return stableStringify(read(a)) === stableStringify(read(b));
-}
-
-/**
- * **The projected order line, re-priced at the INVOICE's own charge windows**
- * (core#112) — or `undefined` when that question does not arise.
- *
- * A time-formula line's counts and money derive from *its own document's* pair
- * windows ({@link meteredLineCounts}), so an invoice that
- * states its own — a partial bill, charge-windows decision 3 — differs from its
- * order on the day count and every money field below it. This re-derives what the
- * order line WOULD be if billed at the invoice's windows, and the caller explains
- * only the fields that then agree exactly.
- *
- * 🔴 **The tax catalog is the line's OWN resolved rates, not a rate catalog the
- * context carries, and that is a correctness choice rather than a saving.** Two
- * reasons, both measured on the code:
- *
- * 1. {@link calculateItemTax} **throws** `"Unknown tax uid"` for a ref absent from
- *    the catalog it is handed (`utils/orders.ts`). A sync badge that 500s because
- *    a caller passed a filtered catalog is worse than one that over-reports, and
- *    every ref here is a hit by construction.
- * 2. It isolates the variable. Only the day count moves, so a line whose rate
- *    VERSION also differs does not agree here and falls through to
- *    `tax_date_version` — which is the arm that owns that question. Re-pricing at
- *    today's catalog would conflate the two and let a rate change hide inside a
- *    day change.
- *
- * ⚠️ **An extension-section line must not reach this.** It bills the days its
- * section ADDS, priced with the one-week floor SKIPPED, while this prices its
- * pair's total WITH the floor — so the money will not agree and nothing is
- * explained. That is the safe direction, and both callers exclude extension lines
- * before comparing anyway ({@link computeInvoiceSyncStatus} marks them `in_sync`;
- * `computeDocumentDiffs` skips them when it scopes).
- */
-function reprojectAtInvoiceWindows(
-  expected: InvoiceItem,
-  context: InvoiceSyncContext,
-): InvoiceItem | undefined {
-  const price = (expected as unknown as { price?: PriceObject }).price;
-  if (!price || price.price_formula?.basis !== "time") return undefined;
-  let counts;
-  try {
-    counts = meteredLineCounts(expected as unknown as LineItem, {
-      charge_windows: context.invoiceChargeWindows,
-      formulas: context.formulas,
-      holidays: context.holidays,
-    });
-  } catch {
-    // A formula the context does not carry: a comparator explains nothing
-    // rather than taking the badge down.
-    return undefined;
-  }
-  if (counts === null) return undefined;
-  // Nothing to explain: the invoice's windows meter what the order's already did.
-  if (stableStringify(counts) === stableStringify(price.counts)) return undefined;
-  const item = { ...expected, price: { ...price, counts } } as unknown as LineItem;
-  const ownRates: Tax[] = (price.taxes ?? []).map((t) => ({ uid: t.uid, name: t.name, rate: t.rate, type: t.type }));
-  return { ...expected, price: { ...price, counts, ...priceLine(item, ownRates) } } as InvoiceItem;
-}
-
-/**
- * Strip the differences that are **explained** — leaving only the ones an
- * operator should act on (api-cloudrun#481).
- *
- * The sync badge and api-cloudrun's `audit-draft-invoice-mirror` script (deleted
- * 2026-09-15) were two
- * comparators kept in agreement by hand, and they disagreed by construction: the
- * audit compared money and then *explained* the difference through tested arms,
- * while the badge had none and so reported every one of them. On prod that was
- * 8,792 lines flagged against **0** the audit called real. This is the audit's
- * reasoning, moved to where both callers share it.
- *
- * Four arms, all narrow, and none of them a field exclusion — an excluded field
- * is blind forever, whereas an explained one goes red the moment its explanation
- * stops holding:
- *
- * 0. **`invoice_windows`** — the invoice states its own charge windows, so its
- *    rental lines bill a different number of days than the order's (core#112). A
- *    partial bill is exactly this: charge-windows decision 3 sets the invoice's
- *    own pair windows to the part being billed. The arm re-prices the projected
- *    order line at those windows and covers only the fields that then agree
- *    EXACTLY, so a money change hiding behind a day change is not covered.
- *    ⚠️ It runs first and rebases what the three tax arms compare — see
- *    {@link reprojectAtInvoiceWindows} and the comment at the top of
- *    {@link explainInvoiceItemDifferences}.
- * 1. **`coa_untaxes`** — the invoice knows the line is non-revenue and the order
- *    does not, so the retired account-keyed taxability gate fired on one side
- *    only. ⚠️ **HISTORICAL, and deliberately kept.** Nothing prices this way
- *    since the owner ruling of 2026-08-20 (`isTaxableCoa`), so no NEW line can
- *    reach this arm — but the frozen documents the gate shaped are still
- *    compared against their orders every time the badge renders, and deleting
- *    the arm would turn each of them red for a rule that ran when they were
- *    written.
- * 2. **`tax_date_version`** — the same tax NAMES at different rate versions, on a
- *    **frozen** order. One materializer, two as-of instants; the decision not to
- *    restate completed orders' quoted totals.
- * 3. **`tax_zero_money`** — the tax rows differ but neither side collects a cent.
- *    Checked on the stored amounts, never inferred from `zero_priced`, so a
- *    mislabelled line cannot hide in here.
- *
- * ⚠️ **`price.total_cents` is covered only when it moved by EXACTLY the tax
- * delta.** A tax difference necessarily moves the total, so refusing to cover it
- * would leave every explained line red for a consequence of the thing just
- * explained. Covering it unconditionally would hide a real total divergence
- * behind an unrelated tax one. The equality is exact integer cents, so there is
- * no tolerance to choose.
- *
- * `price.subtotal_cents` and `price.subtotal_discounted_cents` are deliberately
- * NOT explainable: tax is a function of the discounted subtotal, so a line that
- * disagrees there has no independent tax question — the money difference is the
- * finding, and it stays.
- */
-export function unexplainedInvoiceItemDifferences(
-  expected: InvoiceItem,
-  current: InvoiceItem,
-  differences: readonly string[],
-  context: InvoiceSyncContext,
-): string[] {
-  return explainInvoiceItemDifferences(expected, current, differences, context).unexplained;
-}
-
-/** Which explanation accounted for a difference. */
-export type InvoiceSyncArm = "invoice_windows" | "coa_untaxes" | "tax_date_version" | "tax_zero_money";
-
-/** {@link explainInvoiceItemDifferences}'s verdict: what is left, and what accounted for the rest. */
-export interface InvoiceSyncExplanation {
-  /** Differences no arm accounted for — the ones an operator should act on. */
-  unexplained: string[];
-  /** The arms that fired. Empty when nothing was explained. */
-  arms: InvoiceSyncArm[];
-}
-
-/**
- * {@link unexplainedInvoiceItemDifferences}, but it also says WHICH arm fired.
- *
- * The residue alone is what the badge needs; a diagnostic needs the reason, and
- * api-cloudrun's deleted `audit-draft-invoice-mirror` script reported one bucket per arm. Returning
- * the arm is what let that audit be a pure CONSUMER of this function rather
- * than a second implementation of it — which is the defect api-cloudrun#481 is
- * named after, and it had already produced two comparators that disagreed about
- * 8,792 prod lines.
- */
-export function explainInvoiceItemDifferences(
-  expected: InvoiceItem,
-  current: InvoiceItem,
-  differences: readonly string[],
-  context: InvoiceSyncContext,
-): InvoiceSyncExplanation {
-  if (differences.length === 0) return { unexplained: [], arms: [] };
-
-  // ── Arm 0: the invoice bills its own charge windows (core#112) ──
-  //
-  // 🔴 **It runs FIRST and REBASES the comparison, because every arm below is a
-  // statement about money, and the day count is upstream of all of it.** Priced
-  // at the order's windows, a partial bill's tax rows differ for a reason that
-  // has nothing to do with tax, and `tax_zero_money` would happily "explain" the
-  // pair on an untaxed line. Re-deriving first means the tax arms see the
-  // question they were written for: what is left once the days agree.
-  const reprojected = reprojectAtInvoiceWindows(expected, context);
-  const windowArms: InvoiceSyncArm[] = [];
-  let remaining: readonly string[] = differences;
-  if (reprojected) {
-    // A field is explained only when pricing the order line at the INVOICE's
-    // windows reproduces the invoice's stored value EXACTLY. Two causes at once
-    // (a day change and a rate change) reproduce neither, so the line stays
-    // badged — the house rule's preferred direction.
-    const covered = differences.filter((d) => WINDOW_EXPLAINABLE_FIELDS.has(d) && priceKeyAgrees(reprojected, current, d));
-    if (covered.length > 0) {
-      windowArms.push("invoice_windows");
-      const coveredSet = new Set(covered);
-      remaining = differences.filter((d) => !coveredSet.has(d));
-    }
-  }
-
-  const tax = explainTaxDifferences(reprojected ?? expected, current, remaining, context);
-  return { unexplained: tax.unexplained, arms: [...windowArms, ...tax.arms] };
-}
-
-/**
- * The three TAX arms, over whatever the charge-window arm left
- * ({@link explainInvoiceItemDifferences}). `expected` is the rebased baseline, so
- * the `totalFollowsTax` arithmetic below is against the same line the residue was
- * measured from.
- */
-function explainTaxDifferences(
-  expected: InvoiceItem,
-  current: InvoiceItem,
-  differences: readonly string[],
-  context: InvoiceSyncContext,
-): InvoiceSyncExplanation {
-  if (differences.length === 0) return { unexplained: [], arms: [] };
-  const taxFields = differences.filter((d) => TAX_EXPLAINABLE_FIELDS.has(d));
-  if (taxFields.length === 0) return { unexplained: [...differences], arms: [] };
-
-  // ⚠️ **Every arm is a statement about a TAX-ROW difference, so none may fire
-  // when `price.taxes` agrees.** Without this the zero-money arm is trivially
-  // true on any untaxed line — both sides collect nothing — and would go on to
-  // "explain" an unrelated `price.taxes_base` difference that has no tax-row
-  // question in it at all. Measured on prod the moment the audit cross-check was
-  // wired: **171 lines** where this function fired an arm and the audit, which
-  // classifies only once the rows disagree, reported the two as agreeing. The
-  // conservative direction is the correct one — an unexplained line is merely
-  // badged, an over-explained one is invisible.
-  if (!differences.includes("price.taxes")) return { unexplained: [...differences], arms: [] };
-
-  const expectedTax = taxAmountCents(expected);
-  const currentTax = taxAmountCents(current);
-
-  // ⚠️ `isTaxableCoa` is the RETIRED gate, read here on purpose: this arm
-  // explains documents written while it ran. See its docblock.
-  const coaUntaxes = !isTaxableCoa((current as { coa_revenue?: COARevenueType | null }).coa_revenue) &&
-    (expected as { coa_revenue?: COARevenueType | null }).coa_revenue == null;
-  const dateVersion = context.orderFrozen &&
-    !sameList(taxIdentity(expected), taxIdentity(current)) &&
-    sameList(taxNames(expected, context.taxNameByUid), taxNames(current, context.taxNameByUid));
-  const zeroMoney = expectedTax === 0 && currentTax === 0;
-
-  // Order matters only for REPORTING — the arms are independent, and a line can
-  // legitimately satisfy more than one. They are collected rather than
-  // short-circuited so a diagnostic can say so instead of silently picking the
-  // first, which is how a bucket count comes to misdescribe its own population.
-  const arms: InvoiceSyncArm[] = [];
-  if (coaUntaxes) arms.push("coa_untaxes");
-  if (dateVersion) arms.push("tax_date_version");
-  if (zeroMoney) arms.push("tax_zero_money");
-  if (arms.length === 0) return { unexplained: [...differences], arms };
-
-  // The total moved by EXACTLY what the tax moved, and by nothing else.
-  const expectedTotal = (expected as { price?: { total_cents?: number } }).price?.total_cents ?? 0;
-  const currentTotal = (current as { price?: { total_cents?: number } }).price?.total_cents ?? 0;
-  const totalFollowsTax = currentTotal - expectedTotal === currentTax - expectedTax;
-
-  const unexplained = differences.filter((d) => {
-    if (!TAX_EXPLAINABLE_FIELDS.has(d)) return true;
-    if (d === "price.total_cents") return !totalFollowsTax;
-    return false;
-  });
-  return { unexplained, arms };
-}
-
 // ── Substitutions on an invoice ─────────────────────────────────
 
 /**
@@ -1697,7 +1153,7 @@ function explainTaxDifferences(
  * substitution"* — a locked value is what let an order-side reparent resurrect X
  * (api-cloudrun#897). The sync is the only place that can do this: it is the one
  * caller holding both revisions of the order. Every downstream reader — the wire
- * guard, `api-cloudrun/scripts/audit-fulfillment-diff.ts`, {@link computeInvoiceSyncStatus},
+ * guard, `api-cloudrun/scripts/audit-fulfillment-diff.ts`, `computeDocumentDiffs`,
  * {@link computeOrderInvoiceCoverage} — sees only the current order.
  *
  * @param scopedInvoiceItems - This order divider's invoice items
@@ -2721,9 +2177,9 @@ export interface AdoptedDividerStructure {
  * The CRMS invoice tree carries none of the `group` dividers its order does
  * (measured 2026-08-10: zero of 999 prod invoices carry one; 941 of 978 orders
  * do), so every invoice line's path is shorter than its counterpart's and the
- * path-keyed comparators match nothing at all — `computeInvoiceSyncStatus`
- * reports every line both "missing" and "removed", and
- * `syncOrderToInvoiceSelective` re-projects nothing. This is what makes the two
+ * path-keyed comparators match nothing at all — the diff reports every line
+ * both "missing" and "removed", and `syncOrderToInvoiceSelective` re-projects
+ * nothing. This is what makes the two
  * trees comparable again; the direction is settled — **the order tree is
  * right**, and `flattenForXero` strips dividers at the Xero boundary so
  * carrying them costs Xero nothing.
@@ -2749,7 +2205,7 @@ export interface AdoptedDividerStructure {
  *   line the invoice does not carry is NOT added; an invoice line the order does
  *   not carry is kept, at its current parent (root of the order scope when that
  *   parent no longer exists), because an invoice-only line is line-level drift
- *   for the badge to report — not a structural defect to erase.
+ *   for the diff to report — not a structural defect to erase.
  * - **Passes any `order` divider row through at the head**, and never mints one:
  *   its identity is the source order's uid and only the caller knows it.
  *
@@ -2908,7 +2364,7 @@ export function adoptOrderDividerStructure(
  * 102 prod pairs carrying a custom line carry a legitimate invoice-only line,
  * which makes the path sets differ forever while the tree shapes agree
  * perfectly. A line the order lacks is **line-level drift**, correctly reported
- * `out_of_sync` by {@link computeInvoiceSyncStatus}; conflating it with a
+ * by the diff (`computeDocumentDiffs`); conflating it with a
  * structural misalignment would make the two indistinguishable and the
  * structural repair unfinishable.
  *
@@ -3372,145 +2828,6 @@ export function resyncInvoiceLines(
   });
 }
 
-/**
- * Derive each order-scoped invoice line's sync status against the CURRENT order
- * projection — no stored flag (minimal-state, derived). A line is `out_of_sync`
- * when it differs from `projectOrderItemToInvoiceItem(orderItem)` at the same
- * `path`, ignoring the invoice-only override fields
- * ({@link INVOICE_ONLY_ITEM_FIELDS}) **and ignoring any difference that is
- * EXPLAINED** ({@link unexplainedInvoiceItemDifferences}); otherwise `in_sync`.
- * Surfaced by `GET /invoices/{uid}/sync-status` and its MCP twin
- * (`get_invoices_uid_sync_status`), to offer per-line/whole resync (see
- * {@link resyncInvoiceLines}).
- *
- * ⚠️ **It does NOT drive a manager badge, and this line used to say it did.**
- * Measured 2026-09-17: nothing under `manager/src` calls that endpoint. What an
- * operator sees is {@link computeDocumentDiffs}, which reuses the explanation
- * arms but then suppresses every `derived` field — so the two answer different
- * questions and only this one reports derived money. The stale claim mattered:
- * it is what made core#112 read as an operator-facing regression rather than a
- * wrong answer on an API surface.
- *
- * ⚠️ **A line goes green because its difference is EXPLAINED, never because a
- * field was skipped** (api-cloudrun#481). The distinction is the whole design: an
- * excluded field is blind forever, while an explained one goes red the moment
- * its explanation stops holding — so a frozen invoice whose tax differs only by
- * rate version reads clean, and prod order #765 ↔ invoice #2162, whose line money
- * genuinely diverges, stays red. The naive form reported 8,792 prod lines of
- * which the audit called **0** real, which is a badge no operator can use.
- *
- * ⚠️ **Meaningful only where the invoice is hung on the SAME divider skeleton as
- * its order** — it is keyed on `path`, so if the two trees disagree structurally
- * no pair is ever compared and every line reports both "missing" and "removed"
- * with `differs` at exactly 0. Check {@link invoiceScopeDividersMatch} first; a
- * `differs` of 0 beside two large counts is the tell.
- *
- * Keyed by the full, divider-scoped `path` (`join("/")`), matching what the
- * invoice stores. Scoped to one order divider; a multi-order invoice merges the
- * per-divider maps. Reports as `out_of_sync`:
- * - an order line the invoice is missing (keyed by its projected path), and
- * - an order-scoped invoice line with no matching order line (removed upstream).
- *
- * 🔴 **A SUBSTITUTED pair is neither of those, and reporting it as both is how
- * a tracked divergence becomes permanent noise.** X is missing from the invoice
- * and Y matches no order line, so the naive form badges two rows `out_of_sync`
- * for one deliberate operator edit, forever, with no resync that could ever
- * clear them. {@link liveInvoiceAnchors} is what distinguishes the two cases:
- *
- * - X (and its components) get **no entry at all** — there is no invoice row to
- *   badge, and inventing one at a projected path invites a per-line resync that
- *   would undo the substitution.
- * - Y (and its components) read **`in_sync`** — the invoice is exactly what the
- *   operator asked it to be. It is not "a difference we chose to ignore": the
- *   moment the anchor is spent or removed, both rows go back to being compared
- *   normally, which is the same standard the explained-difference arms are held
- *   to.
- */
-export function computeInvoiceSyncStatus(
-  currentInvoiceItems: InvoiceItem[],
-  orderItems: LineItem[],
-  orderDividerUid: string,
-  context: InvoiceSyncContext,
-): Map<string, "in_sync" | "out_of_sync"> {
-  const status = new Map<string, "in_sync" | "out_of_sync">();
-
-  // Index this divider's invoice lines by order-relative path key.
-  const invoiceByRelPath = new Map<string, InvoiceItem>();
-  // An extension section extends lines the order has, at dates the order has:
-  // it is what the invoice was asked to bill, not drift from the order.
-  const extensionTargets = extensionSectionTargets(currentInvoiceItems, orderDividerUid);
-  for (const item of currentInvoiceItems) {
-    if (item.type === "order" && item.uid === orderDividerUid) continue;
-    if (item.path[0] !== orderDividerUid) continue;
-    if (isInExtensionSection(item.path, orderDividerUid, extensionTargets)) {
-      status.set(itemPathKey(item.path), "in_sync");
-      continue;
-    }
-    invoiceByRelPath.set(itemPathKey(stripOrderPrefix(item.path, orderDividerUid)), item);
-  }
-
-  // The substitutions this scope carries, in the order's own path space.
-  const anchors = liveInvoiceAnchors(currentInvoiceItems, orderItems, orderDividerUid);
-  // D2 (manager#414): a merged or partially substituted row is compared at its
-  // ORDER-EQUIVALENT quantity, so exactly the substituted units are explained.
-  const scopedLines = [...invoiceByRelPath].map(([k, it]) => ({ path: k.split("/"), substituted_for: it.substituted_for }));
-  const resync = substitutionResync(scopedLines, orderItems, orderItems);
-
-  // Moved rows (core#125): each claimant of X is compared against X, re-stated
-  // at the claimant's own position, so the move itself is no difference.
-  const claimantsOf = new Map<string, string[]>();
-  for (const [row, x] of orderLineClaims(currentInvoiceItems, orderDividerUid)) {
-    if (!invoiceByRelPath.has(row)) continue;
-    const k = itemPathKey(x);
-    claimantsOf.set(k, [...(claimantsOf.get(k) ?? []), row]);
-  }
-
-  const matchedRelKeys = new Set<string>();
-  for (const orderItem of orderItems) {
-    const relKey = itemPathKey(orderItem.path ?? []);
-    matchedRelKeys.add(relKey);
-    const fullKey = itemPathKey([orderDividerUid, ...(orderItem.path ?? [])]);
-    const claimants = claimantsOf.get(relKey) ?? [];
-    for (const row of claimants) {
-      matchedRelKeys.add(row);
-      const claimant = invoiceByRelPath.get(row)!;
-      const expected = projectOrderItemToInvoiceItem({ ...orderItem, path: row.split("/") }, orderDividerUid);
-      const unexplained = unexplainedInvoiceItemDifferences(expected, claimant, invoiceItemDifferences(expected, claimant), context);
-      status.set(itemPathKey(claimant.path), unexplained.length === 0 ? "in_sync" : "out_of_sync");
-    }
-    const stored = invoiceByRelPath.get(relKey);
-    const equivalent = stored === undefined ? undefined : resync.orderEquivalent(orderItem.path ?? [], stored);
-    const current = stored === undefined || equivalent === (stored.quantity ?? 0) ? stored : { ...stored, quantity: equivalent };
-    if (!current) {
-      // Explained: this line was substituted away. No invoice row exists to
-      // carry a badge, so emit no entry rather than a phantom `out_of_sync`.
-      if (isRemovedBySubstitution(orderItem.path ?? [], anchors)) continue;
-      // Billed from another position: the claimant carries the badge.
-      if (claimants.length > 0) continue;
-      status.set(fullKey, "out_of_sync"); // order has a line the invoice lacks
-      continue;
-    }
-    const expected = projectOrderItemToInvoiceItem(orderItem, orderDividerUid);
-    const unexplained = unexplainedInvoiceItemDifferences(
-      expected,
-      current,
-      invoiceItemDifferences(expected, current),
-      context,
-    );
-    status.set(fullKey, unexplained.length === 0 ? "in_sync" : "out_of_sync");
-  }
-
-  // Invoice-scoped lines the order no longer has.
-  for (const [relKey, item] of invoiceByRelPath) {
-    if (matchedRelKeys.has(relKey)) continue;
-    // Y itself, or one of Y's components — the divergence is tracked, not drift.
-    const substituted = isSubstitutionRow(stripOrderPrefix(item.path, orderDividerUid), anchors);
-    status.set(itemPathKey(item.path), substituted ? "in_sync" : "out_of_sync");
-  }
-
-  return status;
-}
-
 // ── Order-first coverage ────────────────────────────────────────
 
 /** An invoice line with no counterpart on the order it is scoped to. */
@@ -3546,22 +2863,15 @@ export interface OrderInvoiceCoverage {
 
 /**
  * **Is this order fully invoiced?** — the ORDER-first, union-across-invoices
- * question, and the complement of {@link computeInvoiceSyncStatus}.
- *
- * The two are easy to confuse and answer different things. `computeInvoiceSyncStatus`
- * stands on ONE invoice and asks whether each of its lines still agrees with the
- * order, collapsing *missing* / *removed* / *differs* into a single
- * `out_of_sync` flag. This stands on the ORDER and asks which of its lines no
- * live invoice bills — so it unions every linked invoice, and a line billed on
- * invoice A is covered even though invoice B lacks it. **Neither can be derived
- * from the other**: prod order #1000 is billed by #2385 and #2388, and every one
- * of its lines is `out_of_sync` on at least one of them while exactly one line
- * is genuinely unbilled.
+ * question. It unions every linked invoice, so a line billed on invoice A is
+ * covered even though invoice B lacks it: prod order #1000 is billed by #2385
+ * and #2388, neither carries the whole order, and exactly one line is
+ * genuinely unbilled.
  *
  * It deliberately says nothing about lines that DIFFER. A matched-but-drifted
- * line is covered here and is `computeInvoiceSyncStatus`'s subject; measured
- * 2026-08-25 the corpus carries 1,653 drifted lines against 177 uninvoiced ones,
- * so folding the two would bury this answer in the other's.
+ * line is covered here and is the diff's subject (`computeDocumentDiffs`);
+ * measured 2026-08-25 the corpus carries 1,653 drifted lines against 177
+ * uninvoiced ones, so folding the two would bury this answer in the other's.
  *
  * **A reader of the account** (one-document-model 6e-0b2 F9): `uninvoiced` is
  * every order line with units that no live billing row or reversing credit

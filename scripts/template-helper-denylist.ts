@@ -416,12 +416,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "removeOrderScopedItems", // items mutation (write-path)
     "removeOrderScopedDestinations", // destinations mutation (write-path)
     "resyncInvoiceLines", // operator-triggered resync (write-path)
-    "computeInvoiceSyncStatus", // manager line-badging, not rendering
     "canonicalizePayload", // pair-comparison normalization, shared with utils/documentDiff.ts — not rendering
-    "invoiceItemsMatch", // the one order↔invoice comparator — sync machinery
-    "invoiceItemDifferences", // that comparator's substrate — audits + histograms
-    "unexplainedInvoiceItemDifferences", // the sync explainers — badge + audit machinery
-    "explainInvoiceItemDifferences", // ditto, plus which arm fired — diagnostics
     // Order → invoice projection. Exported for probes and audits
     // (api-cloudrun#481), NOT for rendering: it takes an ORDER line and an order
     // divider uid, and a template that has an order already has its items.

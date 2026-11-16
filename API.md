@@ -41410,7 +41410,7 @@ window stores no count).
 ⚠️ It carried `taxNameByUid` and `isOrderFrozen` until the one field comparer
 (one-document-model F10): they fed the invoice sync badge's explanation arms,
 which could never change the diff's output (every field they cover is
-`derived`) and are no longer called from it.
+`derived`). The badge itself is gone (ruling 93).
 
 ```ts
 interface DocumentDiffContext {
@@ -42655,7 +42655,7 @@ ratio (`credit × component quantity ÷ kit quantity`, rounded half-up once per
 level — never the catalog, D1/D2).
 
 The one walk the billing fold (`billedByPath`), `computeDocumentDiffs`'s D2 quantity check and
-the invoice sync (`syncOrderToInvoiceSelective`, `computeInvoiceSyncStatus`) read. A path under a credited kit is present even at 0.
+the invoice sync (`syncOrderToInvoiceSelective`) read. A path under a credited kit is present even at 0.
 
 A path named directly that the order does not carry (a dangling anchor) keeps
 its direct credit; the walk only reaches paths the order has.
@@ -42861,44 +42861,6 @@ interface InvoiceSettledTotals {
   amount_void_cents?: number;
   amount_due_cents?: number;
   closure_count?: number;
-}
-```
-
-### `InvoiceSyncArm`
-
-Which explanation accounted for a difference.
-
-```ts
-type InvoiceSyncArm = "invoice_windows" | "coa_untaxes" | "tax_date_version" | "tax_zero_money";
-```
-
-### `InvoiceSyncContext`
-
-What {@link computeInvoiceSyncStatus} needs in order to EXPLAIN a difference
-rather than merely report it (api-cloudrun#481).
-
-Required, never defaulted. An optional context would mean a caller that
-forgot it silently gets the naive comparator back — which is the exact
-regression this exists to remove, and it would be invisible.
-
-```ts
-interface InvoiceSyncContext {
-  taxNameByUid: ReadonlyMap<string, string>;
-  orderFrozen: boolean;
-  invoiceChargeWindows: readonly PairChargeWindows[];
-  formulas: PricingFormulas;
-  holidays: readonly string[];
-}
-```
-
-### `InvoiceSyncExplanation`
-
-{@link explainInvoiceItemDifferences}'s verdict: what is left, and what accounted for the rest.
-
-```ts
-interface InvoiceSyncExplanation {
-  unexplained: string[];
-  arms: InvoiceSyncArm[];
 }
 ```
 
@@ -43390,9 +43352,9 @@ skeleton. Pure, and **structure-only**.
 The CRMS invoice tree carries none of the `group` dividers its order does
 (measured 2026-08-10: zero of 999 prod invoices carry one; 941 of 978 orders
 do), so every invoice line's path is shorter than its counterpart's and the
-path-keyed comparators match nothing at all — `computeInvoiceSyncStatus`
-reports every line both "missing" and "removed", and
-`syncOrderToInvoiceSelective` re-projects nothing. This is what makes the two
+path-keyed comparators match nothing at all — the diff reports every line
+both "missing" and "removed", and `syncOrderToInvoiceSelective` re-projects
+nothing. This is what makes the two
 trees comparable again; the direction is settled — **the order tree is
 right**, and `flattenForXero` strips dividers at the Xero boundary so
 carrying them costs Xero nothing.
@@ -43418,7 +43380,7 @@ What it does:
   line the invoice does not carry is NOT added; an invoice line the order does
   not carry is kept, at its current parent (root of the order scope when that
   parent no longer exists), because an invoice-only line is line-level drift
-  for the badge to report — not a structural defect to erase.
+  for the diff to report — not a structural defect to erase.
 - **Passes any `order` divider row through at the head**, and never mints one:
   its identity is the source order's uid and only the caller knows it.
 
@@ -43632,61 +43594,6 @@ Generic in `T`, like every sibling here (`computeItemPaths`,
 caller holding the real `Invoice["items"]` gets it back rather than the loose
 `InvoiceItem[]`.
 
-### `computeInvoiceSyncStatus(currentInvoiceItems: InvoiceItem[], orderItems: LineItem[], orderDividerUid: string, context: InvoiceSyncContext): Map<string, "in_sync" | "out_of_sync">`
-
-Derive each order-scoped invoice line's sync status against the CURRENT order
-projection — no stored flag (minimal-state, derived). A line is `out_of_sync`
-when it differs from `projectOrderItemToInvoiceItem(orderItem)` at the same
-`path`, ignoring the invoice-only override fields
-({@link INVOICE_ONLY_ITEM_FIELDS}) **and ignoring any difference that is
-EXPLAINED** ({@link unexplainedInvoiceItemDifferences}); otherwise `in_sync`.
-Surfaced by `GET /invoices/{uid}/sync-status` and its MCP twin
-(`get_invoices_uid_sync_status`), to offer per-line/whole resync (see
-{@link resyncInvoiceLines}).
-
-⚠️ **It does NOT drive a manager badge, and this line used to say it did.**
-Measured 2026-09-17: nothing under `manager/src` calls that endpoint. What an
-operator sees is {@link computeDocumentDiffs}, which reuses the explanation
-arms but then suppresses every `derived` field — so the two answer different
-questions and only this one reports derived money. The stale claim mattered:
-it is what made core#112 read as an operator-facing regression rather than a
-wrong answer on an API surface.
-
-⚠️ **A line goes green because its difference is EXPLAINED, never because a
-field was skipped** (api-cloudrun#481). The distinction is the whole design: an
-excluded field is blind forever, while an explained one goes red the moment
-its explanation stops holding — so a frozen invoice whose tax differs only by
-rate version reads clean, and prod order #765 ↔ invoice #2162, whose line money
-genuinely diverges, stays red. The naive form reported 8,792 prod lines of
-which the audit called **0** real, which is a badge no operator can use.
-
-⚠️ **Meaningful only where the invoice is hung on the SAME divider skeleton as
-its order** — it is keyed on `path`, so if the two trees disagree structurally
-no pair is ever compared and every line reports both "missing" and "removed"
-with `differs` at exactly 0. Check {@link invoiceScopeDividersMatch} first; a
-`differs` of 0 beside two large counts is the tell.
-
-Keyed by the full, divider-scoped `path` (`join("/")`), matching what the
-invoice stores. Scoped to one order divider; a multi-order invoice merges the
-per-divider maps. Reports as `out_of_sync`:
-- an order line the invoice is missing (keyed by its projected path), and
-- an order-scoped invoice line with no matching order line (removed upstream).
-
-🔴 **A SUBSTITUTED pair is neither of those, and reporting it as both is how
-a tracked divergence becomes permanent noise.** X is missing from the invoice
-and Y matches no order line, so the naive form badges two rows `out_of_sync`
-for one deliberate operator edit, forever, with no resync that could ever
-clear them. {@link liveInvoiceAnchors} is what distinguishes the two cases:
-
-- X (and its components) get **no entry at all** — there is no invoice row to
-  badge, and inventing one at a projected path invites a per-line resync that
-  would undo the substitution.
-- Y (and its components) read **`in_sync`** — the invoice is exactly what the
-  operator asked it to be. It is not "a difference we chose to ignore": the
-  moment the anchor is spent or removed, both rows go back to being compared
-  normally, which is the same standard the explained-difference arms are held
-  to.
-
 ### `computeItemPaths(items: T[], _: unknown): T[]`
 
 Compute full structural paths for a flat items array AND linearize it
@@ -43740,22 +43647,15 @@ returned `path` is non-empty and ends in the item's own uid.
 ### `computeOrderInvoiceCoverage(account: InitiatorAccount): OrderInvoiceCoverage`
 
 **Is this order fully invoiced?** — the ORDER-first, union-across-invoices
-question, and the complement of {@link computeInvoiceSyncStatus}.
-
-The two are easy to confuse and answer different things. `computeInvoiceSyncStatus`
-stands on ONE invoice and asks whether each of its lines still agrees with the
-order, collapsing *missing* / *removed* / *differs* into a single
-`out_of_sync` flag. This stands on the ORDER and asks which of its lines no
-live invoice bills — so it unions every linked invoice, and a line billed on
-invoice A is covered even though invoice B lacks it. **Neither can be derived
-from the other**: prod order #1000 is billed by #2385 and #2388, and every one
-of its lines is `out_of_sync` on at least one of them while exactly one line
-is genuinely unbilled.
+question. It unions every linked invoice, so a line billed on invoice A is
+covered even though invoice B lacks it: prod order #1000 is billed by #2385
+and #2388, neither carries the whole order, and exactly one line is
+genuinely unbilled.
 
 It deliberately says nothing about lines that DIFFER. A matched-but-drifted
-line is covered here and is `computeInvoiceSyncStatus`'s subject; measured
-2026-08-25 the corpus carries 1,653 drifted lines against 177 uninvoiced ones,
-so folding the two would bury this answer in the other's.
+line is covered here and is the diff's subject (`computeDocumentDiffs`);
+measured 2026-08-25 the corpus carries 1,653 drifted lines against 177
+uninvoiced ones, so folding the two would bury this answer in the other's.
 
 **A reader of the account** (one-document-model 6e-0b2 F9): `uninvoiced` is
 every order line with units that no live billing row or reversing credit
@@ -43911,17 +43811,6 @@ Keyed by PATH, never by uid: `item.uid` repeats within one document.
 - `levels` — Its divider hierarchy — `ORDER_ITEM_LEVELS` for a quote,
 `INVOICE_ITEM_LEVELS` for an invoice
 - `options.hideZeroPricedComponents` — The family's declared param
-
-### `explainInvoiceItemDifferences(expected: InvoiceItem, current: InvoiceItem, differences: readonly string[], context: InvoiceSyncContext): InvoiceSyncExplanation`
-
-{@link unexplainedInvoiceItemDifferences}, but it also says WHICH arm fired.
-
-The residue alone is what the badge needs; a diagnostic needs the reason, and
-api-cloudrun's deleted `audit-draft-invoice-mirror` script reported one bucket per arm. Returning
-the arm is what let that audit be a pure CONSUMER of this function rather
-than a second implementation of it — which is the defect api-cloudrun#481 is
-named after, and it had already produced two comparators that disagreed about
-8,792 prod lines.
 
 ### `extensionSectionTargets(scopedItems: readonly InvoiceItem[], orderDividerUid: string): Map<string, string[]>`
 
@@ -44163,58 +44052,6 @@ weaker on a `part_paid` one.
 gate (`lineMoneyAgrees`) asks *did the amount move?*; this asks *is this field
 the operator's to change at all?* Both exist, and neither subsumes the other.
 
-### `invoiceItemDifferences(expected: InvoiceItem, current: InvoiceItem): string[]`
-
-**Which fields two invoice-shaped items differ on** — the substrate of
-{@link invoiceItemsMatch}, and the reason there is only one comparator.
-
-Returns sorted, qualified field names (`name`, `price.taxes`,
-`price.counts`); `[]` means the rows agree. Invoice-only fields
-({@link INVOICE_ONLY_ITEM_FIELDS}) are filtered out of both sides first, so an
-override is never a difference.
-
-⚠️ **This exists because the boolean could not be bucketed** (api-cloudrun#481).
-The badge reported thousands of `out_of_sync` lines with no way to say what
-they differed ON, so the question *"which of these are real drift?"* could only
-be answered by a probe reimplementing the comparison — and a reimplementation
-is what invented a phantom `taxes_base` slice across the whole corpus. A
-histogram taken through this function agrees with the badge **by construction**,
-because the badge is defined in terms of it.
-
-Both arguments must already be invoice-shaped, with full (divider-scoped)
-paths — project an order item with {@link projectOrderItemToInvoiceItem} first.
-Comparison is:
-
-- **top-level keys** present on one side and not the other, minus the
-  invoice-only fields (a key whose value is `undefined` does not count as
-  present — Firestore stores no such value, so it can only come from a
-  caller's partially-built object);
-- **`price` structurally** ({@link invoicePriceDifferences}), with absent ≡
-  null on the keys the schema blesses both encodings of;
-- **every other key by canonical value** ({@link stableStringify}).
-
-### `invoiceItemsMatch(expected: InvoiceItem, current: InvoiceItem): boolean`
-
-**The one comparator.** Are two invoice-shaped items the same row, ignoring
-the fields an invoice OWNS ({@link INVOICE_ONLY_ITEM_FIELDS})?
-
-It replaced two near-duplicate comparisons — the private
-`invoiceProjectionMatches` behind {@link computeInvoiceSyncStatus}, and
-`isItemSynced`'s order-shaped one behind the draft mirror — which had drifted
-into disagreeing about what "the same line" means.
-
-⚠️ `isItemSynced` is GONE (retired with the whole-row sync mode): a whole-row
-verdict is exactly what the per-field rule replaced, so leaving the predicate
-exported would have invited a caller back into G1. This comparator survives
-because {@link computeInvoiceSyncStatus} still asks a row-level question for
-the sync BADGE, which is a display, not a write decision.
-
-The comparison rules live in {@link invoiceItemDifferences}; this is that
-function's emptiness. Keeping the boolean as the derived half rather than the
-other way round is deliberate — two implementations of "the same row" is the
-exact defect this function was created to remove, and a separate boolean pass
-would be a second one.
-
 ### `invoicePairKey(pair: typeLiteral): string`
 
 **The identity of an invoice's destination pair**: `{uid_order}/{uid}` — the
@@ -44238,7 +44075,7 @@ the wrong criterion and would never go green: measured 2026-08-10, 15 of the
 102 prod pairs carrying a custom line carry a legitimate invoice-only line,
 which makes the path sets differ forever while the tree shapes agree
 perfectly. A line the order lacks is **line-level drift**, correctly reported
-`out_of_sync` by {@link computeInvoiceSyncStatus}; conflating it with a
+by the diff (`computeDocumentDiffs`); conflating it with a
 structural misalignment would make the two indistinguishable and the
 structural repair unfinishable.
 
@@ -44331,7 +44168,7 @@ replaced line's current order path"*, not *"its path at the moment of the
 substitution"* — a locked value is what let an order-side reparent resurrect X
 (api-cloudrun#897). The sync is the only place that can do this: it is the one
 caller holding both revisions of the order. Every downstream reader — the wire
-guard, `api-cloudrun/scripts/audit-fulfillment-diff.ts`, {@link computeInvoiceSyncStatus},
+guard, `api-cloudrun/scripts/audit-fulfillment-diff.ts`, `computeDocumentDiffs`,
 {@link computeOrderInvoiceCoverage} — sees only the current order.
 
 **Parameters**
@@ -44447,8 +44284,9 @@ order → invoice boundary instead.
 backfilled first** — stage two of `manager#421`, landed 2026-09-10 by
 api-cloudrun/scripts/backfill-zero-priced-projections.ts (a done one-shot, deleted 2026-11-01; in api-cloudrun's git history).
 
-⚠️ **The order of those two was forced, and the reason is
-`invoiceItemDifferences` comparing top-level KEY SETS.** `buildOrderLine`
+⚠️ **The order of those two was forced, and the reason was the sync badge's
+comparator (retired with one-document-model ruling 93) comparing top-level
+KEY SETS.** `buildOrderLine`
 writes `zero_priced: null` explicitly on every order line — see its own
 comment, *"the server writes both as an explicit `null` so the optimistic row
 matches the echo"* — so the key is present on every order line without
@@ -44491,8 +44329,7 @@ order-only fields this function drops. A prod probe that compared raw order
 prices invented a phantom `taxes_base: 8,360` difference across the corpus,
 because `taxes_base` is order-only and never reaches an invoice line. There is
 no way to reimplement this faithfully outside the module, so the answer is to
-export it rather than to keep re-deriving it. Paired with
-{@link invoiceItemDifferences}, which is the other half a probe needs.
+export it rather than to keep re-deriving it.
 
 ### `purchaseBillIsLive(bill: typeLiteral): boolean`
 
@@ -44944,59 +44781,6 @@ defect this function exists to remove.
 An invoice item's path in the ORDER's path space, reading an extension
 section as the order divider it extends: `[O, E, …rest]` → `[…target, …rest]`.
 Any other item is {@link stripOrderPrefix}.
-
-### `unexplainedInvoiceItemDifferences(expected: InvoiceItem, current: InvoiceItem, differences: readonly string[], context: InvoiceSyncContext): string[]`
-
-Strip the differences that are **explained** — leaving only the ones an
-operator should act on (api-cloudrun#481).
-
-The sync badge and api-cloudrun's `audit-draft-invoice-mirror` script (deleted
-2026-09-15) were two
-comparators kept in agreement by hand, and they disagreed by construction: the
-audit compared money and then *explained* the difference through tested arms,
-while the badge had none and so reported every one of them. On prod that was
-8,792 lines flagged against **0** the audit called real. This is the audit's
-reasoning, moved to where both callers share it.
-
-Four arms, all narrow, and none of them a field exclusion — an excluded field
-is blind forever, whereas an explained one goes red the moment its explanation
-stops holding:
-
-0. **`invoice_windows`** — the invoice states its own charge windows, so its
-   rental lines bill a different number of days than the order's (core#112). A
-   partial bill is exactly this: charge-windows decision 3 sets the invoice's
-   own pair windows to the part being billed. The arm re-prices the projected
-   order line at those windows and covers only the fields that then agree
-   EXACTLY, so a money change hiding behind a day change is not covered.
-   ⚠️ It runs first and rebases what the three tax arms compare — see
-   {@link reprojectAtInvoiceWindows} and the comment at the top of
-   {@link explainInvoiceItemDifferences}.
-1. **`coa_untaxes`** — the invoice knows the line is non-revenue and the order
-   does not, so the retired account-keyed taxability gate fired on one side
-   only. ⚠️ **HISTORICAL, and deliberately kept.** Nothing prices this way
-   since the owner ruling of 2026-08-20 (`isTaxableCoa`), so no NEW line can
-   reach this arm — but the frozen documents the gate shaped are still
-   compared against their orders every time the badge renders, and deleting
-   the arm would turn each of them red for a rule that ran when they were
-   written.
-2. **`tax_date_version`** — the same tax NAMES at different rate versions, on a
-   **frozen** order. One materializer, two as-of instants; the decision not to
-   restate completed orders' quoted totals.
-3. **`tax_zero_money`** — the tax rows differ but neither side collects a cent.
-   Checked on the stored amounts, never inferred from `zero_priced`, so a
-   mislabelled line cannot hide in here.
-
-⚠️ **`price.total_cents` is covered only when it moved by EXACTLY the tax
-delta.** A tax difference necessarily moves the total, so refusing to cover it
-would leave every explained line red for a consequence of the thing just
-explained. Covering it unconditionally would hide a real total divergence
-behind an unrelated tax one. The equality is exact integer cents, so there is
-no tolerance to choose.
-
-`price.subtotal_cents` and `price.subtotal_discounted_cents` are deliberately
-NOT explainable: tax is a function of the discounted subtotal, so a line that
-disagrees there has no independent tax question — the money difference is the
-finding, and it stays.
 
 ### `validateInvoiceItemPaths(items: T[]): ItemPathIssue[]`
 
@@ -48127,10 +47911,9 @@ substitution licenses — no more, no less. There are six askers today:
 | `api-cloudrun/src/services/fulfillmentEdits.ts` — the counterpart guard | a SUBMITTED row with no order line | is it strictly below some substitution's own path? |
 | `api-cloudrun/scripts/audit-fulfillment-diff.ts` | an ORDER line with no fulfillment row | is it at or below some entry's X? |
 | {@link syncOrderToInvoiceSelective} | an ORDER line the invoice does not carry | is it at or below some entry's X? |
-| {@link computeInvoiceSyncStatus} | both sides of a substituted pair | is the divergence tracked rather than drift? |
 | {@link computeOrderInvoiceCoverage} | an order line with no invoice line | is it at or below some entry's X? |
 
-Four of the six are the same question, and the wire boundary, the audit and
+Four of the five are the same question, and the wire boundary, the audit and
 the projection **must** answer it identically — an audit stricter than the
 guard reports correct data as a finding, and one that is looser certifies
 what the guard would have refused. Sharing the predicate is what makes "the
@@ -48563,7 +48346,7 @@ ratio (`credit × component quantity ÷ kit quantity`, rounded half-up once per
 level — never the catalog, D1/D2).
 
 The one walk the billing fold (`billedByPath`), `computeDocumentDiffs`'s D2 quantity check and
-the invoice sync (`syncOrderToInvoiceSelective`, `computeInvoiceSyncStatus`) read. A path under a credited kit is present even at 0.
+the invoice sync (`syncOrderToInvoiceSelective`) read. A path under a credited kit is present even at 0.
 
 A path named directly that the order does not carry (a dangling anchor) keeps
 its direct credit; the walk only reaches paths the order has.
@@ -51337,7 +51120,7 @@ an absent nullable key to `null`. Extra keys (computed money, `discount`,
 
 ⚠️ **Every order line therefore carries `base_percent`** — `null` on all but a
 percent-of-total fee line. That matches what `buildOrderLineFromProduct` already
-stages, and `invoicePriceDifferences` drops null keys before comparing.
+stages.
 
 ### `deriveNextEventDate(order: typeLiteral): typeLiteral`
 

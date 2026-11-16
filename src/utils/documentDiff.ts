@@ -116,11 +116,9 @@
  * ({@link billingLineFields}, one-document-model F10): the shared fields the
  * side's sync merges, minus `derived`, `homonym` and the account's fields. It
  * replaced an order ↔ invoice comparer built on the invoice sync badge's
- * `invoiceItemDifferences` + `explainInvoiceItemDifferences` and a separate
- * purchase ↔ bill one. The badge's explanation arms cover only `derived`
- * fields, which this never reports, so it still cannot report a difference the
- * badge explains away. Census 2026-11-15: no stored document's field entries
- * moved, in prod, dev or `test`.
+ * comparator and explanation arms (both deleted with the badge, ruling 93) and
+ * a separate purchase ↔ bill one. Census 2026-11-15: no stored document's field
+ * entries moved, in prod, dev or `test`.
  *
  * ## A substitution is ONE difference, never a pair of presence entries
  *
@@ -618,7 +616,7 @@ export interface DocumentDiffSources {
  * ⚠️ It carried `taxNameByUid` and `isOrderFrozen` until the one field comparer
  * (one-document-model F10): they fed the invoice sync badge's explanation arms,
  * which could never change the diff's output (every field they cover is
- * `derived`) and are no longer called from it.
+ * `derived`). The badge itself is gone (ruling 93).
  */
 export interface DocumentDiffContext {
   formulas: PricingFormulas;

@@ -520,9 +520,10 @@ export interface InvoiceDocLineItemType {
    * ⭐ **EMITTED since 2026-09-10**, unconditionally as `?? null`, by
    * `projectOrderItemToInvoiceItem` and by `api-cloudrun`'s hand-mirrored
    * `buildInvoiceItems`. The corpus was backfilled first — 1,037 of 1,040 prod
-   * invoices, 9,590 rows — because `invoiceItemDifferences` compares top-level
-   * KEY SETS and `buildOrderLine` writes the key on every order line, so an emit
-   * ahead of the backfill would have made every paired line differ at once.
+   * invoices, 9,590 rows — because the sync badge's comparator (retired, ruling
+   * 93) compared top-level KEY SETS and `buildOrderLine` writes the key on every
+   * order line, so an emit ahead of the backfill would have made every paired
+   * line differ at once.
    *
    * ⚠️ **The key is present on every line, valued `null` where the order line
    * states nothing.** Absence means a line written before the backfill, not "no
@@ -546,9 +547,7 @@ export interface InvoiceDocLineItemType {
   uid_tracking_category: string | null;
   /**
    * @see `OrderDocLineItemType.uid_tax_class`. Mirrored onto the invoice so an
-   * order→invoice projection round-trips it, and so `invoiceItemsMatch` can
-   * compare it rather than report every affected line `out_of_sync` forever —
-   * that comparator matches on KEY SETS.
+   * order→invoice projection round-trips it.
    */
   uid_tax_class: string;
   /** @see `OrderDocLineItemType.uid_tax_class_override`. */
@@ -588,9 +587,8 @@ export interface InvoiceDocLineItemType {
    *    {@link INVOICE_ONLY_ITEM_FIELDS} records under `crms_id`.
    * 4. **Absence cannot reach the state the ruling protects against.** Every
    *    consumer is already absence-shaped — `pickInvoiceOnlyFields` skips
-   *    `undefined`, `projectOrderItemToInvoiceItem` spreads conditionally, and
-   *    `invoiceItemDifferences` counts `undefined` as not-present — so no path
-   *    hands a literal `undefined` to a write boundary.
+   *    `undefined` and `projectOrderItemToInvoiceItem` spreads conditionally —
+   *    so no path hands a literal `undefined` to a write boundary.
    */
   substituted_for?: SubstitutedForEntryType[];
   /**
@@ -643,8 +641,7 @@ export interface InvoiceDocLineItemType {
    *
    * ⚠️ **NOT an invoice-only override field.** `carryForwardOverrides` matches
    * by `uid`, which repeats within a document, so carrying it would stamp the
-   * pointer onto another occurrence of the same product. It is excluded from
-   * the comparator's key sets separately (`INVOICE_ROW_POINTER_FIELDS`).
+   * pointer onto another occurrence of the same product.
    *
    * `.optional()` for `substituted_for`'s reasons (array-member-uncensusable,
    * meaningful on a handful of rows only).
