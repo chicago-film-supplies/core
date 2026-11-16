@@ -10,7 +10,7 @@
  * 1. **The deleted names stay deleted.** Each was a second author of a fact the
  *    account now states once (`invoicedByPath`, `invoiceOnlyLines`,
  *    `accountLine`, `remainingForOrder`, `purchaseLineBilledNet`, the exported
- *    `extensionGroups`). Re-adding one beside the account re-opens two answers
+ *    `extensionGroups`, `recomputePurchaseQuantityBilled`, `purchaseBilledPaths`). Re-adding one beside the account re-opens two answers
  *    to one question. api-cloudrun's Ratchet J and manager's line-money arm
  *    carry the same list for their own trees.
  * 2. **No side comparison in the fold or the diff** (ruling 84). Everything
@@ -71,9 +71,9 @@ const show = (hits: Hit[]) => hits.map((h) => `  + ${h.file}:${h.line}  ${h.text
 
 // ── 1. The deleted names ──────────────────────────────────────────────
 
-/** Deleted in 6e-0b2 beta F step 2c. Step 5 adds the payable writer's names when F5 deletes them. */
+/** Deleted in 6e-0b2 beta F step 2c and F5; F13 (ruling 42) adds the recount and the second "is it billed" rule. */
 export const DELETED_FOLD_NAMES_RE =
-  /\b(?:invoicedByPath|InvoicedByPath|InvoicedAtPath|InvoicedRow|TimeCredit|invoiceOnlyLines|InvoiceOnlyLines|InvoiceOnlySkip|accountLine|OrderLineAccount|extensionGroups|remainingForOrder|RemainingLine|RemainingForOrder|purchaseLineBilledNet|PurchaseLineBilledNet|purchaseLineBilledCounts|remainingTimeCounts|RemainingTimeCountsArgs|purchaseDocumentBilling|purchaseCreditBilling|foldPurchaseDocument|PurchaseLineBilling|purchaseDocumentsBefore)\b/;
+  /\b(?:invoicedByPath|InvoicedByPath|InvoicedAtPath|InvoicedRow|TimeCredit|invoiceOnlyLines|InvoiceOnlyLines|InvoiceOnlySkip|accountLine|OrderLineAccount|extensionGroups|remainingForOrder|RemainingLine|RemainingForOrder|purchaseLineBilledNet|PurchaseLineBilledNet|purchaseLineBilledCounts|remainingTimeCounts|RemainingTimeCountsArgs|purchaseDocumentBilling|purchaseCreditBilling|foldPurchaseDocument|PurchaseLineBilling|purchaseDocumentsBefore|recomputePurchaseQuantityBilled|purchaseBilledPaths)\b/;
 
 Deno.test("billingFoldCoverage — the deleted fold names stay deleted in src/", async () => {
   const back = await grepSrc(DELETED_FOLD_NAMES_RE);
@@ -203,6 +203,8 @@ Deno.test("billingFoldCoverage — documentDiff asks the side which lines its cu
 Deno.test("billingFoldCoverage — the scans bite (non-vacuity)", async () => {
   assertEquals(DELETED_FOLD_NAMES_RE.test("const f = invoicedByPath(order, invoices);"), true, "deleted-name RE stopped matching");
   assertEquals(DELETED_FOLD_NAMES_RE.test("purchaseLineBilledNet({ bills })"), true, "deleted-name RE lost the AP names");
+  assertEquals(DELETED_FOLD_NAMES_RE.test("recomputePurchaseQuantityBilled(p, docs)"), true, "deleted-name RE lost the recount (ruling 42)");
+  assertEquals(DELETED_FOLD_NAMES_RE.test("purchaseBilledPaths(bills, uid)"), true, "deleted-name RE lost the billed-paths rule (ruling 42)");
   assertEquals(DELETED_FOLD_NAMES_RE.test("const a = accountInitiator(side, o, fold);"), false, "deleted-name RE over-matches the account");
   assertEquals(DELETED_FOLD_NAMES_RE.test("fold.byPath.get(k)?.time_credits"), false, "deleted-name RE over-matches a field");
 

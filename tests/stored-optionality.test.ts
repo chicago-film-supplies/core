@@ -89,6 +89,11 @@ type Reason =
   | "structurally-absent";
 
 const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
+  // ── pending-removal — one-document-model F13 (ruling 42), beta G1. What a
+  //    purchase line has billed is the billing fold; nothing writes or reads the
+  //    key. Optional so the deployed build parses the corpus until the purge
+  //    empties it; beta G2 deletes it, and this entry with it.
+  ["purchases.items[].quantity_billed", "pending-removal"],
   // ── mid-expand — api-cloudrun#1223. Absent = a bill written before the backfill,
   //    null = a bill with no due date, a value = the mirror. Tighten to bare
   //    `.nullable()` once the dev and prod backfills have run.

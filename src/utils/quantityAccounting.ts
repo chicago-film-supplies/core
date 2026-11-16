@@ -1210,6 +1210,52 @@ export function billedByPath<S extends Side>(
   };
 }
 
+// ── What a caller that ACTS reads off the fold (ruling 42) ──
+
+/**
+ * **Units billed at a path, as a caller that ACTS reads them** (ruling 42, R2):
+ * the fold's signed count floored at 0, so an over-credit bills nothing extra
+ * and frees nothing below zero. The diff reads the fold unfloored instead.
+ * {@link accountInitiator} and every payable reader share this one floor.
+ *
+ * @param fold - {@link billedByPath} over the initiator's documents
+ * @param path - The initiator-relative line path
+ */
+export function actedBilledUnits(fold: Pick<BilledByPath, "byPath">, path: readonly string[]): number {
+  return Math.max(0, fold.byPath.get(key(path))?.quantity ?? 0);
+}
+
+/**
+ * **Units of a line still to bill** (ruling 42's one remaining-to-bill engine):
+ * ordered less what is billed, floored at 0, so an over-billed line (legal,
+ * flagged by the diff) has nothing left. Pass the ACTED billed units
+ * ({@link actedBilledUnits}).
+ *
+ * ⚠️ A TIME line's remaining is its never-billed units; what it still owes in
+ * TIME is its owed extension groups (`LineAccount.remaining.owed`), not this.
+ *
+ * @param item - The initiator line (its ordered `quantity`)
+ * @param billedUnits - Acted billed units, ≥ 0
+ */
+export function remainingToBill(item: { quantity: number }, billedUnits: number): number {
+  return Math.max(0, item.quantity - billedUnits);
+}
+
+/**
+ * **Does the billing fold NAME this line?** A live direct or substitute row
+ * bills it (units through a substituted kit included), or a live reversing
+ * credit took something back from it. An extension row alone does not: it bills
+ * days on units billed elsewhere; nor does a money-only residual with no units
+ * and no row. `LineAccount.named` is this, and a payable line it names is
+ * "touched" (ruling 102).
+ *
+ * @param at - The fold's entry at the line's path, if any
+ */
+export function billingNamesLine(at: BilledAtPath | undefined): boolean {
+  return at !== undefined &&
+    (at.quantity !== 0 || at.rows.some((r) => r.via !== "extension") || (at.credit_documents?.length ?? 0) > 0);
+}
+
 // ── The one per-line account (one-document-model 6e-0b2 F9, rulings 90–92) ──
 
 /** Why a line's documents disagree. Empty set ⇔ no quantity entry. */
@@ -1556,8 +1602,7 @@ export function accountInitiator(
     }
 
     // What acts reads billing floored at 0 (R2): an over-credit bills nothing extra.
-    const actedBilled = Math.max(0, billedUnits);
-    const remainingUnits = Math.max(0, ordered - actedBilled);
+    const remainingUnits = remainingToBill({ quantity: ordered }, actedBilledUnits(fold, path));
     const owed = groups.filter((g) => g.extension_direction > 0);
     const shortened = groups.filter((g) => g.extension_direction < 0);
 
@@ -1627,8 +1672,7 @@ export function accountInitiator(
       kind,
       // An extension row bills DAYS on units billed elsewhere, so it names nothing on
       // its own; nor does a money-only residual (F2 rule 7) with no units and no row.
-      named: at !== undefined &&
-        (at.quantity !== 0 || at.rows.some((r) => r.via !== "extension") || (at.credit_documents?.length ?? 0) > 0),
+      named: billingNamesLine(at),
       naming,
       credit_sources: creditSources,
       ordered,

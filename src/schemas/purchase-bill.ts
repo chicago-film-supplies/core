@@ -5,8 +5,9 @@
  * What a supplier BILLED CFS for a purchase (an ACCPAY bill, or a SPEND bank
  * transaction — a bill born paid), and what it CREDITED back (an ACCPAYCREDIT).
  * Many bills per purchase, each its own document; each bill product item bills
- * some quantity of one purchase item, and moves that item's `quantity_billed` in
- * the same transaction. Design: api-cloudrun#1210; the item shape,
+ * some quantity of one purchase item; what the item has billed is the billing
+ * fold over the purchase's bills and credits (ruling 42), never a stored count.
+ * Design: api-cloudrun#1210; the item shape,
  * api-cloudrun#1407.
  *
  * ## Own collections, one MODEL (superseded ruling)
@@ -947,8 +948,8 @@ export interface PurchaseCredit {
   date_fs: FirestoreTimestampType;
   reference: string | null;
   /**
-   * Each product item UN-bills that quantity of its purchase item: it lowers
-   * `quantity_billed`. Under its purchase's dividers, as a bill's are.
+   * Each product item UN-bills that quantity of its purchase item: the billing
+   * fold subtracts it. Under its purchase's dividers, as a bill's are.
    */
   items: PurchaseDocumentRow[];
   /** The purchase's pairs the credited lines sit under ({@link PurchaseDocDestination}). */
@@ -1323,7 +1324,7 @@ export const CreatePurchaseBillInput: z.ZodType<CreatePurchaseBillInputType> = z
  * ACCPAYCREDIT, or link one the supplier's credit was entered as in Xero.
  *
  * Each `items` entry UN-bills that quantity of its purchase item, or of the
- * bill line it names: it lowers `quantity_billed`, and a PUSHED credit prices it
+ * bill line it names (the billing fold subtracts it), and a PUSHED credit prices it
  * from the line's billed pool (`billedPoolCreditMoney`) or from the named bill
  * line (`billLineCreditMoney`), so more than was billed cannot be credited. A price correction with no quantity is a `charge_items` entry
  * (push only). A LINKED credit reads its date, reference and total from Xero,

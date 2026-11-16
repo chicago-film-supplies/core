@@ -29,8 +29,9 @@
  * - **Custody lives on the inbound bookings, not here** (one-document-model
  *   C8): what a line has received and returned is DERIVED, per grain from its
  *   inbound booking and per row from the movements naming it
- *   (`custodyBySourceItem`, `@cfs/core/utils/bookings-inbound`). The one
- *   co-written bucket left is `quantity_billed`, until 6e-0b2 (ruling 42).
+ *   (`custodyBySourceItem`, `@cfs/core/utils/bookings-inbound`). What a line
+ *   has BILLED is derived too: the billing fold over its bills and credits
+ *   (`purchaseBillingFold`, ruling 42). No co-written bucket is left.
  * - **A line closed to 0 is removed**, as an order line is (ruling 47); there
  *   is no line status.
  * - **A derived status** in the record's vocabulary (`active | complete |
@@ -87,8 +88,8 @@
  *   stored per-unit rate: measured on prod, most buys cost a total that does
  *   not divide by their quantity, and no reader needs one (`perUnitCostAt4dp`
  *   derives the display rate).
- * - **time** — commits nothing on the purchase (`amount_cents` and
- *   `quantity_billed` null, money zero); each bill meters it from its
+ * - **time** — commits nothing on the purchase (`amount_cents` null, money
+ *   zero); each bill meters it from its
  *   destination pair's charge windows as an order line is metered, and bills in
  *   parts by COUNTS: never-billed units over their pair, owed time as an
  *   extension section (`splitBillTime`, one-document-model 6e-0b2 F5).
@@ -98,9 +99,7 @@
  *
  * A per-line REFINE ({@link purchaseLineMoneyIssues}) rather than union arms,
  * because `basis` cuts across all three types; arms would split each in two.
- * It also makes `quantity_billed` null exactly on time lines: billed is a
- * co-written bucket only on flat lines, and a time line resolves on custody
- * (Q7). Over-billing is never refused (D5) — the purchase↔bill diff flags it.
+ * Over-billing is never refused (D5) — the purchase↔bill diff flags it.
  *
  * The purchase's `totals.total_cents` is the COMMITTED amount (owner,
  * 2026-10-30; the order's `totals` since D5): Σ of the lines' stored money. A
@@ -308,8 +307,7 @@ export const PurchaseItemDatesSchema: z.ZodType<PurchaseItemDates> = z.strictObj
 // a stated TOTAL, so an untouched bill line follows them all, and a line where
 // any was edited keeps them all (one-document-model Phase 3). A partial bill
 // differs from its purchase line on them, so it keeps them and a purchase edit
-// never re-bills it. The co-written `quantity_billed` has no counterpart on a
-// bill at all. Declared here, above the price schema, because
+// never re-bills it. Declared here, above the price schema, because
 // {@link PayableStatedCore} spreads it at module evaluation.
 const flatMoney = { propagate: true, shared_group: "flat_money" } as const;
 
@@ -452,8 +450,8 @@ export const PurchaseLinePriceSchema: z.ZodType<PurchaseLinePrice> = z.strictObj
  *   beta B) and no rates; its `amount_cents` and computed money are what
  *   `priceDocument`'s stated-total arm derives from it.
  * - **time** (one-document-model Phase 3) — carries its formula's `rates`.
- *   On a PURCHASE (`grain: "purchase"`) it commits nothing: `amount_cents` and
- *   `quantity_billed` are null and its money is zero. On a BILL or CREDIT line
+ *   On a PURCHASE (`grain: "purchase"`) it commits nothing: `amount_cents` is
+ *   null and its money is zero. On a BILL or CREDIT line
  *   (`grain: "document"`) it states its amount — `rates × counts` metered from
  *   its pair's windows on a pushed document, Xero's on a linked one — and its
  *   money follows from that amount as a flat line's does.
@@ -462,7 +460,6 @@ export function purchaseLineMoneyIssues(
   item: {
     price?: PurchaseLinePrice;
     amount_cents: number | null;
-    quantity_billed?: number | null;
     /** The line's quantity, which a stated line's money is derived over. */
     quantity?: number;
   },
@@ -477,9 +474,6 @@ export function purchaseLineMoneyIssues(
     if (grain === "purchase") {
       if (item.amount_cents !== null) {
         issues.push({ path: ["amount_cents"], message: "a time line commits no amount; its bills decide its cost" });
-      }
-      if (item.quantity_billed != null) {
-        issues.push({ path: ["quantity_billed"], message: "a time line counts nothing billed; it resolves on custody" });
       }
       if (stated !== null) {
         issues.push({ path: ["price", "stated_cents"], message: "a time line states no total; its bills decide its cost" });
@@ -497,9 +491,6 @@ export function purchaseLineMoneyIssues(
     issues.push({ path: ["price", "stated_cents"], message: "a flat line states its gross" });
   }
   if (rates.length > 0) issues.push({ path: ["price", "rates"], message: "a flat line carries no rates" });
-  if (item.quantity_billed === null) {
-    issues.push({ path: ["quantity_billed"], message: "a flat line counts what is billed" });
-  }
   if (item.price && item.amount_cents !== null) {
     issues.push(...statedTotalMoneyIssues(item.price, item.amount_cents));
   }
@@ -700,11 +691,12 @@ export interface PurchaseSaleItem extends Omit<PurchaseItemBase, "ledger_account
    */
   price: PurchaseLinePrice;
   /**
-   * Units billed — Σ of bill items minus Σ of credit items projecting this
-   * item. May exceed what was ordered: over-billing is legal and flagged, never
-   * refused (D5).
+   * ⚠️ **RETIRED (ruling 42).** What a line has billed is the billing fold over
+   * its bills and credits (`purchaseBillingFold`, `actedBilledUnits`); nothing
+   * writes or reads this. Optional only so the deployed build parses the corpus
+   * until the purge empties it; the next beta deletes the key.
    */
-  quantity_billed: number;
+  quantity_billed?: number;
   /** Freight, duty and fees spread onto the units still to arrive ({@link PurchaseLandedCost}). */
   landed_costs: PurchaseLandedCost[];
 }
@@ -717,8 +709,13 @@ export interface PurchaseRentalItem extends Omit<PurchaseItemBase, "ledger_accou
   /** Net whole cost on a flat line; `null` on a time line (its bills decide it). */
   amount_cents: number | null;
   price: PurchaseLinePrice;
-  /** Units billed on a flat line; `null` on a time line, which resolves on custody alone (Q7). */
-  quantity_billed: number | null;
+  /**
+   * ⚠️ **RETIRED (ruling 42).** What a line has billed is the billing fold over
+   * its bills and credits (`purchaseBillingFold`, `actedBilledUnits`); nothing
+   * writes or reads this. Optional only so the deployed build parses the corpus
+   * until the purge empties it; the next beta deletes the key.
+   */
+  quantity_billed?: number | null;
   /**
    * The orders this item was raised for, possibly none. For margin and for
    * raising a subrent from an order's shortage; it is NOT a reservation, and
@@ -759,8 +756,13 @@ export interface PurchaseServiceItem extends PurchaseItemBase {
   /** Net whole cost on a flat line; `null` on a time line. */
   amount_cents: number | null;
   price: PurchaseLinePrice;
-  /** Units billed on a flat line; `null` on a time line. */
-  quantity_billed: number | null;
+  /**
+   * ⚠️ **RETIRED (ruling 42).** What a line has billed is the billing fold over
+   * its bills and credits (`purchaseBillingFold`, `actedBilledUnits`); nothing
+   * writes or reads this. Optional only so the deployed build parses the corpus
+   * until the purge empties it; the next beta deletes the key.
+   */
+  quantity_billed?: number | null;
 }
 
 /**
@@ -855,7 +857,9 @@ const itemShape = {
 // `≥ 1`: a line closed to 0 is removed (ruling 47), never stored at 0.
 const quantityKey = z.int().min(1).meta({ column: true, label: "Quantity", ...flatMoney });
 const amountKey = z.int().min(0).meta({ column: true, label: "Amount", ...flatMoney });
-const billedKey = z.int().min(0).meta({ column: true, label: "Billed" });
+// Retired (ruling 42): written by nothing, read by nothing, purged, then deleted.
+// No column and no label (D5 beta D's precedent for `total_cents`).
+const billedKey = z.int().min(0);
 
 /**
  * May a payable line of `type` post to `account`? The class is
@@ -944,7 +948,7 @@ const SaleItemInner = z.strictObject({
   ledger_account: PayableKitLedgerAccount,
   amount_cents: amountKey,
   price: PurchaseLinePriceSchema,
-  quantity_billed: billedKey,
+  quantity_billed: billedKey.optional(),
   landed_costs: z.array(PurchaseLandedCostSchema).meta({ label: "Landed Cost" }),
 }).superRefine((item, ctx) => {
   storedUidIssue(item, ctx);
@@ -982,7 +986,7 @@ const RentalItemInner = z.strictObject({
   ledger_account: PayableKitLedgerAccount,
   amount_cents: amountKey.nullable(),
   price: PurchaseLinePriceSchema,
-  quantity_billed: billedKey.nullable(),
+  quantity_billed: billedKey.nullable().optional(),
   uid_orders: z.array(FirestoreId),
   // See the interface docblock. `seed: false`: a seeded `[]` would claim a
   // take-back list on a line under no exchange pair, which `checkExchangedFor` refuses.
@@ -1001,7 +1005,7 @@ const noCustodyShape = {
   ...itemShape,
   amount_cents: amountKey.nullable(),
   price: PurchaseLinePriceSchema,
-  quantity_billed: billedKey.nullable(),
+  quantity_billed: billedKey.nullable().optional(),
 } as const;
 
 function noCustodyIssues(

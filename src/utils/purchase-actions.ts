@@ -52,6 +52,7 @@ import {
   purchaseBillIsLive,
   purchaseBillingFold,
 } from "./purchase-documents.ts";
+import { actedBilledUnits, type BilledByPath, billingNamesLine } from "./quantityAccounting.ts";
 import { collectSubstitutionAnchors, sliceSubstitutedFor } from "./substitutions.ts";
 import { closeRefusal, InvoiceActionRefusal } from "./invoice-actions.ts";
 import { invoiceIsFrozen } from "./invoices.ts";
@@ -60,7 +61,7 @@ import { remainingToBill, remainingToReceive, remainingToReturn } from "./purcha
 import { lineCustodyAt, type PurchaseLineCustody } from "./bookings-inbound.ts";
 
 /** The keys of a purchase line the ruleset reads — so a line not yet saved can be asked too. */
-type LineKeys = "uid" | "path" | "quantity" | "quantity_billed" | "price";
+type LineKeys = "uid" | "path" | "quantity" | "price";
 
 /** A purchase line as the ruleset reads it. */
 export type PurchaseActionItem =
@@ -102,7 +103,7 @@ export interface PurchaseOfferContext {
   /**
    * Each row's custody, `custodyBySourceItem` over the purchase's movements
    * (one-document-model C8): what a line has received and returned is no longer
-   * on the line. ⚠️ **Required**, unlike `billed_paths`: an absent map would
+   * on the line. ⚠️ **Required**: an absent map would
    * read every line as untouched and offer its removal, which the server
    * would refuse only if it re-read the journal.
    */
@@ -114,50 +115,33 @@ export interface PurchaseOfferContext {
    */
   now: string;
   /**
-   * The paths a live bill names ({@link purchaseBilledPaths}): how a TIME line,
-   * which counts no `quantity_billed`, is known to be billed. **Absent ⇒ none**,
-   * so a billed time line reads as untouched; the server re-checks.
+   * EVERY bill and supplier credit of the purchase (ruling 42): what a line has
+   * billed is the billing fold over these ({@link purchaseBillingFold}), never a
+   * stored count. Liveness is the fold's. ⚠️ **Required**, as on AR
+   * (`orderInvoiceActionsFor` builds its account from the documents): an empty
+   * list would read every line as unbilled and offer its removal.
    */
-  billed_paths?: ReadonlySet<string>;
-}
-
-/**
- * The paths of the lines of purchase `uidPurchase` that a LIVE bill bills,
- * each joined with `/` — relative to that purchase, so they compare with its
- * own `item.path`. A bill may bill several purchases, hence the scope.
- */
-export function purchaseBilledPaths(
-  bills: readonly Pick<PurchaseBill, "totals" | "items" | "status">[],
-  uidPurchase: string,
-): Set<string> {
-  const prefix = `${uidPurchase}/`;
-  return new Set(
-    bills.filter(purchaseBillIsLive).flatMap((b) =>
-      b.items.flatMap((row) => {
-        if (!isPurchaseLine(row) || isKitHeaderLine(row)) return [];
-        const key = purchaseLineKeyOf(row as PurchaseDocumentItem);
-        if (key === null || !key.startsWith(prefix)) return [];
-        // A substitute (W5) bills the X it stands in for as well. A component of
-        // a substituted kit is billed through its kit, which this names.
-        const stands = "substituted_for" in row ? (row.substituted_for ?? []).map((e) => e.path.join("/")) : [];
-        return [key.slice(prefix.length), ...stands];
-      })
-    ),
-  );
+  bills: PurchaseBilledDocuments["bills"];
+  credits: PurchaseBilledDocuments["credits"];
 }
 
 /**
  * **Has anything happened to this line that makes it history as well as an
- * order?** A touched line cannot be removed or moved across bases. A time line
- * counts no `quantity_billed`, so whether a bill names it comes from
- * `billedPaths` ({@link purchaseBilledPaths}).
+ * order?** A touched line cannot be removed or moved across bases. Billed is
+ * the billing fold NAMING the line (`billingNamesLine`, ruling 102): a live bill
+ * row, a substitute standing in for it, or a live credit that took something
+ * back; received units touch a custody line too.
+ *
+ * @param item - The purchase line
+ * @param fold - {@link purchaseBillingFold} over the purchase's bills and credits
+ * @param custody - The row's custody (`custodyBySourceItem`)
  */
 export function purchaseItemTouched(
   item: PurchaseActionItem,
-  billedPaths: ReadonlySet<string>,
+  fold: Pick<BilledByPath, "byPath">,
   custody: PurchaseLineCustody,
 ): boolean {
-  const billed = (item.quantity_billed ?? 0) > 0 || billedPaths.has(item.path.join("/"));
+  const billed = billingNamesLine(fold.byPath.get(item.path.join("/")));
   switch (item.type) {
     case "sale":
     case "rental":
@@ -178,19 +162,21 @@ export function purchaseItemTouched(
  * service or replacement drops its unbilled quantity, and a TIME line ends its
  * pair's charge window, so it is closable while that window is open at `now`
  * (ruling 63). A rental with units still out is NOT closable: the close zeroes
- * its supply, so the API refuses it until they have gone back.
+ * its supply, so the API refuses it until they have gone back. `fold` is
+ * {@link purchaseBillingFold} over the purchase's documents.
  */
 export function purchaseItemClosable(
   item: PurchaseActionItem,
   custody: PurchaseLineCustody,
   pair: Pick<PurchaseDestination, "dates"> | undefined,
   now: string,
+  fold: Pick<BilledByPath, "byPath">,
 ): boolean {
   switch (item.type) {
     case "service":
     case "replacement":
       if (purchaseItemBasis(item) === "time") return pair !== undefined && chargeWindowOpenAt(pair, now);
-      return item.quantity - (item.quantity_billed ?? 0) > 0;
+      return remainingToBill(item, actedBilledUnits(fold, item.path)) > 0;
     case "rental":
       return remainingToReturn(custody) === 0 && remainingToReceive(item, custody) > 0;
     case "sale":
@@ -216,23 +202,23 @@ function chargeWindowOpenAt(pair: Pick<PurchaseDestination, "dates">, now: strin
 
 /**
  * Whether a close leaves this line with nothing: nothing received on a custody
- * line, and nothing billed on a charge (a time charge's bills are read from
- * `billedPaths`, since it counts no `quantity_billed`).
+ * line, and nothing the billing fold names on a charge (ruling 102).
  */
-function closeCancels(item: PurchaseActionItem, custody: PurchaseLineCustody, billedPaths: ReadonlySet<string>): boolean {
+function closeCancels(item: PurchaseActionItem, custody: PurchaseLineCustody, fold: Pick<BilledByPath, "byPath">): boolean {
   return item.type === "service" || item.type === "replacement"
-    ? (item.quantity_billed ?? 0) === 0 && !billedPaths.has(item.path.join("/"))
+    ? !billingNamesLine(fold.byPath.get(item.path.join("/")))
     : custody.received === 0;
 }
 
 /**
  * The units a line may still bill, 0 when it has nothing to bill: what is
- * ordered, less what is billed. A TIME line counts no `quantity_billed`, so it
- * offers its open units every time — what is left of its time is the bill
- * writer's split by the account (`splitBillTime`), not a unit count.
+ * ordered, less what the fold bills ({@link remainingToBill}). A TIME line
+ * offers its open units every time: what is left of its time is the bill
+ * writer's split by the account (`splitBillTime`), not a unit count, and a
+ * bill of more units than were never billed takes owed time first.
  */
-function billableQuantity(item: PurchaseActionItem): number {
-  return remainingToBill({ quantity: item.quantity, quantity_billed: item.quantity_billed ?? 0 });
+function billableQuantity(item: PurchaseActionItem, fold: Pick<BilledByPath, "byPath">): number {
+  return purchaseItemBasis(item) === "time" ? item.quantity : remainingToBill(item, actedBilledUnits(fold, item.path));
 }
 
 /**
@@ -244,7 +230,7 @@ function billableQuantity(item: PurchaseActionItem): number {
  * close.
  */
 export function purchaseActionsFor(
-  purchase: Pick<Purchase, "status" | "query_by_bills" | "destinations"> & {
+  purchase: Pick<Purchase, "uid" | "status" | "query_by_bills" | "destinations"> & {
     items: readonly (PurchaseActionItem | { type: PayableDividerType })[];
   },
   ctx: PurchaseOfferContext,
@@ -254,17 +240,22 @@ export function purchaseActionsFor(
   const rows = purchase.items.filter((i): i is PurchaseActionItem => isPurchaseLine(i));
   const items = rows.filter((i) => !isKitHeaderLine(i));
   const active = status === "active";
-  const billedPaths = ctx.billed_paths ?? new Set<string>();
+  const fold = purchaseBillingFold({
+    uid_purchase: purchase.uid,
+    purchase_items: purchase.items,
+    bills: ctx.bills,
+    credits: ctx.credits,
+  });
   const custodyOf = (i: PurchaseActionItem) => lineCustodyAt(ctx.custody, i.path);
   const closable = (i: PurchaseActionItem) =>
-    purchaseItemClosable(i, custodyOf(i), purchase.destinations.find((d) => d.uid === i.path[0]), ctx.now);
+    purchaseItemClosable(i, custodyOf(i), purchase.destinations.find((d) => d.uid === i.path[0]), ctx.now, fold);
   const unitsOut = items.some((i) => i.type === "rental" && remainingToReturn(custodyOf(i)) > 0);
   if (active && !unitsOut && items.some(closable)) {
-    const cancels = items.every((i) => closeCancels(i, custodyOf(i), billedPaths));
+    const cancels = items.every((i) => closeCancels(i, custodyOf(i), fold));
     offers.push({ key: "close", action: "close", outcome: cancels ? "cancel" : "close" });
   }
   if (status !== "canceled") offers.push({ key: "add_bill", action: "add_bill" });
-  if (purchase.query_by_bills.length > 0 || items.some((i) => (i.quantity_billed ?? 0) > 0)) {
+  if (purchase.query_by_bills.length > 0 || items.some((i) => actedBilledUnits(fold, i.path) > 0)) {
     offers.push({ key: "add_credit", action: "add_credit" });
   }
   for (const item of items) {
@@ -272,10 +263,10 @@ export function purchaseActionsFor(
       offers.push({ key: lineActionKey(action, item.path), action, path_purchase_item: [...item.path], ...extra });
     if (active && closable(item)) line("close_item");
     if (status !== "canceled") {
-      const max = billableQuantity(item);
+      const max = billableQuantity(item, fold);
       if (max > 0) line("bill_item", { max_quantity: max });
     }
-    if (!purchaseItemTouched(item, billedPaths, custodyOf(item))) {
+    if (!purchaseItemTouched(item, fold, custodyOf(item))) {
       line("remove_item");
       line("change_basis");
     }
@@ -284,7 +275,7 @@ export function purchaseActionsFor(
   // while nothing under it has happened, and the removal takes its subtree.
   for (const header of rows.filter(isKitHeaderLine)) {
     const under = (i: PurchaseActionItem) => i.path.length > header.path.length && header.path.every((seg, k) => i.path[k] === seg);
-    if (!items.some((i) => under(i) && purchaseItemTouched(i, billedPaths, custodyOf(i)))) {
+    if (!items.some((i) => under(i) && purchaseItemTouched(i, fold, custodyOf(i)))) {
       offers.push({ key: lineActionKey("remove_item", header.path), action: "remove_item", path_purchase_item: [...header.path] });
     }
   }
@@ -301,10 +292,9 @@ export type PurchaseBillActionBill =
 
 /**
  * What a bill's void is decided on: the bill's purchase and EVERY bill and credit
- * of that purchase. ⚠️ **Required, unlike {@link PurchaseOfferContext}.** That
- * context reads an absent key as "none", which is safe there because the server
- * re-checks. Here it would offer Void on an unknown answer, so a caller without
- * these documents cannot compile.
+ * of that purchase. ⚠️ **Required**, as {@link PurchaseOfferContext}'s are: an
+ * absent answer would offer Void on an unknown one, so a caller without these
+ * documents cannot compile.
  */
 export interface PurchaseBillContext {
   /** One entry per purchase the bill names: a bill may bill several. */
@@ -326,8 +316,8 @@ export interface PurchaseBillContext {
  * an unsynced allocation refuses too. Xero would refuse any payment or
  * allocation it holds.
  *
- * Only FLAT lines are read for the negative: a time line counts no
- * `quantity_billed`, so there is nothing for a recount to take below zero.
+ * Only FLAT lines are read for the negative: a time line's billing is its
+ * metered time, which a void cannot strand a credit under.
  */
 export function purchaseBillVoidRefusal(bill: PurchaseBillActionBill, ctx: PurchaseBillContext): string | null {
   if (!purchaseBillIsLive(bill)) return `Bill ${bill.number} is already void.`;
@@ -342,10 +332,11 @@ export function purchaseBillVoidRefusal(bill: PurchaseBillActionBill, ctx: Purch
       bills: p.bills.filter((b) => b.uid !== bill.uid),
       credits: p.credits,
     };
-    const named = purchaseBilledPaths([bill], p.uid_purchase);
+    // The lines this bill names: the fold over the bill alone.
+    const named = purchaseBillingFold({ ...others, bills: [bill], credits: [] });
     const fold = purchaseBillingFold(others);
     return purchaseLines(p.purchase.items).some((item) =>
-      purchaseItemBasis(item) === "flat" && named.has(item.path.join("/")) &&
+      purchaseItemBasis(item) === "flat" && billingNamesLine(named.byPath.get(item.path.join("/"))) &&
       (fold.byPath.get(item.path.join("/"))?.quantity ?? 0) < 0
     );
   });

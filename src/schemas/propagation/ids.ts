@@ -253,7 +253,6 @@ export type RuleId =
   | "reopen-purchase-bill:reversal-to-bill"
   | "settle-purchase-bill:settlements-to-credit"
   | "void-purchase-bill-from-xero:settlements-to-credit"
-  | "create-purchase-credit:credit-to-purchase"
   | "update-purchase-bill:status-to-purchases"
   | "update-purchase-credit:status-to-purchases"
   | "allocate-purchase-credit:credit-to-settlements"
@@ -275,8 +274,6 @@ export type RuleId =
   | "update-inbound-booking:booking-to-transactions"
   | "update-inbound-booking:booking-to-out-of-service"
   | "create-receipt-exchange:leg-self"
-  | "purchase-billed:bills-to-purchase"
-  | "purchase-billed:credits-to-purchase"
   | "update-out-of-service-record:record-to-inbound-booking"
   // out-of-service.ts
   | "create-out-of-service-record:sources-to-record"

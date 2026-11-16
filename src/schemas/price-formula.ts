@@ -439,8 +439,7 @@ function checkRule(rule: PriceFormulaRule, ctx: z.RefinementCtx): void {
  * A line snapshots it beside the formula's uid and name (`price.price_formula`)
  * so a single-document rule can branch on it without reading the formula: a
  * purchase line's money shape (flat ⇒ a stated `amount_cents`, time ⇒ dated
- * `rates`) and whether `quantity_billed` is a co-written bucket (flat only) are
- * both decided by it (purchases-as-documents, Phase 2 ruling 1).
+ * `rates`) is decided by it (purchases-as-documents, Phase 2 ruling 1).
  */
 export const PRICE_FORMULA_BASES = ["flat", "time"] as const;
 /** One {@link PRICE_FORMULA_BASES} member. */

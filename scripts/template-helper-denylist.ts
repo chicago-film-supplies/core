@@ -658,6 +658,10 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // The remainder and the over-billing offer assembled from that account.
     "buildOverbillingCredits",
     "buildRemainingInvoice",
+    // Ruling 42's acted floor, remainder and "is it named": each reads the fold
+    // over every billing document of an initiator, which no render context holds.
+    "actedBilledUnits",
+    "billingNamesLine",
     // The one billing fold (one-document-model 6e-0b2 F1): an initiator and
     // EVERY billing and credit document on it, which no render context holds.
     // Its `document_only` is the input to a fulfillment projection
@@ -788,7 +792,6 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "purchaseBillCreditRefusal",
     "purchaseBillPushRefusal",
     "purchaseBillVoidRefusal",
-    "purchaseBilledPaths",
     "purchaseCreditActionsFor",
     "purchaseItemClosable",
     "purchaseItemTouched",
@@ -830,7 +833,6 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "purchaseBillSharedLineFields",
     "purchaseBillSharedPairFields",
     "purchaseScopeDivider",
-    "recomputePurchaseQuantityBilled",
     // The W4K re-key author and its pointer rewrite: a migration's and a writer's.
     "rekeyPayableLines",
     "rekeyPayablePointer",

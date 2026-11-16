@@ -9,8 +9,9 @@
  * lost | damaged` on the `return_to_supplier` settles an out-of-service
  * record's PUT writes. What a line has received and returned is DERIVED from
  * that custody (one-document-model C8 retired the line buckets
- * `quantity_received` / `quantity_returned`); the one co-written bucket left
- * is `quantity_billed`, a recount (see *Billing*).
+ * `quantity_received` / `quantity_returned`), and what it has billed is the
+ * billing fold over its bills and credits (ruling 42 retired `quantity_billed`;
+ * see *Billing*). No co-written bucket is left.
  *
  * ⚠️ **The rule ids below still say `…-to-purchase`** although their target is
  * the inbound booking: renaming them is the C13 vocabulary survey's, in the
@@ -52,18 +53,16 @@
  *
  * ## Billing
  *
- * A bill is its own document (`purchase-bills`), written in ONE transaction with
- * its purchase lines' `quantity_billed`.
- *
- * ⚠️ **That bucket is RECOUNTED** (api-cloudrun#1441). A bill line's quantity
- * changes, so a delta releases the wrong number when that bill is voided. Every write that adds or
- * voids a bill or credit, or edits a bill line's quantity, recalculates the count
- * from the purchase's live documents in the same commit: the shared steps
- * `purchase-billed:bills-to-purchase` and `purchase-billed:credits-to-purchase`,
- * referenced as `RECOUNT_STEPS`. It is one rule with several firing contexts,
- * not one per transaction, for the reason `STOCK_STEPS` is. A recount moves no
- * status and so no return card: a purchase's status is custody-only (7a C7,
- * rulings 55 and 56) and the purchase finalize writes it.
+ * A bill is its own document (`purchase-bills`). What a purchase line has
+ * billed is DERIVED, never stored (ruling 42): the billing fold over the
+ * purchase's live bills net of its live credits (`purchaseBillingFold`), floored
+ * at 0 where a reader acts on it (`actedBilledUnits`), unfloored in the diff.
+ * So a bill or credit write moves no count on the purchase; a void releases
+ * what the bill says NOW, because the fold reads the bill as it stands. A bill
+ * create still writes its purchase, appending `query_by_bills`
+ * (`create-purchase-bill:bill-to-purchase`), so a writer can point-get every
+ * bill; a credit converges `query_by_credits` after its commit
+ * (`update-purchase-credit:status-to-purchases`).
  *
  * A card payment linked as a bill is BORN PAID: the same transaction appends its
  * one `bill_payment` row and folds it, so its due is 0 from the first write. The
@@ -377,13 +376,13 @@ const purchaseCardRules: CollectionRule[] = [
   },
 ];
 
-/** The bill co-write, asserted on a pushed bill billed in two parts. */
+/** The bill create, asserted on a pushed bill billed in two parts. */
 const BILL_MOVES_THE_BUCKET: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/purchases/purchaseBills.test.ts::push — two bills move quantity_billed and each line costs its cumulative share",
+    "api-cloudrun/tests/integration/purchases/purchaseBills.test.ts::push — two bills each cost their cumulative share of the line",
   clause:
-    "each bill recounts its purchase lines' quantity_billed in the same commit; each line is priced at its cumulative share, so the bills of a fully billed line sum to its amount_cents exactly",
+    "each bill line is priced at its cumulative share, starting where the billing fold over the purchase's other documents stands, so the bills of a fully billed line sum to its amount_cents exactly; the bill's uid is appended to query_by_bills in the same commit",
   gates: true,
 };
 
@@ -480,7 +479,7 @@ const createPurchaseBillRules: CollectionRule[] = [
     target: "purchases",
     mode: "co-write",
     invariant:
-      "Every bill product line bills ONE purchase line: it sits at `[purchase uid, ...that line's path]` under the purchase's `purchase` divider and takes its uid (never joined by product: one product may sit on two lines), or names it by the move pointer `path_purchase_item`, and is defaulted from it by `projectPurchaseLineToBillLine` (`@cfs/core/utils/purchase-documents`). A FLAT line is counted by the recount (`purchase-billed:bills-to-purchase`) and priced at `lineUnitsCents(line, billed_before, billed_after)`, the one line-money function — never a client input — so the bills of a fully billed line sum to its amount exactly. A TIME line is billed by counts, never-billed units first (`splitBillTime` over the purchase's account, clipped at the bill date): those units at the line's own path, metered over the bill's pair, and time owed on units earlier bills billed as an extension section (`billExtensionSections`, ruling 89); `priceDocument` prices `rates × counts`. Billing past what was ordered is LEGAL and flagged by the purchase↔bill diff, never refused (D5, reversing #1396). The bill's uid is appended to the purchase's `query_by_bills` in the same commit. A LINKED bill's lines are projected the same way for attribution; its total is Xero's and is exempt.",
+      "Every bill product line bills ONE purchase line: it sits at `[purchase uid, ...that line's path]` under the purchase's `purchase` divider and takes its uid (never joined by product: one product may sit on two lines), or names it by the move pointer `path_purchase_item`, and is defaulted from it by `projectPurchaseLineToBillLine` (`@cfs/core/utils/purchase-documents`). A FLAT line is priced at `lineUnitsCents(line, billed_before, billed_after)`, the one line-money function, where `billed_before` is what the billing fold over the purchase's other documents bills at the line (`actedBilledUnits`, ruling 42) — never a client input — so the bills of a fully billed line sum to its amount exactly. A TIME line is billed by counts, never-billed units first (`splitBillTime` over the purchase's account, clipped at the bill date): those units at the line's own path, metered over the bill's pair, and time owed on units earlier bills billed as an extension section (`billExtensionSections`, ruling 89); `priceDocument` prices `rates × counts`. Billing past what was ordered is LEGAL and flagged by the purchase↔bill diff, never refused (D5, reversing #1396). The bill's uid is appended to the purchase's `query_by_bills` in the same commit. A LINKED bill's lines are projected the same way for attribution; its total is Xero's and is exempt.",
     enforced_by: [BILL_MOVES_THE_BUCKET],
     transaction: "create-purchase-bill",
     fields: [
@@ -551,13 +550,13 @@ const BILL_PAYMENT_REAPED: EnforcementRef = {
   gates: true,
 };
 
-/** The void, asserted with a purchase whose lines it released. */
+/** The void, asserted with a purchase whose lines it released (the fold, not a stored count). */
 const BILL_VOIDED: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/purchases/purchaseBillSettlements.test.ts::webhook — a bill voided in Xero appends one bill_void, retracts its payments and releases quantity_billed",
+    "api-cloudrun/tests/integration/purchases/purchaseBillSettlements.test.ts::webhook — a bill voided in Xero appends one bill_void, retracts its payments and releases its lines",
   clause:
-    "a tracked ACCPAY that Xero reports VOIDED or DELETED retracts every live bill_payment, appends one bill_void for total_cents, folds the bill to amount_due_cents 0 and recounts each billed purchase line's quantity_billed without it, all in one commit; a redelivered void moves nothing",
+    "a tracked ACCPAY that Xero reports VOIDED or DELETED retracts every live bill_payment, appends one bill_void for total_cents and folds the bill to amount_due_cents 0, all in one commit, so the billing fold stops counting it; a redelivered void moves nothing",
   gates: true,
 };
 
@@ -567,7 +566,7 @@ const BILL_VOIDED_FROM_CFS: EnforcementRef = {
   ref:
     "api-cloudrun/tests/integration/purchases/purchaseBillSettlements.test.ts::void from CFS — a bill nothing settles voids in Xero and releases its lines; one with a live payment is refused",
   clause:
-    "voiding a pushed bill from CFS voids the posted Xero bill, then appends one bill_void for total_cents, stamps voided_at, folds the bill to amount_due_cents 0 and recounts each billed purchase line's quantity_billed without it, in one commit; a bill purchaseBillVoidRefusal refuses is refused before Xero is called",
+    "voiding a pushed bill from CFS voids the posted Xero bill, then appends one bill_void for total_cents, stamps voided_at, folds the bill to amount_due_cents 0, in one commit, so the billing fold stops counting it; a bill purchaseBillVoidRefusal refuses is refused before Xero is called",
   gates: true,
 };
 
@@ -707,16 +706,6 @@ const voidPurchaseBillFromXeroRules: CollectionRule[] = [
   },
 ];
 
-/** The credit co-write, asserted on a pushed credit un-billing part of a line. */
-const CREDIT_UNBILLS_THE_BUCKET: EnforcementRef = {
-  kind: "test",
-  ref:
-    "api-cloudrun/tests/integration/purchases/purchaseCredits.test.ts::push — a credit un-bills its items at their cumulative share",
-  clause:
-    "each credit recounts its purchase lines' quantity_billed in the same commit; a pushed credit line naming no bill line is priced from the line's billed pool (`billedPoolCreditMoney`: a share of what live bills net of live credits hold, or the supplier's memo as the line's `price.stated_cents`, capped at the pool), and one naming a bill line first-come from that line's own money with its discount terms (`billLineCreditMoney`), so a bill and the credit of all its units sum to zero; un-billing past quantity_billed is refused",
-  gates: true,
-};
-
 /** An operator allocation, asserted on both folds and a replay. */
 const CREDIT_ALLOCATED: EnforcementRef = {
   kind: "test",
@@ -784,26 +773,6 @@ const closePurchaseBillRules: CollectionRule[] = [
       { source: [], target: ["totals", "closure_count"], transform: "−1 — the contract multiplier folded through `counts_into`" },
       { source: [], target: ["status"], transform: "deriveInvoiceStatus over the folded totals — `paid` → `issued`" },
       { source: [], target: ["version"], transform: "+1" },
-    ],
-  },
-];
-
-const createPurchaseCreditRules: CollectionRule[] = [
-  {
-    id: "create-purchase-credit:credit-to-purchase",
-    source: "purchase-credits",
-    target: "purchases",
-    mode: "co-write",
-    invariant:
-      "Every credit line UN-bills some quantity of ONE purchase line — the line at its path under the purchase's `purchase` divider, or its `path_purchase_item` move pointer; the recount (`purchase-billed:credits-to-purchase`) lowers the count. Un-billing past `quantity_billed` is refused. A PUSHED credit line is priced by the one line-money function over the range it un-bills (`lineUnitsCents`) — so a bill and a credit of all its units net to zero. A LINKED credit's lines are priced the same way for attribution; its total is Xero's.",
-    enforced_by: [CREDIT_UNBILLS_THE_BUCKET],
-    transaction: "create-purchase-credit",
-    fields: [
-      {
-        source: ["query_by_sources"],
-        target: ["uid"],
-        transform: "the credit names its purchase",
-      },
     ],
   },
 ];
@@ -984,17 +953,7 @@ const CREDIT_VOIDED_FROM_XERO: EnforcementRef = {
   ref:
     "api-cloudrun/tests/integration/purchases/purchaseCreditSettlements.test.ts::void from Xero — a voided credit reaps its draws, refolds its bills and re-bills its purchase items",
   clause:
-    "a tracked supplier credit Xero reports VOIDED or DELETED becomes void; every live row drawing on it is reversed (source_retracted), each bill those rows credited is refolded in the same commit, and each purchase line's quantity_billed is recounted without the credit; a redelivery writes nothing",
-  gates: true,
-};
-
-/** An operator void, asserted with its refusal. */
-const CREDIT_VOIDED_FROM_CFS: EnforcementRef = {
-  kind: "test",
-  ref:
-    "api-cloudrun/tests/integration/purchases/purchaseCreditSettlements.test.ts::void from CFS — a credit nothing draws on voids in Xero and re-bills; one with a live allocation is refused",
-  clause:
-    "voiding a supplier credit from CFS voids the posted Xero credit note, then marks the credit void and recounts its purchase lines' quantity_billed in one commit; a credit with any live allocation or refund is refused before Xero is called; a void that re-bills units the purchase has since canceled is legal and over-bills the line (D5)",
+    "a tracked supplier credit Xero reports VOIDED or DELETED becomes void; every live row drawing on it is reversed (source_retracted), each bill those rows credited is refolded in the same commit, and the billing fold stops subtracting the credit; a redelivery writes nothing",
   gates: true,
 };
 
@@ -1094,15 +1053,6 @@ const voidPurchaseCreditFromXeroRules: CollectionRule[] = [
   },
 ];
 
-/** The recount itself, against hand-stated counts. */
-const BILLED_RECOUNT: EnforcementRef = {
-  kind: "test",
-  ref: "core/tests/purchase-documents.test.ts::recomputePurchaseQuantityBilled: live bills net of live credits, floored at 0",
-  clause:
-    "a flat line's count is Σ live bill line quantities − Σ live credit line quantities joined on the full path, floored at 0, through an edited quantity, a void, a $0 void and a voided credit; a time line stays null. Does NOT cover the writer reading the complete set inside its transaction.",
-  gates: true,
-};
-
 // ── Discovery mirrors on the purchase (6e-0a) ───────────────────────
 
 const purchaseMirrorRules: CollectionRule[] = [
@@ -1139,72 +1089,15 @@ const purchaseMirrorRules: CollectionRule[] = [
   },
 ];
 
-const purchaseBilledRules: CollectionRule[] = [
-  {
-    id: "purchase-billed:bills-to-purchase",
-    source: "purchase-bills",
-    target: "purchases",
-    mode: "co-write",
-    invariant:
-      "A FLAT purchase line's `quantity_billed` is recounted from the purchase's live documents (`recomputePurchaseQuantityBilled`): Σ live bill line quantities − Σ live credit line quantities, joined on the full purchase line key (`purchaseLineKeyOf`: a line's path under its purchase divider, or its move pointer), floored at 0, written in the same commit as the bill or credit that moved it. So a bill line's quantity edit moves the count (5→3 frees 2 units; 5→8 reads over-billed, which the purchase ↔ bill diff flags), and a void releases what the bill says NOW, not what it said when it was created. A voided bill stays in `query_by_bills` and stops counting. A later bill of the same units is priced at its cumulative share of the new range, so the live bills of a line can sum to its amount ±1¢. A TIME line counts nothing: `quantity_billed` stays null.",
-    enforced_by: [BILLED_RECOUNT, BILL_MOVES_THE_BUCKET, BILL_VOIDED, BILL_VOIDED_FROM_CFS],
-    fields: [
-      {
-        source: ["items", "quantity"],
-        target: ["items", "quantity_billed"],
-        transform: "Σ over the live bills, on the purchase line each bill line bills (`purchaseLineKeyOf`: its path under the purchase divider, or its move pointer)",
-      },
-      {
-        source: ["voided_at"],
-        target: ["items", "quantity_billed"],
-        transform: "a voided bill counts nothing (`purchaseBillIsLive`)",
-      },
-    ],
-  },
-  {
-    id: "purchase-billed:credits-to-purchase",
-    source: "purchase-credits",
-    target: "purchases",
-    mode: "co-write",
-    invariant:
-      "The other half of the recount: every live credit line is subtracted from the purchase line it credits (`purchaseLineKeyOf`), and a voided credit stops being subtracted, so its units read billed again. Voiding a credit from Xero is never refused and is uncapped: a void that re-bills units the purchase has since CANCELED (a short close's credit, voided in Xero) over-bills the line, which is legal and flagged by the purchase ↔ bill diff (D5), never trimmed. An operator void is refused only while a row draws on the credit, since Xero refuses to void a note with an allocation or a payment. A credit left with no live bill under it floors the count at 0, and the diff shows the unfloored number.",
-    enforced_by: [BILLED_RECOUNT, CREDIT_UNBILLS_THE_BUCKET, CREDIT_VOIDED_FROM_XERO, CREDIT_VOIDED_FROM_CFS],
-    fields: [
-      {
-        source: ["items", "quantity"],
-        target: ["items", "quantity_billed"],
-        transform: "− Σ over the live credits, on the purchase line each credit line credits (`purchaseLineKeyOf`)",
-      },
-      {
-        source: ["status"],
-        target: ["items", "quantity_billed"],
-        transform: "a void credit counts nothing (`purchaseCreditIsLive`)",
-      },
-    ],
-  },
-];
-
-/**
- * The recount as its firing transactions name it. `STOCK_STEPS`'s shape, and
- * file-local because no other module fires it. Billing holds no purchase open
- * (ruling 61), so a recount writes no status and the return card, which reads
- * custody, does not follow it (7a C7).
- */
-const RECOUNT_STEPS = [
-  "purchase-billed:bills-to-purchase",
-  "purchase-billed:credits-to-purchase",
-] as const;
-
 const createPurchaseBillTransaction: TransactionDefinition = {
   id: "create-purchase-bill",
   description:
-    "Bills a purchase: either PUSHES a new ACCPAY (`CFS-BILL-n`, posted by a post-commit task with read-before-create) or LINKS an existing Xero bill or card payment, read from Xero rather than the caller. The bill recounts its purchase lines' `quantity_billed` in the same transaction. A linked card payment is born paid, and a linked ACCPAY carries the payments Xero already reports, as `bill_payment` settlement rows in the same transaction — fires on: a link whose Xero document holds any payment.",
+    "Bills a purchase: either PUSHES a new ACCPAY (`CFS-BILL-n`, posted by a post-commit task with read-before-create) or LINKS an existing Xero bill or card payment, read from Xero rather than the caller. The bill's uid is appended to its purchases' `query_by_bills` in the same transaction; what a line has billed is the billing fold, so nothing is counted on the purchase (ruling 42). A linked card payment is born paid, and a linked ACCPAY carries the payments Xero already reports, as `bill_payment` settlement rows in the same transaction — fires on: a link whose Xero document holds any payment.",
   steps: [
     "create-purchase-bill:bill-to-purchase",
     "create-purchase-bill:bill-to-settlements",
     "cowrite-thread:purchase-bills-to-thread",
     "cowrite-thread:thread-to-purchase-bills",
-    ...RECOUNT_STEPS,
     "update-purchase-bill:status-to-purchases",
   ],
 };
@@ -1212,8 +1105,8 @@ const createPurchaseBillTransaction: TransactionDefinition = {
 const updatePurchaseBillTransaction: TransactionDefinition = {
   id: "update-purchase-bill",
   description:
-    "Edits a PUSHED, unsettled bill (`PUT /purchase-bills/{uid}`, D5): any line's shared field may be overridden until the bill settles, exactly the invoice rule; the writer re-prices the edited bill with `priceDocument` (payable arm), whose stated-total arm states each line's money from its amount and discount. Refused on a linked bill (Xero is authoritative) and, per field class, on a frozen one (`PURCHASE_BILL_FIELD_FREEZE`). The accepted edit is pushed to Xero after the commit by the ACCPAY edit push — GET-modify-POST against Xero's own InvoiceID, hash-gated so an unchanged body pushes nothing. Editing a flat line's quantity recounts the purchase's `quantity_billed` and bumps its version in the same commit — fires on: an edit that moves a line's count.",
-  steps: [...RECOUNT_STEPS],
+    "Edits a PUSHED, unsettled bill (`PUT /purchase-bills/{uid}`, D5): any line's shared field may be overridden until the bill settles, exactly the invoice rule; the writer re-prices the edited bill with `priceDocument` (payable arm), whose stated-total arm states each line's money from its amount and discount. Refused on a linked bill (Xero is authoritative) and, per field class, on a frozen one (`PURCHASE_BILL_FIELD_FREEZE`). The accepted edit is pushed to Xero after the commit by the ACCPAY edit push — GET-modify-POST against Xero's own InvoiceID, hash-gated so an unchanged body pushes nothing. Editing a line's quantity moves what the billing fold bills at its purchase line, and nothing is written to the purchase (ruling 42).",
+  steps: [],
 };
 
 const settlePurchaseBillTransaction: TransactionDefinition = {
@@ -1232,11 +1125,10 @@ const settlePurchaseBillTransaction: TransactionDefinition = {
 const voidPurchaseBillTransaction: TransactionDefinition = {
   id: "void-purchase-bill",
   description:
-    "An operator voids a pushed bill nothing has settled: a bill Xero holds is voided there first, then one commit appends one `bill_void` for its total, stamps `voided_at`, folds the bill to nothing due and recounts its purchase lines. A bill with no `xero_id` is voided in CFS alone, and its push then posts nothing. If the commit loses a race after Xero voided, the webhook's `void-purchase-bill-from-xero` finishes it. Refused by `purchaseBillVoidRefusal`, before Xero is called. A void Xero throttles changes nothing and re-runs from a task. Fires on: every void that is not a replay.",
+    "An operator voids a pushed bill nothing has settled: a bill Xero holds is voided there first, then one commit appends one `bill_void` for its total, stamps `voided_at`, folds the bill to nothing due; the billing fold stops counting it. A bill with no `xero_id` is voided in CFS alone, and its push then posts nothing. If the commit loses a race after Xero voided, the webhook's `void-purchase-bill-from-xero` finishes it. Refused by `purchaseBillVoidRefusal`, before Xero is called. A void Xero throttles changes nothing and re-runs from a task. Fires on: every void that is not a replay.",
   steps: [
     "void-purchase-bill:void-to-settlements",
     "void-purchase-bill:settlements-to-bill",
-    ...RECOUNT_STEPS,
     "update-purchase-bill:status-to-purchases",
   ],
 };
@@ -1256,12 +1148,11 @@ const reopenPurchaseBillTransaction: TransactionDefinition = {
 const voidPurchaseBillFromXeroTransaction: TransactionDefinition = {
   id: "void-purchase-bill-from-xero",
   description:
-    "Mirrors a bill Xero reports VOIDED or DELETED: retracts its live payments, appends one `bill_void` for its total, stamps `voided_at`, folds the bill to nothing due and recounts its purchase lines' `quantity_billed`, in one commit. The `markInvoiceVoidedFromXero` twin. Never writes to Xero. Fires on: the first webhook that sees the bill void.",
+    "Mirrors a bill Xero reports VOIDED or DELETED: retracts its live payments, appends one `bill_void` for its total, stamps `voided_at`, folds the bill to nothing due, in one commit; the billing fold stops counting it. The `markInvoiceVoidedFromXero` twin. Never writes to Xero. Fires on: the first webhook that sees the bill void.",
   steps: [
     "void-purchase-bill-from-xero:void-to-settlements",
     "void-purchase-bill-from-xero:settlements-to-bill",
     "void-purchase-bill-from-xero:settlements-to-credit",
-    ...RECOUNT_STEPS,
     "update-purchase-bill:status-to-purchases",
     "update-purchase-credit:status-to-purchases",
   ],
@@ -1270,12 +1161,10 @@ const voidPurchaseBillFromXeroTransaction: TransactionDefinition = {
 const createPurchaseCreditTransaction: TransactionDefinition = {
   id: "create-purchase-credit",
   description:
-    "Records a supplier credit against a purchase: either PUSHES a new ACCPAYCREDIT (`CFS-SCR-n`, posted by a post-commit task with read-before-create) or LINKS one entered in Xero, read from Xero rather than the caller. Each credit line un-bills its purchase line, and `quantity_billed` is recounted in the same transaction. The credit is written holding its whole total; allocations are their own writes — a linked credit's existing Xero allocations arrive through the bills they name.",
+    "Records a supplier credit against a purchase: either PUSHES a new ACCPAYCREDIT (`CFS-SCR-n`, posted by a post-commit task with read-before-create) or LINKS one entered in Xero, read from Xero rather than the caller. Each credit line UN-bills some quantity of ONE purchase line (its path under the purchase's `purchase` divider, or its `path_purchase_item` move pointer), which the billing fold subtracts (ruling 42); nothing is written to the purchase in the commit. Un-billing past what the fold bills at the line is refused. A PUSHED credit line is priced by the one line-money function over the range it un-bills, so a bill and a credit of all its units net to zero; a LINKED credit's total is Xero's. The credit is written holding its whole total; allocations are their own writes — a linked credit's existing Xero allocations arrive through the bills they name.",
   steps: [
-    "create-purchase-credit:credit-to-purchase",
     "cowrite-thread:purchase-credits-to-thread",
     "cowrite-thread:thread-to-purchase-credits",
-    ...RECOUNT_STEPS,
     "update-purchase-credit:status-to-purchases",
   ],
 };
@@ -1316,19 +1205,18 @@ const settlePurchaseCreditTransaction: TransactionDefinition = {
 const voidPurchaseCreditTransaction: TransactionDefinition = {
   id: "void-purchase-credit",
   description:
-    "An operator voids a supplier credit nothing draws on: the posted Xero credit note is voided first (`POST /CreditNotes/{id}` `Status: VOIDED`), then one commit marks the credit void and recounts its purchase lines. A pushed credit not yet posted is voided in CFS alone, and its push then posts nothing. Fires on: every void that is not a replay.",
-  steps: [...RECOUNT_STEPS, "update-purchase-credit:status-to-purchases"],
+    "An operator voids a supplier credit nothing draws on: the posted Xero credit note is voided first (`POST /CreditNotes/{id}` `Status: VOIDED`), then one commit marks the credit void; the billing fold stops subtracting it. A pushed credit not yet posted is voided in CFS alone, and its push then posts nothing. Fires on: every void that is not a replay.",
+  steps: ["update-purchase-credit:status-to-purchases"],
 };
 
 const voidPurchaseCreditFromXeroTransaction: TransactionDefinition = {
   id: "void-purchase-credit-from-xero",
   description:
-    "Mirrors a supplier credit Xero reports VOIDED or DELETED: reverses every live row drawing on it, refolds the bills those rows credited, marks the credit void and recounts its purchase lines, in one commit conditioned on every document's version. Never writes to Xero. Fires on: the first webhook that sees the credit void.",
+    "Mirrors a supplier credit Xero reports VOIDED or DELETED: reverses every live row drawing on it, refolds the bills those rows credited, marks the credit void, in one commit conditioned on every document's version. Never writes to Xero. Fires on: the first webhook that sees the credit void.",
   steps: [
     "void-purchase-credit-from-xero:void-to-settlements",
     "void-purchase-credit-from-xero:settlements-to-bill",
     "void-purchase-credit-from-xero:settlements-to-credit",
-    ...RECOUNT_STEPS,
     "update-purchase-bill:status-to-purchases",
     "update-purchase-credit:status-to-purchases",
   ],
@@ -1507,7 +1395,6 @@ const closePurchaseTransaction: TransactionDefinition = {
     ...STOCK_STEPS,
     ...PURCHASE_CUSTODY_STEPS,
     "purchase-card:purchases-to-card",
-    ...RECOUNT_STEPS,
   ],
 };
 
@@ -1564,13 +1451,11 @@ export const purchases: PropagationModule = {
     ...closePurchaseBillRules,
     ...voidPurchaseBillFromXeroRules,
     settlementsToCreditRule("void-purchase-bill-from-xero:settlements-to-credit", "void-purchase-bill-from-xero"),
-    ...createPurchaseCreditRules,
     ...allocatePurchaseCreditRules,
     ...reversePurchaseCreditAllocationRules,
     ...closePurchaseRules,
     ...settlePurchaseCreditRules,
     ...voidPurchaseCreditFromXeroRules,
-    ...purchaseBilledRules,
   ],
   transactions: [
     createPurchaseTransaction,

@@ -300,6 +300,7 @@ export function billExtensionSections(
         const line = projectPurchaseLineToBillLine(entry.item, {
           uid_purchase: P,
           quantity: entry.quantity,
+          from: 0,
           counts: [...entry.group.extension_counts],
         });
         // An extension bills more days of a leg; it is not an exchange, so it keeps no
@@ -352,32 +353,6 @@ export function creditTimeCounts(line: LineAccount, quantity: number): TierCount
 /** Two window sets name the same dates, in order. */
 function sameWindowDates(a: readonly { start: string; end: string }[], b: readonly { start: string; end: string }[]): boolean {
   return a.length === b.length && a.every((w, i) => Date.parse(w.start) === Date.parse(b[i].start) && Date.parse(w.end) === Date.parse(b[i].end));
-}
-
-/**
- * **A purchase's rows with each line's `quantity_billed` recounted** from its
- * documents (api-cloudrun#1441). A flat line's count is the fold's
- * ({@link purchaseBillingFold}) floored at 0, because the schema's bucket is
- * `.min(0)`; the diff keeps the unfloored number. A time line and a divider
- * come back as they went in.
- *
- * ⚠️ `quantity_billed` is recounted, never kept by delta: a bill line's
- * quantity changes, so a delta here would release the wrong number on a void.
- * (Its retired siblings `quantity_received` / `quantity_returned` are custody
- * now, read off the inbound bookings and the journal, C8.) Pass EVERY bill and credit of the purchase, including the one the
- * caller is writing.
- */
-export function recomputePurchaseQuantityBilled(
-  purchase: Pick<Purchase, "items">,
-  documents: PurchaseBilledDocuments,
-): PurchaseRow[] {
-  const fold = purchaseBillingFold(documents);
-  return purchase.items.map((row) => {
-    if (row.type === "destination" || row.type === "group") return row;
-    return purchaseItemBasis(row) === "flat"
-      ? { ...row, quantity_billed: Math.max(0, fold.byPath.get(row.path.join("/"))?.quantity ?? 0) }
-      : row;
-  });
 }
 
 // ── Money ───────────────────────────────────────────────────────
@@ -744,12 +719,14 @@ export interface ProjectBillLineOptions {
   /** The units billed (the operator's input). */
   quantity: number;
   /**
-   * The unit the share starts after — the line's `quantity_billed` by default
-   * (the next bill continues where the last stopped). The sync's projector
-   * passes `0`: it projects the WHOLE line, as an order line projects whole.
-   * A flat line only.
+   * The unit the share starts after. A new bill continues where the line's
+   * billing stands: the ACTED billed units (`actedBilledUnits` over
+   * {@link purchaseBillingFold}, ruling 42). The sync's projector passes `0`:
+   * it projects the WHOLE line, as an order line projects whole. A TIME line
+   * reads nothing from it; its callers pass `0`. Required, so no caller falls
+   * back on a stored count.
    */
-  from?: number;
+  from: number;
   /**
    * A TIME line's counts to bill: an extension row's added counts
    * ({@link billExtensionSections}), or a credit's ({@link creditTimeCounts}).
@@ -762,7 +739,7 @@ export interface ProjectBillLineOptions {
  * **Default a bill line from its purchase line** (D5). Name, formula, discount
  * terms, posting and attribution are the purchase line's (each then
  * overridable on the bill until it settles). The amount is `quantity` units of
- * the line from where its `quantity_billed` stands, by the one line-money
+ * the line from `from` (where its billing stands), by the one line-money
  * function (`lineUnitsCents`, defined past the ordered count because
  * over-billing is legal), so the bills of a line sum to its `amount_cents`.
  *
@@ -782,7 +759,7 @@ export function projectPurchaseLineToBillLine(
   opts: ProjectBillLineOptions,
 ): PurchaseDocumentItem {
   if (item.price.price_formula.basis === "time") return projectTimeLine(item, opts);
-  const before = opts.from ?? item.quantity_billed ?? 0;
+  const before = opts.from;
   const part = partMoney(item, before, before + opts.quantity);
   const amount_cents = part.amount_cents;
   const price: PurchaseDocumentLinePrice = flatPayablePrice({

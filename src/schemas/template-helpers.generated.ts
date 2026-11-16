@@ -338,6 +338,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "crmsAuthoredInvoices", expr: "it.quantityAccounting.crmsAuthoredInvoices(invoices)", desc: "The uids of the LIVE invoices CRMS authored — a remainder refuses when any exist.", returns: "string[]" },
     { name: "orderLineWindow", expr: "it.quantityAccounting.orderLineWindow(destinations, path)", desc: "The window of the order pair an order line hangs under (`path[0]`), or `null`.", returns: "BilledWindow | null" },
     { name: "pairWindow", expr: "it.quantityAccounting.pairWindow(pair)", desc: "A pair's {@link BilledWindow}, or `null` when it has no windows.", returns: "BilledWindow | null" },
+    { name: "remainingToBill", expr: "it.quantityAccounting.remainingToBill(item, billedUnits)", desc: "**Units of a line still to bill** (ruling 42's one remaining-to-bill engine): ordered less what is billed, floored at 0, so an over-billed line (legal, flagged by the diff) has nothing left. Pass the ACTED billed units ({@link actedBilledUnits}).", returns: "number" },
     { name: "sameWindowDates", expr: "it.quantityAccounting.sameWindowDates(a, b)", desc: "Whether two window lists cover the same Chicago calendar dates, window for window, in order.", returns: "boolean" },
   ],
   "replacements": [

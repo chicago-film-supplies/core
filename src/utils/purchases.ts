@@ -216,8 +216,16 @@ export type PurchaseLineCloseOutcome =
  *
  * Only the facts both sides need live here; restating the money, keeping the
  * booking and moving the window are the writer's.
+ *
+ * @param item - The purchase line
+ * @param custody - The row's custody (`custodyBySourceItem`)
+ * @param billedUnits - What the billing fold bills at the line, ACTED (`actedBilledUnits`, ruling 42)
  */
-export function purchaseLineCloseOutcome(item: PurchaseItem, custody: PurchaseLineCustody): PurchaseLineCloseOutcome {
+export function purchaseLineCloseOutcome(
+  item: PurchaseItem,
+  custody: PurchaseLineCustody,
+  billedUnits: number,
+): PurchaseLineCloseOutcome {
   const to = (quantity: number): PurchaseLineCloseOutcome =>
     quantity === 0 ? { kind: "remove" } : { kind: "lower", quantity };
   switch (item.type) {
@@ -227,7 +235,7 @@ export function purchaseLineCloseOutcome(item: PurchaseItem, custody: PurchaseLi
     case "service":
     case "replacement":
       if (purchaseItemBasis(item) === "time") return { kind: "end_window" };
-      return to(Math.min(item.quantity, item.quantity_billed ?? 0));
+      return to(Math.min(item.quantity, billedUnits));
     default: {
       const unreachable: never = item;
       throw new Error(`purchaseLineCloseOutcome: unknown item ${JSON.stringify(unreachable)}`);
@@ -244,19 +252,11 @@ export function remainingToReceive(
 }
 
 /**
- * Units of a FLAT item still to be billed: `quantity − canceled − billed`,
- * never below 0 — an over-billed line (legal since D5, flagged by the diff) has
- * nothing left.
- *
- * ⚠️ **Not for a TIME line**, which has no billed count (`quantity_billed:
- * null`): what it still owes is its units' unbilled charge windows, read by
- * the bill projector, not a number here.
+ * Units of a line still to be billed: ordered less billed, floored at 0. The one
+ * engine lives with the account (ruling 42); its home here is kept (the C8
+ * precedent `remainingToReceive` set: the name stays, the input changes).
  */
-export function remainingToBill(
-  item: { quantity: number; quantity_billed: number },
-): number {
-  return Math.max(0, item.quantity - item.quantity_billed);
-}
+export { remainingToBill } from "./quantityAccounting.ts";
 
 /**
  * Units of a SUBRENT line still to go back to the supplier: `received −

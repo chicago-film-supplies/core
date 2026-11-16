@@ -333,7 +333,7 @@ export interface XeroEventLogRecord {
   item_name?: string;
   /** `purchase_bill_void_release_clamped`: the units the bill's lines name for the item. */
   quantity_on_bill?: number;
-  /** `purchase_bill_void_release_clamped`: the units actually released from `quantity_billed`. */
+  /** `purchase_bill_void_release_clamped`: the units actually released from the line's retired billed count (ruling 42; the arm is dead and drops on its `droppableAfter` date). */
   quantity_released?: number;
   /** The supplier credit a `purchase_credit_*` arm is about. Its uid IS the document id. */
   uid_purchase_credit?: string;
