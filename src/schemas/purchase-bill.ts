@@ -569,7 +569,9 @@ function documentLineIssues(
     { price: item.price, amount_cents: item.amount_cents, quantity: item.quantity },
     "document",
   );
-  issues.push(...payablePostingIssues(item.type, item.ledger_account), ...kitHeaderIssues(item), ...zeroPricedMoneyIssues(item));
+  // A bill line and a supplier credit line share this check; the payable credit
+  // class IS the billing class (`schemas/side.ts`, pinned in `tests/side.test.ts`).
+  issues.push(...payablePostingIssues(item.type, item.ledger_account, "billing"), ...kitHeaderIssues(item), ...zeroPricedMoneyIssues(item));
   // The credit line's shape rules, shared with the AR note and keyed on the
   // POINTER (ruling 34; Q4 ruling 106, Q6 ruling 108): an unpointed time line
   // states the counts it moves — a pushed one, since a linked one's money is

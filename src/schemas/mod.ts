@@ -36,6 +36,7 @@ export {
 export {
   type LineCustody,
   type PostingClass,
+  type PostingRole,
   SHARED_LINE_TYPES,
   type SharedLineType,
   type Side,

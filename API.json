@@ -4604,6 +4604,12 @@
         },
         {
           "kind": "typeAlias",
+          "name": "PostingRole",
+          "declaration": "type PostingRole = \"initiator\" | \"billing\" | \"credit\";",
+          "doc": "The roles whose lines state an account: the initiator, its billing documents, and its credits."
+        },
+        {
+          "kind": "typeAlias",
           "name": "PreTaxItemType",
           "declaration": "type PreTaxItemType = indexedAccess;",
           "doc": "The `pricing: \"pre_tax\"` members — every type that counts INTO the document\nsubtotal.\n\nDerived from {@link ITEM_CONTRACTS} rather than listed. A hand-written copy of\nthis union is exactly the drift the parity assertions above exist to prevent,\nand `@cfs/core/utils/orders` carried one — `PreTaxLineItem[\"type\"]` was the\nliteral list `\"rental\" | \"sale\" | \"service\" | \"surcharge\" | \"replacement\"`,\na sixth place to remember when a type is added."
@@ -6183,7 +6189,7 @@
         {
           "kind": "interface",
           "name": "SideContract",
-          "declaration": "interface SideContract {\n  line_labels: Readonly<Record<SharedLineType, string>>;\n  posting_class: Readonly<Record<SharedLineType, PostingClass>>;\n  custody: Readonly<Record<SharedLineType, LineCustody>>;\n  tax: SideTax;\n  xero_line_money: Readonly<Record<XeroDocumentRole, XeroLineMoney>>;\n  custody_ladder: BookingLadderType;\n}",
+          "declaration": "interface SideContract {\n  line_labels: Readonly<Record<SharedLineType, string>>;\n  posting_class: Readonly<Record<PostingRole, Readonly<Record<SharedLineType, PostingClass>>>>;\n  custody: Readonly<Record<SharedLineType, LineCustody>>;\n  tax: SideTax;\n  xero_line_money: Readonly<Record<XeroDocumentRole, XeroLineMoney>>;\n  custody_ladder: BookingLadderType;\n}",
           "doc": "One side's entries. Total over {@link SharedLineType}, so a new type is a compile error until both sides state it."
         },
         {
@@ -8812,8 +8818,8 @@
         {
           "kind": "function",
           "name": "payablePostingIssues",
-          "signature": "payablePostingIssues(type: SharedLineType, account: number | null): typeLiteral[]",
-          "doc": "May a payable line of `type` post to `account`? The class is\n`SIDE_CONTRACTS.payable.posting_class[type]` (`schemas/side.ts`):\n\n- `asset_or_expensed` (a Buy) — `COA_ASSET_CODES`, plus the TEMPORARY\n  `COA_EXPENSED_ASSET_CODES` (de minimis acquisitions expensed directly;\n  owner, 2026-11-07);\n- `cost` (a Subrent) — `COA_COST_CODES`;\n- `any` (a Charge or Replacement) — any `COACode`.\n\nOne rule for the purchase, bill and credit lines alike. Until 2026-11 a bill\nline took any account while the purchase's buy took an asset one; the\ncensus found the bills' non-asset buys were all de minimis acquisitions\n(6500 / 6300) plus one mis-coding (6000) the owner recodes.",
+          "signature": "payablePostingIssues(type: SharedLineType, account: number | null, role: PostingRole): typeLiteral[]",
+          "doc": "May a payable line of `type`, on a document of posting `role`, post to\n`account`? The class is `SIDE_CONTRACTS.payable.posting_class[role][type]`\n(`schemas/side.ts`):\n\n- `asset_or_expensed` (a Buy) — `COA_ASSET_CODES`, plus the TEMPORARY\n  `COA_EXPENSED_ASSET_CODES` (de minimis acquisitions expensed directly;\n  owner, 2026-11-07);\n- `cost` (a Subrent) — `COA_COST_CODES`;\n- `any` (a Charge or Replacement) — any `COACode`.\n\nOne rule for the purchase, bill and credit lines alike. Until 2026-11 a bill\nline took any account while the purchase's buy took an asset one; the\ncensus found the bills' non-asset buys were all de minimis acquisitions\n(6500 / 6300) plus one mis-coding (6000) the owner recodes.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -14396,8 +14402,8 @@
         {
           "kind": "function",
           "name": "payablePostingIssues",
-          "signature": "payablePostingIssues(type: SharedLineType, account: number | null): typeLiteral[]",
-          "doc": "May a payable line of `type` post to `account`? The class is\n`SIDE_CONTRACTS.payable.posting_class[type]` (`schemas/side.ts`):\n\n- `asset_or_expensed` (a Buy) — `COA_ASSET_CODES`, plus the TEMPORARY\n  `COA_EXPENSED_ASSET_CODES` (de minimis acquisitions expensed directly;\n  owner, 2026-11-07);\n- `cost` (a Subrent) — `COA_COST_CODES`;\n- `any` (a Charge or Replacement) — any `COACode`.\n\nOne rule for the purchase, bill and credit lines alike. Until 2026-11 a bill\nline took any account while the purchase's buy took an asset one; the\ncensus found the bills' non-asset buys were all de minimis acquisitions\n(6500 / 6300) plus one mis-coding (6000) the owner recodes.",
+          "signature": "payablePostingIssues(type: SharedLineType, account: number | null, role: PostingRole): typeLiteral[]",
+          "doc": "May a payable line of `type`, on a document of posting `role`, post to\n`account`? The class is `SIDE_CONTRACTS.payable.posting_class[role][type]`\n(`schemas/side.ts`):\n\n- `asset_or_expensed` (a Buy) — `COA_ASSET_CODES`, plus the TEMPORARY\n  `COA_EXPENSED_ASSET_CODES` (de minimis acquisitions expensed directly;\n  owner, 2026-11-07);\n- `cost` (a Subrent) — `COA_COST_CODES`;\n- `any` (a Charge or Replacement) — any `COACode`.\n\nOne rule for the purchase, bill and credit lines alike. Until 2026-11 a bill\nline took any account while the purchase's buy took an asset one; the\ncensus found the bills' non-asset buys were all de minimis acquisitions\n(6500 / 6300) plus one mis-coding (6000) the owner recodes.",
           "paramTags": [],
           "returnsTag": null
         },

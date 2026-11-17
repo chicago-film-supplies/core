@@ -178,7 +178,7 @@ import {
 import { LedgerPostingCore, LineItemCore, LineTaxCore, PayableKitLedgerAccount } from "./_items.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import { type InboundBreakdown, InboundBreakdownSchema } from "./_inbound-breakdown.ts";
-import { SIDE_CONTRACTS, type SharedLineType } from "./side.ts";
+import { type PostingRole, SIDE_CONTRACTS, type SharedLineType } from "./side.ts";
 import {
   type PriceFormulaBasis,
   type PriceFormulaRef,
@@ -866,8 +866,9 @@ const quantityKey = z.int().min(1).meta({ column: true, label: "Quantity", ...fl
 const amountKey = z.int().min(0).meta({ column: true, label: "Amount", ...flatMoney });
 
 /**
- * May a payable line of `type` post to `account`? The class is
- * `SIDE_CONTRACTS.payable.posting_class[type]` (`schemas/side.ts`):
+ * May a payable line of `type`, on a document of posting `role`, post to
+ * `account`? The class is `SIDE_CONTRACTS.payable.posting_class[role][type]`
+ * (`schemas/side.ts`):
  *
  * - `asset_or_expensed` (a Buy) — `COA_ASSET_CODES`, plus the TEMPORARY
  *   `COA_EXPENSED_ASSET_CODES` (de minimis acquisitions expensed directly;
@@ -883,9 +884,10 @@ const amountKey = z.int().min(0).meta({ column: true, label: "Amount", ...flatMo
 export function payablePostingIssues(
   type: SharedLineType,
   account: number | null,
+  role: PostingRole,
 ): { path: (string | number)[]; message: string }[] {
   if (account === null) return [];
-  const cls = SIDE_CONTRACTS.payable.posting_class[type];
+  const cls = SIDE_CONTRACTS.payable.posting_class[role][type];
   const allowed: readonly number[] | null = cls === "asset_or_expensed"
     ? [...COA_ASSET_CODES, ...COA_EXPENSED_ASSET_CODES]
     : cls === "cost"
@@ -956,7 +958,7 @@ const SaleItemInner = z.strictObject({
 }).superRefine((item, ctx) => {
   storedUidIssue(item, ctx);
   addIssues(purchaseLineMoneyIssues(item), ctx);
-  addIssues(payablePostingIssues(item.type, item.ledger_account), ctx);
+  addIssues(payablePostingIssues(item.type, item.ledger_account, "initiator"), ctx);
   addIssues(kitHeaderIssues(item), ctx);
   addIssues(zeroPricedMoneyIssues(item), ctx);
   addIssues(replacementIssues(item), ctx);
@@ -996,7 +998,7 @@ const RentalItemInner = z.strictObject({
 }).superRefine((item, ctx) => {
   storedUidIssue(item, ctx);
   addIssues(purchaseLineMoneyIssues(item), ctx);
-  addIssues(payablePostingIssues(item.type, item.ledger_account), ctx);
+  addIssues(payablePostingIssues(item.type, item.ledger_account, "initiator"), ctx);
   addIssues(kitHeaderIssues(item), ctx);
   addIssues(zeroPricedMoneyIssues(item), ctx);
 });
@@ -1015,7 +1017,7 @@ function noCustodyIssues(
 ): void {
   storedUidIssue(item, ctx);
   addIssues(purchaseLineMoneyIssues(item), ctx);
-  addIssues(payablePostingIssues(item.type, item.ledger_account), ctx);
+  addIssues(payablePostingIssues(item.type, item.ledger_account, "initiator"), ctx);
   addIssues(replacementIssues(item), ctx);
   if (item.type === "replacement") {
     for (const [path, message] of outOfServiceLinkIssues(item)) {
@@ -1770,7 +1772,7 @@ function inputPostingIssue(
   ctx: z.RefinementCtx,
 ): void {
   addIssues(payableInputStatedIssues(item), ctx);
-  if (item.ledger_account !== undefined) addIssues(payablePostingIssues(item.type, item.ledger_account), ctx);
+  if (item.ledger_account !== undefined) addIssues(payablePostingIssues(item.type, item.ledger_account, "initiator"), ctx);
   if (item.type !== "rental" && item.price?.replacement_cents != null) {
     ctx.addIssue({ code: "custom", path: ["price", "replacement_cents"], message: "only a subrent line states a replacement" });
   }

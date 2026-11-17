@@ -96,12 +96,22 @@ export type XeroLineMoney = "exact_split" | "unit_amount";
 /** The billing and credit documents, the two roles that post lines to Xero. */
 export type XeroDocumentRole = "billing" | "credit";
 
+/** The roles whose lines state an account: the initiator, its billing documents, and its credits. */
+export type PostingRole = "initiator" | "billing" | "credit";
+
 /** One side's entries. Total over {@link SharedLineType}, so a new type is a compile error until both sides state it. */
 export interface SideContract {
   /** The operator-facing name of each shared line type on this side. */
   line_labels: Readonly<Record<SharedLineType, string>>;
-  /** What each shared line type may post to. */
-  posting_class: Readonly<Record<SharedLineType, PostingClass>>;
+  /**
+   * What each shared line type may post to, per posting role (F14 item 7). The
+   * role decides on the receivable side: an initiator or billing line posts to
+   * revenue, while a credit line may post away from the revenue it reverses (a
+   * bad-debt note to 6900), so it takes any account and records the revenue it
+   * reverses as `source_ledger_account`. A supplier credit posts to the account
+   * of the line it credits, so the payable credit class is the billing class.
+   */
+  posting_class: Readonly<Record<PostingRole, Readonly<Record<SharedLineType, PostingClass>>>>;
   /** Whether each shared line type moves custody. */
   custody: Readonly<Record<SharedLineType, LineCustody>>;
   /** How the side's lines are taxed. */
@@ -125,7 +135,11 @@ export interface SideContract {
 export const SIDE_CONTRACTS: Readonly<Record<Side, SideContract>> = {
   receivable: {
     line_labels: { sale: "Sale", rental: "Rental", service: "Service", replacement: "Replacement" },
-    posting_class: { sale: "revenue", rental: "revenue", service: "revenue", replacement: "revenue" },
+    posting_class: {
+      initiator: { sale: "revenue", rental: "revenue", service: "revenue", replacement: "revenue" },
+      billing: { sale: "revenue", rental: "revenue", service: "revenue", replacement: "revenue" },
+      credit: { sale: "any", rental: "any", service: "any", replacement: "any" },
+    },
     custody: { sale: "custody", rental: "custody", service: "custody", replacement: "none" },
     tax: "resolved",
     xero_line_money: { billing: "unit_amount", credit: "exact_split" },
@@ -133,7 +147,11 @@ export const SIDE_CONTRACTS: Readonly<Record<Side, SideContract>> = {
   },
   payable: {
     line_labels: { sale: "Buy", rental: "Subrent", service: "Charge", replacement: "Replacement" },
-    posting_class: { sale: "asset_or_expensed", rental: "cost", service: "any", replacement: "any" },
+    posting_class: {
+      initiator: { sale: "asset_or_expensed", rental: "cost", service: "any", replacement: "any" },
+      billing: { sale: "asset_or_expensed", rental: "cost", service: "any", replacement: "any" },
+      credit: { sale: "asset_or_expensed", rental: "cost", service: "any", replacement: "any" },
+    },
     custody: { sale: "custody", rental: "custody", service: "none", replacement: "none" },
     tax: "exempt",
     xero_line_money: { billing: "exact_split", credit: "exact_split" },

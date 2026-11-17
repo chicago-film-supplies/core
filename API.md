@@ -10434,6 +10434,14 @@ Which accounts a line of one type may post to (its `ledger_account`):
 type PostingClass = "revenue" | "asset_or_expensed" | "cost" | "any";
 ```
 
+### `PostingRole`
+
+The roles whose lines state an account: the initiator, its billing documents, and its credits.
+
+```ts
+type PostingRole = "initiator" | "billing" | "credit";
+```
+
 ### `PreTaxItemType`
 
 The `pricing: "pre_tax"` members — every type that counts INTO the document
@@ -13773,7 +13781,7 @@ One side's entries. Total over {@link SharedLineType}, so a new type is a compil
 ```ts
 interface SideContract {
   line_labels: Readonly<Record<SharedLineType, string>>;
-  posting_class: Readonly<Record<SharedLineType, PostingClass>>;
+  posting_class: Readonly<Record<PostingRole, Readonly<Record<SharedLineType, PostingClass>>>>;
   custody: Readonly<Record<SharedLineType, LineCustody>>;
   tax: SideTax;
   xero_line_money: Readonly<Record<XeroDocumentRole, XeroLineMoney>>;
@@ -18904,10 +18912,11 @@ or `replacement` line's names a catalog product or is `custom-`.
 Attached to every stored purchase line arm and, through `documentItemsIssues`
 (`schemas/purchase-bill.ts`), to every bill and supplier-credit line.
 
-### `payablePostingIssues(type: SharedLineType, account: number | null): typeLiteral[]`
+### `payablePostingIssues(type: SharedLineType, account: number | null, role: PostingRole): typeLiteral[]`
 
-May a payable line of `type` post to `account`? The class is
-`SIDE_CONTRACTS.payable.posting_class[type]` (`schemas/side.ts`):
+May a payable line of `type`, on a document of posting `role`, post to
+`account`? The class is `SIDE_CONTRACTS.payable.posting_class[role][type]`
+(`schemas/side.ts`):
 
 - `asset_or_expensed` (a Buy) — `COA_ASSET_CODES`, plus the TEMPORARY
   `COA_EXPENSED_ASSET_CODES` (de minimis acquisitions expensed directly;
@@ -30503,10 +30512,11 @@ or `replacement` line's names a catalog product or is `custom-`.
 Attached to every stored purchase line arm and, through `documentItemsIssues`
 (`schemas/purchase-bill.ts`), to every bill and supplier-credit line.
 
-### `payablePostingIssues(type: SharedLineType, account: number | null): typeLiteral[]`
+### `payablePostingIssues(type: SharedLineType, account: number | null, role: PostingRole): typeLiteral[]`
 
-May a payable line of `type` post to `account`? The class is
-`SIDE_CONTRACTS.payable.posting_class[type]` (`schemas/side.ts`):
+May a payable line of `type`, on a document of posting `role`, post to
+`account`? The class is `SIDE_CONTRACTS.payable.posting_class[role][type]`
+(`schemas/side.ts`):
 
 - `asset_or_expensed` (a Buy) — `COA_ASSET_CODES`, plus the TEMPORARY
   `COA_EXPENSED_ASSET_CODES` (de minimis acquisitions expensed directly;

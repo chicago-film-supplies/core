@@ -32,9 +32,10 @@ Deno.test("SIDE_CONTRACTS is total over both sides and every shared line type", 
   assertEquals(Object.keys(SIDE_CONTRACTS).sort(), [...SIDES].sort());
   for (const side of SIDES) {
     const c = SIDE_CONTRACTS[side];
-    for (const entry of [c.line_labels, c.posting_class, c.custody]) {
+    for (const entry of [c.line_labels, c.custody, ...Object.values(c.posting_class)]) {
       assertEquals(Object.keys(entry).sort(), [...SHARED_LINE_TYPES].sort(), side);
     }
+    assertEquals(Object.keys(c.posting_class).sort(), ["billing", "credit", "initiator"], side);
   }
 });
 
@@ -88,7 +89,7 @@ Deno.test("payable labels are the operator's names: Buy, Subrent, Charge", () =>
 
 Deno.test("payablePostingIssues: each class against the account lists it names", () => {
   const ok = (type: Parameters<typeof payablePostingIssues>[0], code: number) =>
-    payablePostingIssues(type, code).length === 0;
+    payablePostingIssues(type, code, "billing").length === 0;
   for (const code of [...COA_ASSET_CODES, ...COA_EXPENSED_ASSET_CODES]) assert(ok("sale", code), `sale ${code}`);
   for (const code of [6000, 5100, 4000]) assert(!ok("sale", code), `sale ${code} must be refused`);
   for (const code of COA_COST_CODES) assert(ok("rental", code), `rental ${code}`);
@@ -97,7 +98,17 @@ Deno.test("payablePostingIssues: each class against the account lists it names",
     assert(ok("service", code), `service ${code}`);
     assert(ok("replacement", code), `replacement ${code}`);
   }
-  assertEquals(payablePostingIssues("sale", 6000)[0].path, ["ledger_account"]);
+  assertEquals(payablePostingIssues("sale", 6000, "initiator")[0].path, ["ledger_account"]);
+});
+
+Deno.test("posting_class is role-keyed (F14 item 7): an AR credit may post anywhere, a supplier credit posts as its bill does", () => {
+  // A bad-debt note posts to 6900, away from the revenue it reverses; a revenue-only
+  // class on the credit role would refuse every one of them once Phase 8 attaches the refine.
+  assertEquals(Object.values(SIDE_CONTRACTS.receivable.posting_class.credit), ["any", "any", "any", "any"]);
+  assertEquals(SIDE_CONTRACTS.receivable.posting_class.billing.sale, "revenue");
+  // `purchase-bill.ts` checks bill and supplier-credit lines with the BILLING class.
+  assertEquals(SIDE_CONTRACTS.payable.posting_class.credit, SIDE_CONTRACTS.payable.posting_class.billing);
+  assertEquals(SIDE_CONTRACTS.payable.posting_class.initiator, SIDE_CONTRACTS.payable.posting_class.billing);
 });
 
 Deno.test("each payable union refuses the receivable-only and the retired types", () => {
