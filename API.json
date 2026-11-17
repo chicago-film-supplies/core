@@ -1683,7 +1683,7 @@
         {
           "kind": "interface",
           "name": "CreditNote",
-          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  items: CreditNoteDocLineItem[];\n  totals: CreditNoteDocTotals;\n  remaining_credit_cents: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_credit_note_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  items: CreditNoteDocItemType[];\n  destinations?: InvoiceDocDestinationType[];\n  totals: CreditNoteDocTotals;\n  remaining_credit_cents: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_id?: string | null;\n  xero_credit_note_id?: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A credit note issued to an organization."
         },
         {
@@ -1701,7 +1701,7 @@
         {
           "kind": "interface",
           "name": "CreditNoteDocLineItem",
-          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  coa_revenue: COARevenueType | null;\n  coa_posting: number;\n  uid_tracking_category: string | null;\n  xero_id: string | null;\n  uid_invoice_item: string | null;\n  path_invoice_item?: string[];\n  reverses_billing: boolean;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  coa_revenue?: COARevenueType | null;\n  coa_posting?: number;\n  ledger_account?: COACodeType;\n  source_ledger_account?: COARevenueType | null;\n  uid_tracking_category: string | null;\n  xero_id: string | null;\n  uid_invoice_item?: string | null;\n  path_invoice_item?: string[];\n  uid_billing?: string;\n  path_billing_item?: string[];\n  path?: string[];\n  reverses_billing: boolean;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "A credited line.\n\n**`coa_revenue` is required, not optional.** A credit spanning lines with\ndifferent revenue accounts (#1689 hits 4000 and 4100; #1322 is all 4210)\ncannot be posted correctly from a document-level amount, and apportioning it\nafterwards is inferring cause from effect — the thing `schemas/transaction.ts` warns\nagainst. This is also the gap Xero *has*: its allocation view carries\n`LineItems: []`, and Odoo's users pay OCA for a module that adds line-level\nprovenance.\n\n**No dividers.** A credit note has no destinations and bills no orders, so the\nwhole `ORDER_ITEM_LEVELS` / `INVOICE_ITEM_LEVELS` hierarchy — and the `path`\nmachinery that goes with it — has nothing to organize here. Lines are flat.\n\n## `coa_revenue` and `coa_posting` are TWO facts, and a line has both\n\nThey are routinely different, and collapsing them loses real information.\nMeasured on the live tenant: CN-1009 writes off 35 lines whose products are\nrentals — `product.price.coa_revenue` 4000 Rental Income — and every one of\nthem posts to **6900 Bad Debt**. Store only the posting account and the\nrevenue attribution that tracking-category rollups and the tax tables depend\non is gone; store only the revenue account and the write-off is invisible.\n\n- **`coa_revenue`** — the revenue account of the *thing being credited*.\n  Product-sourced, same vocabulary as the invoice line it mirrors. Never the\n  account the credit posts to, and — since the owner ruling of 2026-08-20 —\n  never an input to what the line is taxed either.\n- **`coa_posting`** — where this credit lands in the ledger. Any account in\n  the `chart-of-accounts` catalog, including the expense range, which is\n  exactly why it cannot be `COARevenueEnum`: that enum is shared with\n  `Product.price.coa_revenue`, and widening it would make a catalog product\n  whose revenue account is Bad Debt Expense representable."
         },
         {
@@ -3189,13 +3189,13 @@
         {
           "kind": "typeAlias",
           "name": "LeadingDividerGrain",
-          "declaration": "type LeadingDividerGrain = \"order\" | \"fulfillment\" | \"invoice\" | \"purchase\" | \"purchase_receipt\" | \"purchase_document\";",
+          "declaration": "type LeadingDividerGrain = \"order\" | \"fulfillment\" | \"invoice\" | \"purchase\" | \"purchase_receipt\" | \"purchase_document\" | \"credit_note\";",
           "doc": "Which document a {@link leadingDividerViolations} call is judging."
         },
         {
           "kind": "interface",
           "name": "LeadingDividerViolation",
-          "declaration": "interface LeadingDividerViolation {\n  expected: \"destination\" | \"order\" | \"purchase\";\n  found: string | null;\n}",
+          "declaration": "interface LeadingDividerViolation {\n  expected: \"destination\" | \"order\" | \"purchase\";\n  or_billing?: true;\n  found: string | null;\n}",
           "doc": "A document whose first row is not the divider its grain leads with."
         },
         {
@@ -8009,8 +8009,8 @@
         {
           "kind": "function",
           "name": "deriveCreditNoteSources",
-          "signature": "deriveCreditNoteSources(billing: readonly CreditNoteBillingSource[], items: readonly Pick<CreditNoteDocLineItem, \"path_invoice_item\">[]): Pick<CreditNote, \"sources\" | \"query_by_sources\">",
-          "doc": "**The one author of an AR credit note's `sources`** (one-document-model\nruling 32), the twin of `derivePurchaseCreditSources`: the orders it credits,\nthen each invoice it credits, in the order given. `query_by_sources` is\n`<collection>:<uid>` of each, so `orders:<uid>` is what an order-scoped read\n(`order.credit_notes[]`, the over-billing cap) queries on.\n\nWhich orders: for each invoice, the order a pointed line's\n`path_invoice_item[0]` names (an order divider's uid IS its order's uid), kept\nonly when the invoice bills that order — an invoice-authored subtree's first\nsegment names no order. An invoice that holds a line with NO pointer\ncontributes every order it bills, because the line cannot say which (ruling\n52: the 13 notes stored before 2026-09-15 point no line, and are backfilled\nfrom the invoices their allocations name). Over-naming is the safe direction:\na missing `orders:` key hides a credit from its order, an extra one only\nlists it there.\n\n⚠️ Until ruling 34 gives every line `uid_billing`, a line's pointer cannot\nsay WHICH invoice it is on, so the pointers are matched against every\ninvoice. Today every note credits at most one, so the two are the same.",
+          "signature": "deriveCreditNoteSources(billing: readonly CreditNoteBillingSource[], items: readonly CreditSourceRow[]): Pick<CreditNote, \"sources\" | \"query_by_sources\">",
+          "doc": "**The one author of an AR credit note's `sources`** (one-document-model\nruling 32), the twin of `derivePurchaseCreditSources`: the orders it credits,\nthen each invoice it credits, in the order given. `query_by_sources` is\n`<collection>:<uid>` of each, so `orders:<uid>` is what an order-scoped read\n(`order.credit_notes[]`, the over-billing cap) queries on.\n\nWhich orders: for each invoice, the order a pointed line's\n`path_invoice_item[0]` names (an order divider's uid IS its order's uid), kept\nonly when the invoice bills that order — an invoice-authored subtree's first\nsegment names no order. An invoice that holds a line with NO pointer\ncontributes every order it bills, because the line cannot say which (ruling\n52: the 13 notes stored before 2026-09-15 point no line, and are backfilled\nfrom the invoices their allocations name). Over-naming is the safe direction:\na missing `orders:` key hides a credit from its order, an extra one only\nlists it there.\n\nThe order (ruling 34 item 8): the orders in order of first appearance, then\neach invoice in line order. A line's `uid_billing` says which invoice its\npointer is on; a retiring `path_invoice_item` cannot, so it is matched against\nevery invoice. (The docblock this replaced claimed every note credits at most\none invoice; CN-1015 credits two, harmless only because its lines are\nunpointed.)",
           "paramTags": [],
           "returnsTag": null
         },
@@ -12268,13 +12268,13 @@
         {
           "kind": "typeAlias",
           "name": "LeadingDividerGrain",
-          "declaration": "type LeadingDividerGrain = \"order\" | \"fulfillment\" | \"invoice\" | \"purchase\" | \"purchase_receipt\" | \"purchase_document\";",
+          "declaration": "type LeadingDividerGrain = \"order\" | \"fulfillment\" | \"invoice\" | \"purchase\" | \"purchase_receipt\" | \"purchase_document\" | \"credit_note\";",
           "doc": "Which document a {@link leadingDividerViolations} call is judging."
         },
         {
           "kind": "interface",
           "name": "LeadingDividerViolation",
-          "declaration": "interface LeadingDividerViolation {\n  expected: \"destination\" | \"order\" | \"purchase\";\n  found: string | null;\n}",
+          "declaration": "interface LeadingDividerViolation {\n  expected: \"destination\" | \"order\" | \"purchase\";\n  or_billing?: true;\n  found: string | null;\n}",
           "doc": "A document whose first row is not the divider its grain leads with."
         },
         {
@@ -14875,9 +14875,21 @@
           "doc": "The per-status credit-note contract. `Readonly<Record<CreditNoteStatusType, …>>`\nmakes a fifth status a type error here, at the declaration — the same\ntotality `INVOICE_STATUS_CONTRACTS` relies on."
         },
         {
+          "kind": "variable",
+          "name": "CreditDocBillingItem",
+          "declaration": "const CreditDocBillingItem: z.ZodType<CreditDocBillingItemType>;",
+          "doc": "Zod schema for a credit's billing divider row."
+        },
+        {
+          "kind": "interface",
+          "name": "CreditDocBillingItemType",
+          "declaration": "interface CreditDocBillingItemType {\n  uid: string;\n  type: \"billing\";\n  name: string;\n  path: string[];\n  description: string;\n}",
+          "doc": "A credit's `billing` divider row (ruling 107) — see `BillingDividerArm`\n(`schemas/_dividers.ts`), declared once for both credit row unions."
+        },
+        {
           "kind": "interface",
           "name": "CreditNote",
-          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  items: CreditNoteDocLineItem[];\n  totals: CreditNoteDocTotals;\n  remaining_credit_cents: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_credit_note_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  items: CreditNoteDocItemType[];\n  destinations?: InvoiceDocDestinationType[];\n  totals: CreditNoteDocTotals;\n  remaining_credit_cents: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_id?: string | null;\n  xero_credit_note_id?: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A credit note issued to an organization."
         },
         {
@@ -14887,15 +14899,27 @@
           "doc": "The billing-document facts {@link deriveCreditNoteSources} reads: an invoice and the orders it bills."
         },
         {
+          "kind": "variable",
+          "name": "CreditNoteDocItem",
+          "declaration": "const CreditNoteDocItem: z.ZodType<CreditNoteDocItemType>;",
+          "doc": "Zod schema for {@link CreditNoteDocItemType}."
+        },
+        {
           "kind": "interface",
           "name": "CreditNoteDocItemPrice",
           "declaration": "interface CreditNoteDocItemPrice {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  total_cents: number;\n}",
           "doc": "Pricing breakdown for a single credit-note line."
         },
         {
+          "kind": "typeAlias",
+          "name": "CreditNoteDocItemType",
+          "declaration": "type CreditNoteDocItemType = CreditNoteDocLineItem | CreditDocBillingItemType | InvoiceDocOrderItemType | InvoiceDocDestinationItemType | OrderDocGroupItemType;",
+          "doc": "Any row of an AR credit note's `items[]` (ruling 34 item 1): a line, or a\nbilling / order / destination / group divider, at\n`CREDIT_NOTE_ITEM_LEVELS` (`@cfs/core/utils/invoices`). A historic note holds\nlines only (ruling 53 keeps it flat)."
+        },
+        {
           "kind": "interface",
           "name": "CreditNoteDocLineItem",
-          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  coa_revenue: COARevenueType | null;\n  coa_posting: number;\n  uid_tracking_category: string | null;\n  xero_id: string | null;\n  uid_invoice_item: string | null;\n  path_invoice_item?: string[];\n  reverses_billing: boolean;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  coa_revenue?: COARevenueType | null;\n  coa_posting?: number;\n  ledger_account?: COACodeType;\n  source_ledger_account?: COARevenueType | null;\n  uid_tracking_category: string | null;\n  xero_id: string | null;\n  uid_invoice_item?: string | null;\n  path_invoice_item?: string[];\n  uid_billing?: string;\n  path_billing_item?: string[];\n  path?: string[];\n  reverses_billing: boolean;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "A credited line.\n\n**`coa_revenue` is required, not optional.** A credit spanning lines with\ndifferent revenue accounts (#1689 hits 4000 and 4100; #1322 is all 4210)\ncannot be posted correctly from a document-level amount, and apportioning it\nafterwards is inferring cause from effect — the thing `schemas/transaction.ts` warns\nagainst. This is also the gap Xero *has*: its allocation view carries\n`LineItems: []`, and Odoo's users pay OCA for a module that adds line-level\nprovenance.\n\n**No dividers.** A credit note has no destinations and bills no orders, so the\nwhole `ORDER_ITEM_LEVELS` / `INVOICE_ITEM_LEVELS` hierarchy — and the `path`\nmachinery that goes with it — has nothing to organize here. Lines are flat.\n\n## `coa_revenue` and `coa_posting` are TWO facts, and a line has both\n\nThey are routinely different, and collapsing them loses real information.\nMeasured on the live tenant: CN-1009 writes off 35 lines whose products are\nrentals — `product.price.coa_revenue` 4000 Rental Income — and every one of\nthem posts to **6900 Bad Debt**. Store only the posting account and the\nrevenue attribution that tracking-category rollups and the tax tables depend\non is gone; store only the revenue account and the write-off is invisible.\n\n- **`coa_revenue`** — the revenue account of the *thing being credited*.\n  Product-sourced, same vocabulary as the invoice line it mirrors. Never the\n  account the credit posts to, and — since the owner ruling of 2026-08-20 —\n  never an input to what the line is taxed either.\n- **`coa_posting`** — where this credit lands in the ledger. Any account in\n  the `chart-of-accounts` catalog, including the expense range, which is\n  exactly why it cannot be `COARevenueEnum`: that enum is shared with\n  `Product.price.coa_revenue`, and widening it would make a catalog product\n  whose revenue account is Bad Debt Expense representable."
         },
         {
@@ -14935,10 +14959,64 @@
           "doc": "Allowed credit-note statuses."
         },
         {
+          "kind": "interface",
+          "name": "CreditSourceRow",
+          "declaration": "interface CreditSourceRow {\n  type?: string;\n  uid_billing?: string;\n  path_billing_item?: string[];\n  path_invoice_item?: string[];\n}",
+          "doc": "The row keys {@link deriveCreditNoteSources} reads: a divider's `type`, a line's pointer."
+        },
+        {
+          "kind": "function",
+          "name": "creditLineBillingPointer",
+          "signature": "creditLineBillingPointer(line: Pick<CreditNoteDocLineItem, \"uid_billing\" | \"path_billing_item\" | \"path_invoice_item\">): typeLiteral | null",
+          "doc": "The billing row a credit line names: `uid_billing` + `path_billing_item`, else\nthe retiring `path_invoice_item` (whose invoice it cannot name, so `uid` is\n`undefined`). `null` for an unpointed line.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "creditLinePostingAccount",
+          "signature": "creditLinePostingAccount(line: Pick<CreditNoteDocLineItem, \"ledger_account\" | \"coa_posting\">): number | undefined",
+          "doc": "Where a credit line posts: `ledger_account`, else the retiring `coa_posting`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "creditLineShapeIssues",
+          "signature": "creditLineShapeIssues(line: typeLiteral): typeLiteral[]",
+          "doc": "**The credit line's shape rules, both sides** (ruling 34; Q4 ruling 106, Q6\nruling 108), keyed on the POINTER rather than the document type:\n\n- the pointer pair is set together (the payable rule, `purchase-bill.ts`);\n- a time-basis line naming no billing row states the time it moves of its own\n  (`counts` non-empty) — an unpointed credit, like an invoice line, prices\n  itself;\n- a line naming a billing row states only the time it takes BACK: empty\n  `counts` = whole units of the named row, non-empty = time per unit, which\n  only a time-basis row has (a flat row's `[flat 1/1]` copied onto a units\n  credit would read as a time credit).\n\n\"A credit naming an extension-section row states counts\" needs the billing\nrow, so the fold, not this refine, holds it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "creditLineSourceAccount",
+          "signature": "creditLineSourceAccount(line: Pick<CreditNoteDocLineItem, \"source_ledger_account\" | \"coa_revenue\">): COARevenueType | null",
+          "doc": "The revenue account credited: `source_ledger_account`, else the retiring `coa_revenue`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "creditNoteLines",
+          "signature": "creditNoteLines(rows: readonly CreditNoteDocItemType[]): CreditNoteDocLineItem[]",
+          "doc": "The lines of a credit note's rows, dividers dropped.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "creditNoteXeroId",
+          "signature": "creditNoteXeroId(note: Pick<CreditNote, \"xero_id\" | \"xero_credit_note_id\">): string | null",
+          "doc": "A credit note's Xero `CreditNoteID`: `xero_id`, else the retiring `xero_credit_note_id`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
           "kind": "function",
           "name": "deriveCreditNoteSources",
-          "signature": "deriveCreditNoteSources(billing: readonly CreditNoteBillingSource[], items: readonly Pick<CreditNoteDocLineItem, \"path_invoice_item\">[]): Pick<CreditNote, \"sources\" | \"query_by_sources\">",
-          "doc": "**The one author of an AR credit note's `sources`** (one-document-model\nruling 32), the twin of `derivePurchaseCreditSources`: the orders it credits,\nthen each invoice it credits, in the order given. `query_by_sources` is\n`<collection>:<uid>` of each, so `orders:<uid>` is what an order-scoped read\n(`order.credit_notes[]`, the over-billing cap) queries on.\n\nWhich orders: for each invoice, the order a pointed line's\n`path_invoice_item[0]` names (an order divider's uid IS its order's uid), kept\nonly when the invoice bills that order — an invoice-authored subtree's first\nsegment names no order. An invoice that holds a line with NO pointer\ncontributes every order it bills, because the line cannot say which (ruling\n52: the 13 notes stored before 2026-09-15 point no line, and are backfilled\nfrom the invoices their allocations name). Over-naming is the safe direction:\na missing `orders:` key hides a credit from its order, an extra one only\nlists it there.\n\n⚠️ Until ruling 34 gives every line `uid_billing`, a line's pointer cannot\nsay WHICH invoice it is on, so the pointers are matched against every\ninvoice. Today every note credits at most one, so the two are the same.",
+          "signature": "deriveCreditNoteSources(billing: readonly CreditNoteBillingSource[], items: readonly CreditSourceRow[]): Pick<CreditNote, \"sources\" | \"query_by_sources\">",
+          "doc": "**The one author of an AR credit note's `sources`** (one-document-model\nruling 32), the twin of `derivePurchaseCreditSources`: the orders it credits,\nthen each invoice it credits, in the order given. `query_by_sources` is\n`<collection>:<uid>` of each, so `orders:<uid>` is what an order-scoped read\n(`order.credit_notes[]`, the over-billing cap) queries on.\n\nWhich orders: for each invoice, the order a pointed line's\n`path_invoice_item[0]` names (an order divider's uid IS its order's uid), kept\nonly when the invoice bills that order — an invoice-authored subtree's first\nsegment names no order. An invoice that holds a line with NO pointer\ncontributes every order it bills, because the line cannot say which (ruling\n52: the 13 notes stored before 2026-09-15 point no line, and are backfilled\nfrom the invoices their allocations name). Over-naming is the safe direction:\na missing `orders:` key hides a credit from its order, an extra one only\nlists it there.\n\nThe order (ruling 34 item 8): the orders in order of first appearance, then\neach invoice in line order. A line's `uid_billing` says which invoice its\npointer is on; a retiring `path_invoice_item` cannot, so it is matched against\nevery invoice. (The docblock this replaced claimed every note credits at most\none invoice; CN-1015 credits two, harmless only because its lines are\nunpointed.)",
           "paramTags": [],
           "returnsTag": null
         },
@@ -14949,6 +15027,14 @@
           "doc": "Where a credit line posts, from the two facts that decide it.\n\n**Bad debt is not a revenue reversal, and that is the whole rule.** The money\n*was* owed — the sale stands — and the write-off moves it to Bad Debt so it\ncan be written off: `DR 6900 / CR A/R`. Everything else is a return or an\nallowance, where the customer never owed the money and the revenue itself is\nreversed: `DR <the line's own revenue account> / CR A/R`. `early_return` is\nthe clearest case of the second kind.\n\n**New notes derive this; history does not obey it.** Of the 12 notes in the\nlive tenant, 8 agree and 4 are miscodings the owner has ruled historic rather\nthan sanctioned — CN-1007 books a bad-debt write-off to 4210 (revenue), and\nCN-1010/1011/1012 book a customer credit to 6000 General Operating Expenses\non a free-text line whose `TaxType` is `INPUT`, a *purchase* tax type on a\nreceivable. CFS stores the corrected account and leaves Xero alone; the\ndivergence is recorded as a comment on the note's thread, and\n`audit-credit-note-posting.ts` reports it. Xero still holds the original, so\nnothing is lost by correcting.\n\nThat is also why `coa_posting` is STORED rather than derived on read: the\nstored value is what CFS asserts, this function is what CFS intends, and an\naudit comparing them against Xero is a real guard precisely because the three\ncome from different places. Deriving on read would make the check a\nrestatement of its own oracle.\n\n`correction` is deliberately absent: it is bidirectional — an operator may be\nadding a credit they missed or removing one that never happened — so its\nposting depends on what is being corrected. Callers must supply it.",
           "paramTags": [],
           "returnsTag": "the account code, or `null` when the rule has no opinion."
+        },
+        {
+          "kind": "function",
+          "name": "isCreditNoteLine",
+          "signature": "isCreditNoteLine(row: CreditNoteDocItemType): row is CreditNoteDocLineItem",
+          "doc": "Whether a credit-note row is a line (every row but the four dividers).",
+          "paramTags": [],
+          "returnsTag": null
         }
       ]
     },

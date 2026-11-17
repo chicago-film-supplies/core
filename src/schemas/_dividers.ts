@@ -147,3 +147,31 @@ export const BillingDividerArm = z.strictObject({
   path: z.array(ItemUid),
   description: z.string().meta({ pii: "none" }),
 });
+
+/**
+ * An invoice's `order` divider — scopes a billing document's rows to a source
+ * order, and on an AR credit note sits under the `billing` divider of the
+ * invoice whose rows it credits (ruling 107). Its `uid` IS the order's
+ * Firestore id. Moved here from `schemas/invoice.ts` so both unions share one
+ * instance.
+ */
+export const OrderDividerArm = z.strictObject({
+  // Option B: the order divider's identity IS the source order's Firestore doc-id
+  // (order.uid), not a synthesized UUID — so this is z.string(), not z.uuid().
+  uid: ItemUid,
+  type: z.literal("order"),
+  // Machine-generated, not operator-typed: 218/218 order dividers in the dev
+  // replica are literally `Order #NNN`. See `OrderDocLineItem.name`.
+  //
+  // **REQUIRED — the inert `.default("")` came off 2026-09-11 (core#95 batch 7).**
+  // 1,009 of 1,009 stored order dividers state it in both projects, and the sole
+  // writer builds the literal `Order #NNN` above. ⚠️ A SEPARATE declaration from
+  // `DestinationDividerArm.name`, which moved in the same batch — a field name is
+  // not a node, and only reading both said the two agree.
+  name: z.string().max(200).meta({ pii: "none" }),
+  // REQUIRED — the inert `.default([])` came off (core#95 batch 13), same
+  // rationale as `_items.ts`'s `LineItemCore.path`. `computeInvoiceItemPaths`
+  // is the sole author of every order divider's path.
+  path: z.array(ItemUid),
+  description: z.string().meta({ pii: "none" }),
+});

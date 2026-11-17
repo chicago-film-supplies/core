@@ -986,12 +986,18 @@ export type LeadingDividerGrain =
   | "invoice"
   | "purchase"
   | "purchase_receipt"
-  | "purchase_document";
+  | "purchase_document"
+  | "credit_note";
 
 /** A document whose first row is not the divider its grain leads with. */
 export interface LeadingDividerViolation {
   /** The divider type the first row had to be. */
   expected: "destination" | "order" | "purchase";
+  /**
+   * A credit's other legal first row (ruling 107): a credit may also lead with
+   * the `billing` divider of a document it credits.
+   */
+  or_billing?: true;
   /** The type the first row actually has (`null` when it has none). */
   found: string | null;
 }
@@ -1035,13 +1041,20 @@ export function leadingDividerViolations(
   if (items.length === 0) return [];
   const expected = grain === "invoice"
     ? (linked ? "order" : null)
+    : grain === "credit_note"
+    ? (linked ? "order" : null)
     : grain === "purchase_document"
     ? (linked ? "purchase" : null)
     : "destination";
   if (expected === null) return [];
   const type = (items[0] as { type?: unknown } | null)?.type;
   if (type === expected) return [];
-  return [{ expected, found: typeof type === "string" ? type : null }];
+  // A credit's rows may open under the billing document they credit (ruling
+  // 107); a bill never carries a `billing` row, so the payable grain admits it
+  // for the supplier credit only in effect.
+  const orBilling = grain === "credit_note" || grain === "purchase_document";
+  if (orBilling && type === "billing") return [];
+  return [{ expected, found: typeof type === "string" ? type : null, ...(orBilling ? { or_billing: true as const } : {}) }];
 }
 
 /**
@@ -1071,6 +1084,8 @@ export function checkLeadingDivider(
     for (const v of leadingDividerViolations(doc.items, grain, linked)) {
       const subject = grain === "invoice"
         ? "an order-linked invoice"
+        : grain === "credit_note"
+        ? "a credit note holding dividers"
         : grain === "purchase_document"
         ? "a purchase-linked bill or credit"
         : grain === "purchase_receipt"
@@ -1079,7 +1094,7 @@ export function checkLeadingDivider(
       ctx.addIssue({
         code: "custom",
         path: ["items", 0, "type"],
-        message: `${subject} must lead with ${v.expected === "order" ? "an" : "a"} ${v.expected} divider, ` +
+        message: `${subject} must lead with ${v.or_billing ? "a billing or " : v.expected === "order" ? "an " : "a "}${v.expected} divider, ` +
           `not ${v.found ?? "an untyped row"}`,
       });
     }

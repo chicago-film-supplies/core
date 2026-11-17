@@ -71,7 +71,15 @@ import {
   PriceModifier,
   type PriceModifierType,
 } from "./order.ts";
-import { COACode } from "./chart-of-accounts.ts";
+import { COACode, type COACodeType } from "./chart-of-accounts.ts";
+import { BillingDividerArm, DestinationSectionDividerArm, GroupDividerArm, OrderDividerArm } from "./_dividers.ts";
+import {
+  InvoiceDocDestination,
+  type InvoiceDocDestinationItemType,
+  type InvoiceDocDestinationType,
+  type InvoiceDocOrderItemType,
+} from "./invoice.ts";
+import { checkDestinationJoin, leadingDividerViolations, type OrderDocGroupItemType } from "./order.ts";
 
 // ── Posting ──────────────────────────────────────────────────────
 
@@ -261,12 +269,27 @@ export interface CreditNoteDocLineItem {
    * sole line has no `ItemCode`). A schema stricter than the invoice it credits
    * cannot represent the corpus.
    */
-  coa_revenue: COARevenueType | null;
+  coa_revenue?: COARevenueType | null;
   /**
    * The account this credit posts to. See {@link deriveCreditPostingAccount} —
    * new notes derive it, history stores what actually happened.
+   *
+   * ⚠️ **Retiring (ruling 34, Phase 8's rename folded in): `ledger_account` is
+   * its new name** and {@link coa_revenue}'s is `source_ledger_account`. Beta H1
+   * declares both spellings optional, every writer writes only the new one,
+   * every reader reads through {@link creditLinePostingAccount} /
+   * {@link creditLineSourceAccount}; the migration renames the stored keys and
+   * beta H2 deletes these two.
    */
-  coa_posting: number;
+  coa_posting?: number;
+  /** Where this credit posts — {@link coa_posting}'s new name (ruling 34). */
+  ledger_account?: COACodeType;
+  /**
+   * The revenue account of the thing credited — {@link coa_revenue}'s new name
+   * (ruling 34). AR only: an AR credit can post away from the revenue it
+   * reverses (bad debt to 6900), so it records both accounts.
+   */
+  source_ledger_account?: COARevenueType | null;
   /**
    * The `tracking-categories` document the credited thing reports under — copied
    * from the invoice line it credits (`InvoiceDocLineItemType.uid_tracking_category`).
@@ -275,8 +298,13 @@ export interface CreditNoteDocLineItem {
    */
   uid_tracking_category: string | null;
   xero_id: string | null;
-  /** The invoice line this credits, when the credit was raised from one. */
-  uid_invoice_item: string | null;
+  /**
+   * The invoice line this credits, when the credit was raised from one.
+   * **Retired** (ruling 34): 146 of 147 stored lines hold `null`, and the pointer
+   * is {@link uid_billing} + {@link path_billing_item}. Optional in beta H1,
+   * deleted in H2.
+   */
+  uid_invoice_item?: string | null;
   /**
    * The `path` of the invoice line this credits — its row identity on that
    * invoice (api-cloudrun#680 R1).
@@ -291,6 +319,27 @@ export interface CreditNoteDocLineItem {
    * both run the beta that declares it (the schema is strict).
    */
   path_invoice_item?: string[];
+  /**
+   * **The billing document this line credits** (ruling 34, one name on both
+   * sides): an invoice's uid here, a bill's on a supplier credit. Set together
+   * with {@link path_billing_item} by every writer raising the credit from a
+   * billing row; absent on a goodwill or bad-debt line (ruling 104). It replaces
+   * {@link path_invoice_item}, which could not say WHICH invoice.
+   *
+   * A pointed line sits under that document's `billing` divider:
+   * `path[0] === uid_billing` (ruling 107).
+   */
+  uid_billing?: string;
+  /** The `path` of the billing row credited, on its own document (ruling 34). */
+  path_billing_item?: string[];
+  /**
+   * The row's identity on this note, self-inclusive (ruling 107):
+   * `[uid_billing, ...billing row path]` for a pointed line, `[uid]` for a flat
+   * historic one. **Optional in beta H1**: the 147 stored lines carry none (prod,
+   * 2026-11-17) and none repeats a `uid` within its note, so the migration
+   * writes `[uid]` on each flat line and H2 requires it.
+   */
+  path?: string[];
   /**
    * This line reverses BILLING at {@link path_invoice_item} — it credits units
    * the invoices billed beyond the order, so quantity accounting must stop
@@ -380,14 +429,24 @@ const CreditNoteDocLineItemInner = z.strictObject({
   // into the other is how a batch stops being reviewable. 146 of 146 stored
   // credit-note line rows state the key in both projects.
   quantity: z.int().meta({ column: true, label: "Quantity" }),
+  // Optional until H2 (the interface docblock); `seed: false` so a form seed
+  // does not state a path its writer has not computed.
+  path: z.array(ItemUid).min(1).optional().meta({ seed: false }),
   price: CreditNoteDocItemPriceSchema,
-  coa_revenue: COARevenueEnum.nullable(),
-  coa_posting: COACode,
+  // Beta H1 (ruling 34): both spellings optional, `seed: false` on the old ones
+  // so a form seed states only the new; the migration renames, H2 deletes.
+  coa_revenue: COARevenueEnum.nullable().optional().meta({ seed: false }),
+  coa_posting: COACode.optional().meta({ seed: false }),
+  ledger_account: COACode.optional(),
+  source_ledger_account: COARevenueEnum.nullable().optional(),
   uid_tracking_category: FirestoreId.nullable(),
   xero_id: z.uuid().nullable(),
-  uid_invoice_item: ItemUid.nullable(),
+  uid_invoice_item: ItemUid.nullable().optional().meta({ seed: false }),
   // `seed: false`: `[]` fails `.min(1)`, so the form seed must omit the key (core#125).
   path_invoice_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
+  // The payable pair's spelling (`purchase-bill.ts`), paired-presence refined below.
+  uid_billing: FirestoreId.optional().meta({ seed: false }),
+  path_billing_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
   reverses_billing: z.boolean(),
   // See the interface docblock. The invoice line's spelling, field for field:
   // `substituted_for` plain `.optional()`; `exchanged_for` `seed: false`, so a form
@@ -395,10 +454,141 @@ const CreditNoteDocLineItemInner = z.strictObject({
   // row never stated.
   substituted_for: SubstitutedForList.optional(),
   exchanged_for: ExchangedForList.optional().meta({ seed: false }),
-}).superRefine(checkItemPriceFormula);
+}).superRefine(checkItemPriceFormula).superRefine((line, ctx) => {
+  for (const issue of creditLineShapeIssues(line)) ctx.addIssue({ code: "custom", ...issue });
+  if (creditLinePostingAccount(line) === undefined) {
+    ctx.addIssue({ code: "custom", path: ["ledger_account"], message: "a credit line states the account it posts to" });
+  }
+});
 
 /** Zod schema for a credit-note line item. */
 export const CreditNoteDocLineItem: z.ZodType<CreditNoteDocLineItem> = CreditNoteDocLineItemInner;
+
+// ── The renamed keys: one reader per pair (beta H1, deleted in H2) ─────────
+
+/** Where a credit line posts: `ledger_account`, else the retiring `coa_posting`. */
+export function creditLinePostingAccount(
+  line: Pick<CreditNoteDocLineItem, "ledger_account" | "coa_posting">,
+): number | undefined {
+  return line.ledger_account ?? line.coa_posting;
+}
+
+/** The revenue account credited: `source_ledger_account`, else the retiring `coa_revenue`. */
+export function creditLineSourceAccount(
+  line: Pick<CreditNoteDocLineItem, "source_ledger_account" | "coa_revenue">,
+): COARevenueType | null {
+  return line.source_ledger_account !== undefined ? line.source_ledger_account : line.coa_revenue ?? null;
+}
+
+/**
+ * The billing row a credit line names: `uid_billing` + `path_billing_item`, else
+ * the retiring `path_invoice_item` (whose invoice it cannot name, so `uid` is
+ * `undefined`). `null` for an unpointed line.
+ */
+export function creditLineBillingPointer(
+  line: Pick<CreditNoteDocLineItem, "uid_billing" | "path_billing_item" | "path_invoice_item">,
+): { uid?: string; path: string[] } | null {
+  if (line.path_billing_item !== undefined) return { uid: line.uid_billing, path: line.path_billing_item };
+  if (line.path_invoice_item !== undefined) return { path: line.path_invoice_item };
+  return null;
+}
+
+/** A credit note's Xero `CreditNoteID`: `xero_id`, else the retiring `xero_credit_note_id`. */
+export function creditNoteXeroId(note: Pick<CreditNote, "xero_id" | "xero_credit_note_id">): string | null {
+  return note.xero_id !== undefined ? note.xero_id : note.xero_credit_note_id ?? null;
+}
+
+/**
+ * **The credit line's shape rules, both sides** (ruling 34; Q4 ruling 106, Q6
+ * ruling 108), keyed on the POINTER rather than the document type:
+ *
+ * - the pointer pair is set together (the payable rule, `purchase-bill.ts`);
+ * - a time-basis line naming no billing row states the time it moves of its own
+ *   (`counts` non-empty) — an unpointed credit, like an invoice line, prices
+ *   itself;
+ * - a line naming a billing row states only the time it takes BACK: empty
+ *   `counts` = whole units of the named row, non-empty = time per unit, which
+ *   only a time-basis row has (a flat row's `[flat 1/1]` copied onto a units
+ *   credit would read as a time credit).
+ *
+ * "A credit naming an extension-section row states counts" needs the billing
+ * row, so the fold, not this refine, holds it.
+ */
+export function creditLineShapeIssues(line: {
+  uid_billing?: string;
+  path_billing_item?: string[];
+  path_invoice_item?: string[];
+  price: { price_formula: { basis: string } | null; counts: readonly unknown[] };
+}): { path: (string | number)[]; message: string }[] {
+  const issues: { path: (string | number)[]; message: string }[] = [];
+  if ((line.uid_billing === undefined) !== (line.path_billing_item === undefined)) {
+    issues.push({ path: ["path_billing_item"], message: "uid_billing and path_billing_item are set together" });
+  }
+  const pointed = line.path_billing_item !== undefined || line.path_invoice_item !== undefined;
+  const time = line.price.price_formula?.basis === "time";
+  const counts = line.price.counts.length;
+  if (!pointed && time && counts === 0) {
+    issues.push({ path: ["price", "counts"], message: "a time line naming no billing row states the counts it moves" });
+  }
+  if (pointed && !time && counts > 0) {
+    issues.push({
+      path: ["price", "counts"],
+      message: "a credit naming a billing row states only the time it takes back, which a flat row has none of",
+    });
+  }
+  return issues;
+}
+
+// ── Rows ─────────────────────────────────────────────────────────
+
+/**
+ * A credit's `billing` divider row (ruling 107) — see `BillingDividerArm`
+ * (`schemas/_dividers.ts`), declared once for both credit row unions.
+ */
+export interface CreditDocBillingItemType {
+  uid: string;
+  type: "billing";
+  name: string;
+  path: string[];
+  description: string;
+}
+
+/** Zod schema for a credit's billing divider row. */
+export const CreditDocBillingItem: z.ZodType<CreditDocBillingItemType> = BillingDividerArm;
+
+/**
+ * Any row of an AR credit note's `items[]` (ruling 34 item 1): a line, or a
+ * billing / order / destination / group divider, at
+ * `CREDIT_NOTE_ITEM_LEVELS` (`@cfs/core/utils/invoices`). A historic note holds
+ * lines only (ruling 53 keeps it flat).
+ */
+export type CreditNoteDocItemType =
+  | CreditNoteDocLineItem
+  | CreditDocBillingItemType
+  | InvoiceDocOrderItemType
+  | InvoiceDocDestinationItemType
+  | OrderDocGroupItemType;
+
+/** Zod schema for {@link CreditNoteDocItemType}. */
+export const CreditNoteDocItem: z.ZodType<CreditNoteDocItemType> = z.discriminatedUnion("type", [
+  CreditNoteDocLineItemInner,
+  BillingDividerArm,
+  OrderDividerArm,
+  DestinationSectionDividerArm,
+  GroupDividerArm,
+]);
+
+const CREDIT_DIVIDER_TYPES: ReadonlySet<string> = new Set(["billing", "order", "destination", "group"]);
+
+/** Whether a credit-note row is a line (every row but the four dividers). */
+export function isCreditNoteLine(row: CreditNoteDocItemType): row is CreditNoteDocLineItem {
+  return !CREDIT_DIVIDER_TYPES.has(row.type);
+}
+
+/** The lines of a credit note's rows, dividers dropped. */
+export function creditNoteLines(rows: readonly CreditNoteDocItemType[]): CreditNoteDocLineItem[] {
+  return rows.filter(isCreditNoteLine);
+}
 
 // ── Totals ───────────────────────────────────────────────────────
 
@@ -464,7 +654,15 @@ export interface CreditNote {
    */
   notes: string | null;
   organization: DocumentOrganizationSnapshotType;
-  items: CreditNoteDocLineItem[];
+  /** Lines and, on a note raised from billing rows, their dividers (ruling 107). */
+  items: CreditNoteDocItemType[];
+  /**
+   * The billing documents' pairs the note's destination dividers answer to —
+   * COPIES of the credited invoices' pairs, never re-derived (ruling 34 item 3),
+   * as a supplier credit carries its purchase's. `[]` on a flat note. Optional in
+   * beta H1 (no stored note states it); the migration writes it, H2 requires it.
+   */
+  destinations?: InvoiceDocDestinationType[];
   totals: CreditNoteDocTotals;
   /**
    * Value not yet consumed, in integer cents. `total_cents` minus every
@@ -490,13 +688,28 @@ export interface CreditNote {
   remaining_credit_cents: number;
   sources: DocSourceType[];
   query_by_sources: string[];
-  xero_credit_note_id: string | null;
+  /**
+   * Xero's `CreditNoteID` — the header key every billing and credit document
+   * spells `xero_id` (ruling 34 item 8). Beta H1: optional beside the retiring
+   * {@link xero_credit_note_id}; read through {@link creditNoteXeroId}.
+   */
+  xero_id?: string | null;
+  /** Retiring (ruling 34): renamed `xero_id`, deleted in beta H2. */
+  xero_credit_note_id?: string | null;
   uid_thread?: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
+}
+
+/** The row keys {@link deriveCreditNoteSources} reads: a divider's `type`, a line's pointer. */
+export interface CreditSourceRow {
+  type?: string;
+  uid_billing?: string;
+  path_billing_item?: string[];
+  path_invoice_item?: string[];
 }
 
 /** The billing-document facts {@link deriveCreditNoteSources} reads: an invoice and the orders it bills. */
@@ -522,27 +735,40 @@ export interface CreditNoteBillingSource {
  * a missing `orders:` key hides a credit from its order, an extra one only
  * lists it there.
  *
- * ⚠️ Until ruling 34 gives every line `uid_billing`, a line's pointer cannot
- * say WHICH invoice it is on, so the pointers are matched against every
- * invoice. Today every note credits at most one, so the two are the same.
+ * The order (ruling 34 item 8): the orders in order of first appearance, then
+ * each invoice in line order. A line's `uid_billing` says which invoice its
+ * pointer is on; a retiring `path_invoice_item` cannot, so it is matched against
+ * every invoice. (The docblock this replaced claimed every note credits at most
+ * one invoice; CN-1015 credits two, harmless only because its lines are
+ * unpointed.)
  */
 export function deriveCreditNoteSources(
   billing: readonly CreditNoteBillingSource[],
-  items: readonly Pick<CreditNoteDocLineItem, "path_invoice_item">[],
+  items: readonly CreditSourceRow[],
 ): Pick<CreditNote, "sources" | "query_by_sources"> {
-  const pointed = items.flatMap((i) => i.path_invoice_item?.[0] ?? []);
-  const anyUnpointed = items.some((i) => i.path_invoice_item === undefined);
+  const lines = items.filter((r) => r.type === undefined || !CREDIT_DIVIDER_TYPES.has(r.type));
+  const pointers = lines.map(creditLineBillingPointer);
+  // Each billing document in line order (the first line naming it), then any
+  // the caller named that no line does (a historic note's allocations).
+  const lineOrder = pointers.flatMap((p) => p?.uid ?? []);
+  const invoiceUids = [...new Set([...lineOrder, ...billing.map((b) => b.uid)])];
+  const byUid = new Map(billing.map((b) => [b.uid, b]));
+  const anyUnpointed = pointers.some((p) => p === null);
   const orders: string[] = [];
-  for (const invoice of billing) {
+  for (const uid of invoiceUids) {
+    const invoice = byUid.get(uid);
+    if (invoice === undefined) continue;
+    // A pointer names its invoice (`uid_billing`); a retiring `path_invoice_item`
+    // cannot, so it is matched against every invoice, as before ruling 34.
+    const pointed = pointers.flatMap((p) => p !== null && (p.uid === undefined || p.uid === uid) ? [p.path[0]] : []);
     const named = anyUnpointed
       ? invoice.query_by_orders
       : invoice.query_by_orders.filter((o) => pointed.includes(o));
     for (const o of named) if (!orders.includes(o)) orders.push(o);
   }
-  const invoices = [...new Set(billing.map((b) => b.uid))];
   const sources: DocSourceType[] = [
     ...orders.map((uid) => ({ collection: "orders" as const, uid })),
-    ...invoices.map((uid) => ({ collection: "invoices" as const, uid })),
+    ...invoiceUids.filter((uid) => byUid.has(uid)).map((uid) => ({ collection: "invoices" as const, uid })),
   ];
   return { sources, query_by_sources: sources.map((s) => `${s.collection}:${s.uid}`) };
 }
@@ -571,6 +797,21 @@ function checkCreditNote(cn: CreditNote, ctx: z.RefinementCtx): void {
     });
   }
 
+  // A pointed line sits under the billing divider of the document it names
+  // (ruling 107). Only checked once the line states its path (H2 requires it).
+  cn.items.forEach((row, i) => {
+    if (!isCreditNoteLine(row) || row.uid_billing === undefined || row.path === undefined) return;
+    if (row.path[0] !== row.uid_billing) {
+      ctx.addIssue({ code: "custom", path: ["items", i, "path"], message: "a line naming a billing row sits under that document's billing divider: path[0] is uid_billing" });
+    }
+  });
+  // The leading-divider rule runs only on a note holding a divider row (ruling
+  // 34 item 2): the 13 historic flat notes stay legal.
+  const divided = cn.items.some((r) => !isCreditNoteLine(r));
+  for (const v of leadingDividerViolations(cn.items, "credit_note", divided)) {
+    ctx.addIssue({ code: "custom", path: ["items", 0, "type"], message: `a credit note holding dividers must lead with a billing or ${v.expected} divider, not ${v.found ?? "an untyped row"}` });
+  }
+  if (cn.destinations !== undefined) checkDestinationJoin({ items: cn.items, destinations: cn.destinations }, ctx);
   if (cn.remaining_credit_cents > cn.totals.total_cents) {
     ctx.addIssue({
       code: "custom",
@@ -604,7 +845,9 @@ export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
   // were forced, not ceremonial: every write validates the FULL document and
   // this is a `z.strictObject`, so a schema that has dropped the key REJECTS
   // every stored document still carrying it. Optional → empty storage → delete.
-  items: z.array(CreditNoteDocLineItem).meta({ label: "Item" }),
+  items: z.array(CreditNoteDocItem).meta({ label: "Item" }),
+  // Optional in beta H1 (the interface docblock).
+  destinations: z.array(InvoiceDocDestination).optional().meta({ label: "Destination" }),
   totals: CreditNoteDocTotalsSchema,
   remaining_credit_cents: z.int().meta({ column: true, label: "Remaining Credit" }),
   // Bare `z.array(DocSource)` — the dropped `.default([])` is core#95 batch
@@ -612,7 +855,8 @@ export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
   // writes a literal `sources: []`).
   sources: z.array(DocSource),
   query_by_sources: z.array(z.string()),
-  xero_credit_note_id: z.uuid().nullable(),
+  xero_id: z.uuid().nullable().optional(),
+  xero_credit_note_id: z.uuid().nullable().optional().meta({ seed: false }),
   uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
@@ -623,7 +867,12 @@ export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
   // applied or void its money has moved, and it keeps what it stored — see
   // `checkItemsLineMoney`.
   .superRefine((cn, ctx) => {
-    if (cn.status !== "applied" && cn.status !== "void") checkItemsLineMoney(cn.items, ctx);
+    // A line naming a billing row is priced as a PART of that row (first-come,
+    // ruling 34 item 6), not from its own counts, so only unpointed lines are
+    // checked here; dividers carry no price and are skipped anyway.
+    if (cn.status !== "applied" && cn.status !== "void") {
+      checkItemsLineMoney(cn.items.map((r) => isCreditNoteLine(r) && creditLineBillingPointer(r) === null ? r : {}), ctx);
+    }
   }).meta({
   title: "Credit Note",
   collection: "credit-notes",

@@ -3735,12 +3735,14 @@ interface CreditNote {
   reference: string | null;
   notes: string | null;
   organization: DocumentOrganizationSnapshotType;
-  items: CreditNoteDocLineItem[];
+  items: CreditNoteDocItemType[];
+  destinations?: InvoiceDocDestinationType[];
   totals: CreditNoteDocTotals;
   remaining_credit_cents: number;
   sources: DocSourceType[];
   query_by_sources: string[];
-  xero_credit_note_id: string | null;
+  xero_id?: string | null;
+  xero_credit_note_id?: string | null;
   uid_thread?: string;
   version: number;
   created_by: ActorRefType;
@@ -3822,12 +3824,17 @@ interface CreditNoteDocLineItem {
   description: string;
   quantity: number;
   price: CreditNoteDocItemPrice;
-  coa_revenue: COARevenueType | null;
-  coa_posting: number;
+  coa_revenue?: COARevenueType | null;
+  coa_posting?: number;
+  ledger_account?: COACodeType;
+  source_ledger_account?: COARevenueType | null;
   uid_tracking_category: string | null;
   xero_id: string | null;
-  uid_invoice_item: string | null;
+  uid_invoice_item?: string | null;
   path_invoice_item?: string[];
+  uid_billing?: string;
+  path_billing_item?: string[];
+  path?: string[];
   reverses_billing: boolean;
   substituted_for?: SubstitutedForEntryType[];
   exchanged_for?: ExchangedForEntryType[];
@@ -7109,7 +7116,7 @@ const LOCATION_ROLES: "storage" | "staging"[];
 Which document a {@link leadingDividerViolations} call is judging.
 
 ```ts
-type LeadingDividerGrain = "order" | "fulfillment" | "invoice" | "purchase" | "purchase_receipt" | "purchase_document";
+type LeadingDividerGrain = "order" | "fulfillment" | "invoice" | "purchase" | "purchase_receipt" | "purchase_document" | "credit_note";
 ```
 
 ### `LeadingDividerViolation`
@@ -7119,6 +7126,7 @@ A document whose first row is not the divider its grain leads with.
 ```ts
 interface LeadingDividerViolation {
   expected: "destination" | "order" | "purchase";
+  or_billing?: true;
   found: string | null;
 }
 ```
@@ -17798,7 +17806,7 @@ uids are unique. Instants compared with `Date.parse`, never lexically.
 It cannot say "every key the formula names has a row in force" — the formula
 is another document; the writer checks that (`snapshotRates` throws).
 
-### `deriveCreditNoteSources(billing: readonly CreditNoteBillingSource[], items: readonly Pick<CreditNoteDocLineItem, "path_invoice_item">[]): Pick<CreditNote, "sources" | "query_by_sources">`
+### `deriveCreditNoteSources(billing: readonly CreditNoteBillingSource[], items: readonly CreditSourceRow[]): Pick<CreditNote, "sources" | "query_by_sources">`
 
 **The one author of an AR credit note's `sources`** (one-document-model
 ruling 32), the twin of `derivePurchaseCreditSources`: the orders it credits,
@@ -17816,9 +17824,12 @@ from the invoices their allocations name). Over-naming is the safe direction:
 a missing `orders:` key hides a credit from its order, an extra one only
 lists it there.
 
-⚠️ Until ruling 34 gives every line `uid_billing`, a line's pointer cannot
-say WHICH invoice it is on, so the pointers are matched against every
-invoice. Today every note credits at most one, so the two are the same.
+The order (ruling 34 item 8): the orders in order of first appearance, then
+each invoice in line order. A line's `uid_billing` says which invoice its
+pointer is on; a retiring `path_invoice_item` cannot, so it is matched against
+every invoice. (The docblock this replaced claimed every note credits at most
+one invoice; CN-1015 credits two, harmless only because its lines are
+unpointed.)
 
 ### `deriveCreditPostingAccount(reason: SettlementReasonType, coaRevenue: number | null): number | null`
 
@@ -26038,7 +26049,7 @@ interface ItemPriceType {
 Which document a {@link leadingDividerViolations} call is judging.
 
 ```ts
-type LeadingDividerGrain = "order" | "fulfillment" | "invoice" | "purchase" | "purchase_receipt" | "purchase_document";
+type LeadingDividerGrain = "order" | "fulfillment" | "invoice" | "purchase" | "purchase_receipt" | "purchase_document" | "credit_note";
 ```
 
 ### `LeadingDividerViolation`
@@ -26048,6 +26059,7 @@ A document whose first row is not the divider its grain leads with.
 ```ts
 interface LeadingDividerViolation {
   expected: "destination" | "order" | "purchase";
+  or_billing?: true;
   found: string | null;
 }
 ```
@@ -31592,6 +31604,29 @@ totality `INVOICE_STATUS_CONTRACTS` relies on.
 const CREDIT_NOTE_STATUS_CONTRACTS: Readonly<Record<CreditNoteStatusType, CreditNoteStatusContract>>;
 ```
 
+### `CreditDocBillingItem`
+
+Zod schema for a credit's billing divider row.
+
+```ts
+const CreditDocBillingItem: z.ZodType<CreditDocBillingItemType>;
+```
+
+### `CreditDocBillingItemType`
+
+A credit's `billing` divider row (ruling 107) — see `BillingDividerArm`
+(`schemas/_dividers.ts`), declared once for both credit row unions.
+
+```ts
+interface CreditDocBillingItemType {
+  uid: string;
+  type: "billing";
+  name: string;
+  path: string[];
+  description: string;
+}
+```
+
 ### `CreditNote`
 
 A credit note issued to an organization.
@@ -31607,12 +31642,14 @@ interface CreditNote {
   reference: string | null;
   notes: string | null;
   organization: DocumentOrganizationSnapshotType;
-  items: CreditNoteDocLineItem[];
+  items: CreditNoteDocItemType[];
+  destinations?: InvoiceDocDestinationType[];
   totals: CreditNoteDocTotals;
   remaining_credit_cents: number;
   sources: DocSourceType[];
   query_by_sources: string[];
-  xero_credit_note_id: string | null;
+  xero_id?: string | null;
+  xero_credit_note_id?: string | null;
   uid_thread?: string;
   version: number;
   created_by: ActorRefType;
@@ -31633,6 +31670,14 @@ interface CreditNoteBillingSource {
 }
 ```
 
+### `CreditNoteDocItem`
+
+Zod schema for {@link CreditNoteDocItemType}.
+
+```ts
+const CreditNoteDocItem: z.ZodType<CreditNoteDocItemType>;
+```
+
 ### `CreditNoteDocItemPrice`
 
 Pricing breakdown for a single credit-note line.
@@ -31649,6 +31694,17 @@ interface CreditNoteDocItemPrice {
   taxes: PriceModifierType[];
   total_cents: number;
 }
+```
+
+### `CreditNoteDocItemType`
+
+Any row of an AR credit note's `items[]` (ruling 34 item 1): a line, or a
+billing / order / destination / group divider, at
+`CREDIT_NOTE_ITEM_LEVELS` (`@cfs/core/utils/invoices`). A historic note holds
+lines only (ruling 53 keeps it flat).
+
+```ts
+type CreditNoteDocItemType = CreditNoteDocLineItem | CreditDocBillingItemType | InvoiceDocOrderItemType | InvoiceDocDestinationItemType | OrderDocGroupItemType;
 ```
 
 ### `CreditNoteDocLineItem`
@@ -31694,12 +31750,17 @@ interface CreditNoteDocLineItem {
   description: string;
   quantity: number;
   price: CreditNoteDocItemPrice;
-  coa_revenue: COARevenueType | null;
-  coa_posting: number;
+  coa_revenue?: COARevenueType | null;
+  coa_posting?: number;
+  ledger_account?: COACodeType;
+  source_ledger_account?: COARevenueType | null;
   uid_tracking_category: string | null;
   xero_id: string | null;
-  uid_invoice_item: string | null;
+  uid_invoice_item?: string | null;
   path_invoice_item?: string[];
+  uid_billing?: string;
+  path_billing_item?: string[];
+  path?: string[];
   reverses_billing: boolean;
   substituted_for?: SubstitutedForEntryType[];
   exchanged_for?: ExchangedForEntryType[];
@@ -31780,7 +31841,59 @@ Allowed credit-note statuses.
 type CreditNoteStatusType = indexedAccess;
 ```
 
-### `deriveCreditNoteSources(billing: readonly CreditNoteBillingSource[], items: readonly Pick<CreditNoteDocLineItem, "path_invoice_item">[]): Pick<CreditNote, "sources" | "query_by_sources">`
+### `CreditSourceRow`
+
+The row keys {@link deriveCreditNoteSources} reads: a divider's `type`, a line's pointer.
+
+```ts
+interface CreditSourceRow {
+  type?: string;
+  uid_billing?: string;
+  path_billing_item?: string[];
+  path_invoice_item?: string[];
+}
+```
+
+### `creditLineBillingPointer(line: Pick<CreditNoteDocLineItem, "uid_billing" | "path_billing_item" | "path_invoice_item">): typeLiteral | null`
+
+The billing row a credit line names: `uid_billing` + `path_billing_item`, else
+the retiring `path_invoice_item` (whose invoice it cannot name, so `uid` is
+`undefined`). `null` for an unpointed line.
+
+### `creditLinePostingAccount(line: Pick<CreditNoteDocLineItem, "ledger_account" | "coa_posting">): number | undefined`
+
+Where a credit line posts: `ledger_account`, else the retiring `coa_posting`.
+
+### `creditLineShapeIssues(line: typeLiteral): typeLiteral[]`
+
+**The credit line's shape rules, both sides** (ruling 34; Q4 ruling 106, Q6
+ruling 108), keyed on the POINTER rather than the document type:
+
+- the pointer pair is set together (the payable rule, `purchase-bill.ts`);
+- a time-basis line naming no billing row states the time it moves of its own
+  (`counts` non-empty) — an unpointed credit, like an invoice line, prices
+  itself;
+- a line naming a billing row states only the time it takes BACK: empty
+  `counts` = whole units of the named row, non-empty = time per unit, which
+  only a time-basis row has (a flat row's `[flat 1/1]` copied onto a units
+  credit would read as a time credit).
+
+"A credit naming an extension-section row states counts" needs the billing
+row, so the fold, not this refine, holds it.
+
+### `creditLineSourceAccount(line: Pick<CreditNoteDocLineItem, "source_ledger_account" | "coa_revenue">): COARevenueType | null`
+
+The revenue account credited: `source_ledger_account`, else the retiring `coa_revenue`.
+
+### `creditNoteLines(rows: readonly CreditNoteDocItemType[]): CreditNoteDocLineItem[]`
+
+The lines of a credit note's rows, dividers dropped.
+
+### `creditNoteXeroId(note: Pick<CreditNote, "xero_id" | "xero_credit_note_id">): string | null`
+
+A credit note's Xero `CreditNoteID`: `xero_id`, else the retiring `xero_credit_note_id`.
+
+### `deriveCreditNoteSources(billing: readonly CreditNoteBillingSource[], items: readonly CreditSourceRow[]): Pick<CreditNote, "sources" | "query_by_sources">`
 
 **The one author of an AR credit note's `sources`** (one-document-model
 ruling 32), the twin of `derivePurchaseCreditSources`: the orders it credits,
@@ -31798,9 +31911,12 @@ from the invoices their allocations name). Over-naming is the safe direction:
 a missing `orders:` key hides a credit from its order, an extra one only
 lists it there.
 
-⚠️ Until ruling 34 gives every line `uid_billing`, a line's pointer cannot
-say WHICH invoice it is on, so the pointers are matched against every
-invoice. Today every note credits at most one, so the two are the same.
+The order (ruling 34 item 8): the orders in order of first appearance, then
+each invoice in line order. A line's `uid_billing` says which invoice its
+pointer is on; a retiring `path_invoice_item` cannot, so it is matched against
+every invoice. (The docblock this replaced claimed every note credits at most
+one invoice; CN-1015 credits two, harmless only because its lines are
+unpointed.)
 
 ### `deriveCreditPostingAccount(reason: SettlementReasonType, coaRevenue: number | null): number | null`
 
@@ -31834,6 +31950,10 @@ adding a credit they missed or removing one that never happened — so its
 posting depends on what is being corrected. Callers must supply it.
 
 **Returns** — the account code, or `null` when the rule has no opinion.
+
+### `isCreditNoteLine(row: CreditNoteDocItemType): row is CreditNoteDocLineItem`
+
+Whether a credit-note row is a line (every row but the four dividers).
 
 ## `@cfs/core/schemas/session`
 

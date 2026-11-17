@@ -101,6 +101,24 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["purchases.items[].price.stated_cents", "mid-expand"],
   ["purchase-bills.items[].price.stated_cents", "mid-expand"],
   ["purchase-credits.items[].price.stated_cents", "mid-expand"],
+  // ── mid-expand — one-document-model F14 beta H1 (ruling 34). Both spellings of
+  //    a renamed AR credit-note key are optional until the migration renames the
+  //    stored keys; beta H2 deletes the old spelling and requires the new one
+  //    (bare `.nullable()`). `source_ledger_account` and `xero_id` are the new
+  //    spellings; `coa_revenue`, `uid_invoice_item` and `xero_credit_note_id`
+  //    are deleted in H2.
+  ["credit-notes.items[].coa_revenue", "mid-expand"],
+  ["credit-notes.items[].source_ledger_account", "mid-expand"],
+  ["credit-notes.items[].uid_invoice_item", "mid-expand"],
+  ["credit-notes.xero_credit_note_id", "mid-expand"],
+  ["credit-notes.xero_id", "mid-expand"],
+  // The note's `destinations` (optional in H1, required in H2) carry the invoice
+  // pair's shape, so its array members' nullable-optional leaves come with it.
+  ["credit-notes.destinations[].collection.address.address_coordinates", "array-member-uncensusable"],
+  ["credit-notes.destinations[].collection.address.user_coordinates", "array-member-uncensusable"],
+  ["credit-notes.destinations[].delivery.address.address_coordinates", "array-member-uncensusable"],
+  ["credit-notes.destinations[].delivery.address.user_coordinates", "array-member-uncensusable"],
+  ["credit-notes.destinations[].jurisdiction", "array-member-uncensusable"],
   // D7: a part's first unit of its source line. Absent on a line that is no part, and on a pre-D7 one.
   ["purchase-bills.items[].units_from", "array-member-uncensusable"],
   ["purchase-credits.items[].units_from", "array-member-uncensusable"],
