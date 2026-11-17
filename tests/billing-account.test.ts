@@ -118,7 +118,7 @@ Deno.test("accountInitiator: what ACTS floors an over-credit; what is SHOWN does
 Deno.test("accountInitiator: over-billing offers a credit on the row that billed it, and refuses a DRAFT biller", () => {
   const issued = accountAR(orderOf(2), [invoice("inv-1", 3, "issued", { amount_due_cents: 3000 })]).lines[0];
   assertEquals(issued.overbilled.units, 1);
-  assertEquals(issued.credit.lines.map((l) => [l.uid_billing, l.path_invoice_item, l.quantity, l.preview_cents]), [["inv-1", [O, D, X], 1, 1000]]);
+  assertEquals(issued.credit.lines.map((l) => [l.uid_billing, l.path_billing_item, l.quantity, l.preview_cents]), [["inv-1", [O, D, X], 1, 1000]]);
 
   const draft = accountAR(orderOf(2), [invoice("inv-1", 3, "draft")]).lines[0];
   assertEquals(draft.credit.lines, []);

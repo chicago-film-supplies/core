@@ -1680,8 +1680,7 @@ export function accountInitiator(
           left -= take;
           creditLines.push({
             uid_billing: row.documentUid,
-            path_invoice_item: [...(row.item.path ?? [])],
-            uid_invoice_item: row.item.uid,
+            path_billing_item: [...(row.item.path ?? [])],
             order_path: [...path],
             quantity: take,
             preview_cents: subtotalCents({ ...row.item, quantity: take } as LineItem),
@@ -1701,8 +1700,7 @@ export function accountInitiator(
       }
       creditLines.push({
         uid_billing: group.last_billed.documentUid,
-        path_invoice_item: [...group.last_billed.path],
-        uid_invoice_item: group.last_billed.uid,
+        path_billing_item: [...group.last_billed.path],
         order_path: [...path],
         quantity: group.quantity,
         credited_counts: countsMagnitude(group.item, group.extension_counts),
@@ -2050,12 +2048,10 @@ export function crmsAuthoredInvoices(invoices: readonly AccountedInvoice[]): str
 
 /** One credit-note line the offer would raise. */
 export interface OverbillingCreditLine {
-  /** The billing document the credited row is on. */
-  uid_billing?: string;
-  /** The invoice row this credits — its row identity on that invoice. */
-  path_invoice_item: string[];
-  /** That row's own uid, for the `uid_invoice_item` a credit note also stores. */
-  uid_invoice_item: string;
+  /** The billing document the credited row is on (ruling 34: the one credit pointer). */
+  uid_billing: string;
+  /** The billing row this credits — its row identity on that document. */
+  path_billing_item: string[];
   /** The order-relative path the over-billing was found at. */
   order_path: string[];
   /** Whole units to credit. `0` on a days-only credit. */
@@ -2383,7 +2379,7 @@ export function buildOverbillingCredits(account: InitiatorAccount): OverbillingC
   const refused: OverbillingCredits["refused"] = [];
   for (const line of account.lines) {
     for (const credit of line.credit.lines) {
-      const uid = credit.uid_billing!;
+      const uid = credit.uid_billing;
       if (!perBilling.has(uid)) perBilling.set(uid, []);
       perBilling.get(uid)!.push(credit);
     }

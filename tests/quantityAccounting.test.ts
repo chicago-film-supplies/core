@@ -837,7 +837,7 @@ Deno.test("buildOverbillingCredits: over-billed units become one credit line aga
   assertEquals(out.notes[0].uid_invoice, "a");
   assertEquals(out.notes[0].lines.map((l) => [l.order_path.join("/"), l.quantity, l.preview_cents]), [[lightKey, 3, 3000]]);
   // The row identity it will credit is the INVOICE path, not the order path.
-  assertEquals(out.notes[0].lines[0].path_invoice_item, [O, D, G, LIGHT]);
+  assertEquals(out.notes[0].lines[0].path_billing_item, [O, D, G, LIGHT]);
   assertEquals([out.refused, out.crms_authored, out.unaligned], [[], [], []]);
 });
 

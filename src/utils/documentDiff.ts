@@ -220,6 +220,7 @@ import {
   BILLING_FOLD,
   type BilledByPath,
   billedByPath,
+  creditLinePointer,
   type CustodyOnlyAccount,
   type CustodyRow,
   custodyRows,
@@ -513,10 +514,9 @@ export interface DocumentDiffMap {
    */
   credits: Map<string, DocumentCredit[]>;
   /**
-   * Credit notes relevant to the viewed document that name no row this can key:
-   * no `path_invoice_item` and a `uid_invoice_item` that is not unique on its
-   * invoice (or no invoice passed to resolve it against), or not exactly one
-   * `invoices` source. Listed rather than dropped, like
+   * Credit notes relevant to the viewed document with a line this cannot key: a
+   * line naming no billing row, or one on the retiring `path_invoice_item` whose
+   * note has not exactly one `invoices` source. Listed rather than dropped, like
    * {@link unplaced_out_of_service} — "no credit shown" must never read as "no credit".
    */
   unkeyed_credit_notes: DocumentUnkeyedCredit[];
@@ -549,19 +549,12 @@ export interface DocumentCredit {
 export interface DocumentUnkeyedCredit {
   uid_credit_note: string;
   number: number;
-  /** `null` when the note does not name exactly one invoice. */
+  /** The invoice the unkeyed line names, else the note's one invoice, else `null`. */
   uid_invoice: string | null;
 }
 
 /** One credit note line, as the diff reads it. */
-export interface DocumentDiffCreditNoteItem extends AccountedCreditNoteItem {
-  /**
-   * The legacy key, read only when `path_invoice_item` is absent — and then only
-   * when this uid is on exactly ONE line of the invoice, because `item.uid`
-   * repeats within a document (`cfs-items` invariant 4).
-   */
-  uid_invoice_item: string | null;
-}
+export type DocumentDiffCreditNoteItem = AccountedCreditNoteItem;
 
 /** A credit note as the diff reads it: the accounting shape plus its number. */
 export interface DocumentDiffCreditNote extends AccountedCreditNote {
@@ -1607,14 +1600,13 @@ interface CreditKeys {
 }
 
 /**
- * Key every issued/applied credit note line to the invoice row it credits.
- *
- * The keying is the one credit keyer's reversed view (`keyInvoiceCredits`,
- * `utils/quantityAccounting.ts`) WITHOUT its `reverses_billing` filter: exactly
- * one `invoices` source, and the row's `path_invoice_item`. One fallback it
- * takes that netting does not, because this only DISPLAYS: a legacy line with
- * no path keys by `uid_invoice_item` when that uid is on exactly one line of the
- * invoice. A guessed row is acceptable on screen and not in arithmetic.
+ * Key every issued/applied credit note line to the invoice row it credits, by
+ * the one credit pointer (`(uid_billing, path_billing_item)`,
+ * `creditLinePointer` in `utils/quantityAccounting.ts`), WITHOUT the fold's
+ * `reverses_billing` filter. A note may credit several invoices (ruling 107):
+ * each line names its own. Only a line on the retiring `path_invoice_item`
+ * reads the note's one `invoices` source. The `uid_invoice_item` guess is
+ * retired (F14 item 4).
  */
 function creditKeys(notes: readonly DocumentDiffCreditNote[], invoices: readonly Invoice[], orders: readonly Order[]): CreditKeys {
   const invoiceByUid = new Map(invoices.map((i) => [i.uid, i]));
@@ -1634,17 +1626,16 @@ function creditKeys(notes: readonly DocumentDiffCreditNote[], invoices: readonly
   for (const note of notes) {
     if (note.status !== "issued" && note.status !== "applied") continue;
     const sourced = (note.sources ?? []).filter((s) => s.collection === "invoices");
-    const uidInvoice = sourced.length === 1 ? sourced[0].uid : null;
+    const noteInvoice = sourced.length === 1 ? sourced[0].uid : null;
     for (const line of note.items) {
-      let path: readonly string[] | undefined = line.path_invoice_item?.length ? line.path_invoice_item : undefined;
+      if (line.type !== undefined && isDividerItemType(line.type)) continue;
+      const pointer = creditLinePointer(line);
+      const uidInvoice = pointer === null ? null : pointer.legacyAr ? noteInvoice : pointer.uid ?? null;
+      const path = pointer?.path;
       const invoice = uidInvoice === null ? undefined : invoiceByUid.get(uidInvoice);
-      if (path === undefined && invoice !== undefined && line.uid_invoice_item) {
-        const matches = (invoice.items as readonly InvoiceDocItemType[]).filter((it) => it.uid === line.uid_invoice_item && !isDividerItemType(it.type));
-        if (matches.length === 1) path = matches[0].path;
-      }
       if (uidInvoice === null || path === undefined) {
         if (!unkeyed.some((u) => u.uid_credit_note === note.uid)) {
-          unkeyed.push({ uid_credit_note: note.uid, number: note.number, uid_invoice: uidInvoice });
+          unkeyed.push({ uid_credit_note: note.uid, number: note.number, uid_invoice: uidInvoice ?? noteInvoice });
         }
         continue;
       }

@@ -19820,9 +19820,9 @@
           "doc": "A credit note as the diff reads it: the accounting shape plus its number."
         },
         {
-          "kind": "interface",
+          "kind": "typeAlias",
           "name": "DocumentDiffCreditNoteItem",
-          "declaration": "interface DocumentDiffCreditNoteItem {\n  uid_invoice_item: string | null;\n}",
+          "declaration": "type DocumentDiffCreditNoteItem = AccountedCreditNoteItem;",
           "doc": "One credit note line, as the diff reads it."
         },
         {
@@ -20113,7 +20113,7 @@
         {
           "kind": "interface",
           "name": "OverbillingCreditLine",
-          "declaration": "interface OverbillingCreditLine {\n  uid_billing?: string;\n  path_invoice_item: string[];\n  uid_invoice_item: string;\n  order_path: string[];\n  quantity: number;\n  credited_counts?: TierCount[];\n  preview_cents: number;\n}",
+          "declaration": "interface OverbillingCreditLine {\n  uid_billing: string;\n  path_billing_item: string[];\n  order_path: string[];\n  quantity: number;\n  credited_counts?: TierCount[];\n  preview_cents: number;\n}",
           "doc": "One credit-note line the offer would raise."
         },
         {

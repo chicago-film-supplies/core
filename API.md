@@ -41937,9 +41937,7 @@ interface DocumentDiffCreditNote {
 One credit note line, as the diff reads it.
 
 ```ts
-interface DocumentDiffCreditNoteItem {
-  uid_invoice_item: string | null;
-}
+type DocumentDiffCreditNoteItem = AccountedCreditNoteItem;
 ```
 
 ### `DocumentDiffEntry`
@@ -42758,9 +42756,8 @@ One credit-note line the offer would raise.
 
 ```ts
 interface OverbillingCreditLine {
-  uid_billing?: string;
-  path_invoice_item: string[];
-  uid_invoice_item: string;
+  uid_billing: string;
+  path_billing_item: string[];
   order_path: string[];
   quantity: number;
   credited_counts?: TierCount[];

@@ -1177,7 +1177,7 @@ function creditNote(
   uid: string,
   number: number,
   invoiceUid: string | string[],
-  lines: Array<{ quantity: number; path?: string[]; uid_invoice_item?: string | null; reverses_billing?: boolean }>,
+  lines: Array<{ quantity: number; path?: string[]; uid_billing?: string; reverses_billing?: boolean }>,
   status: DocumentDiffCreditNote["status"] = "issued",
 ): DocumentDiffCreditNote {
   const invoices = Array.isArray(invoiceUid) ? invoiceUid : [invoiceUid];
@@ -1186,10 +1186,10 @@ function creditNote(
     number,
     status,
     sources: invoices.map((i) => ({ collection: "invoices", uid: i })),
+    // A line naming its invoice states the new pointer; one that does not, the retiring path.
     items: lines.map((l) => ({
       quantity: l.quantity,
-      path_invoice_item: l.path,
-      uid_invoice_item: l.uid_invoice_item ?? null,
+      ...(l.uid_billing !== undefined ? { uid_billing: l.uid_billing, path_billing_item: l.path } : { path_invoice_item: l.path }),
       reverses_billing: l.reverses_billing ?? false,
     })),
   };
@@ -1284,18 +1284,28 @@ Deno.test("documentDiff: credits on two invoices of one order are attributed per
   assertEquals([...computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-b" }, CONTEXT).credits], [[`${O}/${LIGHT_REL}`, [creditB]]]);
 });
 
-Deno.test("documentDiff: a legacy line with no path keys by uid only when the uid is unique on the invoice; otherwise the note is unkeyed", () => {
+Deno.test("documentDiff: a line naming no billing row is unkeyed — the uid_invoice_item guess is retired (F14 item 4)", () => {
   const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
-  // LIGHT sits at two paths on the invoice, TRIPOD at one.
-  const ambiguous = creditNote("cn-light", 1050, "inv-1", [{ quantity: 1, uid_invoice_item: LIGHT }]);
-  const unique = creditNote("cn-tripod", 1051, "inv-1", [{ quantity: 1, uid_invoice_item: TRIPOD }]);
-  const diff = computeDocumentDiffs({ orders: [order()], invoices: [inv], creditNotes: [ambiguous, unique] }, { kind: "order", uid: O }, CONTEXT);
-
-  assertEquals([...diff.credits], [[`${D}/${G}/${TRIPOD}`, [{ uid_credit_note: "cn-tripod", number: 1051, uid_invoice: "inv-1", quantity: 1, reverses_billing: false, bills_order_line: true }]]]);
-  assertEquals(diff.unkeyed_credit_notes, [{ uid_credit_note: "cn-light", number: 1050, uid_invoice: "inv-1" }]);
+  const unpointed = creditNote("cn-tripod", 1051, "inv-1", [{ quantity: 1 }]);
+  const diff = computeDocumentDiffs({ orders: [order()], invoices: [inv], creditNotes: [unpointed] }, { kind: "order", uid: O }, CONTEXT);
+  assertEquals(diff.credits.size, 0);
+  assertEquals(diff.unkeyed_credit_notes, [{ uid_credit_note: "cn-tripod", number: 1051, uid_invoice: "inv-1" }]);
 });
 
-Deno.test("documentDiff: a note naming two invoices cannot be keyed to a row, and is listed rather than dropped", () => {
+Deno.test("documentDiff: a note crediting two invoices keys each line to the invoice it names (ruling 107)", () => {
+  const inv1 = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  const inv2 = invoice("inv-2", [{ order: O, items: orderItems() }]);
+  const cn = creditNote("cn-two", 1061, ["inv-1", "inv-2"], [
+    { quantity: 1, uid_billing: "inv-1", path: LIGHT_ON_INVOICE },
+    { quantity: 2, uid_billing: "inv-2", path: LIGHT_ON_INVOICE },
+  ]);
+  const sources = { orders: [order()], invoices: [inv1, inv2], creditNotes: [cn] };
+  const at = (uid: string) => computeDocumentDiffs(sources, { kind: "invoice", uid }, CONTEXT).credits.get(LIGHT_ON_INVOICE.join("/"))?.map((c) => [c.uid_invoice, c.quantity]);
+  assertEquals([at("inv-1"), at("inv-2")], [[["inv-1", 1]], [["inv-2", 2]]]);
+  assertEquals(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-1" }, CONTEXT).unkeyed_credit_notes, []);
+});
+
+Deno.test("documentDiff: a line on the retiring pointer, on a note naming two invoices, cannot be keyed and is listed rather than dropped", () => {
   const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
   const cn = creditNote("cn-2src", 1060, ["inv-1", "inv-2"], [{ quantity: 1, path: LIGHT_ON_INVOICE }]);
   const diff = computeDocumentDiffs({ orders: [order()], invoices: [inv], creditNotes: [cn] }, { kind: "invoice", uid: "inv-1" }, CONTEXT);
