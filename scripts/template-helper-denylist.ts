@@ -670,7 +670,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // the invoice's CREDIT NOTES, which a render context holds even less often
     // than the sibling invoices, and their output feeds the credit cap and
     // the fold's sum, both denied here.
-    "keyInvoiceCredits",
+    "keyCreditLines",
+    "creditLinePointer",
     "unitsCreditedBefore",
     // Exact rational arithmetic over a credit budget's unit-time. A template
     // renders stored counts; it never computes a cap.

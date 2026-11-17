@@ -95,7 +95,8 @@ import {
   buildOverbillingCredits,
   compareTime,
   countsTime,
-  keyInvoiceCredits,
+  keyCreditLines,
+  type KeyableCreditLine,
   type InitiatorAccount,
   type OverbillingCredits,
   scaleTime,
@@ -181,6 +182,8 @@ export interface InvoiceActionOffer {
 
 /** An invoice as the ruleset reads it. */
 export interface OfferInvoice {
+  /** Its id: the billing document a prior credit line must name to count against it. */
+  uid: string;
   status: InvoiceStatusType;
   totals: InvoiceSettledTotals & { total_cents: number; amount_due_cents: number };
   /** Read only by `add_credit_note`; the dividers are skipped. */
@@ -192,12 +195,13 @@ export interface OfferInvoice {
 /** A settlement row as `reverse_settlement` reads it. */
 export type OfferSettlement = Pick<Settlement, "uid" | "type" | "reverses" | "xero_payment_id">;
 
-/** A prior credit-note line, as the credit cap reads it. */
-export interface CappedCreditLine {
+/**
+ * A credit-note line, as the credit cap reads it: keyed by its billing pointer
+ * ({@link keyCreditLines}). A line naming another invoice does not count here.
+ */
+export interface CappedCreditLine extends KeyableCreditLine {
   name: string;
   quantity: number;
-  uid_invoice_item: string | null;
-  path_invoice_item?: readonly string[];
   price: { counts?: readonly { num: number; den: number }[] };
 }
 
@@ -257,15 +261,16 @@ const pathKey = (path: readonly string[]): string => path.join("/");
  * the budget exactly the unit count.
  */
 export function creditableLines(
-  items: readonly InvoiceDocItemType[],
+  invoice: { uid: string; items: readonly InvoiceDocItemType[] },
   priorNotes: readonly CappedNote[],
 ): CreditableLine[] {
-  const lines = items.filter(isInvoiceLineItem);
+  const lines = invoice.items.filter(isInvoiceLineItem);
+  const billing = { uid: invoice.uid, rows: lines };
   const credited = new Map<string, TimeAmount>();
   for (const note of priorNotes) {
     if (note.status === "void") continue;
-    // The credited view of the one keyer: marker-free, legacy uid fallback.
-    for (const { line, row, time } of keyInvoiceCredits(lines, note.items, { fallback: true }).keyed) {
+    // The credited view of the one keyer: marker-free, this invoice's rows only.
+    for (const { line, row, time } of keyCreditLines(billing, note.items, { legacyUid: invoice.uid }).keyed) {
       const k = pathKey(row.path);
       credited.set(k, addTime(credited.get(k) ?? { num: 0, den: 1 }, scaleTime(time, line.quantity)));
     }
@@ -315,16 +320,16 @@ export interface CreditKitPart {
  * @returns `[]` when no line row sits at `path`
  */
 export function creditKitParts(
-  items: readonly InvoiceDocItemType[],
+  invoice: { uid: string; items: readonly InvoiceDocItemType[] },
   path: readonly string[],
   n: number,
   priorNotes: readonly CappedNote[],
 ): CreditKitPart[] {
-  const lines = items.filter(isInvoiceLineItem);
+  const lines = invoice.items.filter(isInvoiceLineItem);
   const k = pathKey(path);
   const root = lines.find((l) => pathKey(l.path) === k);
   if (root === undefined || n <= 0) return [];
-  const c = unitsCreditedBefore(lines, root, priorNotes);
+  const c = unitsCreditedBefore({ uid: invoice.uid, rows: lines }, root, priorNotes);
   const out: CreditKitPart[] = [{ path: [...root.path], uid: root.uid, quantity: n }];
   if (root.quantity <= 0) return out;
   const at = (units: number, q: number) => Math.floor((2 * units * q + root.quantity) / (2 * root.quantity));
@@ -346,14 +351,15 @@ export function creditKitParts(
  */
 export function creditNoteOverCredit(
   invoiceNumber: number,
-  items: readonly InvoiceDocItemType[],
+  invoice: { uid: string; items: readonly InvoiceDocItemType[] },
   requested: readonly CappedCreditLine[],
   priorNotes: readonly CappedNote[],
 ): string | null {
-  const lines = items.filter(isInvoiceLineItem);
-  const left = new Map(creditableLines(items, priorNotes).map((l) => [pathKey(l.path), l]));
+  const lines = invoice.items.filter(isInvoiceLineItem);
+  const billing = { uid: invoice.uid, rows: lines };
+  const left = new Map(creditableLines(invoice, priorNotes).map((l) => [pathKey(l.path), l]));
   for (const line of requested) {
-    const keyed = keyInvoiceCredits(lines, [line], { fallback: true }).keyed[0];
+    const keyed = keyCreditLines(billing, [line], { legacyUid: invoice.uid }).keyed[0];
     const target = keyed?.row;
     const billed = target?.quantity ?? 0;
     if (line.quantity > billed) {
@@ -444,7 +450,7 @@ export function invoiceActionsFor(invoice: OfferInvoice, ctx: InvoiceOfferContex
   }
 
   if (contract.live_in_xero) {
-    const lines = creditableLines(invoice.items ?? [], ctx.creditNotes ?? []).filter((l) => l.unit_time.num > 0);
+    const lines = creditableLines({ uid: invoice.uid, items: invoice.items ?? [] }, ctx.creditNotes ?? []).filter((l) => l.unit_time.num > 0);
     if (lines.length > 0) offer("add_credit_note", { lines });
   }
 
@@ -541,7 +547,7 @@ export function assertInvoiceAction(
     }
     case "add_credit_note": {
       if (!contract!.live_in_xero) refuse(`invoice ${request.invoice_number} is ${invoice.status}; a credit is raised only on an issued invoice`);
-      const why = creditNoteOverCredit(request.invoice_number, invoice.items ?? [], request.lines, ctx.creditNotes ?? []);
+      const why = creditNoteOverCredit(request.invoice_number, { uid: invoice.uid, items: invoice.items ?? [] }, request.lines, ctx.creditNotes ?? []);
       if (why !== null) refuse(why);
       return;
     }

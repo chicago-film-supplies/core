@@ -42348,6 +42348,7 @@ interface AccountedCreditNote {
   uid: string;
   status: CreditNoteStatusType;
   items: readonly AccountedCreditNoteItem[];
+  destinations?: readonly parenthesized[];
   number?: number;
   version?: number;
   sources?: readonly typeLiteral[];
@@ -42361,8 +42362,8 @@ One credit-note line, as quantity accounting reads it.
 ```ts
 interface AccountedCreditNoteItem {
   quantity: number;
-  path_invoice_item?: readonly string[];
-  uid_invoice_item?: string | null;
+  type?: string;
+  path?: readonly string[];
   reverses_billing?: boolean;
   price?: typeLiteral;
   substituted_for?: readonly typeLiteral[];
@@ -42539,9 +42540,9 @@ interface BillingFoldInitiator {
 
 **Everything that differs between the sides in the billing fold** — data,
 never an `if side` (ruling 84), on the pattern of {@link ScopedSyncSide}.
-The last two entries (how a credit reaches the row it reverses, and whose
-anchors and time test it reads) are ruling 34's to collapse into one keyer
-`(uid_billing, path_billing_item)`; until then they are named here.
+How a credit reaches the row it reverses is NOT here: one keyer,
+`(uid_billing, path_billing_item)`, places every credit on both sides
+({@link keyCreditLines}, ruling 34).
 
 ```ts
 interface BillingFoldSide {
@@ -42553,7 +42554,8 @@ interface BillingFoldSide {
   billingRows(doc: B): typeLiteral;
   rowNetCents(row: InvoiceItem): number;
   partCents(row: InvoiceItem, before: number, after: number): number;
-  placeCredits(billing: ReadonlyMap<string, FoldContext>, credits: readonly C[], unkeyed: Set<string>, scopeUid: string, initiatorPaths: ReadonlySet<string>): FoldContext[];
+  creditRows(doc: C): typeLiteral;
+  creditLegacyBillingUid(doc: C): string | null;
 }
 ```
 
@@ -42668,40 +42670,44 @@ interface InitiatorAccount {
 
 ### `KeyableCreditLine`
 
-What {@link keyInvoiceCredits} reads of a credit-note line: the cap's lines and the fold's alike.
+What {@link keyCreditLines} reads of a credit line, on both sides: the cap's
+lines and the fold's alike.
 
 ```ts
 interface KeyableCreditLine {
   quantity: number;
+  uid_billing?: string;
+  path_billing_item?: readonly string[];
   path_invoice_item?: readonly string[];
-  uid_invoice_item?: string | null;
+  uid_purchase_bill?: string;
+  path_bill_item?: readonly string[];
   price?: typeLiteral;
 }
 ```
 
-### `KeyedInvoiceCredit`
+### `KeyedBillingRow`
 
-One credit-note line matched to the invoice row it credits. @see {@link keyInvoiceCredits}
-
-```ts
-interface KeyedInvoiceCredit {
-  line: L;
-  row: R;
-  kind: "units" | "time";
-  time: TimeAmount;
-}
-```
-
-### `KeyedInvoiceRow`
-
-The invoice row a keyed credit line credits: the fields the keyer reads.
+The billing row a keyed credit line credits: the fields the keyer reads.
 
 ```ts
-interface KeyedInvoiceRow {
+interface KeyedBillingRow {
   uid: string;
   path: readonly string[];
   quantity?: number;
   price?: typeLiteral;
+}
+```
+
+### `KeyedCredit`
+
+One credit line matched to the billing row it credits. @see {@link keyCreditLines}
+
+```ts
+interface KeyedCredit {
+  line: L;
+  row: R;
+  kind: "units" | "time";
+  time: TimeAmount;
 }
 ```
 
@@ -43093,6 +43099,13 @@ The magnitude of a count delta — every tier's sign flipped when the direction 
 **One unit's billed time**: Σ a line's `counts`, exact. A line with no counts
 (none stored) counts as one period, so the budget is exactly its unit count.
 
+### `creditLinePointer(line: KeyableCreditLine): typeLiteral | null`
+
+The billing row a credit line names, on either side: `uid_billing` +
+`path_billing_item`, else a side's retiring pointer. `uid` is absent on the
+AR note's retiring `path_invoice_item`, which names no document; `legacyAr`
+marks that spelling. `null` for a line naming no billing row.
+
 ### `crmsAuthoredInvoices(invoices: readonly AccountedInvoice[]): string[]`
 
 The uids of the LIVE invoices CRMS authored — a remainder refuses when any exist.
@@ -43110,19 +43123,25 @@ A row a substitution explains is left out — its `substituted` entry is that
 row's answer, and a custody figure there would report it twice. A receipt
 carries no substitution, so the skip is vacuous there.
 
-### `keyInvoiceCredits(rows: readonly R[], lines: readonly L[], opts: typeLiteral): typeLiteral`
+### `keyCreditLines(billing: typeLiteral, lines: readonly L[], _: unknown): typeLiteral`
 
-**The one AR credit keyer** (ruling 84): each line of `notes` matched to the
-row of `rows` it credits, with its kind. Both views read it:
+**The one credit keyer, both sides** (ruling 34 F14 item 5): each line of
+`lines` that names a row of `billing` — by `(uid_billing, path_billing_item)`
+— matched to that row, with its kind. Every reader of a credit keys through
+it: the cap ({@link unitsCreditedBefore}, `creditableLines`) and the fold
+({@link billedByPath}).
 
-- **credited** — the cap ({@link creditableLines}' budget,
-  {@link unitsCreditedBefore}): every non-void note, marker-free, with the
-  legacy `uid_invoice_item` fallback (`fallback: true`);
-- **reversed** — netting ({@link billedByPath}): issued or applied notes,
-  `reverses_billing === true` lines, by `path_invoice_item` only.
+- A line naming ANOTHER billing document is not this document's: left out.
+- A line on the AR note's retiring `path_invoice_item` names
+  `opts.legacyUid` (the cap: the invoice it is reading; the fold: the note's
+  one invoice), and is `unmatched` when that is null.
+- A line naming a row `billing` does not carry is `unmatched`.
+- A line naming no billing row is `unpointed`.
 
-The caller has already chosen the notes of ONE invoice. A line it cannot
-match is returned in `unmatched`.
+The kind is the line's shape (ruling 106). ⚠️ Beta H1 only: a line on the
+retiring `path_invoice_item` self-priced its counts, so its kind is still
+read by comparing its time with the row's, as before ruling 106. The
+migration rewrites that one stored line (CN-1030) and H2 deletes the arm.
 
 ### `orderLineWindow(destinations: readonly typeLiteral[], path: readonly string[]): BilledWindow | null`
 
@@ -43205,12 +43224,16 @@ its direct credit; the walk only reaches paths the order has.
 - `orderItems` — The order's items, dividers included (skipped)
 - `direct` — Order path key → units substitutes name it for directly
 
-### `unitsCreditedBefore(rows: readonly KeyedInvoiceRow[], row: Pick<KeyedInvoiceRow, "path">, notes: readonly typeLiteral[]): number`
+### `unitsCreditedBefore(billing: typeLiteral, row: Pick<KeyedBillingRow, "path">, notes: readonly typeLiteral[]): number`
 
 **`c` — whole units of `row` the non-void `notes` already credited**, the
 credited view (marker-free, the cap's liveness and matching). A credit line's
 `substituted_for` slice starts here (ruling 84): units `(c, c + n]`. Time
 credits take no units (R3), so they do not advance it.
+
+**Parameters**
+
+- `billing` — The billing document `row` is on, and its line rows
 
 ## `@cfs/core/utils/icons`
 
@@ -45469,14 +45492,13 @@ contexts are easy to get wrong:
 
 ### `CappedCreditLine`
 
-A prior credit-note line, as the credit cap reads it.
+A credit-note line, as the credit cap reads it: keyed by its billing pointer
+({@link keyCreditLines}). A line naming another invoice does not count here.
 
 ```ts
 interface CappedCreditLine {
   name: string;
   quantity: number;
-  uid_invoice_item: string | null;
-  path_invoice_item?: readonly string[];
   price: typeLiteral;
 }
 ```
@@ -45607,6 +45629,7 @@ An invoice as the ruleset reads it.
 
 ```ts
 interface OfferInvoice {
+  uid: string;
   status: InvoiceStatusType;
   totals: InvoiceSettledTotals & typeLiteral;
   items?: readonly InvoiceDocItemType[];
@@ -45688,7 +45711,7 @@ rule for an invoice and a bill (`noun` is for the message only).
 **One unit's billed time**: Σ a line's `counts`, exact. A line with no counts
 (none stored) counts as one period, so the budget is exactly its unit count.
 
-### `creditKitParts(items: readonly InvoiceDocItemType[], path: readonly string[], n: number, priorNotes: readonly CappedNote[]): CreditKitPart[]`
+### `creditKitParts(invoice: typeLiteral, path: readonly string[], n: number, priorNotes: readonly CappedNote[]): CreditKitPart[]`
 
 **The rows a credit of `n` units of the invoice line at `path` pre-fills**
 (R5, owner 2026-11-13): the line itself, then — when it is a KIT, ordinary or
@@ -45720,7 +45743,7 @@ Every action the UI may offer on this credit note.
   context), a status that accepts allocation, and credit left; `max_cents` is
   the remaining credit.
 
-### `creditNoteOverCredit(invoiceNumber: number, items: readonly InvoiceDocItemType[], requested: readonly CappedCreditLine[], priorNotes: readonly CappedNote[]): string | null`
+### `creditNoteOverCredit(invoiceNumber: number, invoice: typeLiteral, requested: readonly CappedCreditLine[], priorNotes: readonly CappedNote[]): string | null`
 
 Why crediting `requested` would exceed what the invoice billed, or `null` when
 it would not. **The api's whole credit-note cap**, both arms, with its
@@ -45729,7 +45752,7 @@ billed) checked first, then arm B (the cumulative unit-day budget).
 
 `invoiceNumber` is for the message only.
 
-### `creditableLines(items: readonly InvoiceDocItemType[], priorNotes: readonly CappedNote[]): CreditableLine[]`
+### `creditableLines(invoice: typeLiteral, priorNotes: readonly CappedNote[]): CreditableLine[]`
 
 Credit left on every billed line, net of `priorNotes` (D3). **Arm B of the
 api's credit-note cap, lifted here** (`api-cloudrun/src/lib/creditNoteCap.ts`)

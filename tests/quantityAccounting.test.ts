@@ -1073,16 +1073,18 @@ Deno.test("one credit fold: an unplaceable reversing line is named in credits_un
   assertEquals([out.byPath.get(lightKey)?.quantity, out.credits_unkeyed], [5, ["cn1"]]);
 });
 
-Deno.test("unitsCreditedBefore: the CREDITED view — marker-free, non-void, unit credits only, legacy uid fallback", () => {
+Deno.test("unitsCreditedBefore: the CREDITED view — marker-free, non-void, unit credits only, keyed (uid_billing, path)", () => {
   const rows = invoice("a", lightOrder(5, 10)).items.filter((it) => it.type === "rental");
   const row = rows[0];
-  const n = (quantity: number, extra: Record<string, unknown> = {}) => ({ quantity, path_invoice_item: row.path, ...extra });
-  assertEquals(unitsCreditedBefore(rows, row, [
+  const n = (quantity: number, extra: Record<string, unknown> = {}) => ({ quantity, uid_billing: "a", path_billing_item: row.path, ...extra });
+  assertEquals(unitsCreditedBefore({ uid: "a", rows }, row, [
     { status: "issued", items: [n(1), n(1, { reverses_billing: true })] }, // marker-free: both count
     { status: "draft", items: [n(1)] }, // a draft is non-void: the cap counts it
     { status: "void", items: [n(5)] }, // void: nothing
-    { status: "issued", items: [n(2, { price: { counts: fdwCounts(5) } })] }, // a time credit: no units (R3)
-    { status: "issued", items: [{ quantity: 1, uid_invoice_item: row.uid }] }, // stored before paths
+    { status: "issued", items: [n(2, { price: { counts: fdwCounts(5) } })] }, // a time credit (non-empty counts): no units (R3)
+    { status: "issued", items: [n(3, { uid_billing: "b" })] }, // another invoice's row at the same path: not this one's
+    { status: "issued", items: [{ quantity: 1, path_invoice_item: row.path }] }, // the retiring pointer names the invoice read
+    { status: "issued", items: [{ quantity: 4 }] }, // no pointer: credits no row
   ]), 4);
 });
 

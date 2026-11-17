@@ -19939,13 +19939,13 @@
         {
           "kind": "interface",
           "name": "AccountedCreditNote",
-          "declaration": "interface AccountedCreditNote {\n  uid: string;\n  status: CreditNoteStatusType;\n  items: readonly AccountedCreditNoteItem[];\n  number?: number;\n  version?: number;\n  sources?: readonly typeLiteral[];\n}",
+          "declaration": "interface AccountedCreditNote {\n  uid: string;\n  status: CreditNoteStatusType;\n  items: readonly AccountedCreditNoteItem[];\n  destinations?: readonly parenthesized[];\n  number?: number;\n  version?: number;\n  sources?: readonly typeLiteral[];\n}",
           "doc": "A credit note as quantity accounting reads it."
         },
         {
           "kind": "interface",
           "name": "AccountedCreditNoteItem",
-          "declaration": "interface AccountedCreditNoteItem {\n  quantity: number;\n  path_invoice_item?: readonly string[];\n  uid_invoice_item?: string | null;\n  reverses_billing?: boolean;\n  price?: typeLiteral;\n  substituted_for?: readonly typeLiteral[];\n}",
+          "declaration": "interface AccountedCreditNoteItem {\n  quantity: number;\n  type?: string;\n  path?: readonly string[];\n  reverses_billing?: boolean;\n  price?: typeLiteral;\n  substituted_for?: readonly typeLiteral[];\n}",
           "doc": "One credit-note line, as quantity accounting reads it."
         },
         {
@@ -20029,8 +20029,8 @@
         {
           "kind": "interface",
           "name": "BillingFoldSide",
-          "declaration": "interface BillingFoldSide {\n  scopeType: \"order\" | \"purchase\";\n  billingIsLive(doc: B): boolean;\n  creditIsLive(doc: C): boolean;\n  billingHeader(doc: B): Omit<BilledDocument, \"role\" | \"live\">;\n  creditHeader(doc: C): Omit<BilledDocument, \"role\" | \"live\">;\n  billingRows(doc: B): typeLiteral;\n  rowNetCents(row: InvoiceItem): number;\n  partCents(row: InvoiceItem, before: number, after: number): number;\n  placeCredits(billing: ReadonlyMap<string, FoldContext>, credits: readonly C[], unkeyed: Set<string>, scopeUid: string, initiatorPaths: ReadonlySet<string>): FoldContext[];\n}",
-          "doc": "**Everything that differs between the sides in the billing fold** — data,\nnever an `if side` (ruling 84), on the pattern of {@link ScopedSyncSide}.\nThe last two entries (how a credit reaches the row it reverses, and whose\nanchors and time test it reads) are ruling 34's to collapse into one keyer\n`(uid_billing, path_billing_item)`; until then they are named here."
+          "declaration": "interface BillingFoldSide {\n  scopeType: \"order\" | \"purchase\";\n  billingIsLive(doc: B): boolean;\n  creditIsLive(doc: C): boolean;\n  billingHeader(doc: B): Omit<BilledDocument, \"role\" | \"live\">;\n  creditHeader(doc: C): Omit<BilledDocument, \"role\" | \"live\">;\n  billingRows(doc: B): typeLiteral;\n  rowNetCents(row: InvoiceItem): number;\n  partCents(row: InvoiceItem, before: number, after: number): number;\n  creditRows(doc: C): typeLiteral;\n  creditLegacyBillingUid(doc: C): string | null;\n}",
+          "doc": "**Everything that differs between the sides in the billing fold** — data,\nnever an `if side` (ruling 84), on the pattern of {@link ScopedSyncSide}.\nHow a credit reaches the row it reverses is NOT here: one keyer,\n`(uid_billing, path_billing_item)`, places every credit on both sides\n({@link keyCreditLines}, ruling 34)."
         },
         {
           "kind": "interface",
@@ -20083,20 +20083,20 @@
         {
           "kind": "interface",
           "name": "KeyableCreditLine",
-          "declaration": "interface KeyableCreditLine {\n  quantity: number;\n  path_invoice_item?: readonly string[];\n  uid_invoice_item?: string | null;\n  price?: typeLiteral;\n}",
-          "doc": "What {@link keyInvoiceCredits} reads of a credit-note line: the cap's lines and the fold's alike."
+          "declaration": "interface KeyableCreditLine {\n  quantity: number;\n  uid_billing?: string;\n  path_billing_item?: readonly string[];\n  path_invoice_item?: readonly string[];\n  uid_purchase_bill?: string;\n  path_bill_item?: readonly string[];\n  price?: typeLiteral;\n}",
+          "doc": "What {@link keyCreditLines} reads of a credit line, on both sides: the cap's\nlines and the fold's alike."
         },
         {
           "kind": "interface",
-          "name": "KeyedInvoiceCredit",
-          "declaration": "interface KeyedInvoiceCredit {\n  line: L;\n  row: R;\n  kind: \"units\" | \"time\";\n  time: TimeAmount;\n}",
-          "doc": "One credit-note line matched to the invoice row it credits. @see {@link keyInvoiceCredits}"
+          "name": "KeyedBillingRow",
+          "declaration": "interface KeyedBillingRow {\n  uid: string;\n  path: readonly string[];\n  quantity?: number;\n  price?: typeLiteral;\n}",
+          "doc": "The billing row a keyed credit line credits: the fields the keyer reads."
         },
         {
           "kind": "interface",
-          "name": "KeyedInvoiceRow",
-          "declaration": "interface KeyedInvoiceRow {\n  uid: string;\n  path: readonly string[];\n  quantity?: number;\n  price?: typeLiteral;\n}",
-          "doc": "The invoice row a keyed credit line credits: the fields the keyer reads."
+          "name": "KeyedCredit",
+          "declaration": "interface KeyedCredit {\n  line: L;\n  row: R;\n  kind: \"units\" | \"time\";\n  time: TimeAmount;\n}",
+          "doc": "One credit line matched to the billing row it credits. @see {@link keyCreditLines}"
         },
         {
           "kind": "interface",
@@ -20350,6 +20350,14 @@
         },
         {
           "kind": "function",
+          "name": "creditLinePointer",
+          "signature": "creditLinePointer(line: KeyableCreditLine): typeLiteral | null",
+          "doc": "The billing row a credit line names, on either side: `uid_billing` +\n`path_billing_item`, else a side's retiring pointer. `uid` is absent on the\nAR note's retiring `path_invoice_item`, which names no document; `legacyAr`\nmarks that spelling. `null` for a line naming no billing row.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "crmsAuthoredInvoices",
           "signature": "crmsAuthoredInvoices(invoices: readonly AccountedInvoice[]): string[]",
           "doc": "The uids of the LIVE invoices CRMS authored — a remainder refuses when any exist.",
@@ -20366,9 +20374,9 @@
         },
         {
           "kind": "function",
-          "name": "keyInvoiceCredits",
-          "signature": "keyInvoiceCredits(rows: readonly R[], lines: readonly L[], opts: typeLiteral): typeLiteral",
-          "doc": "**The one AR credit keyer** (ruling 84): each line of `notes` matched to the\nrow of `rows` it credits, with its kind. Both views read it:\n\n- **credited** — the cap ({@link creditableLines}' budget,\n  {@link unitsCreditedBefore}): every non-void note, marker-free, with the\n  legacy `uid_invoice_item` fallback (`fallback: true`);\n- **reversed** — netting ({@link billedByPath}): issued or applied notes,\n  `reverses_billing === true` lines, by `path_invoice_item` only.\n\nThe caller has already chosen the notes of ONE invoice. A line it cannot\nmatch is returned in `unmatched`.",
+          "name": "keyCreditLines",
+          "signature": "keyCreditLines(billing: typeLiteral, lines: readonly L[], _: unknown): typeLiteral",
+          "doc": "**The one credit keyer, both sides** (ruling 34 F14 item 5): each line of\n`lines` that names a row of `billing` — by `(uid_billing, path_billing_item)`\n— matched to that row, with its kind. Every reader of a credit keys through\nit: the cap ({@link unitsCreditedBefore}, `creditableLines`) and the fold\n({@link billedByPath}).\n\n- A line naming ANOTHER billing document is not this document's: left out.\n- A line on the AR note's retiring `path_invoice_item` names\n  `opts.legacyUid` (the cap: the invoice it is reading; the fold: the note's\n  one invoice), and is `unmatched` when that is null.\n- A line naming a row `billing` does not carry is `unmatched`.\n- A line naming no billing row is `unpointed`.\n\nThe kind is the line's shape (ruling 106). ⚠️ Beta H1 only: a line on the\nretiring `path_invoice_item` self-priced its counts, so its kind is still\nread by comparing its time with the row's, as before ruling 106. The\nmigration rewrites that one stored line (CN-1030) and H2 deletes the arm.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -20457,9 +20465,14 @@
         {
           "kind": "function",
           "name": "unitsCreditedBefore",
-          "signature": "unitsCreditedBefore(rows: readonly KeyedInvoiceRow[], row: Pick<KeyedInvoiceRow, \"path\">, notes: readonly typeLiteral[]): number",
+          "signature": "unitsCreditedBefore(billing: typeLiteral, row: Pick<KeyedBillingRow, \"path\">, notes: readonly typeLiteral[]): number",
           "doc": "**`c` — whole units of `row` the non-void `notes` already credited**, the\ncredited view (marker-free, the cap's liveness and matching). A credit line's\n`substituted_for` slice starts here (ruling 84): units `(c, c + n]`. Time\ncredits take no units (R3), so they do not advance it.",
-          "paramTags": [],
+          "paramTags": [
+            {
+              "name": "billing",
+              "doc": "The billing document `row` is on, and its line rows"
+            }
+          ],
           "returnsTag": null
         }
       ]
@@ -21659,8 +21672,8 @@
         {
           "kind": "interface",
           "name": "CappedCreditLine",
-          "declaration": "interface CappedCreditLine {\n  name: string;\n  quantity: number;\n  uid_invoice_item: string | null;\n  path_invoice_item?: readonly string[];\n  price: typeLiteral;\n}",
-          "doc": "A prior credit-note line, as the credit cap reads it."
+          "declaration": "interface CappedCreditLine {\n  name: string;\n  quantity: number;\n  price: typeLiteral;\n}",
+          "doc": "A credit-note line, as the credit cap reads it: keyed by its billing pointer\n({@link keyCreditLines}). A line naming another invoice does not count here."
         },
         {
           "kind": "interface",
@@ -21731,7 +21744,7 @@
         {
           "kind": "interface",
           "name": "OfferInvoice",
-          "declaration": "interface OfferInvoice {\n  status: InvoiceStatusType;\n  totals: InvoiceSettledTotals & typeLiteral;\n  items?: readonly InvoiceDocItemType[];\n  xero_id?: string | null;\n}",
+          "declaration": "interface OfferInvoice {\n  uid: string;\n  status: InvoiceStatusType;\n  totals: InvoiceSettledTotals & typeLiteral;\n  items?: readonly InvoiceDocItemType[];\n  xero_id?: string | null;\n}",
           "doc": "An invoice as the ruleset reads it."
         },
         {
@@ -21807,7 +21820,7 @@
         {
           "kind": "function",
           "name": "creditKitParts",
-          "signature": "creditKitParts(items: readonly InvoiceDocItemType[], path: readonly string[], n: number, priorNotes: readonly CappedNote[]): CreditKitPart[]",
+          "signature": "creditKitParts(invoice: typeLiteral, path: readonly string[], n: number, priorNotes: readonly CappedNote[]): CreditKitPart[]",
           "doc": "**The rows a credit of `n` units of the invoice line at `path` pre-fills**\n(R5, owner 2026-11-13): the line itself, then — when it is a KIT, ordinary or\nsubstitute — every line row below it at the INVOICE's own ratio. The AR twin\nof `billLineCreditParts` without its refusals: the operator may remove or\nchange any part and the API accepts any subset, because the fold judges root\nvs component from the invoice's anchors, never the credit's.\n\nThe ratio range is the root's: a row of `q` units under a root of `Q` takes\n`(⌊cq/Q⌉, ⌊(c + n)q/Q⌉]`, `c` the root's units already credited\n({@link unitsCreditedBefore}), rounded half-up, so credits that sum to the\nroot's quantity sum to each row's. A row the ratio gives no unit is left out.\n\nQuantities only: each line's money is `priceCreditNote`'s, and its\n`substituted_for` slice is the API writer's (it needs the orders' rows).",
           "paramTags": [],
           "returnsTag": "`[]` when no line row sits at `path`"
@@ -21823,7 +21836,7 @@
         {
           "kind": "function",
           "name": "creditNoteOverCredit",
-          "signature": "creditNoteOverCredit(invoiceNumber: number, items: readonly InvoiceDocItemType[], requested: readonly CappedCreditLine[], priorNotes: readonly CappedNote[]): string | null",
+          "signature": "creditNoteOverCredit(invoiceNumber: number, invoice: typeLiteral, requested: readonly CappedCreditLine[], priorNotes: readonly CappedNote[]): string | null",
           "doc": "Why crediting `requested` would exceed what the invoice billed, or `null` when\nit would not. **The api's whole credit-note cap**, both arms, with its\nmessages unchanged but one (a null-day line now names the days it spends) — arm A (one line may not claim more units than the row\nbilled) checked first, then arm B (the cumulative unit-day budget).\n\n`invoiceNumber` is for the message only.",
           "paramTags": [],
           "returnsTag": null
@@ -21831,7 +21844,7 @@
         {
           "kind": "function",
           "name": "creditableLines",
-          "signature": "creditableLines(items: readonly InvoiceDocItemType[], priorNotes: readonly CappedNote[]): CreditableLine[]",
+          "signature": "creditableLines(invoice: typeLiteral, priorNotes: readonly CappedNote[]): CreditableLine[]",
           "doc": "Credit left on every billed line, net of `priorNotes` (D3). **Arm B of the\napi's credit-note cap, lifted here** (`api-cloudrun/src/lib/creditNoteCap.ts`)\nso the manager offers exactly what the server will accept.\n\nONE budget, in unit-TIME: quantity × Σ `counts`, exact (ruling 8 — the days\na line bills are its frozen counts, in its formula's own periods). A prior\nnote line credited its own counts: the invoice line's for whole units, the\ncredited days stated through the formula for a days credit\n(`priceCreditNote`). A line with no counts counts as one period, which makes\nthe budget exactly the unit count.",
           "paramTags": [],
           "returnsTag": null

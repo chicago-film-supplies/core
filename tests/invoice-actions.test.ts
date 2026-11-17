@@ -63,6 +63,7 @@ function line(uid: string, qty: number, days: number | null): InvoiceDocItemType
   } as unknown as InvoiceDocItemType;
 }
 
+const INV = "inv";
 const DIVIDER = { uid: "dest", path: ["ord", "dest"], type: "destination" } as unknown as InvoiceDocItemType;
 
 function invoice(
@@ -73,6 +74,7 @@ function invoice(
   const total = totals.total_cents ?? 10_000;
   const paid = totals.amount_paid_cents ?? 0;
   return {
+    uid: INV,
     status,
     items: items ?? [DIVIDER, line("cam", 5, 10)],
     totals: {
@@ -254,8 +256,8 @@ const note = (status: string, ...items: CappedNote["items"]): CappedNote => ({ s
 const credit = (uid: string, quantity: number, days: number | null = null) => ({
   name: uid,
   quantity,
-  uid_invoice_item: uid,
-  path_invoice_item: ["ord", "dest", uid],
+  uid_billing: INV,
+  path_billing_item: ["ord", "dest", uid],
   // A days credit STATES the time it gave back, unfloored; a whole-unit credit carries none of its own.
   price: { ...fdwPrice(0), counts: days === null ? [] : fdwCounts(days, { stated: true }) },
 });
@@ -270,14 +272,14 @@ Deno.test("R5 creditKitParts: a kit pre-fills its components at the INVOICE's ra
     at("cable", ["ord", "dest", "kit", "cable"], 3),
     at("light", ["ord", "dest", "light"], 4),
   ];
-  const parts = (n: number, prior: CappedNote[] = []) => creditKitParts(items, ["ord", "dest", "kit"], n, prior).map((p) => [p.uid, p.quantity]);
+  const parts = (n: number, prior: CappedNote[] = []) => creditKitParts({ uid: INV, items }, ["ord", "dest", "kit"], n, prior).map((p) => [p.uid, p.quantity]);
   assertEquals(parts(1), [["kit", 1], ["stake", 2], ["cable", 1]]);
   // After 1 kit already credited, the next 2 take the rows' next units, and the three credits sum to each row.
-  const prior = [note("issued", { name: "kit", quantity: 1, uid_invoice_item: "kit", path_invoice_item: ["ord", "dest", "kit"], price: { counts: [] } })];
+  const prior = [note("issued", { name: "kit", quantity: 1, uid_billing: INV, path_billing_item: ["ord", "dest", "kit"], price: { counts: [] } })];
   assertEquals(parts(2, prior), [["kit", 2], ["stake", 4], ["cable", 2]]);
   // A plain line is itself alone; a path with no line pre-fills nothing.
-  assertEquals(creditKitParts(items, ["ord", "dest", "light"], 2, []).map((p) => [p.uid, p.quantity]), [["light", 2]]);
-  assertEquals(creditKitParts(items, ["ord", "dest", "nothing"], 1, []), []);
+  assertEquals(creditKitParts({ uid: INV, items }, ["ord", "dest", "light"], 2, []).map((p) => [p.uid, p.quantity]), [["light", 2]]);
+  assertEquals(creditKitParts({ uid: INV, items }, ["ord", "dest", "nothing"], 1, []), []);
 });
 
 Deno.test("D3 creditableLines nets prior notes in unit-TIME, exactly; void notes and dividers are skipped", () => {
@@ -288,7 +290,7 @@ Deno.test("D3 creditableLines nets prior notes in unit-TIME, exactly; void notes
     note("applied", credit("bag", 1)), // a sale unit: 1 unit
   ];
   // cam: 5 units × 2 weeks = 10, less 4/5 → 46/5 unit-weeks; ⌊(46/5) ÷ 2⌋ = 4 whole units.
-  assertEquals(creditableLines(items, prior).map((l) => [l.uid, l.unit_time, l.units]), [
+  assertEquals(creditableLines({ uid: INV, items }, prior).map((l) => [l.uid, l.unit_time, l.units]), [
     ["cam", { num: 46, den: 5 }, 4],
     ["bag", { num: 1, den: 1 }, 1],
   ]);
@@ -297,24 +299,43 @@ Deno.test("D3 creditableLines nets prior notes in unit-TIME, exactly; void notes
 Deno.test("D3: a note line stating no counts consumes the row's FULL time, not one period", () => {
   // Read as one period, crediting all 5 units of a 5 × 5-day row would leave room for more.
   const items = [line("cam", 5, 5)];
-  assertEquals(creditableLines(items, [note("issued", credit("cam", 5))])[0].unit_time, { num: 0, den: 1 });
+  assertEquals(creditableLines({ uid: INV, items }, [note("issued", credit("cam", 5))])[0].unit_time, { num: 0, den: 1 });
+});
+
+Deno.test("D3 creditableLines keys by (uid_billing, path_billing_item): a line naming ANOTHER invoice at the same path does not count", () => {
+  // A deposit and a final invoice bill one order line at one path (ruling 107): a
+  // note crediting the deposit's row must not spend the final invoice's budget.
+  const items = [line("cam", 5, 10)];
+  const other = { ...credit("cam", 5), uid_billing: "inv-deposit" };
+  assertEquals(creditableLines({ uid: INV, items }, [note("issued", other)])[0].units, 5);
+  assertEquals(creditableLines({ uid: "inv-deposit", items }, [note("issued", other)])[0].units, 0);
+});
+
+Deno.test("D3 creditableLines: the retiring path_invoice_item names the invoice being read, its kind still by time comparison (H1 only)", () => {
+  const items = [line("cam", 5, 10)];
+  // A self-priced legacy whole-unit line states the row's own counts: units, as before ruling 106.
+  const legacy = { name: "cam", quantity: 2, path_invoice_item: ["ord", "dest", "cam"], price: { counts: fdwCounts(10) } };
+  assertEquals(creditableLines({ uid: INV, items }, [note("issued", legacy)])[0].units, 3);
+  // The same counts on the NEW pointer read as a time credit of 2 × the row's time: the same budget, so the same answer.
+  const pointed = { ...legacy, path_invoice_item: undefined, uid_billing: INV, path_billing_item: ["ord", "dest", "cam"] };
+  assertEquals(creditableLines({ uid: INV, items }, [note("issued", pointed)])[0].units, 3);
 });
 
 Deno.test("D3 creditNoteOverCredit: the api's two arms, with its messages", () => {
   const items = [line("cam", 5, 10)];
   // Arm A — more units than the row billed, checked first.
-  assertEquals(creditNoteOverCredit(2001, items, [credit("cam", 6)], []), 'crediting 6 of "cam" exceeds what invoice 2001 billed (5)');
+  assertEquals(creditNoteOverCredit(2001, { uid: INV, items }, [credit("cam", 6)], []), 'crediting 6 of "cam" exceeds what invoice 2001 billed (5)');
   // Arm B — the 140% counter-example: 5 × 4/5 = 4 unit-weeks already, then 5 whole units (10).
   assertEquals(
-    creditNoteOverCredit(2001, items, [credit("cam", 5)], [note("issued", credit("cam", 5, 4))]),
+    creditNoteOverCredit(2001, { uid: INV, items }, [credit("cam", 5)], [note("issued", credit("cam", 5, 4))]),
     'crediting 5 × 2 period(s) of "cam" is 10 unit-periods, and invoice 2001 billed 10 (5 × 2) less 4 already credited',
   );
   // A sale line keeps the plain wording.
   assertEquals(
-    creditNoteOverCredit(7, [line("bag", 2, null)], [credit("bag", 2)], [note("issued", credit("bag", 1))]),
+    creditNoteOverCredit(7, { uid: INV, items: [line("bag", 2, null)] }, [credit("bag", 2)], [note("issued", credit("bag", 1))]),
     'crediting 2 of "bag" exceeds what invoice 7 billed (2) less what is already credited (1)',
   );
-  assertEquals(creditNoteOverCredit(2001, items, [credit("cam", 4)], [note("issued", credit("cam", 1))]), null);
+  assertEquals(creditNoteOverCredit(2001, { uid: INV, items }, [credit("cam", 4)], [note("issued", credit("cam", 1))]), null);
 });
 
 Deno.test("D3 add_credit_note: offered on a status live in Xero with credit left", () => {

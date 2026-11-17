@@ -86,6 +86,48 @@ Deno.test("billedByPath (AR): a reversing credit nets units AND money; an over-c
   assertEquals(at?.rows, []);
 });
 
+Deno.test("billedByPath (AR): one note crediting two invoices that bill ONE order line keys each line to its own invoice (ruling 107)", () => {
+  // A deposit and a final invoice each bill X at the same invoice path [O, D, X].
+  // The note credits 1 of the deposit and 2 of the final, under one billing
+  // divider each: the paths alone collide, the pointer does not.
+  const two: AccountedCreditNote = {
+    uid: "cn-2",
+    status: "issued",
+    sources: [{ collection: "orders", uid: O }, { collection: "invoices", uid: "inv-1" }, { collection: "invoices", uid: "inv-2" }],
+    items: [
+      { type: "billing", path: ["inv-1"] },
+      { type: "rental", path: ["inv-1", O, D, X], quantity: 1, uid_billing: "inv-1", path_billing_item: [O, D, X], reverses_billing: true, price: { counts: [], subtotal_discounted_cents: 1000 } },
+      { type: "billing", path: ["inv-2"] },
+      { type: "rental", path: ["inv-2", O, D, X], quantity: 2, uid_billing: "inv-2", path_billing_item: [O, D, X], reverses_billing: true, price: { counts: [], subtotal_discounted_cents: 1998 } },
+    ] as AccountedCreditNote["items"],
+  };
+  const out = billedByPath("receivable", { uid: O, items: ORDER_ITEMS }, [invoice("inv-1", 2, 2000), invoice("inv-2", 2, 1998)], [two]);
+  const at = out.byPath.get(`${D}/${X}`);
+  assertEquals([at?.quantity, at?.amount_cents], [1, 1000]);
+  assertEquals(at?.rows.map((r) => [r.documentUid, r.quantity]), [["inv-1", 1]]);
+  assertEquals(out.credits_unkeyed, []);
+  // Companion: the retiring pointer names no invoice, so the same lines on a note
+  // with two invoice sources cannot be placed — the reason ruling 107 exists.
+  const legacy: AccountedCreditNote = {
+    ...two,
+    items: two.items.filter((l) => l.type !== "billing").map(({ uid_billing: _u, path_billing_item, ...l }) => ({ ...l, path_invoice_item: path_billing_item })),
+  };
+  const unplaced = billedByPath("receivable", { uid: O, items: ORDER_ITEMS }, [invoice("inv-1", 2, 2000), invoice("inv-2", 2, 1998)], [legacy]);
+  assertEquals([unplaced.byPath.get(`${D}/${X}`)?.quantity, unplaced.credits_unkeyed], [4, ["cn-2"]]);
+});
+
+Deno.test("billedByPath (AR): a pointed line's kind is its SHAPE — non-empty counts take back time and no units (ruling 106)", () => {
+  const time: AccountedCreditNote = {
+    uid: "cn-3",
+    status: "issued",
+    sources: [{ collection: "invoices", uid: "inv-1" }],
+    items: [{ type: "rental", path: ["inv-1", O, D, X], quantity: 2, uid_billing: "inv-1", path_billing_item: [O, D, X], reverses_billing: true, price: { counts: [{ rate_key: "day", num: 1, den: 1 }], subtotal_discounted_cents: 200 } }] as AccountedCreditNote["items"],
+  };
+  const out = billedByPath("receivable", { uid: O, items: ORDER_ITEMS }, [invoice("inv-1", 3, 3000)], [time]);
+  const at = out.byPath.get(`${D}/${X}`);
+  assertEquals([at?.quantity, at?.amount_cents, at?.time_credits?.map((t) => [t.documentUid, t.quantity])], [3, 2800, [["inv-1", 2]]]);
+});
+
 // ── Payable ───────────────────────────────────────────────────────
 
 const flat = (cents: number) => ({ price_formula: { basis: "flat" }, discount: null, stated_cents: cents, counts: [] });
@@ -124,6 +166,28 @@ Deno.test("billedByPath (AP): bills net of reversing supplier credits; a void bi
   // An unmarked credit line (a goodwill or freight credit) un-bills nothing.
   assertEquals(out.byPath.get(`${D}/freight`), undefined);
   assertEquals(out.compared, ["bill-1"]);
+});
+
+Deno.test("billedByPath (AP): a POINTED supplier credit line reverses its bill's row, and a two-bill credit drops neither (F14 item 5, Q5)", () => {
+  // Two bills each bill 2 of X; one credit takes back 1 from each, under a
+  // billing divider per bill. Placed by purchase-local path alone, one line
+  // would overwrite the other.
+  const credit = {
+    uid: "credit-2",
+    status: "issued",
+    destinations: [],
+    items: [
+      { uid: "bill-1", type: "billing", path: ["bill-1"] },
+      { ...billX(1, 1000), path: ["bill-1", P, D, X], uid_billing: "bill-1", path_billing_item: [P, D, X], reverses_billing: true },
+      { uid: "bill-2", type: "billing", path: ["bill-2"] },
+      { ...billX(1, 900), path: ["bill-2", P, D, X], uid_billing: "bill-2", path_billing_item: [P, D, X], reverses_billing: true },
+    ],
+  } as unknown as PayableFoldCredit;
+  const out = billedByPath("payable", { uid: P, items: PURCHASE_ITEMS }, [bill("bill-1", [billX(2, 2000)]), bill("bill-2", [billX(2, 1800)])], [credit]);
+  const at = out.byPath.get(`${D}/${X}`);
+  assertEquals([at?.quantity, at?.amount_cents], [2, 1900]);
+  assertEquals(at?.rows.map((r) => [r.documentUid, r.quantity]), [["bill-1", 1], ["bill-2", 1]]);
+  assertEquals(at?.credit_documents, ["credit-2"]);
 });
 
 Deno.test("billedByPath (AP): a row under a group the BILL authored is document-only, never keyed at its own join (ruling 86)", () => {
