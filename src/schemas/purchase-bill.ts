@@ -922,8 +922,8 @@ export const PurchaseCreditReasonEnum: z.ZodType<PurchaseCreditReasonType> = z.e
 
 // The status vocabulary lives in `schemas/common.ts` so `purchase.ts` can mirror it
 // (`purchase.credits[]`) without importing this file (6e-0a, api-cloudrun#1455).
-export { PURCHASE_CREDIT_STATUSES, PurchaseCreditStatusEnum, type PurchaseCreditStatusType } from "./common.ts";
-import { PurchaseCreditStatusEnum, type PurchaseCreditStatusType } from "./common.ts";
+export { deriveCreditStatus, PURCHASE_CREDIT_STATUSES, PurchaseCreditStatusEnum, type PurchaseCreditStatusType } from "./common.ts";
+import { deriveCreditStatus, PurchaseCreditStatusEnum, type PurchaseCreditStatusType } from "./common.ts";
 
 /** A supplier credit (ACCPAYCREDIT) against one purchase. */
 export interface PurchaseCredit {
@@ -1029,13 +1029,15 @@ function checkPurchaseCredit(c: PurchaseCredit, ctx: z.RefinementCtx): void {
       message: "remaining_credit_cents must lie between 0 and total_cents",
     });
   }
-  // `applied` IS `remaining === 0`; a void strands the balance rather than
-  // consuming it — the AR credit note's rule (`schemas/credit-note.ts`).
-  if (c.status === "applied" && c.remaining_credit_cents !== 0) {
-    ctx.addIssue({ code: "custom", path: ["remaining_credit_cents"], message: "an applied credit has no remaining credit" });
+  // One vocabulary with the AR note, and no draft step yet: 6e-0d's create mode
+  // is the first writer of one, as the bill refuses its own.
+  if (c.status === "draft") {
+    ctx.addIssue({ code: "custom", path: ["status"], message: "a supplier credit has no draft status yet" });
   }
-  if (c.status === "issued" && c.remaining_credit_cents === 0 && c.total_cents !== 0) {
-    ctx.addIssue({ code: "custom", path: ["status"], message: "a fully consumed credit is applied, not issued" });
+  // The stored status IS the derivation (ruling 34 Q1, the bill's precedent).
+  const derived = deriveCreditStatus(c, c.remaining_credit_cents, c.total_cents);
+  if (c.status !== derived) {
+    ctx.addIssue({ code: "custom", path: ["status"], message: `a supplier credit with this balance is ${derived}, not ${c.status}` });
   }
 }
 

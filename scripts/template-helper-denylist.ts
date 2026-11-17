@@ -354,10 +354,6 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "computePurchaseDocumentItemPaths",
     "syncScopedDestinations",
     "validatePurchaseDocumentItemPaths",
-    // core#130 row 1: the status a balance write implies — write-path; a template
-    // reads the STORED status.
-    "deriveCreditNoteStatus",
-    "derivePurchaseCreditStatus",
     // core#130 row 13: a pair's identity key — a join key, never printed.
     "invoicePairKey",
     // The invoice totals AUDIT oracle (api-cloudrun#575, #997 step 2): re-derives

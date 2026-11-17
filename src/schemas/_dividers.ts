@@ -117,3 +117,33 @@ export const GroupDividerArm = z.strictObject({
   path: z.array(ItemUid),
   description: z.string().meta({ pii: "none" }),
 });
+
+/**
+ * **A credit's billing-document divider** (one-document-model ruling 107): the
+ * CREDIT role's top level on both sides, declared once and joined to the AR
+ * credit note's and the supplier credit's row unions — never an initiator's or a
+ * billing document's.
+ *
+ * Its `uid` IS the billing document's Firestore id (an invoice's or a bill's),
+ * as an invoice's `order` divider's is its order's. Under it sit that billing
+ * document's own rows, copied with their paths one level deeper:
+ * `[uid_billing, ...billing row path]`, the initiator divider included. So a
+ * credit naming a deposit invoice and a final invoice that bill ONE order line
+ * holds two rows that cannot collide (invariant 1), and the fold keys each to its
+ * own billing document.
+ *
+ * Only a credit line that names its billing row (`uid_billing` +
+ * `path_billing_item`) sits under one; an unpointed line (a goodwill, bad-debt,
+ * pool or charge-only credit) sits outside every billing divider, under its
+ * initiator divider or at the root.
+ *
+ * `name` is machine-generated (`Invoice #NNN` / `Bill #NNN`), as an order
+ * divider's is, so `none`.
+ */
+export const BillingDividerArm = z.strictObject({
+  uid: ItemUid,
+  type: z.literal("billing"),
+  name: z.string().max(200).meta({ pii: "none" }),
+  path: z.array(ItemUid),
+  description: z.string().meta({ pii: "none" }),
+});

@@ -3084,7 +3084,7 @@ Deno.test("ITEM_CONTRACTS covers every item type, and the derived lists agree", 
   // The compile-time assertions in `schemas/common.ts` already pin these; this is the
   // runtime companion, so a table edit that somehow type-checks still fails.
   const contractKeys = Object.keys(ITEM_CONTRACTS).sort();
-  assertEquals(contractKeys.length, 10, "nine receivable types plus the payable `purchase` divider (one-document-model Phase 3)");
+  assertEquals(contractKeys.length, 11, "nine receivable types, the payable `purchase` divider (one-document-model Phase 3) and the credit `billing` divider (ruling 107)");
 
   const lines = contractKeys.filter((t) => ITEM_CONTRACTS[t as ItemTypeType].kind === "line").sort();
   assertEquals(lines, [...DOC_LINE_ITEM_TYPES].sort());
@@ -3217,7 +3217,7 @@ Deno.test("PreTaxItemType and FromTotalItemType are the contract's pricing axis,
     Object.keys(ITEM_CONTRACTS).filter((t) => ITEM_CONTRACTS[t as ItemTypeType].pricing === p).sort();
   assertEquals(byPricing("pre_tax"), [...preTax].sort());
   assertEquals(byPricing("from_total"), [...fromTotal].sort());
-  assertEquals(byPricing("none"), ["destination", "group", "order", "purchase"]);
+  assertEquals(byPricing("none"), ["billing", "destination", "group", "order", "purchase"]);
 });
 
 Deno.test("the three pricing predicates read the contract, not their own type lists", () => {

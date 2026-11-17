@@ -100,9 +100,9 @@ const CREDIT_NOTE_NUMBER_AHEAD: EnforcementRef = {
 const CREDIT_NOTE_STATUS_REFINE: EnforcementRef = {
   kind: "zod",
   ref:
-    "core/src/schemas/credit-note.ts::an applied credit note has no remaining credit",
+    "core/src/schemas/credit-note.ts::a credit note with this balance is",
   clause:
-    "`applied` ⟺ `remaining_credit_cents === 0` (void exempt) — the anchored `superRefine` issue — plus its neighbour `remaining_credit_cents cannot exceed the credit note's total_cents`. Says nothing about whether the stored `remaining_credit_cents` matches the settlements that produced it.",
+    "the stored status equals `deriveCreditStatus` — `applied` ⟺ `remaining_credit_cents === 0` on a note with value, a $0 note `issued` (void and draft stated) — the anchored `superRefine` issue — plus its neighbour `remaining_credit_cents cannot exceed the credit note's total_cents`. Says nothing about whether the stored `remaining_credit_cents` matches the settlements that produced it.",
   gates: true,
 };
 

@@ -1148,11 +1148,16 @@ const ITEM_TYPES = [
   "transaction_fee",
   "order",
   "purchase",
+  "billing",
 ] as const;
 /**
  * Union of every item type on either side. `purchase` is the payable twin of
  * the `order` divider: it scopes a bill's or supplier credit's lines to their
  * purchase (one-document-model Phase 3), and no receivable union carries it.
+ * `billing` is the CREDIT role's top divider on both sides (one-document-model
+ * ruling 107): it scopes a credit's rows to the billing document they credit,
+ * so two billing documents billing one initiator line cannot collide in one
+ * credit. Only the two credit row unions carry it.
  */
 export type ItemTypeType = typeof ITEM_TYPES[number];
 /** Zod schema for {@link ItemTypeType}. */
@@ -1163,7 +1168,7 @@ export const ItemTypeEnum: z.ZodType<ItemTypeType> = z.enum(ITEM_TYPES);
 // `DOC_ITEM_TYPES` member fails the first; inventing a member here fails the
 // second. Same shape as `_lineParity` below — both compare two lists neither of
 // which is typed on the other, which is what makes them capable of failing.
-type _DerivedItemTypeType = DocItemTypeType | "order" | "purchase";
+type _DerivedItemTypeType = DocItemTypeType | "order" | "purchase" | "billing";
 type _ItemTypesCoverDerived = Exclude<_DerivedItemTypeType, ItemTypeType> extends never ? true : never;
 type _DerivedCoversItemTypes = Exclude<ItemTypeType, _DerivedItemTypeType> extends never ? true : never;
 const _itemTypeParity: [_ItemTypesCoverDerived, _DerivedCoversItemTypes] = [true, true];
@@ -1288,6 +1293,8 @@ const ITEM_CONTRACTS_INNER = {
   order: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false, substitutable: false },
   // The payable twin of `order`: a bill's or supplier credit's scope divider.
   purchase: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false, substitutable: false },
+  // A credit's billing-document divider (ruling 107), above `order` / `purchase`.
+  billing: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false, substitutable: false },
   destination: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false, substitutable: false },
   group: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false, substitutable: false },
   // ── lines ──
@@ -1314,8 +1321,11 @@ const ITEM_CONTRACTS_INNER = {
  * table total over `ITEM_TYPES`, so a new item type fails to compile here.
  */
 export const ITEM_CONTRACTS: Readonly<Record<ItemTypeType, ItemContract>> = {
-  order: { ...ITEM_CONTRACTS_INNER.order, parentable_by: [] },
-  purchase: { ...ITEM_CONTRACTS_INNER.purchase, parentable_by: [] },
+  // An initiator divider sits at the root, or — on a credit — under the billing
+  // divider of the document whose rows it credits (ruling 107).
+  order: { ...ITEM_CONTRACTS_INNER.order, parentable_by: ["billing"] },
+  purchase: { ...ITEM_CONTRACTS_INNER.purchase, parentable_by: ["billing"] },
+  billing: { ...ITEM_CONTRACTS_INNER.billing, parentable_by: [] },
   destination: { ...ITEM_CONTRACTS_INNER.destination, parentable_by: ["order", "purchase"] },
   group: { ...ITEM_CONTRACTS_INNER.group, parentable_by: ["destination"] },
   rental: { ...ITEM_CONTRACTS_INNER.rental, parentable_by: LINE_PARENTS },
@@ -1995,11 +2005,37 @@ export const CreditNoteStatusEnum: z.ZodType<CreditNoteStatusType> = z.enum(
 );
 
 /**
- * `issued` while it holds credit, `applied` once it holds none, `void` when
- * annulled — the AR credit note's vocabulary minus `draft` (a supplier credit is
- * raised by a close or recorded from the supplier, never drafted).
+ * The supplier credit's statuses — the AR credit note's vocabulary, one list for
+ * the credit role on both sides (one-document-model ruling 34, Q1). A refine on
+ * `PurchaseCreditSchema` refuses `draft` until 6e-0d's create mode writes one, as
+ * the bill refuses a draft: a supplier credit is raised by a close or recorded
+ * from the supplier, never drafted, today.
  */
-export const PURCHASE_CREDIT_STATUSES = ["issued", "applied", "void"] as const;
+export const PURCHASE_CREDIT_STATUSES = ["draft", "issued", "applied", "void"] as const;
+/**
+ * **The one credit status derivation, both sides** (one-document-model ruling
+ * 34, Q1; ruling 103). `void` and `draft` are stated, never derived. Otherwise a
+ * credit is `applied` exactly when it holds no remaining credit AND it had some
+ * to give: a $0 credit stays `issued`, because `applied` would claim a
+ * consumption that never happened — the invoice's rule since api-cloudrun#1169,
+ * where a $0 invoice is not `paid` until an operator closes it.
+ *
+ * Read by both schema refines (the stored status must equal it) and by every
+ * writer that moves a credit's balance.
+ *
+ * @param credit - The credit's stored status (only `void` / `draft` are read)
+ * @param remainingCents - Its balance AFTER the write
+ * @param totalCents - Its total
+ */
+export function deriveCreditStatus(
+  credit: { status: CreditNoteStatusType },
+  remainingCents: number,
+  totalCents: number,
+): CreditNoteStatusType {
+  if (credit.status === "void" || credit.status === "draft") return credit.status;
+  return remainingCents === 0 && totalCents > 0 ? "applied" : "issued";
+}
+
 /** One {@link PURCHASE_CREDIT_STATUSES} member. */
 export type PurchaseCreditStatusType = typeof PURCHASE_CREDIT_STATUSES[number];
 /** Zod schema for PurchaseCreditStatusType. */

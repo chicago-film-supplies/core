@@ -3130,7 +3130,7 @@
           "kind": "typeAlias",
           "name": "ItemTypeType",
           "declaration": "type ItemTypeType = indexedAccess;",
-          "doc": "Union of every item type on either side. `purchase` is the payable twin of\nthe `order` divider: it scopes a bill's or supplier credit's lines to their\npurchase (one-document-model Phase 3), and no receivable union carries it."
+          "doc": "Union of every item type on either side. `purchase` is the payable twin of\nthe `order` divider: it scopes a bill's or supplier credit's lines to their\npurchase (one-document-model Phase 3), and no receivable union carries it.\n`billing` is the CREDIT role's top divider on both sides (one-document-model\nruling 107): it scopes a credit's rows to the billing document they credit,\nso two billing documents billing one initiator line cannot collide in one\ncredit. Only the two credit row unions carry it."
         },
         {
           "kind": "variable",
@@ -4329,8 +4329,8 @@
         {
           "kind": "variable",
           "name": "PURCHASE_CREDIT_STATUSES",
-          "declaration": "const PURCHASE_CREDIT_STATUSES: \"issued\" | \"applied\" | \"void\"[];",
-          "doc": "`issued` while it holds credit, `applied` once it holds none, `void` when\nannulled — the AR credit note's vocabulary minus `draft` (a supplier credit is\nraised by a close or recorded from the supplier, never drafted)."
+          "declaration": "const PURCHASE_CREDIT_STATUSES: \"draft\" | \"issued\" | \"applied\" | \"void\"[];",
+          "doc": "The supplier credit's statuses — the AR credit note's vocabulary, one list for\nthe credit role on both sides (one-document-model ruling 34, Q1). A refine on\n`PurchaseCreditSchema` refuses `draft` until 6e-0d's create mode writes one, as\nthe bill refuses a draft: a supplier credit is raised by a close or recorded\nfrom the supplier, never drafted, today."
         },
         {
           "kind": "variable",
@@ -8024,6 +8024,27 @@
         },
         {
           "kind": "function",
+          "name": "deriveCreditStatus",
+          "signature": "deriveCreditStatus(credit: typeLiteral, remainingCents: number, totalCents: number): CreditNoteStatusType",
+          "doc": "**The one credit status derivation, both sides** (one-document-model ruling\n34, Q1; ruling 103). `void` and `draft` are stated, never derived. Otherwise a\ncredit is `applied` exactly when it holds no remaining credit AND it had some\nto give: a $0 credit stays `issued`, because `applied` would claim a\nconsumption that never happened — the invoice's rule since api-cloudrun#1169,\nwhere a $0 invoice is not `paid` until an operator closes it.\n\nRead by both schema refines (the stored status must equal it) and by every\nwriter that moves a credit's balance.",
+          "paramTags": [
+            {
+              "name": "credit",
+              "doc": "The credit's stored status (only `void` / `draft` are read)"
+            },
+            {
+              "name": "remainingCents",
+              "doc": "Its balance AFTER the write"
+            },
+            {
+              "name": "totalCents",
+              "doc": "Its total"
+            }
+          ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "deriveName",
           "signature": "deriveName(parts: NamePartsLike): string",
           "doc": "Canonical join rule for deriving a single display string from name parts.\nJoins `[first_name, middle_name, last_name]` with single spaces (missing\nparts are dropped, never produce empty padding) and appends ` (pronunciation)`\nwhen set. This is the single source of truth — every `name` field on a\nstored document and `ActorRef.name` is computed by passing through here.",
@@ -9467,7 +9488,7 @@
           "kind": "typeAlias",
           "name": "ItemTypeType",
           "declaration": "type ItemTypeType = indexedAccess;",
-          "doc": "Union of every item type on either side. `purchase` is the payable twin of\nthe `order` divider: it scopes a bill's or supplier credit's lines to their\npurchase (one-document-model Phase 3), and no receivable union carries it."
+          "doc": "Union of every item type on either side. `purchase` is the payable twin of\nthe `order` divider: it scopes a bill's or supplier credit's lines to their\npurchase (one-document-model Phase 3), and no receivable union carries it.\n`billing` is the CREDIT role's top divider on both sides (one-document-model\nruling 107): it scopes a credit's rows to the billing document they credit,\nso two billing documents billing one initiator line cannot collide in one\ncredit. Only the two credit row unions carry it."
         },
         {
           "kind": "variable",
@@ -9670,8 +9691,8 @@
         {
           "kind": "variable",
           "name": "PURCHASE_CREDIT_STATUSES",
-          "declaration": "const PURCHASE_CREDIT_STATUSES: \"issued\" | \"applied\" | \"void\"[];",
-          "doc": "`issued` while it holds credit, `applied` once it holds none, `void` when\nannulled — the AR credit note's vocabulary minus `draft` (a supplier credit is\nraised by a close or recorded from the supplier, never drafted)."
+          "declaration": "const PURCHASE_CREDIT_STATUSES: \"draft\" | \"issued\" | \"applied\" | \"void\"[];",
+          "doc": "The supplier credit's statuses — the AR credit note's vocabulary, one list for\nthe credit role on both sides (one-document-model ruling 34, Q1). A refine on\n`PurchaseCreditSchema` refuses `draft` until 6e-0d's create mode writes one, as\nthe bill refuses a draft: a supplier credit is raised by a close or recorded\nfrom the supplier, never drafted, today."
         },
         {
           "kind": "interface",
@@ -10029,6 +10050,27 @@
           "signature": "checkZeroQuantityComponents(items: readonly ZeroPricedItemLike[], ctx: z.RefinementCtx): void",
           "doc": "{@link zeroQuantityComponents} as an array-level refinement, attached to the order's `items`.",
           "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "deriveCreditStatus",
+          "signature": "deriveCreditStatus(credit: typeLiteral, remainingCents: number, totalCents: number): CreditNoteStatusType",
+          "doc": "**The one credit status derivation, both sides** (one-document-model ruling\n34, Q1; ruling 103). `void` and `draft` are stated, never derived. Otherwise a\ncredit is `applied` exactly when it holds no remaining credit AND it had some\nto give: a $0 credit stays `issued`, because `applied` would claim a\nconsumption that never happened — the invoice's rule since api-cloudrun#1169,\nwhere a $0 invoice is not `paid` until an operator closes it.\n\nRead by both schema refines (the stored status must equal it) and by every\nwriter that moves a credit's balance.",
+          "paramTags": [
+            {
+              "name": "credit",
+              "doc": "The credit's stored status (only `void` / `draft` are read)"
+            },
+            {
+              "name": "remainingCents",
+              "doc": "Its balance AFTER the write"
+            },
+            {
+              "name": "totalCents",
+              "doc": "Its total"
+            }
+          ],
           "returnsTag": null
         },
         {
@@ -14254,8 +14296,8 @@
         {
           "kind": "variable",
           "name": "PURCHASE_CREDIT_STATUSES",
-          "declaration": "const PURCHASE_CREDIT_STATUSES: \"issued\" | \"applied\" | \"void\"[];",
-          "doc": "`issued` while it holds credit, `applied` once it holds none, `void` when\nannulled — the AR credit note's vocabulary minus `draft` (a supplier credit is\nraised by a close or recorded from the supplier, never drafted)."
+          "declaration": "const PURCHASE_CREDIT_STATUSES: \"draft\" | \"issued\" | \"applied\" | \"void\"[];",
+          "doc": "The supplier credit's statuses — the AR credit note's vocabulary, one list for\nthe credit role on both sides (one-document-model ruling 34, Q1). A refine on\n`PurchaseCreditSchema` refuses `draft` until 6e-0d's create mode writes one, as\nthe bill refuses a draft: a supplier credit is raised by a close or recorded\nfrom the supplier, never drafted, today."
         },
         {
           "kind": "variable",
@@ -14581,6 +14623,27 @@
           "signature": "creditItemMemoCents(item: Pick<PurchaseCreditItemInputType, \"price\">): number | undefined",
           "doc": "The supplier's memo a credit item input states (6e-0b1 D4): its\n`price.stated_cents`. `undefined` when it states none, so the line is priced\nby its default partition.",
           "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "deriveCreditStatus",
+          "signature": "deriveCreditStatus(credit: typeLiteral, remainingCents: number, totalCents: number): CreditNoteStatusType",
+          "doc": "**The one credit status derivation, both sides** (one-document-model ruling\n34, Q1; ruling 103). `void` and `draft` are stated, never derived. Otherwise a\ncredit is `applied` exactly when it holds no remaining credit AND it had some\nto give: a $0 credit stays `issued`, because `applied` would claim a\nconsumption that never happened — the invoice's rule since api-cloudrun#1169,\nwhere a $0 invoice is not `paid` until an operator closes it.\n\nRead by both schema refines (the stored status must equal it) and by every\nwriter that moves a credit's balance.",
+          "paramTags": [
+            {
+              "name": "credit",
+              "doc": "The credit's stored status (only `void` / `draft` are read)"
+            },
+            {
+              "name": "remainingCents",
+              "doc": "Its balance AFTER the write"
+            },
+            {
+              "name": "totalCents",
+              "doc": "Its total"
+            }
+          ],
           "returnsTag": null
         },
         {
@@ -20537,44 +20600,10 @@
         },
         {
           "kind": "function",
-          "name": "deriveCreditNoteStatus",
-          "signature": "deriveCreditNoteStatus(note: typeLiteral, remainingCents: number): CreditNoteStatusType",
-          "doc": "The status a credit note's balance implies (core#130 row 1) — the ONE author,\nfor every writer that moves `remaining_credit_cents`: allocation, refund,\nretraction, reap and repair.\n\n- `void` stays `void`: voiding STRANDS a balance rather than consuming it, so\n  promoting a void note to `applied` would assert the opposite of what\n  happened.\n- `0` remaining ⇒ `applied`.\n- Anything else ⇒ `issued` — **including a NEGATIVE balance**. A racing\n  allocation that over-draws a note writes the true negative projection\n  (never clamped); keeping a stale `applied` beside it is a document the\n  credit-note refine rejects, after the settlement rows have committed.\n- `draft` stays `draft`. It is not reachable from a balance write — a draft\n  has no `accepts_allocation` — but a reap or repair must not promote one.",
-          "paramTags": [
-            {
-              "name": "note",
-              "doc": "The note as read inside the write"
-            },
-            {
-              "name": "remainingCents",
-              "doc": "Its balance AFTER the write"
-            }
-          ],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
           "name": "deriveInvoiceStatus",
           "signature": "deriveInvoiceStatus(invoice: typeLiteral): InvoiceStatusType",
           "doc": "**The one billing-document status derivation**, for invoices and supplier bills\nalike (one-document-model Phase 4). Pure, and it lives beside the schemas\nbecause both refine their stored `status` against it.\n\n- `draft` and `void` pass through: leaving either is an explicit move, never a\n  derivation.\n- 🔴 **A $0 document with nothing money-settled is `paid` only if an operator\n  CLOSED it** (`closure_count > 0`), and `issued` otherwise — never from\n  `amount_due_cents <= 0`. That comparison is what made #2396 read `paid`: a\n  shrink invoice whose lines were all removed reached $0 due, the Xero webhook\n  re-derived `paid`, and the freeze locked the operator out of their own edit.\n  Xero marks every $0 document PAID on issue (probed 2026-10-01), so copying\n  Xero's verdict here would reproduce it on every one.\n- Nothing owed: `paid` when any cash moved (`paid` means nothing owed, not\n  \"cash received\" — #1751 and #1322 were PAID in Xero with `AmountPaid: 0`),\n  `credited` when credit alone settled it.\n- Otherwise any cash or credit ⇒ `part_paid`; else `issued`.\n\n`amount_due_cents` is RE-COMPUTED from `total − paid − credited − voided`\nrather than read, so a caller holding a stale due beside fresh buckets cannot\nderive from the stale one.",
           "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
-          "name": "derivePurchaseCreditStatus",
-          "signature": "derivePurchaseCreditStatus(credit: typeLiteral, remainingCents: number): PurchaseCreditStatusType",
-          "doc": "The status a supplier credit's balance implies — the payable twin of\n{@link deriveCreditNoteStatus}. The vocabulary has no `draft`, and a\nZERO-total credit stays `issued`: it has nothing to apply, so `applied`\nwould claim a consumption that never happened.",
-          "paramTags": [
-            {
-              "name": "credit",
-              "doc": "The credit as read inside the write"
-            },
-            {
-              "name": "remainingCents",
-              "doc": "Its balance AFTER the write"
-            }
-          ],
           "returnsTag": null
         },
         {
@@ -26013,23 +26042,6 @@
           "signature": "custodyBySourceItem(movements: readonly SourceItemMovement[]): Map<string, PurchaseLineCustody>",
           "doc": "**Each purchase row's custody, from the journal** (ruling 65): the net of\nevery movement naming the row in `path_source_item`, keyed by the path\njoined with `/`, then read as {@link PurchaseLineCustody}.\n\nA movement adds its quantity to its custody `to` key and takes it from its\n`from` key, plan keys contributing nothing — the per-booking replay's rule\n(`custodyByBooking`), applied per row. A `reverses` reversal carries its\noriginal's pair swapped, and a typed undo the mirrored pair, so both net out\nwith no sign of their own. A movement with no row or no custody (a lineless\nannotation, an outbound step) is skipped.\n\n⚠️ **Pass ONE purchase's movements.** A path is a row identity within one\ndocument only (`cfs-items`); the caller scopes the read, as every writer\nalready does by `sources array-contains {purchases, uid}`.",
           "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
-          "name": "derivePurchaseCreditStatus",
-          "signature": "derivePurchaseCreditStatus(credit: typeLiteral, remainingCents: number): PurchaseCreditStatusType",
-          "doc": "The status a supplier credit's balance implies — the payable twin of\n{@link deriveCreditNoteStatus}. The vocabulary has no `draft`, and a\nZERO-total credit stays `issued`: it has nothing to apply, so `applied`\nwould claim a consumption that never happened.",
-          "paramTags": [
-            {
-              "name": "credit",
-              "doc": "The credit as read inside the write"
-            },
-            {
-              "name": "remainingCents",
-              "doc": "Its balance AFTER the write"
-            }
-          ],
           "returnsTag": null
         },
         {

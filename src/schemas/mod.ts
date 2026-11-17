@@ -848,6 +848,7 @@ export {
   PurchaseCreditReasonEnum,
   PURCHASE_CREDIT_STATUSES,
   PurchaseCreditStatusEnum,
+  deriveCreditStatus,
   PurchaseCreditSchema,
   PurchaseCreditItemInput,
   creditItemMemoCents,

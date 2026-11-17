@@ -125,7 +125,7 @@ export function deriveCreditPostingAccount(
 // `order.ts` can mirror it (`order.credit_notes[]`) without importing this file,
 // which imports `order.ts` (6e-0a, api-cloudrun#1455).
 export { CreditNoteStatusEnum, type CreditNoteStatusType } from "./common.ts";
-import { CreditNoteStatusEnum, type CreditNoteStatusType } from "./common.ts";
+import { CreditNoteStatusEnum, type CreditNoteStatusType, deriveCreditStatus } from "./common.ts";
 
 /**
  * What one credit-note status admits (api-cloudrun#1169). Until this table the
@@ -557,30 +557,18 @@ function checkCreditNote(cn: CreditNote, ctx: z.RefinementCtx): void {
     });
   }
 
-  // `applied` IS `remaining_credit_cents === 0` — the status is a materialized
-  // derivation, so a document asserting one and storing the other is a
-  // contradiction rather than a preference. A voided note is exempt: voiding
-  // strands the balance rather than consuming it, which is exactly what the
-  // three VOIDED notes in the live tenant look like (remaining == total).
-  if (cn.status !== "void") {
-    // Exactly zero. Both operands are integer cents, so the half-cent tolerance
-    // this replaced no longer names a reachable state — and "exhausted" was
-    // always meant to be exact anyway: `applied` IS `remaining === 0`.
-    const exhausted = cn.remaining_credit_cents === 0;
-    if (cn.status === "applied" && !exhausted) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["remaining_credit_cents"],
-        message: "an applied credit note has no remaining credit",
-      });
-    }
-    if (cn.status === "issued" && exhausted && cn.totals.total_cents !== 0) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["status"],
-        message: "a fully consumed credit note is applied, not issued",
-      });
-    }
+  // The stored status IS the derivation (`deriveCreditStatus`, one function for
+  // both sides, ruling 34 Q1): `applied` exactly when nothing remains of a credit
+  // that had value, so a $0 note is `issued` (ruling 103). A voided note is
+  // exempt: voiding strands the balance rather than consuming it, which is
+  // exactly what the three VOIDED notes in the live tenant look like.
+  const derived = deriveCreditStatus(cn, cn.remaining_credit_cents, cn.totals.total_cents);
+  if (cn.status !== derived) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["status"],
+      message: `a credit note with this balance is ${derived}, not ${cn.status}`,
+    });
   }
 
   if (cn.remaining_credit_cents > cn.totals.total_cents) {

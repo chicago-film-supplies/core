@@ -31,7 +31,7 @@ import { apportionCents } from "./money.ts";
 import { lineMoneyAtCents, payableStoredMoney, sliceStoredMoney, statedLine } from "../schemas/_line-money.ts";
 import { componentQuantities, type ComponentRowForWalk } from "./order-lines.ts";
 import { productCountsStock } from "./products.ts";
-import { derivePurchaseCreditStatus, recomputePurchaseBillTotals } from "./invoices.ts";
+import { recomputePurchaseBillTotals } from "./invoices.ts";
 import {
   custodyBySourceItem,
   derivePurchaseStatus,
@@ -44,7 +44,7 @@ import {
 // `utils/invoices.ts`, which owns the one fold, and the custody-only status
 // beside its order twin in `utils/bookings-inbound.ts`; re-exported here so a
 // purchase writer finds them in its own namespace.
-export { derivePurchaseCreditStatus, derivePurchaseStatus, recomputePurchaseBillTotals };
+export { derivePurchaseStatus, recomputePurchaseBillTotals };
 // A line's received and returned counts are custody now (C8), folded beside the inbound ladder.
 export { custodyBySourceItem, lineCustodyAt, NO_LINE_CUSTODY, type PurchaseLineCustody };
 // The mirror authors and the per-arm rules live beside the refine that checks them.

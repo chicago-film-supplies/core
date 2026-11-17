@@ -8,9 +8,7 @@
  */
 import { assertEquals } from "@std/assert";
 import {
-  deriveCreditNoteStatus,
   deriveInvoiceStatus,
-  derivePurchaseCreditStatus,
   computeInvoiceItemPaths,
   INVOICE_ITEM_LEVELS,
   type InvoiceItem,
@@ -21,7 +19,7 @@ import { formatDiscriminatedRate, formatRate } from "../src/utils/money.ts";
 import { seedLineCounts } from "../src/utils/price-document.ts";
 import { businessDayWindows, FIVE_DAY_WEEK, FIXED, tier } from "./helpers/formulas.ts";
 import { cardNextStatus, cardStatusOptions, isCardFieldLocked, isEventCard } from "../src/utils/cards.ts";
-import { type Card, type Movement, takeBackReasonsFor } from "../src/schemas/mod.ts";
+import { type Card, deriveCreditStatus, type Movement, takeBackReasonsFor } from "../src/schemas/mod.ts";
 import { reclassPairReversal, standaloneReversalRefusal } from "../src/utils/movements.ts";
 import { buildDocumentTaxContext } from "../src/utils/taxes.ts";
 import { type ComponentDraft, normalizeAuthoredComponents } from "../src/utils/products.ts";
@@ -29,29 +27,30 @@ import { derivedProjectOf, isOrgDerived } from "../src/utils/organizations.ts";
 import { type RebookLine, rebookProblems } from "../src/utils/custody.ts";
 import { documentRenderRows, getGroupPath, itemDividers, ORDER_ITEM_LEVELS, type StructuralItem } from "../src/utils/orders.ts";
 
-// ── Row 1: credit-note status ────────────────────────────────────────
+// ── Row 1: credit status (both sides, ruling 34 Q1 / ruling 103) ──────────────
 
-Deno.test("row 1: a racing over-allocation leaves the note ISSUED, never a stale applied", () => {
+Deno.test("row 1: a racing over-allocation leaves the credit ISSUED, never a stale applied", () => {
   // `api-cloudrun/src/services/creditNotes.ts` kept `fresh.status`, so an `applied` note driven negative
   // by a concurrent allocation stayed `applied` — a document the refine rejects.
-  assertEquals(deriveCreditNoteStatus({ status: "applied" }, -500), "issued");
-  assertEquals(deriveCreditNoteStatus({ status: "issued" }, -1), "issued");
+  assertEquals(deriveCreditStatus({ status: "applied" }, -500, 900), "issued");
+  assertEquals(deriveCreditStatus({ status: "issued" }, -1, 900), "issued");
 });
 
-Deno.test("row 1: zero remaining is applied; void and draft are never promoted", () => {
-  assertEquals(deriveCreditNoteStatus({ status: "issued" }, 0), "applied");
-  assertEquals(deriveCreditNoteStatus({ status: "applied" }, 1200), "issued");
-  assertEquals(deriveCreditNoteStatus({ status: "void" }, 0), "void");
-  assertEquals(deriveCreditNoteStatus({ status: "void" }, -10), "void");
+Deno.test("row 1: zero remaining on a credit with value is applied; void and draft are never promoted", () => {
+  assertEquals(deriveCreditStatus({ status: "issued" }, 0, 900), "applied");
+  assertEquals(deriveCreditStatus({ status: "applied" }, 1200, 1200), "issued");
+  assertEquals(deriveCreditStatus({ status: "void" }, 0, 900), "void");
+  assertEquals(deriveCreditStatus({ status: "void" }, -10, 900), "void");
   // `api-cloudrun/src/services/invoices.ts` mapped draft → issued; a reap or repair must not promote one.
-  assertEquals(deriveCreditNoteStatus({ status: "draft" }, 700), "draft");
+  assertEquals(deriveCreditStatus({ status: "draft" }, 700, 700), "draft");
+  // Ruling 103 changed this arm: a drafted note at zero stayed applied before.
+  assertEquals(deriveCreditStatus({ status: "draft" }, 0, 700), "draft");
 });
 
-Deno.test("row 1: a supplier credit has no draft, and a $0 credit is never applied", () => {
-  assertEquals(derivePurchaseCreditStatus({ status: "issued", total_cents: 900 }, 0), "applied");
-  assertEquals(derivePurchaseCreditStatus({ status: "applied", total_cents: 900 }, -50), "issued");
-  assertEquals(derivePurchaseCreditStatus({ status: "issued", total_cents: 0 }, 0), "issued");
-  assertEquals(derivePurchaseCreditStatus({ status: "void", total_cents: 900 }, 0), "void");
+Deno.test("row 1: a $0 credit is issued, never applied, on either side (ruling 103)", () => {
+  // The AR derivation answered `applied` here before ruling 103; the payable one did not.
+  assertEquals(deriveCreditStatus({ status: "issued" }, 0, 0), "issued");
+  assertEquals(deriveCreditStatus({ status: "applied" }, 0, 0), "issued");
 });
 
 // ── Row 2: settlement predicate ──────────────────────────────────────

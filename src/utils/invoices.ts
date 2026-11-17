@@ -86,7 +86,7 @@ import {
 } from "./substitutions.ts";
 import { closestAncestor, mapPathsAcrossRebuild, pairItemsAcrossRebuild } from "./item-pairing.ts";
 import { interleaveStoredOnlyRows } from "./stored-only-rows.ts";
-import type { COARevenueType, CreditNoteStatusType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDatesType, OrderDocDestinationItemType, SettlementReasonType, SettlementTargetType, SettlementTypeType, SubstitutedForEntryType, PurchaseCreditStatusType } from "../schemas/mod.ts";
+import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDatesType, OrderDocDestinationItemType, SettlementReasonType, SettlementTargetType, SettlementTypeType, SubstitutedForEntryType, PurchaseCreditStatusType } from "../schemas/mod.ts";
 import { fitOutOfServiceEntries } from "./replacements.ts";
 import type { InitiatorAccount } from "./quantityAccounting.ts";
 import {
@@ -564,50 +564,10 @@ export function creditRemainingFromJournal(
   return totalCents - drawnCents;
 }
 
-/**
- * The status a credit note's balance implies (core#130 row 1) — the ONE author,
- * for every writer that moves `remaining_credit_cents`: allocation, refund,
- * retraction, reap and repair.
- *
- * - `void` stays `void`: voiding STRANDS a balance rather than consuming it, so
- *   promoting a void note to `applied` would assert the opposite of what
- *   happened.
- * - `0` remaining ⇒ `applied`.
- * - Anything else ⇒ `issued` — **including a NEGATIVE balance**. A racing
- *   allocation that over-draws a note writes the true negative projection
- *   (never clamped); keeping a stale `applied` beside it is a document the
- *   credit-note refine rejects, after the settlement rows have committed.
- * - `draft` stays `draft`. It is not reachable from a balance write — a draft
- *   has no `accepts_allocation` — but a reap or repair must not promote one.
- *
- * @param note - The note as read inside the write
- * @param remainingCents - Its balance AFTER the write
- */
-export function deriveCreditNoteStatus(
-  note: { status: CreditNoteStatusType },
-  remainingCents: number,
-): CreditNoteStatusType {
-  if (note.status === "void") return "void";
-  if (remainingCents === 0) return "applied";
-  return note.status === "draft" ? "draft" : "issued";
-}
-
-/**
- * The status a supplier credit's balance implies — the payable twin of
- * {@link deriveCreditNoteStatus}. The vocabulary has no `draft`, and a
- * ZERO-total credit stays `issued`: it has nothing to apply, so `applied`
- * would claim a consumption that never happened.
- *
- * @param credit - The credit as read inside the write
- * @param remainingCents - Its balance AFTER the write
- */
-export function derivePurchaseCreditStatus(
-  credit: { status: PurchaseCreditStatusType; total_cents: number },
-  remainingCents: number,
-): PurchaseCreditStatusType {
-  if (credit.status === "void") return "void";
-  return remainingCents === 0 && credit.total_cents > 0 ? "applied" : "issued";
-}
+// The credit-status derivation is `deriveCreditStatus` (`schemas/common.ts`), one
+// function for both sides (ruling 34, Q1): the schema refines read it, so it lives
+// beside the vocabulary. `deriveCreditNoteStatus` and `derivePurchaseCreditStatus`
+// are deleted; their $0 rules disagreed (ruling 103 took the payable one).
 
 // ── Xero helpers ────────────────────────────────────────────────
 
@@ -993,9 +953,10 @@ export function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: s
     if (item.type === "destination") {
       return buildInvoiceDestinationDivider(item, path);
     }
-    // A `purchase` divider is payable-only: no order carries one.
-    if (item.type === "purchase") {
-      throw new Error(`projectOrderItemToInvoiceItem: an order item cannot be a purchase divider (${item.uid})`);
+    // A `purchase` divider is payable-only and a `billing` divider credit-only: no
+    // order carries either.
+    if (item.type === "purchase" || item.type === "billing") {
+      throw new Error(`projectOrderItemToInvoiceItem: an order item cannot be a ${item.type} divider (${item.uid})`);
     }
     return {
       uid: item.uid,

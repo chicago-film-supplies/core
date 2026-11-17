@@ -1375,7 +1375,8 @@ Deno.test("PurchaseCreditSchema accepts an issued credit and an applied one", ()
 });
 
 Deno.test("PurchaseCreditSchema: applied IS remaining === 0, both directions; a void strands the balance", () => {
-  assertEquals(issuePaths(PurchaseCreditSchema, credit({ status: "applied" })), ["remaining_credit_cents"]);
+  // The stored status IS `deriveCreditStatus` (ruling 34 Q1), so either mismatch is a status issue.
+  assertEquals(issuePaths(PurchaseCreditSchema, credit({ status: "applied" })), ["status"]);
   assertEquals(issuePaths(PurchaseCreditSchema, credit({ remaining_credit_cents: 0 })), ["status"]);
   assertEquals(issuePaths(PurchaseCreditSchema, credit({ status: "void" })), []);
 });

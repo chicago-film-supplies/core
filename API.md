@@ -7001,6 +7001,10 @@ const ItemTypeEnum: z.ZodType<ItemTypeType>;
 Union of every item type on either side. `purchase` is the payable twin of
 the `order` divider: it scopes a bill's or supplier credit's lines to their
 purchase (one-document-model Phase 3), and no receivable union carries it.
+`billing` is the CREDIT role's top divider on both sides (one-document-model
+ruling 107): it scopes a credit's rows to the billing document they credit,
+so two billing documents billing one initiator line cannot collide in one
+credit. Only the two credit row unions carry it.
 
 ```ts
 type ItemTypeType = indexedAccess;
@@ -9810,12 +9814,14 @@ const PURCHASE_CREDIT_REASONS: "supplier_adjustment" | "correction"[];
 
 ### `PURCHASE_CREDIT_STATUSES`
 
-`issued` while it holds credit, `applied` once it holds none, `void` when
-annulled — the AR credit note's vocabulary minus `draft` (a supplier credit is
-raised by a close or recorded from the supplier, never drafted).
+The supplier credit's statuses — the AR credit note's vocabulary, one list for
+the credit role on both sides (one-document-model ruling 34, Q1). A refine on
+`PurchaseCreditSchema` refuses `draft` until 6e-0d's create mode writes one, as
+the bill refuses a draft: a supplier credit is raised by a close or recorded
+from the supplier, never drafted, today.
 
 ```ts
-const PURCHASE_CREDIT_STATUSES: "issued" | "applied" | "void"[];
+const PURCHASE_CREDIT_STATUSES: "draft" | "issued" | "applied" | "void"[];
 ```
 
 ### `PURCHASE_DOCUMENT_ORIGINS`
@@ -17847,6 +17853,24 @@ posting depends on what is being corrected. Callers must supply it.
 
 **Returns** — the account code, or `null` when the rule has no opinion.
 
+### `deriveCreditStatus(credit: typeLiteral, remainingCents: number, totalCents: number): CreditNoteStatusType`
+
+**The one credit status derivation, both sides** (one-document-model ruling
+34, Q1; ruling 103). `void` and `draft` are stated, never derived. Otherwise a
+credit is `applied` exactly when it holds no remaining credit AND it had some
+to give: a $0 credit stays `issued`, because `applied` would claim a
+consumption that never happened — the invoice's rule since api-cloudrun#1169,
+where a $0 invoice is not `paid` until an operator closes it.
+
+Read by both schema refines (the stored status must equal it) and by every
+writer that moves a credit's balance.
+
+**Parameters**
+
+- `credit` — The credit's stored status (only `void` / `draft` are read)
+- `remainingCents` — Its balance AFTER the write
+- `totalCents` — Its total
+
 ### `deriveName(parts: NamePartsLike): string`
 
 Canonical join rule for deriving a single display string from name parts.
@@ -20198,6 +20222,10 @@ const ItemTypeEnum: z.ZodType<ItemTypeType>;
 Union of every item type on either side. `purchase` is the payable twin of
 the `order` divider: it scopes a bill's or supplier credit's lines to their
 purchase (one-document-model Phase 3), and no receivable union carries it.
+`billing` is the CREDIT role's top divider on both sides (one-document-model
+ruling 107): it scopes a credit's rows to the billing document they credit,
+so two billing documents billing one initiator line cannot collide in one
+credit. Only the two credit row unions carry it.
 
 ```ts
 type ItemTypeType = indexedAccess;
@@ -20753,12 +20781,14 @@ const PRE_TAX_ITEM_TYPES: "rental" | "replacement" | "sale" | "service" | "surch
 
 ### `PURCHASE_CREDIT_STATUSES`
 
-`issued` while it holds credit, `applied` once it holds none, `void` when
-annulled — the AR credit note's vocabulary minus `draft` (a supplier credit is
-raised by a close or recorded from the supplier, never drafted).
+The supplier credit's statuses — the AR credit note's vocabulary, one list for
+the credit role on both sides (one-document-model ruling 34, Q1). A refine on
+`PurchaseCreditSchema` refuses `draft` until 6e-0d's create mode writes one, as
+the bill refuses a draft: a supplier credit is raised by a close or recorded
+from the supplier, never drafted, today.
 
 ```ts
-const PURCHASE_CREDIT_STATUSES: "issued" | "applied" | "void"[];
+const PURCHASE_CREDIT_STATUSES: "draft" | "issued" | "applied" | "void"[];
 ```
 
 ### `PartialNameParts`
@@ -21529,6 +21559,24 @@ Invariant (1) — *a flagged line carries no charge* — stays per-item in
 ### `checkZeroQuantityComponents(items: readonly ZeroPricedItemLike[], ctx: z.RefinementCtx): void`
 
 {@link zeroQuantityComponents} as an array-level refinement, attached to the order's `items`.
+
+### `deriveCreditStatus(credit: typeLiteral, remainingCents: number, totalCents: number): CreditNoteStatusType`
+
+**The one credit status derivation, both sides** (one-document-model ruling
+34, Q1; ruling 103). `void` and `draft` are stated, never derived. Otherwise a
+credit is `applied` exactly when it holds no remaining credit AND it had some
+to give: a $0 credit stays `issued`, because `applied` would claim a
+consumption that never happened — the invoice's rule since api-cloudrun#1169,
+where a $0 invoice is not `paid` until an operator closes it.
+
+Read by both schema refines (the stored status must equal it) and by every
+writer that moves a credit's balance.
+
+**Parameters**
+
+- `credit` — The credit's stored status (only `void` / `draft` are read)
+- `remainingCents` — Its balance AFTER the write
+- `totalCents` — Its total
 
 ### `deriveName(parts: NamePartsLike): string`
 
@@ -30403,12 +30451,14 @@ const PURCHASE_CREDIT_REASONS: "supplier_adjustment" | "correction"[];
 
 ### `PURCHASE_CREDIT_STATUSES`
 
-`issued` while it holds credit, `applied` once it holds none, `void` when
-annulled — the AR credit note's vocabulary minus `draft` (a supplier credit is
-raised by a close or recorded from the supplier, never drafted).
+The supplier credit's statuses — the AR credit note's vocabulary, one list for
+the credit role on both sides (one-document-model ruling 34, Q1). A refine on
+`PurchaseCreditSchema` refuses `draft` until 6e-0d's create mode writes one, as
+the bill refuses a draft: a supplier credit is raised by a close or recorded
+from the supplier, never drafted, today.
 
 ```ts
-const PURCHASE_CREDIT_STATUSES: "issued" | "applied" | "void"[];
+const PURCHASE_CREDIT_STATUSES: "draft" | "issued" | "applied" | "void"[];
 ```
 
 ### `PURCHASE_DOCUMENT_ORIGINS`
@@ -31079,6 +31129,24 @@ interface VoidPurchaseCreditInputType {
 The supplier's memo a credit item input states (6e-0b1 D4): its
 `price.stated_cents`. `undefined` when it states none, so the line is priced
 by its default partition.
+
+### `deriveCreditStatus(credit: typeLiteral, remainingCents: number, totalCents: number): CreditNoteStatusType`
+
+**The one credit status derivation, both sides** (one-document-model ruling
+34, Q1; ruling 103). `void` and `draft` are stated, never derived. Otherwise a
+credit is `applied` exactly when it holds no remaining credit AND it had some
+to give: a $0 credit stays `issued`, because `applied` would claim a
+consumption that never happened — the invoice's rule since api-cloudrun#1169,
+where a $0 invoice is not `paid` until an operator closes it.
+
+Read by both schema refines (the stored status must equal it) and by every
+writer that moves a credit's balance.
+
+**Parameters**
+
+- `credit` — The credit's stored status (only `void` / `draft` are read)
+- `remainingCents` — Its balance AFTER the write
+- `totalCents` — Its total
 
 ### `derivePurchaseCreditSources(uidPurchase: string, rows: readonly PurchaseDocumentRow[]): Pick<PurchaseCredit, "sources" | "query_by_sources">`
 
@@ -43759,28 +43827,6 @@ a caller pass a mixed list. **Negative results are preserved, never clamped**.
 - `totalCents` — The document's total
 - `settlements` — Every settlement naming it, reversals included
 
-### `deriveCreditNoteStatus(note: typeLiteral, remainingCents: number): CreditNoteStatusType`
-
-The status a credit note's balance implies (core#130 row 1) — the ONE author,
-for every writer that moves `remaining_credit_cents`: allocation, refund,
-retraction, reap and repair.
-
-- `void` stays `void`: voiding STRANDS a balance rather than consuming it, so
-  promoting a void note to `applied` would assert the opposite of what
-  happened.
-- `0` remaining ⇒ `applied`.
-- Anything else ⇒ `issued` — **including a NEGATIVE balance**. A racing
-  allocation that over-draws a note writes the true negative projection
-  (never clamped); keeping a stale `applied` beside it is a document the
-  credit-note refine rejects, after the settlement rows have committed.
-- `draft` stays `draft`. It is not reachable from a balance write — a draft
-  has no `accepts_allocation` — but a reap or repair must not promote one.
-
-**Parameters**
-
-- `note` — The note as read inside the write
-- `remainingCents` — Its balance AFTER the write
-
 ### `deriveInvoiceStatus(invoice: typeLiteral): InvoiceStatusType`
 
 **The one billing-document status derivation**, for invoices and supplier bills
@@ -43804,18 +43850,6 @@ because both refine their stored `status` against it.
 `amount_due_cents` is RE-COMPUTED from `total − paid − credited − voided`
 rather than read, so a caller holding a stale due beside fresh buckets cannot
 derive from the stale one.
-
-### `derivePurchaseCreditStatus(credit: typeLiteral, remainingCents: number): PurchaseCreditStatusType`
-
-The status a supplier credit's balance implies — the payable twin of
-{@link deriveCreditNoteStatus}. The vocabulary has no `draft`, and a
-ZERO-total credit stays `issued`: it has nothing to apply, so `applied`
-would claim a consumption that never happened.
-
-**Parameters**
-
-- `credit` — The credit as read inside the write
-- `remainingCents` — Its balance AFTER the write
 
 ### `documentRenderRows(items: readonly T[], levels: readonly string[], _: unknown): DocumentRenderRows<T>`
 
@@ -54030,18 +54064,6 @@ annotation, an outbound step) is skipped.
 ⚠️ **Pass ONE purchase's movements.** A path is a row identity within one
 document only (`cfs-items`); the caller scopes the read, as every writer
 already does by `sources array-contains {purchases, uid}`.
-
-### `derivePurchaseCreditStatus(credit: typeLiteral, remainingCents: number): PurchaseCreditStatusType`
-
-The status a supplier credit's balance implies — the payable twin of
-{@link deriveCreditNoteStatus}. The vocabulary has no `draft`, and a
-ZERO-total credit stays `issued`: it has nothing to apply, so `applied`
-would claim a consumption that never happened.
-
-**Parameters**
-
-- `credit` — The credit as read inside the write
-- `remainingCents` — Its balance AFTER the write
 
 ### `derivePurchaseStatus(stored: PurchaseStatusType, bookings: ReadonlyArray<Pick<InboundBooking, "type" | "breakdown">>): PurchaseStatusType`
 

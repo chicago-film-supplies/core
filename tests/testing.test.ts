@@ -508,6 +508,8 @@ Deno.test("enum-arm search — re-chooses exactly five arms across the corpus, b
     "inventory-ledger.stock_method",
     "product.type",
     "purchase-bill.status",
+    // A supplier credit refuses `draft`, the shared vocabulary's first member (ruling 34 Q1).
+    "purchase-credit.status",
     "templates-versions.status",
     "unit.status",
   ]);
