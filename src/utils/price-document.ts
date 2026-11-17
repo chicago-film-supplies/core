@@ -73,6 +73,7 @@ import {
   SIDE_CONTRACTS,
   type TaxRefType,
   TERMINAL_ORDER_STATUSES,
+  pairSourceUid,
 } from "../schemas/mod.ts";
 import {
   assembleLinePrice,
@@ -181,10 +182,12 @@ export interface PairChargeWindows {
 /** The pair shape {@link chargeWindowContext} reads. */
 export interface ChargeWindowPair {
   uid?: string | null;
-  /** Set on an invoice pair: the order the pair is scoped to. */
-  uid_order?: string | null;
-  /** Set on a bill's or supplier credit's pair: the purchase the pair is scoped to. */
-  uid_purchase?: string | null;
+  /** Set on a billing or credit document's pair: the initiator it is scoped to (ruling 109). */
+  uid_source?: string;
+  /** Retiring (ruling 109): an invoice pair's scope. */
+  uid_order?: string;
+  /** Retiring (ruling 109): a bill's or supplier credit's pair scope. */
+  uid_purchase?: string;
   dates: {
     /** `null` on a pair that bills no days (a document with no rental). */
     charge_windows: readonly { start: string; end: string }[] | null;
@@ -231,11 +234,7 @@ export function statedChargeWindows(destinations: readonly ChargeWindowPair[]): 
     const windows = pair.dates?.charge_windows;
     if (!windows || windows.length === 0) continue;
     out.push({
-      divider_path: pair.uid_order
-        ? [pair.uid_order, pair.uid]
-        : pair.uid_purchase
-        ? [pair.uid_purchase, pair.uid]
-        : [pair.uid],
+      divider_path: pairSourceUid(pair) !== undefined ? [pairSourceUid(pair)!, pair.uid] : [pair.uid],
       windows: windows.map((w) => ({ start: w.start, end: w.end })),
     });
   }

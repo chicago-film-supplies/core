@@ -94,6 +94,8 @@ import {
 } from "./purchase.ts";
 import {
   billingExchangedForViolations,
+  checkPairSourceKeys,
+  rowSourcePath,
   checkDestinationJoin,
   checkLeadingDivider,
   type DestinationExchangeType,
@@ -326,8 +328,13 @@ export interface PurchaseDocumentProductItem extends Omit<PurchaseDocumentLineBa
    * that purchase. Absent when the line sits at its purchase line's own path.
    *
    * Several rows may name one purchase line: a split bills it in two places.
+   *
+   * 🔴 Retiring (ruling 109): {@link path_source_item} is its one spelling on
+   * both sides. Read through `rowSourcePath`; deleted in beta H2.
    */
   path_purchase_item?: string[];
+  /** The move pointer (ruling 109), the invoice line's own key. */
+  path_source_item?: string[];
   /**
    * The purchase lines this row stands in for, with how many units: the
    * invoice line's `substituted_for`. It records that the bill deliberately
@@ -365,8 +372,10 @@ export interface PurchaseDocumentProductItem extends Omit<PurchaseDocumentLineBa
  */
 export interface PurchaseDocumentServiceItem extends PurchaseDocumentLineBase {
   type: "service";
-  /** A move pointer, as on {@link PurchaseDocumentProductItem}. */
+  /** A move pointer, as on {@link PurchaseDocumentProductItem}. Retiring (ruling 109). */
   path_purchase_item?: string[];
+  /** The move pointer's one spelling (ruling 109). */
+  path_source_item?: string[];
 }
 
 /**
@@ -450,7 +459,10 @@ export function purchaseDocumentLines(rows: readonly PurchaseDocumentRow[]): Pur
  * carries each one's pairs.
  */
 export interface PurchaseDocDestination extends PairCoreType {
-  uid_purchase: string;
+  /** The source purchase (ruling 109: one key on both sides). Read through `pairSourceUid`. */
+  uid_source?: string;
+  /** Retiring (ruling 109): the scope's old spelling. Deleted in beta H2. */
+  uid_purchase?: string;
   /**
    * The purchase pair's exchange-leg marker (`PurchaseDestination.exchange`),
    * as an invoice pair carries its order pair's. Forced: the purchase pair is
@@ -462,10 +474,11 @@ export interface PurchaseDocDestination extends PairCoreType {
 
 /** Zod schema for {@link PurchaseDocDestination}. */
 export const PurchaseDocDestinationSchema: z.ZodType<PurchaseDocDestination> = z.strictObject({
-  uid_purchase: FirestoreId,
+  uid_purchase: FirestoreId.optional(),
+  uid_source: FirestoreId.optional(),
   ...PairCore,
   exchange: DestinationPairCore.exchange,
-});
+}).superRefine(checkPairSourceKeys);
 
 /**
  * The purchase line a bill or credit line bills, as `[purchase uid, ...path in
@@ -474,14 +487,14 @@ export const PurchaseDocDestinationSchema: z.ZodType<PurchaseDocDestination> = z
  * purchase divider. The one join key for "which purchase line is this".
  */
 export function purchaseLineKeyOf(
-  row: Pick<PurchaseDocumentItem, "path" | "path_purchase_item" | "uid_billing">,
+  row: Pick<PurchaseDocumentItem, "path" | "path_purchase_item" | "path_source_item" | "uid_billing">,
 ): string | null {
   // A supplier credit line under its bill's `billing` divider (ruling 107)
   // keys as the bill row it copies: the billing level is not the purchase's.
   const path = row.uid_billing !== undefined && row.path[0] === row.uid_billing ? row.path.slice(1) : row.path;
   if (path.length < 2) return null;
   const uidPurchase = path[0];
-  const local = row.path_purchase_item ?? path.slice(1);
+  const local = rowSourcePath(row) ?? path.slice(1);
   return [uidPurchase, ...local].join("/");
 }
 
@@ -578,8 +591,10 @@ const PurchaseDocumentProductItemInner = z.strictObject({
   ...docItemHead,
   ...docItemShape,
   ledger_account: PayableKitLedgerAccount,
-  // The move pointer, exactly as invoice's `path_order_item`.
+  // The move pointer, exactly as invoice's: `path_source_item` (ruling 109),
+  // `path_purchase_item` its retiring spelling.
   path_purchase_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
+  path_source_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
   // Plain `.optional()`, matching the invoice line's. Only a substitute carries it.
   substituted_for: SubstitutedForList.optional(),
   // See the interface docblock. `seed: false`, as the invoice line's.
@@ -590,8 +605,9 @@ const noCustodyLine = {
   ...docItemHead,
   ...docItemShape,
   // `seed: false`: `[]` fails `.min(1)`, so the form seed must omit the key —
-  // exactly as invoice's `path_order_item`.
+  // exactly as invoice's move pointer.
   path_purchase_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
+  path_source_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
 };
 
 const PurchaseDocumentServiceItemInner = z.strictObject({
@@ -847,7 +863,7 @@ function checkPurchaseBill(b: PurchaseBill, ctx: z.RefinementCtx): void {
   purchaseScopeIssues(b, ctx);
   checkLeadingDivider("purchase_document")(b, ctx);
   checkDestinationJoin(b, ctx);
-  for (const v of billingExchangedForViolations(b, "uid_purchase")) {
+  for (const v of billingExchangedForViolations(b)) {
     ctx.addIssue({
       code: "custom",
       path: v.entry === null ? ["items", v.index, "exchanged_for"] : ["items", v.index, "exchanged_for", v.entry, v.field],
@@ -1209,15 +1225,23 @@ export interface PurchaseDocumentItemInputType {
   /**
    * The purchase item billed, by its path on the purchase: the row identity.
    * Its uid is its product's (W4K), and one product may sit on two items.
+   * One key on both sides (ruling 109); read it through `rowSourcePath`.
    */
-  path_purchase_item: string[];
+  path_source_item?: string[];
+  /** Retiring (ruling 109): send {@link path_source_item}. One of the two is required. */
+  path_purchase_item?: string[];
   quantity: number;
 }
 
 /** Zod schema for PurchaseDocumentItemInputType. */
 export const PurchaseDocumentItemInput: z.ZodType<PurchaseDocumentItemInputType> = z.object({
-  path_purchase_item: z.array(ItemUid).min(1),
+  path_source_item: z.array(ItemUid).min(1).optional(),
+  path_purchase_item: z.array(ItemUid).min(1).optional(),
   quantity: z.int().min(1),
+}).superRefine((item, ctx) => {
+  if (rowSourcePath(item) === undefined) {
+    ctx.addIssue({ code: "custom", path: ["path_source_item"], message: "a line names the purchase item it bills (path_source_item)" });
+  }
 });
 
 /**
@@ -1242,16 +1266,19 @@ export const PurchaseDocumentItemInput: z.ZodType<PurchaseDocumentItemInputType>
  *   input used to take retired with the unit charge windows
  *   (one-document-model Phase 3).
  */
-export interface PurchaseCreditItemInputType extends Omit<PurchaseDocumentItemInputType, "path_purchase_item"> {
+export interface PurchaseCreditItemInputType extends Omit<PurchaseDocumentItemInputType, "path_purchase_item" | "path_source_item"> {
   /**
    * The purchase item credited, by its path on the purchase. Required unless the
    * line names a bill line ({@link uid_purchase_bill} + {@link path_bill_item}):
    * a credit raised from a bill is keyed on the BILL LINE, and the writer derives
    * the purchase line from the row (one-document-model 6d, owner ruling 23), so a
    * substitute or a bill-authored line, which projects no purchase line of its
-   * own, can be credited. A client may still send both.
+   * own, can be credited. A client may still send both. One key on both sides
+   * (ruling 109): {@link path_source_item}; this spelling retires in H2.
    */
   path_purchase_item?: string[];
+  /** The purchase item credited (ruling 109's spelling of {@link path_purchase_item}). */
+  path_source_item?: string[];
   /** A time line's counts to credit; refused on a flat line by the writer. */
   counts?: TierCountType[];
   /**
@@ -1269,6 +1296,7 @@ export interface PurchaseCreditItemInputType extends Omit<PurchaseDocumentItemIn
 export const PurchaseCreditItemInput: z.ZodType<PurchaseCreditItemInputType> = z.object({
   // Optional only beside a named bill line; `uniqueItemInputs` requires one or the other.
   path_purchase_item: z.array(ItemUid).min(1).optional(),
+  path_source_item: z.array(ItemUid).min(1).optional(),
   quantity: z.int().min(1),
   counts: z.array(z.object({ rate_key: RateKey, num: z.int().min(0), den: z.int().min(1) })).min(1).optional(),
   uid_purchase_bill: FirestoreId.optional(),
@@ -1347,7 +1375,7 @@ const PurchaseDocumentChargeItemInput: z.ZodType<PurchaseDocumentChargeItemInput
  *   purchase line, at different paths, in one.
  */
 function uniqueItemInputs(
-  items: readonly { path_purchase_item?: readonly string[]; uid_purchase_bill?: string; path_bill_item?: readonly string[] }[],
+  items: readonly { path_purchase_item?: string[]; path_source_item?: string[]; uid_purchase_bill?: string; path_bill_item?: readonly string[] }[],
   ctx: z.RefinementCtx,
 ): void {
   const seen = new Set<string>();
@@ -1357,10 +1385,10 @@ function uniqueItemInputs(
       ctx.addIssue({ code: "custom", path: ["items", i, "path_bill_item"], message: "uid_purchase_bill and path_bill_item are set together" });
     }
     const named = item.path_bill_item !== undefined && item.uid_purchase_bill !== undefined;
-    const row = named ? item.path_bill_item!.slice(1) : item.path_purchase_item;
+    const row = named ? item.path_bill_item!.slice(1) : rowSourcePath(item);
     if (row === undefined) {
       if (!halves) {
-        ctx.addIssue({ code: "custom", path: ["items", i, "path_purchase_item"], message: "a line names its purchase item, or a bill line it credits" });
+        ctx.addIssue({ code: "custom", path: ["items", i, "path_source_item"], message: "a line names its purchase item, or a bill line it credits" });
       }
       return;
     }
@@ -1368,7 +1396,7 @@ function uniqueItemInputs(
     if (seen.has(key)) {
       ctx.addIssue({
         code: "custom",
-        path: ["items", i, named ? "path_bill_item" : "path_purchase_item"],
+        path: ["items", i, named ? "path_bill_item" : "path_source_item"],
         message: "one item per credited row; credit another bill's line at the same path in a second credit",
       });
     }
@@ -1554,8 +1582,10 @@ export interface PurchaseBillLineInputType {
   quantity_per_parent?: number | null;
   /** The records a replacement row bills, shares summing to `quantity`. */
   out_of_service?: OutOfServiceEntryType[];
-  /** The purchase line this row bills from another position. See the docblock. */
+  /** The purchase line this row bills from another position. See the docblock. Retiring (ruling 109). */
   path_purchase_item?: string[];
+  /** {@link path_purchase_item}'s one spelling on both sides (ruling 109). */
+  path_source_item?: string[];
   /** What this row stands in for ({@link PurchaseDocumentProductItem.substituted_for}). */
   substituted_for?: SubstitutedForEntryType[];
   /** An exchange line's take-back list ({@link PurchaseDocumentProductItem.exchanged_for}). */
@@ -1607,16 +1637,20 @@ export interface UpdatePurchaseBillInputType {
  * `uid_purchase`, the `InvoiceDocDestination` input's twin.
  */
 export interface PurchaseBillDestinationInputType extends PurchaseDestinationInputType {
-  uid_purchase: string;
+  /** The source purchase (ruling 109); either spelling through beta H1, read with `pairSourceUid`. */
+  uid_source?: string;
+  /** Retiring (ruling 109): send {@link uid_source}. */
+  uid_purchase?: string;
 }
 
 /** Zod schema for {@link PurchaseBillDestinationInputType}. */
 export const PurchaseBillDestinationInput: z.ZodType<PurchaseBillDestinationInputType> = z.object({
-  uid_purchase: FirestoreId,
+  uid_source: FirestoreId.optional(),
+  uid_purchase: FirestoreId.optional(),
   uid: z.uuid(),
   ...PairInputCore,
   exchange: DestinationPairInputCore.exchange,
-}).superRefine(purchaseDestinationInputIssues);
+}).superRefine(purchaseDestinationInputIssues).superRefine(checkPairSourceKeys);
 
 const billDividerInput = (type: "purchase" | "destination" | "group") =>
   z.object({ type: z.literal(type), uid: ItemUid, path: z.array(ItemUid).min(1), name: LineItemCore.name.optional() });
@@ -1637,6 +1671,7 @@ const billLineShape = (type: SharedLineType) => ({
   quantity_per_parent: z.number().min(0).nullable().optional(),
   out_of_service: OutOfServiceListInput.optional().meta({ seed: false }),
   path_purchase_item: z.array(ItemUid).min(1).optional(),
+  path_source_item: z.array(ItemUid).min(1).optional(),
   substituted_for: SubstitutedForListInput.optional(),
   exchanged_for: ExchangedForListInput.optional().meta({ seed: false }),
   uid_tax_class_override: FirestoreId.nullable().optional(),

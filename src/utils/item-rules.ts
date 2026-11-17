@@ -34,6 +34,7 @@ import {
   zeroPricedFlaggedNonComponents,
   zeroPricedUnstatedComponents,
   zeroQuantityComponents,
+  type PairSourceKeys,
 } from "../schemas/mod.ts";
 import {
   computeItemPaths,
@@ -75,7 +76,7 @@ export interface ItemArrayDoc {
   items: readonly LineItem[];
   /** The destination pairs. Absent ⇒ the `destination_join` and `exchanged_for` arms are skipped. */
   destinations?: ReadonlyArray<
-    { uid: string; exchange?: DestinationExchangeType | null; uid_order?: string; uid_purchase?: string }
+    { uid: string; exchange?: DestinationExchangeType | null } & PairSourceKeys
   >;
   /** An invoice's source orders; non-empty ⇒ it must lead with an `order` divider. */
   query_by_orders?: readonly string[];
@@ -219,15 +220,8 @@ export function itemArrayIssues(
       issues.push({ rule: "exchanged_for", ...v });
     }
   }
-  if (grain === "invoice" && doc.destinations) {
-    const destinations = doc.destinations.map((p) => ({ ...p, uid_order: p.uid_order ?? "" }));
-    for (const v of billingExchangedForViolations({ destinations, items }, "uid_order")) {
-      issues.push({ rule: "exchanged_for", ...v });
-    }
-  }
-  if (grain === "purchase_document" && doc.destinations) {
-    const destinations = doc.destinations.map((p) => ({ ...p, uid_purchase: p.uid_purchase ?? "" }));
-    for (const v of billingExchangedForViolations({ destinations, items }, "uid_purchase")) {
+  if ((grain === "invoice" || grain === "purchase_document") && doc.destinations) {
+    for (const v of billingExchangedForViolations({ destinations: doc.destinations, items })) {
       issues.push({ rule: "exchanged_for", ...v });
     }
   }

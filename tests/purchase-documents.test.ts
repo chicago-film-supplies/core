@@ -64,6 +64,10 @@ import {
   PurchaseSaleItemSchema,
   PurchaseReplacementItemSchema,
   isPurchaseLine,
+  type MovePointerKeys,
+  pairSourceUid,
+  PurchaseBillDestinationInput,
+  rowSourcePath,
 } from "../src/schemas/mod.ts";
 import { computeItemPaths } from "../src/utils/orders.ts";
 import { accountBilling, actedBilledUnits } from "../src/utils/quantityAccounting.ts";
@@ -602,7 +606,7 @@ Deno.test("syncPurchaseToBills: a component added to a kit the bill moved lands 
     [PURCHASE, DIV, GROUP, KIT, lid(23)],
   ]);
   const line = linesOf(out.bill).find((l) => l.uid === lid(23))!;
-  assertEquals(line.path_purchase_item, [DIV, KIT, lid(23)]);
+  assertEquals(rowSourcePath(line), [DIV, KIT, lid(23)]);
   assertEquals(out.bill.totals.total_cents, 400 + 600);
   parses(out.bill);
 });
@@ -641,7 +645,7 @@ Deno.test("syncPurchaseToBills: a purchase line added for a product the bill alr
   assertEquals(lines.map((l) => [l.uid, l.quantity, l.amount_cents]), [[a.uid, 3, 140985], [OTHER, 2, 1800]]);
   assertEquals(lines[1].path, [PURCHASE, DIV, OTHER]);
   // Keyed by its product (W4K), the bill's row already sits AT the new line's path, so it needs no pointer.
-  assertEquals(lines[1].path_purchase_item, undefined);
+  assertEquals(rowSourcePath(lines[1]), undefined);
   parses(out.bill);
 
   // The adopted row now bills the purchase line, so a later edit reaches it as a moved row's does.
@@ -655,7 +659,7 @@ Deno.test("syncPurchaseToBills: a purchase line added for a product the bill alr
   const third = buyLine({ uid: "testprod300000000000", path: [DIV, "testprod300000000000"], name: "Cable", quantity: 2, amount_cents: 2000 });
   const [beside] = sync([a], [a, third], [bill]);
   assertEquals(linesOf(beside.bill).map((l) => l.uid), [a.uid, OTHER, "testprod300000000000"]);
-  assertEquals(linesOf(beside.bill)[1].path_purchase_item, undefined);
+  assertEquals(rowSourcePath(linesOf(beside.bill)[1]), undefined);
 });
 
 Deno.test("syncPurchaseToBills: a line the bill LEFT OUT stays out, and a removed line goes unless overridden", () => {
@@ -734,7 +738,7 @@ Deno.test("purchaseDocumentScope: the purchase divider, the dividers above each 
     ["group", `${PURCHASE}/${DIV}/${g}`],
     ["sale", `${PURCHASE}/${DIV}/${g}/${lid(9)}`],
   ]);
-  assertEquals(scope.destinations.map((d) => [d.uid_purchase, d.uid]), [[PURCHASE, DIV]]);
+  assertEquals(scope.destinations.map((d) => [pairSourceUid(d), d.uid]), [[PURCHASE, DIV]]);
   assertThrows(() => purchaseDocumentScope(purchase, [{ ...project(a, 0, 1), path: ["elsewhere", a.uid] }]), Error, "not under purchase");
 });
 
@@ -777,7 +781,7 @@ Deno.test("purchaseDocumentScope: a credit line copied from a bill row keeps the
     ["destination", `${PURCHASE}/${e}`],
     ["sale", `${PURCHASE}/${e}/${lid(6)}`],
   ]);
-  assertEquals(scope.destinations.map((p) => [p.uid_purchase, p.uid]), [[PURCHASE, DIV], [PURCHASE, e]], "the bill's own pair comes with its destination");
+  assertEquals(scope.destinations.map((p) => [pairSourceUid(p), p.uid]), [[PURCHASE, DIV], [PURCHASE, e]], "the bill's own pair comes with its destination");
   assertEquals(scope.items.find((r) => r.uid === g)!.name, "Spare", "a divider the purchase holds is the purchase's");
 
   // Companion: with no bill to read, a bill-row line cannot be placed and says so, rather than flattening.
@@ -1348,7 +1352,7 @@ Deno.test("purchaseDocumentScope: a component whose COUNTED parent is not billed
   const adapter = part(VEST, { zero_priced: true, amount_cents: 0, quantity: 2 } as Partial<PurchaseItem>);
   const scope = purchaseDocumentScope(purchaseDoc([mirror, adapter]), [project(adapter, 0, 2)]);
   const billed = purchaseDocumentLines(scope.items)[0];
-  assertEquals(billed.path_purchase_item, [DIV, KIT, VEST]);
+  assertEquals(rowSourcePath(billed), [DIV, KIT, VEST]);
   assertEquals(purchaseLineKeyOf(billed), `${PURCHASE}/${DIV}/${KIT}/${VEST}`);
 });
 
@@ -1431,7 +1435,7 @@ Deno.test("a split's rows bill the line's units ONCE over its pair: nothing owed
 
 
 
-Deno.test("orderLineClaimIssues, payable: a closed (removed) line cannot be claimed; a live one can; the receivable reader is unchanged", () => {
+Deno.test("orderLineClaimIssues, payable: a closed (removed) line cannot be claimed; a live one can; the receivable side reads the same key", () => {
   const open = buyLine();
   const removed = lid(6);
   const rows = (x: string) => [
@@ -1442,8 +1446,18 @@ Deno.test("orderLineClaimIssues, payable: a closed (removed) line cannot be clai
   assertEquals(orderLineClaimIssues(rows(open.uid), lines, [], PAYABLE_LINE_CLAIMS), []);
   // A line closed to 0 is removed (ruling 47), so a claim on it names no line.
   assertEquals(orderLineClaimIssues(rows(removed), lines, [], PAYABLE_LINE_CLAIMS).map((i) => i.reason), ["not_a_line"]);
-  // The default side reads `path_order_item`, so this payable pointer is no claim there.
-  assertEquals(orderLineClaimIssues(rows(removed), lines), []);
+  // One move-pointer key on both sides (ruling 109): the receivable side reads
+  // it too, and finds the row under no `order` divider.
+  assertEquals(orderLineClaimIssues(rows(removed), lines).map((i) => i.reason), ["outside_order_block"]);
+});
+
+Deno.test("PurchaseBillDestinationInput: a pair scopes by `uid_source` or the retiring `uid_purchase`, and naming neither is refused (ruling 109)", () => {
+  const pair = purchasePair(DIV);
+  const dates = { ...pair.dates, delivery_start: jan(1), collection_start: jan(3), collection_end: jan(4) };
+  const base = { uid: DIV, dates, delivery: pair.delivery, collection: pair.collection };
+  assert(PurchaseBillDestinationInput.safeParse({ ...base, uid_source: PURCHASE }).success);
+  assert(PurchaseBillDestinationInput.safeParse({ ...base, uid_purchase: PURCHASE }).success);
+  assertEquals(PurchaseBillDestinationInput.safeParse(base).error?.issues.map((i) => i.path.join(".")), ["uid_source"]);
 });
 
 Deno.test("UpdatePurchaseBillInput: takes the W3 keys and a bill's pair, and refuses a pair the hire rule refuses", () => {
@@ -1598,12 +1612,12 @@ Deno.test("syncPurchaseToBills: an overridden row whose line was closed out stay
   // Closed to 0, so removed (ruling 47).
   const [out] = syncPurchaseToBills({ prev: purchaseDoc([item, other]), next: purchaseDoc([other]), bills: [bill], tax: TAX, time: BILL_SYNC_TIME });
   const kept = linesOf(out.changed ? out.bill : bill).find((l) => l.path.includes(GROUP))!;
-  assertEquals((kept as { path_purchase_item?: string[] }).path_purchase_item, undefined, "the line is gone, so the row is the bill's own");
+  assertEquals(rowSourcePath(kept as MovePointerKeys), undefined, "the line is gone, so the row is the bill's own");
   assertEquals(kept.name, "Supplier's wording");
   const renamed = { ...other, name: "Renamed" } as PurchaseItem;
   const [later] = syncPurchaseToBills({ prev: purchaseDoc([other]), next: purchaseDoc([renamed]), bills: [out.changed ? out.bill : bill], tax: TAX, time: BILL_SYNC_TIME });
   const still = linesOf(later.bill).find((l) => l.path.includes(GROUP))!;
-  assertEquals((still as { path_purchase_item?: string[] }).path_purchase_item, undefined, "a later edit leaves it the bill's own");
+  assertEquals(rowSourcePath(still as MovePointerKeys), undefined, "a later edit leaves it the bill's own");
 });
 
 

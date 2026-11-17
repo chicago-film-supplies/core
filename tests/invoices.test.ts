@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { fdwPrice, fixedPrice, legacyPrice } from "./helpers/formulas.ts";
-import { getInitialValues, InvoiceDocLineItem, SETTLED_STATUSES, InvoiceDocOrderItem, isInvoiceLineItem, OrderDocDestinationItem, OrderDocGroupItem } from "../src/schemas/mod.ts";
+import { getInitialValues, InvoiceDocLineItem, SETTLED_STATUSES, InvoiceDocOrderItem, isInvoiceLineItem, OrderDocDestinationItem, OrderDocGroupItem, pairSourceUid } from "../src/schemas/mod.ts";
 import { computeItemPaths, rederiveDocumentTotalsForAudit, validateItemPaths } from "../src/utils/orders.ts";
 import type { OrderInvoiceFieldSync } from "../src/utils/invoices.ts";
 import {
@@ -1538,14 +1538,16 @@ function makePair(
   };
 }
 
-Deno.test("syncOrderDestinationsSelective adds new pairs tagged with uid_order", () => {
+Deno.test("syncOrderDestinationsSelective adds new pairs tagged with uid_source", () => {
   const prev = [makePair("d1", "c1")];
   const next = [makePair("d1", "c1"), makePair("d2", "c2")];
   const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...makePair("d1", "c1") }];
   const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set(), PF);
   assertEquals(result.length, 2);
   assertEquals(result[1].delivery.uid, "d2");
-  assertEquals(result[1].uid_order, "o1");
+  assertEquals([result[1].uid_source, result[1].uid_order], ["o1", undefined], "a new pair is born on `uid_source` (ruling 109)");
+  // The stored pair, still on the retiring spelling, is read as in scope.
+  assertEquals(result[0].delivery.uid, "d1");
 });
 
 Deno.test("syncOrderDestinationsSelective replaces synced pairs with new order data", () => {
@@ -2705,10 +2707,10 @@ Deno.test("toInvoiceDestinationPair carries EVERY field of the pair, by construc
   const projected = toInvoiceDestinationPair("o1", pair);
   assertEquals(
     Object.keys(projected).sort(),
-    ["uid_order", ...Object.keys(pair)].sort(),
-    "the projection must carry every key of the source pair, plus uid_order",
+    ["uid_source", ...Object.keys(pair)].sort(),
+    "the projection must carry every key of the source pair, plus uid_source (ruling 109)",
   );
-  assertEquals(projected.uid_order, "o1");
+  assertEquals(projected.uid_source, "o1");
   assertEquals(projected.jurisdiction, "rantoul");
 });
 
@@ -2866,7 +2868,7 @@ function scopeInvoice(order: ReturnType<typeof scopeOrder>) {
 /** The write guard's biconditional, restricted to one order scope. */
 function assertJoined(items: readonly InvoiceDocItemType[], dests: readonly InvoiceDestinationPair[]) {
   const dividers = items.filter((it) => it.type === "destination").map((it) => it.path[it.path.length - 1]).sort();
-  const pairs = dests.filter((p) => p.uid_order === ORDER_DIV_1).map((p) => p.uid).sort();
+  const pairs = dests.filter((p) => pairSourceUid(p) === ORDER_DIV_1).map((p) => p.uid).sort();
   assertEquals(dividers, pairs, "every destination divider has exactly its pair");
 }
 

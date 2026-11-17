@@ -1,6 +1,6 @@
 /**
  * core#125 — an invoice line moved inside its own order block still bills its
- * order line, through `path_order_item`.
+ * order line, through `path_source_item`.
  *
  * The order is `D / Grip / C-stand ×4` plus `D / Misc / Tripod`; the invoice
  * dragged the C-stand into Misc. Without the pointer the C-stand bills nothing
@@ -72,7 +72,7 @@ const orderItems = (cstand: Partial<LineItem> = {}): LineItem[] => [
 const keys = (items: readonly { path: readonly string[] }[]) => items.map((it) => it.path.join("/"));
 const byKey = (items: readonly InvoiceDocItemType[], k: string[]) =>
   items.find((it) => it.path.join("/") === [O, ...k].join("/")) as InvoiceItem | undefined;
-const pointer = (row: InvoiceItem | InvoiceDocItemType | undefined) => (row as InvoiceItem | undefined)?.path_order_item;
+const pointer = (row: InvoiceItem | InvoiceDocItemType | undefined) => (row as InvoiceItem | undefined)?.path_source_item;
 
 /**
  * The invoice after an operator dragged the C-stand from Grip into Misc:
@@ -85,7 +85,7 @@ function movedInvoice(order: LineItem[] = orderItems(), opts: { quantity?: numbe
   const rest = projected.filter((it) => it.uid !== CSTAND && (opts.keepGrip !== false || it.uid !== GRIP));
   return [
     ...rest,
-    { ...cstand, path: [O, ...AT], quantity: opts.quantity ?? cstand.quantity, path_order_item: [...X] } as InvoiceDocItemType,
+    { ...cstand, path: [O, ...AT], quantity: opts.quantity ?? cstand.quantity, path_source_item: [...X] } as InvoiceDocItemType,
   ];
 }
 
@@ -95,7 +95,7 @@ Deno.test("claims: a root claims its order line, a component follows by suffix, 
   const kit = [
     ...movedInvoice(),
     buildOrderScopedItems([line(ARM, [...AT, ARM])], O)[0],
-    { ...buildOrderScopedItems([line(TRIPOD, [D, MISC, TRIPOD])], O)[0], path_order_item: [D, MISC, TRIPOD] } as InvoiceDocItemType,
+    { ...buildOrderScopedItems([line(TRIPOD, [D, MISC, TRIPOD])], O)[0], path_source_item: [D, MISC, TRIPOD] } as InvoiceDocItemType,
   ] as InvoiceItem[];
   assertEquals([...orderLineClaims(kit, O)], [
     [AT.join("/"), X],
@@ -116,7 +116,7 @@ Deno.test("🔴 sync: a component the order adds to a moved kit lands under the 
   // The operator dragged the kit from Grip into Misc.
   const invoice = [
     at(D), at(GRIP), at(MISC),
-    { ...at(TRIPOD), path: [O, D, MISC, TRIPOD], path_order_item: K },
+    { ...at(TRIPOD), path: [O, D, MISC, TRIPOD], path_source_item: K },
     { ...at(ARM), path: [O, D, MISC, TRIPOD, ARM] },
   ] as InvoiceDocItemType[];
 
@@ -134,7 +134,7 @@ Deno.test("sync: a new row under a kit still at its own path is not adopted by a
   const next = [...prev.slice(0, 3), line(CSTAND, NEW), prev[3]];
   const projected = buildOrderScopedItems(prev, O) as InvoiceItem[];
   const at = (uid: string) => projected.find((r) => r.uid === uid)!;
-  const invoice = [at(D), at(GRIP), { ...at(TRIPOD), quantity: 1 }, at(MISC), { ...at(TRIPOD), quantity: 1, path: [O, D, MISC, TRIPOD], path_order_item: K }] as InvoiceDocItemType[];
+  const invoice = [at(D), at(GRIP), { ...at(TRIPOD), quantity: 1 }, at(MISC), { ...at(TRIPOD), quantity: 1, path: [O, D, MISC, TRIPOD], path_source_item: K }] as InvoiceDocItemType[];
 
   const out = syncOrderToInvoiceSelective(prev, next, invoice, O);
 
@@ -155,6 +155,17 @@ Deno.test("🔴 sync: a moved line follows X's quantity and name, stays where th
 Deno.test("sync: an UNCHANGED order leaves the moved line exactly as stored", () => {
   const stored = movedInvoice();
   assertEquals(syncOrderToInvoiceSelective(orderItems(), orderItems(), stored, O), stored);
+});
+
+Deno.test("ruling 109 window: a stored row on the retiring `path_order_item` claims the same, and the sync writes it back as `path_source_item`", () => {
+  const stored = movedInvoice().map((it) => {
+    const { path_source_item: x, ...rest } = it as InvoiceItem;
+    return (x === undefined ? it : { ...rest, path_order_item: x }) as InvoiceDocItemType;
+  });
+  assertEquals([...orderLineClaims(stored as InvoiceItem[], O)], [[AT.join("/"), X]]);
+  const out = syncOrderToInvoiceSelective(orderItems(), orderItems({ quantity: 6 }), stored, O);
+  const row = byKey(out, AT)!;
+  assertEquals([row.quantity, pointer(row), "path_order_item" in row], [6, X, false]);
 });
 
 Deno.test("🔴 sync: X moves on the order ⇒ the pointer re-points; the row stays put", () => {
@@ -223,7 +234,7 @@ const pair = (): DocDestinationType => ({
   collection: { uid: `col-${D}`, address: null, instructions: null, contact: null },
   customer_collecting: false, customer_returning: false, jurisdiction: null, exchange: null,
 }) as unknown as DocDestinationType;
-const invoicePair = () => ({ uid_order: O, ...pair() }) as InvoiceDestinationPair;
+const invoicePair = () => ({ uid_source: O, ...pair() }) as InvoiceDestinationPair;
 const accounted = (scope: InvoiceDocItemType[]): AccountedInvoice => ({
   uid: "a", status: "issued", items: [divider, ...(scope as unknown as InvoiceItem[])], destinations: [invoicePair()] as never,
 });
@@ -258,7 +269,7 @@ Deno.test("🔴 alignment: X's emptied group gone from the invoice — aligned W
   const noGrip = movedInvoice(order, { keepGrip: false }) as InvoiceItem[];
   assertEquals(invoiceScopeDividersMatch(noGrip, order, O), true, "the pointer says which line it bills");
   const unpointed = noGrip.map((it) => {
-    const { path_order_item: _, ...rest } = it;
+    const { path_source_item: _, ...rest } = it;
     return rest as InvoiceItem;
   });
   assertEquals(invoiceScopeDividersMatch(unpointed, order, O), false, "no pointer: billed elsewhere, fail closed");
@@ -270,7 +281,7 @@ Deno.test("🔴 accounting: a moved line in an invoice-AUTHORED group (a split's
   const scope = [
     ...buildOrderScopedItems(order, O).map((it) => it.uid === CSTAND ? { ...it, quantity: 3 } as InvoiceDocItemType : it),
     { ...group(NEWG, "New Group"), path: [O, D, NEWG] } as unknown as InvoiceDocItemType,
-    { ...own, quantity: 1, path: [O, D, NEWG, CSTAND], path_order_item: [...X] } as InvoiceDocItemType,
+    { ...own, quantity: 1, path: [O, D, NEWG, CSTAND], path_source_item: [...X] } as InvoiceDocItemType,
   ];
   const billed = billedAR(O, order, [accounted(scope)]);
   assertEquals([billed.unaligned, billed.byPath.get(X.join("/"))?.quantity], [[], 4]);
@@ -332,9 +343,9 @@ Deno.test("🔴 D3: a pointer must sit in an order block and name a LINE of that
   assertEquals(orderLineClaimIssues(items, lines), [], "a valid move");
 
   const at = items.length - 1;
-  const toGroup = items.map((it, i) => i === at ? { ...it, path_order_item: [D, GRIP] } : it);
+  const toGroup = items.map((it, i) => i === at ? { ...it, path_source_item: [D, GRIP] } : it);
   assertEquals(orderLineClaimIssues(toGroup, lines).map((i) => i.reason), ["not_a_line"], "a divider is not a line");
-  const gone = items.map((it, i) => i === at ? { ...it, path_order_item: [D, GRIP, ARM] } : it);
+  const gone = items.map((it, i) => i === at ? { ...it, path_source_item: [D, GRIP, ARM] } : it);
   assertEquals(orderLineClaimIssues(gone, lines).map((i) => i.reason), ["not_a_line"]);
   assertEquals(orderLineClaimIssues(gone, lines, gone), [], "stored unchanged: the sync answers it, not a refusal");
   assertEquals(orderLineClaimIssues(items, () => undefined).map((i) => i.reason), ["order_unknown"]);
@@ -356,13 +367,13 @@ Deno.test("field: a uid-keyed carry-forward does NOT spread it to another occurr
 Deno.test("field: the stored line requires a non-empty path when present; the input line keeps it", () => {
   const stored = byKey(movedInvoice(), AT)!;
   assert(InvoiceDocLineItem.safeParse(stored).success);
-  assertEquals(InvoiceDocLineItem.safeParse({ ...stored, path_order_item: [] }).success, false);
-  const input = InvoiceItemInputLine.parse({ uid: CSTAND, type: "rental", path: [O, ...AT], path_order_item: X });
-  assertEquals(input.path_order_item, X);
+  assertEquals(InvoiceDocLineItem.safeParse({ ...stored, path_source_item: [] }).success, false);
+  const input = InvoiceItemInputLine.parse({ uid: CSTAND, type: "rental", path: [O, ...AT], path_source_item: X });
+  assertEquals(input.path_source_item, X);
 });
 
 Deno.test("seed: `.meta({ seed: false })` omits a .min(1) pointer from the form seed — both grains", () => {
-  assertEquals("path_order_item" in (getInitialValues(InvoiceDocLineItem) as object), false);
-  assertEquals("path_order_item" in (getInitialValues(InvoiceItemInputLine) as object), false);
+  assertEquals("path_source_item" in (getInitialValues(InvoiceDocLineItem) as object), false);
+  assertEquals("path_source_item" in (getInitialValues(InvoiceItemInputLine) as object), false);
   assertEquals("path_invoice_item" in (getInitialValues(CreditNoteDocLineItem) as object), false);
 });

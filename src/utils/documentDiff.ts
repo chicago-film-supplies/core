@@ -173,6 +173,7 @@ import type {
   Order,
   OrderDocItemType,
 } from "../schemas/mod.ts";
+import { pairSourceUid, type PairSourceKeys } from "../schemas/mod.ts";
 import {
   billsOutOfService,
   deriveQueryByPurchases,
@@ -624,7 +625,7 @@ export interface DocumentDiffContext {
 }
 
 /** The pair keys a comparison is addressed BY, never part of what it compares. */
-const PAIR_IDENTITY_FIELDS: ReadonlySet<string> = new Set(["uid", "uid_order", "uid_purchase"]);
+const PAIR_IDENTITY_FIELDS: ReadonlySet<string> = new Set(["uid", "uid_source", "uid_order", "uid_purchase"]);
 
 /**
  * Pair fields a CUSTODY document does not own, skipped whenever one is on
@@ -989,8 +990,7 @@ function compareScope(
     const m = new Map<string, DocDestinationType>();
     for (const p of side.doc.destinations as readonly (DocDestinationType | InvoiceDocDestinationType)[]) {
       // A billing document's pairs name the initiator they bill (the side's scope key).
-      const scopeKey = BILLING_FOLD[side.side].pairScopeKey;
-      if (isBilling(side) && (p as unknown as Record<string, unknown>)[scopeKey] !== orderUid) continue;
+      if (isBilling(side) && pairSourceUid(p as unknown as PairSourceKeys) !== orderUid) continue;
       m.set(p.uid, p);
     }
     return m;
@@ -1285,9 +1285,9 @@ function scopeInitiator(items: readonly { type: string; path: readonly string[] 
  * key — the same rules on both sides: an extension section bills days on lines
  * the initiator has and is the `quantity` entry's, not a line comparison's; a
  * row billing a RECORD no initiator line carries is the record's (decision 9); a moved row's claim is
- * read through the side's move pointer.
+ * read through the one move pointer (`path_source_item`, ruling 109).
  */
-function scopeBilling(side: Side, doc: DiffBilling, initiator: DiffInitiator): ScopedLines {
+function scopeBilling(doc: DiffBilling, initiator: DiffInitiator): ScopedLines {
   const initiatorUid = initiator.uid;
   const initiatorKeys = new Set((initiator.items as readonly { path: readonly string[] }[]).map((it) => key(it.path)));
   const items = doc.items as unknown as InvoiceItem[];
@@ -1307,7 +1307,7 @@ function scopeBilling(side: Side, doc: DiffBilling, initiator: DiffInitiator): S
     if ("substituted_for" in it) rel.push({ path: relPath, substituted_for: it.substituted_for });
   }
   const claims = new Map<string, string>();
-  for (const [row, x] of orderLineClaims(items, initiatorUid, BILLING_FOLD[side].pointerKey)) {
+  for (const [row, x] of orderLineClaims(items, initiatorUid)) {
     if (byKey.has(row)) claims.set(row, key(x));
   }
   return { byKey, anchors: collectSubstitutionAnchors(rel), claims };
@@ -1498,7 +1498,7 @@ export function computeDocumentDiffs(
     }
   };
 
-  const billingSide = (doc: DiffBilling, scope: InitiatorScope): DiffSide => ({ kind: kinds.billing, role: "billing", side, doc, lines: scopeBilling(side, doc, scope.initiator) });
+  const billingSide = (doc: DiffBilling, scope: InitiatorScope): DiffSide => ({ kind: kinds.billing, role: "billing", side, doc, lines: scopeBilling(doc, scope.initiator) });
   const initiatorSide = (scope: InitiatorScope): DiffSide => ({ kind: kinds.initiator, role: "initiator", side, doc: scope.initiator, lines: scope.scoped });
   const custodySide = (doc: DiffCustody): DiffSide => ({ kind: kinds.custody, role: "custody", side, doc, lines: scopeCustody(doc) });
   const named = (scope: InitiatorScope) => (rel: string) => scope.fold.byPath.has(rel);

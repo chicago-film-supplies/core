@@ -102,6 +102,12 @@ import {
   SETTLEMENT_CONTRACTS,
   SETTLEMENT_TARGET_SIDE,
   type Side,
+  type MovePointerKeys,
+  type PairSourceKeys,
+  pairSourceUid,
+  requirePairSourceUid,
+  rowSourcePath,
+  withRowSourcePath,
 } from "../schemas/mod.ts";
 import { fromCentsBig, roundDivHalfAwayFromZero } from "./money.ts";
 import { invoiceIsFrozen, type InvoiceSettledTotals } from "../schemas/_invoice-freeze.ts";
@@ -174,8 +180,10 @@ export interface InvoiceItem extends LineItem {
   out_of_service?: OutOfServiceEntryType[];
   /** @see `InvoiceDocDestinationItemType.path_extension_for` — a destination divider's only. */
   path_extension_for?: string[];
-  /** @see `InvoiceDocLineItemType.path_order_item` — a moved line's root row only (core#125). */
+  /** @see `InvoiceDocLineItemType.path_order_item` — a moved line's root row only (core#125). Retiring (ruling 109). */
   path_order_item?: string[];
+  /** The move pointer's one spelling (ruling 109). Read through `rowSourcePath`. */
+  path_source_item?: string[];
 }
 
 // ── Invoice totals ──────────────────────────────────────────────
@@ -1202,16 +1210,6 @@ export interface OrderInvoiceFieldSync {
   holidays: readonly string[];
 }
 
-/** The two move-pointer keys a billing row may carry, one per side. */
-export interface MovePointerCarrier {
-  path_order_item?: string[] | null;
-  path_purchase_item?: string[] | null;
-}
-
-/** A billing row's move pointer on `key`'s side, or `undefined`. */
-function movePointerOf(row: MovePointerCarrier, key: keyof MovePointerCarrier): string[] | undefined {
-  return row[key] ?? undefined;
-}
 
 /**
  * A row whose `quantity` the engine just moved, with its out-of-service shares
@@ -1248,8 +1246,6 @@ function refitOutOfService<R>(row: R): R {
 export interface ScopedSyncSide<R extends InvoiceItem = InvoiceDocItemType> {
   /** The scope divider's type: `order` on an invoice, `purchase` on a bill or credit. */
   scopeType: "order" | "purchase";
-  /** The move pointer a billing row carries: `path_order_item` / `path_purchase_item`. */
-  pointerKey: keyof MovePointerCarrier;
   /** An initiator row (line or divider) in the billing document's shape, under the scope divider. */
   project(item: LineItem, scopeUid: string): R;
   /**
@@ -1295,7 +1291,6 @@ export interface ScopedSyncSide<R extends InvoiceItem = InvoiceDocItemType> {
 /** The receivable side: order → invoice. */
 export const RECEIVABLE_SCOPED_SYNC: ScopedSyncSide = {
   scopeType: "order",
-  pointerKey: "path_order_item",
   project: (item, scopeUid) => projectOrderItemToInvoiceItem(item, scopeUid),
   lineFields: (_item) => orderInvoiceSharedFields().line,
 };
@@ -1321,8 +1316,6 @@ function mergeScopedLine<R extends InvoiceItem>(
  * billing document's shape.
  */
 export interface ScopedPairSide<S, P> {
-  /** The billing pair's scope key: `uid_order` on an invoice, `uid_purchase` on a bill. */
-  scopeKey: "uid_order" | "uid_purchase";
   /** The shared pair fields, read off the two schemas. */
   fields(): readonly SharedField[];
   /** An initiator pair in the billing document's shape, scoped by the initiator's uid. */
@@ -1331,7 +1324,6 @@ export interface ScopedPairSide<S, P> {
 
 /** The receivable pair side: order → invoice. */
 const RECEIVABLE_PAIR_SIDE: ScopedPairSide<DocDestinationType, InvoiceDestinationPair> = {
-  scopeKey: "uid_order",
   fields: () => orderInvoiceSharedFields().pair,
   project: (pair, scopeUid) => toInvoiceDestinationPair(scopeUid, pair),
 };
@@ -1606,7 +1598,7 @@ function syncScopedItems<R extends InvoiceItem>(
   };
   const currentInvoiceItems = storedInvoiceItems.map(normalize);
 
-  // ── `path_order_item` claims (core#125) ──
+  // ── move-pointer claims (core#125; `path_source_item`, ruling 109) ──
   //
   // A row that bills order line X from another position IS X: merged three-way
   // against X where it stands, re-pointed when X moves, and removed with X
@@ -1616,7 +1608,6 @@ function syncScopedItems<R extends InvoiceItem>(
   const claims = orderLineClaims(
     currentInvoiceItems.filter((it) => !isInExtensionSection(it.path, orderDividerUid, extensionTargets)) as InvoiceItem[],
     orderDividerUid,
-    side.pointerKey,
   );
   const newByPath = new Map<string, LineItem>();
   for (const item of newOrderItems) newByPath.set(itemPathKey(item.path), item);
@@ -1625,14 +1616,11 @@ function syncScopedItems<R extends InvoiceItem>(
     const x = claims.get(relKey);
     if (x === undefined) return undefined;
     // Only the root states the pointer; a component follows it by suffix.
-    const isRoot = (movePointerOf(row, side.pointerKey)?.length ?? 0) > 0;
+    const isRoot = (rowSourcePath(row as R & MovePointerKeys)?.length ?? 0) > 0;
     const pointing = (r: R, to: readonly string[] | undefined): R => {
       if (!isRoot) return r;
-      const out: R & MovePointerCarrier = { ...r };
       // A pointer at the row's own path is no claim: moving back clears it.
-      if (to !== undefined && itemPathKey(to) !== relKey) out[side.pointerKey] = [...to];
-      else delete out[side.pointerKey];
-      return out;
+      return withRowSourcePath(r, to !== undefined && itemPathKey(to) !== relKey ? to : undefined);
     };
     const prevX = prevByPath.get(itemPathKey(x));
     // X was not on the order this row was claimed against: the row is the
@@ -1759,7 +1747,7 @@ function syncScopedItems<R extends InvoiceItem>(
       if (heldParent !== undefined) {
         const at = [...heldParent, newItem.uid];
         adoptedAt.set(pathKey, at);
-        adopted.push({ row: { ...side.project(newItem, orderDividerUid), path: [orderDividerUid, ...at], [side.pointerKey]: [...newItem.path] } as R, under: heldParent });
+        adopted.push({ row: withRowSourcePath({ ...side.project(newItem, orderDividerUid), path: [orderDividerUid, ...at] } as R, newItem.path), under: heldParent });
         continue;
       }
       // A LINE the previous order already had that the invoice does not carry
@@ -1826,7 +1814,7 @@ function syncScopedItems<R extends InvoiceItem>(
     const adoptedLine = adoptions.get(invoiceItem);
     if (adoptedLine !== undefined) {
       survivors.add(invoiceItem);
-      survivorAs.set(invoiceItem, { ...invoiceItem, [side.pointerKey]: adoptedLine } as R);
+      survivorAs.set(invoiceItem, withRowSourcePath(invoiceItem, adoptedLine));
       continue;
     }
 
@@ -2392,7 +2380,6 @@ export function invoiceScopeDividersMatch(
   scopedInvoiceItems: InvoiceItem[],
   orderItems: LineItem[],
   orderDividerUid: string,
-  pointerKey: keyof MovePointerCarrier = "path_order_item",
 ): boolean {
   // An extension section reads as the order divider it extends, so a scope
   // holding both that divider and its extension collapses to one key, and a
@@ -2439,7 +2426,7 @@ export function invoiceScopeDividersMatch(
     orderLinePaths.add(itemPathKey(it.path ?? []));
     if (missing.some((m) => isStrictlyBelow(it.path ?? [], m))) uidsUnderMissing.add(it.uid);
   }
-  const claims = orderLineClaims(scopedInvoiceItems, orderDividerUid, pointerKey);
+  const claims = orderLineClaims(scopedInvoiceItems, orderDividerUid);
   for (const it of scopedInvoiceItems) {
     if (isDividerItemType(it.type)) continue;
     const path = it.path ?? [];
@@ -2510,7 +2497,8 @@ export function invoiceAuthoredSubtrees(
  * (core#125), keyed by the row's ORDER-relative path, valued by the
  * order-relative path it bills.
  *
- * A root row states `path_order_item`; each line below it — a kit's components
+ * A root row states its move pointer (`path_source_item`, read through
+ * `rowSourcePath` while the retiring spellings exist; ruling 109); each line below it — a kit's components
  * — bills the same suffix under the claimed path, so `[...P, c]` maps to
  * `[...X, c]`. A pointer naming the row's own path claims nothing and is left
  * out, so a caller never has to special-case it.
@@ -2525,19 +2513,16 @@ export function invoiceAuthoredSubtrees(
  * the pointer (owner, 2026-10-03).
  *
  * @param scopedInvoiceItems - Items of one order scope (the order divider may be included)
- * @param orderDividerUid - The order divider's uid
- * @param pointerKey - The move pointer to read: `path_order_item` on an invoice,
- *   `path_purchase_item` on a bill or credit (one-document-model Phase 3).
+ * @param orderDividerUid - The order divider's uid — or a purchase's, on a bill or credit
  */
 export function orderLineClaims(
   scopedInvoiceItems: readonly InvoiceItem[],
   orderDividerUid: string,
-  pointerKey: keyof MovePointerCarrier = "path_order_item",
 ): Map<string, string[]> {
   const claims = new Map<string, string[]>();
   const roots: Array<{ rel: string[]; x: readonly string[] }> = [];
   for (const it of scopedInvoiceItems) {
-    const x = movePointerOf(it, pointerKey);
+    const x = rowSourcePath(it as InvoiceItem & MovePointerKeys);
     const path = it.path ?? [];
     if (!x?.length || !isLineItemType(it.type) || path[0] !== orderDividerUid) continue;
     const rel = path.slice(1);
@@ -2583,13 +2568,11 @@ export interface OrderLineClaimIssue {
  */
 export interface LineClaimSide<L> {
   scopeType: "order" | "purchase";
-  pointerKey: keyof MovePointerCarrier;
 }
 
-/** The receivable side of {@link orderLineClaimIssues}: an invoice's `path_order_item`. */
+/** The receivable side of {@link orderLineClaimIssues}: an invoice's move pointers. */
 export const RECEIVABLE_LINE_CLAIMS: LineClaimSide<{ type: string; path?: readonly string[] }> = {
   scopeType: "order",
-  pointerKey: "path_order_item",
 };
 
 /**
@@ -2608,20 +2591,20 @@ export const RECEIVABLE_LINE_CLAIMS: LineClaimSide<{ type: string; path?: readon
  * @param side - Which pointer and scope to read; an invoice's by default
  */
 export function orderLineClaimIssues<L extends { type: string; path?: readonly string[] }>(
-  items: readonly (InvoiceItem & MovePointerCarrier)[],
+  items: readonly (InvoiceItem & MovePointerKeys)[],
   orderLines: (orderUid: string) => readonly L[] | undefined,
-  stored: readonly (InvoiceItem & MovePointerCarrier)[] = [],
+  stored: readonly (InvoiceItem & MovePointerKeys)[] = [],
   side: LineClaimSide<L> = RECEIVABLE_LINE_CLAIMS,
 ): OrderLineClaimIssue[] {
   const orderDividers = new Set(items.filter((it) => it.type === side.scopeType).map((it) => it.uid));
   const storedPointer = new Map<string, string>();
   for (const it of stored) {
-    const x = movePointerOf(it, side.pointerKey);
+    const x = rowSourcePath(it);
     if (x?.length) storedPointer.set(itemPathKey(it.path ?? []), itemPathKey(x));
   }
   const issues: OrderLineClaimIssue[] = [];
   items.forEach((it, index) => {
-    const x = movePointerOf(it, side.pointerKey);
+    const x = rowSourcePath(it);
     if (!x?.length) return;
     const path = it.path ?? [];
     if (storedPointer.get(itemPathKey(path)) === itemPathKey(x)) return;
@@ -2965,8 +2948,8 @@ function destPairKey(uidOrder: string, pair: Pick<DocDestinationType, "uid"> | {
  * ⚠️ A reconciler already scoped to one order keys on the bare `pair.uid`; the
  * scope is then in the partition, not the key.
  */
-export function invoicePairKey(pair: { uid_order: string; uid?: string | null }): string {
-  return destPairKey(pair.uid_order, pair);
+export function invoicePairKey(pair: PairSourceKeys & { uid?: string | null }): string {
+  return destPairKey(requirePairSourceUid(pair), pair);
 }
 
 /**
@@ -2995,7 +2978,9 @@ export function toInvoiceDestinationPair(
   uidOrder: string,
   pair: DocDestinationType,
 ): InvoiceDestinationPair {
-  const out: Record<string, unknown> = { uid_order: uidOrder };
+  // `uid_source`, the scope's one spelling (ruling 109). The order pair carries no
+  // scope key, so the loop below cannot re-mint a retiring one.
+  const out: Record<string, unknown> = { uid_source: uidOrder };
   for (const [key, value] of Object.entries(pair)) out[key] = value ?? null;
   // 🔴 **`exchange` is required-nullable on the stored pair, and this loop
   // copies KEYS — so an order pair that predates the field would project an
@@ -3171,7 +3156,7 @@ export function syncOrderDestinationsSelective(
   const inScope = new Map<string, InvoiceDestinationPair>();
   const outOfScope: InvoiceDestinationPair[] = [];
   for (const pair of currentInvoiceDests) {
-    if (pair.uid_order === uidOrder) {
+    if (pairSourceUid(pair) === uidOrder) {
       inScope.set(invoicePairKey(pair), pair);
     } else {
       outOfScope.push(pair);
@@ -3190,7 +3175,7 @@ export function syncOrderDestinationsSelective(
     const inv = inScope.get(key);
 
     if (!inv) {
-      // New pair — add tagged with uid_order.
+      // New pair — add tagged with its source order (`uid_source`).
       synced.push(toInvoiceDestinationPair(uidOrder, newPair));
     } else if (prev) {
       synced.push(mergePair(prev, newPair, inv, uidOrder, mode.holidays));
@@ -3236,7 +3221,7 @@ export function removeOrderScopedDestinations(
   dests: InvoiceDestinationPair[],
   uidOrder: string,
 ): InvoiceDestinationPair[] {
-  return dests.filter((d) => d.uid_order !== uidOrder);
+  return dests.filter((d) => pairSourceUid(d) !== uidOrder);
 }
 
 /** What {@link syncOrderDestinationScope} returns. */
@@ -3333,7 +3318,7 @@ export interface ScopedDestinationSyncResult<R, P> {
 export function syncScopedDestinations<
   R extends InvoiceItem,
   S extends { uid?: string },
-  P extends { uid?: string; dates: OrderDocDatesType; uid_order?: string; uid_purchase?: string },
+  P extends { uid?: string; dates: OrderDocDatesType } & PairSourceKeys,
 >(
   prev: { items: LineItem[]; destinations: readonly S[] },
   next: { items: LineItem[]; destinations: readonly S[] },
@@ -3356,7 +3341,7 @@ export function syncScopedDestinations<
   const inScope = new Map<string | undefined, P>();
   const outOfScope: P[] = [];
   for (const pair of currentDests) {
-    if (pair[pairSide.scopeKey] === scopeUid) inScope.set(pair.uid, pair);
+    if (pairSourceUid(pair) === scopeUid) inScope.set(pair.uid, pair);
     else outOfScope.push(pair);
   }
 

@@ -113,7 +113,7 @@ Deno.test("every shared field is the SAME INSTANCE on both grains", () => {
  * are the whole object and `uid_order` was already first, which is what makes the
  * spread inert. This arm is what keeps it inert.
  */
-Deno.test("both grains' key order is exactly the shared shape (invoice prefixed by uid_order)", () => {
+Deno.test("both grains' key order is exactly the shared shape (invoice prefixed by its scope keys)", () => {
   const core = Object.keys(DestinationPairCore);
   assertEquals(
     Object.keys(shapeOf(DocDestination, "DocDestination")),
@@ -122,8 +122,10 @@ Deno.test("both grains' key order is exactly the shared shape (invoice prefixed 
   );
   assertEquals(
     Object.keys(shapeOf(InvoiceDocDestination, "InvoiceDocDestination")),
-    ["uid_order", ...core],
-    "the invoice grain is `uid_order` plus the shared shape, in that order — a new " +
+    // Beta H1 of ruling 109: the retiring `uid_order` beside `uid_source`; H2
+    // deletes the first.
+    ["uid_order", "uid_source", ...core],
+    "the invoice grain is its scope keys plus the shared shape, in that order — a new " +
       "key here is an operator-visible column move, so state it deliberately",
   );
 });
@@ -305,9 +307,11 @@ Deno.test("every pair input strips an unknown key at every level instead of refu
 });
 
 Deno.test("an invoice pair input requires its scope and identity; an order pair's uid stays optional", () => {
-  const base = { uid_order: "testorder10000000000", ...STORED_CORE(), ...CUSTOMER_KEYS };
-  const { uid_order: _o, ...noScope } = base;
-  assertEquals(InvoiceDestinationInput.safeParse(noScope).error?.issues.map((i) => i.path.join(".")), ["uid_order"]);
+  const base = { uid_source: "testorder10000000000", ...STORED_CORE(), ...CUSTOMER_KEYS };
+  const { uid_source: _o, ...noScope } = base;
+  assertEquals(InvoiceDestinationInput.safeParse(noScope).error?.issues.map((i) => i.path.join(".")), ["uid_source"]);
+  // The retiring spelling still scopes the pair through beta H1 (ruling 109).
+  assertEquals(InvoiceDestinationInput.safeParse({ ...noScope, uid_order: "testorder10000000000" }).success, true);
   const { uid: _u, ...noUid } = base;
   assertEquals(InvoiceDestinationInput.safeParse(noUid).error?.issues.map((i) => i.path.join(".")), ["uid"]);
   const { uid: _v, ...orderPair } = { ...STORED_CORE(), ...CUSTOMER_KEYS };

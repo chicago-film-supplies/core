@@ -60,6 +60,7 @@ import {
   purchaseDocumentLines,
   isKitHeaderLine,
   payableLineUid,
+  withRowSourcePath,
 } from "../schemas/mod.ts";
 import {
   lineUnitsCents,
@@ -925,7 +926,7 @@ export function purchaseDocumentScope(
         const above = held.get(ancestor);
         return above !== undefined && isPurchaseLine(above) && !isKitHeaderLine(above) && !byLocal.has(ancestor);
       });
-      rows.push(strandedUnderLine ? { ...line, path_purchase_item: row.path } : line);
+      rows.push(strandedUnderLine ? withRowSourcePath(line, row.path) : line);
     } else if (isKitHeaderLine(row) && wanted.has(local) && row.quantity > 0) {
       rows.push(projectPurchaseLineToBillLine(row, { uid_purchase: purchase.uid, quantity: row.quantity, from: 0 }));
     }
@@ -960,7 +961,7 @@ export function purchaseDocumentScope(
   return {
     items: computePurchaseDocumentItemPaths(rows),
     destinations: [
-      ...purchase.destinations.filter((d) => dividers.has(d.uid)).map((d) => ({ uid_purchase: purchase.uid, ...d })),
+      ...purchase.destinations.filter((d) => dividers.has(d.uid)).map((d) => ({ uid_source: purchase.uid, ...d })),
       ...authoredPairs.filter((d) => dividers.has(d.uid)),
     ],
   };
@@ -1107,7 +1108,6 @@ export function payableScopedSync(prev: Purchase, next: Purchase): {
   const nextItems = convert(next.items);
   const side: ScopedSyncSide<PurchaseDocumentRow> = {
     scopeType: "purchase",
-    pointerKey: "path_purchase_item",
     isStructural: (item) => isKitHeaderLine(item),
     // A bill's own sale or rental line is the purchase line added after it for the
     // same product. A charge or a replacement line names no product it orders.
@@ -1191,10 +1191,10 @@ export interface SyncPurchaseToBillsArgs {
 
 /**
  * **A purchase's pair in a bill's shape**, the payable `ScopedPairSide.project`:
- * the pair scoped by `uid_purchase`, the invoice pair's twin.
+ * the pair scoped by `uid_source` (ruling 109), the invoice pair's twin.
  */
 function purchasePairForBill(pair: PurchaseDestination, uidPurchase: string): PurchaseDocDestination {
-  return { uid_purchase: uidPurchase, ...pair };
+  return { uid_source: uidPurchase, ...pair };
 }
 
 let billPairFields: readonly SharedField[] | null = null;
@@ -1208,20 +1208,18 @@ export function purchaseBillSharedPairFields(): readonly SharedField[] {
 }
 
 const PAYABLE_PAIR_SIDE: ScopedPairSide<PurchaseDestination, PurchaseDocDestination> = {
-  scopeKey: "uid_purchase",
   fields: purchaseBillSharedPairFields,
   project: purchasePairForBill,
 };
 
 /**
- * The payable side of `orderLineClaimIssues`: a bill or credit's
- * `path_purchase_item`. A line closed to 0 is removed (ruling 47), so there is
+ * The payable side of `orderLineClaimIssues`: a bill or credit's move
+ * pointer (`path_source_item`, ruling 109). A line closed to 0 is removed (ruling 47), so there is
  * no closed line to refuse: a claim on it names a row that is not there, as on
  * the receivable side.
  */
 export const PAYABLE_LINE_CLAIMS: LineClaimSide<PurchaseRow> = {
   scopeType: "purchase",
-  pointerKey: "path_purchase_item",
 };
 
 /** A row at `quantity` units carrying `part` (D7). */

@@ -23,7 +23,7 @@ const entry = (path: string[], reason: "damaged" | "lost" = "damaged") => ({ pat
 /** An invoice billing order O's exchange leg only — its parent leg is billed elsewhere. */
 function doc(exchanged_for: ReturnType<typeof entry>[], disposition = "same_trip") {
   return {
-    destinations: [{ uid: EXCHANGE, uid_order: O, exchange: { uid_pair: PARENT, disposition: disposition as "same_trip" } }],
+    destinations: [{ uid: EXCHANGE, uid_source: O, exchange: { uid_pair: PARENT, disposition: disposition as "same_trip" } }],
     items: [
       { path: [O] },
       { path: [O, EXCHANGE] },
@@ -33,11 +33,11 @@ function doc(exchanged_for: ReturnType<typeof entry>[], disposition = "same_trip
 }
 
 Deno.test("billing: a pointer at the PARENT leg passes, though this invoice does not carry it", () => {
-  assertEquals(billingExchangedForViolations(doc([entry([PARENT, X])]), "uid_order"), []);
+  assertEquals(billingExchangedForViolations(doc([entry([PARENT, X])])), []);
 });
 
 Deno.test("billing: a leg this invoice does not carry is DEFERRED (a sibling may be billed elsewhere)", () => {
-  assertEquals(billingExchangedForViolations(doc([entry([SIBLING, X])]), "uid_order"), []);
+  assertEquals(billingExchangedForViolations(doc([entry([SIBLING, X])])), []);
 });
 
 Deno.test("…and its complement: the CUSTODY form refuses that same leg", () => {
@@ -49,25 +49,34 @@ Deno.test("…and its complement: the CUSTODY form refuses that same leg", () =>
 });
 
 Deno.test("billing: a pointer at the exchange's OWN leg is refused — the deferral is not a hole", () => {
-  const v = billingExchangedForViolations(doc([entry([EXCHANGE, X])]), "uid_order");
+  const v = billingExchangedForViolations(doc([entry([EXCHANGE, X])]));
   assertEquals(v.map((x) => [x.index, x.field]), [[2, "path"]], "the index is the INVOICE row's, not the scope's");
 });
 
 Deno.test("billing: the reason is still checked against the disposition", () => {
-  const v = billingExchangedForViolations(doc([entry([PARENT, X], "lost")]), "uid_order");
+  const v = billingExchangedForViolations(doc([entry([PARENT, X], "lost")]));
   assertEquals(v.map((x) => x.field), ["reason"]);
 });
 
 Deno.test("billing: `exchanged_for` under no exchange pair is refused", () => {
   const d = doc([entry([PARENT, X])]);
   d.destinations[0].exchange = null as unknown as typeof d.destinations[0]["exchange"];
-  assertEquals(billingExchangedForViolations(d, "uid_order").map((x) => x.field), ["exchanged_for"]);
+  assertEquals(billingExchangedForViolations(d).map((x) => x.field), ["exchanged_for"]);
 });
 
-Deno.test("billing: pairs are scoped by `uid_order` — another order's exchange pair of the same uid does not count", () => {
+Deno.test("billing: pairs are scoped by `uid_source` — another order's exchange pair of the same uid does not count", () => {
   const d = doc([entry([PARENT, X])]);
-  d.destinations[0].uid_order = "orderother000000000";
-  assertEquals(billingExchangedForViolations(d, "uid_order").map((x) => x.field), ["exchanged_for"]);
+  d.destinations[0].uid_source = "orderother000000000";
+  assertEquals(billingExchangedForViolations(d).map((x) => x.field), ["exchanged_for"]);
+});
+
+Deno.test("billing: a pair still stating the retiring `uid_order` / `uid_purchase` scopes the same (ruling 109, beta H1)", () => {
+  for (const key of ["uid_order", "uid_purchase"] as const) {
+    const d = doc([entry([EXCHANGE, X])]);
+    const { uid_source: _s, ...pair } = d.destinations[0];
+    const old = { ...d, destinations: [{ ...pair, [key]: O }] };
+    assertEquals(billingExchangedForViolations(old).map((x) => [x.index, x.field]), [[2, "path"]], key);
+  }
 });
 
 Deno.test("projection: an exchange line's list is carried ORDER-relative; a line stating none carries none", () => {

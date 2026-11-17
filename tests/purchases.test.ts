@@ -1109,7 +1109,7 @@ Deno.test("CreatePurchaseBillInput: items by path_purchase_item, charge items se
   assertEquals(issuePaths(CreatePurchaseBillInput, { mode: "push", date: "2026-10-01T00:00:00.000-05:00", ...common }), ["due_date"]);
   assertEquals(
     issuePaths(CreatePurchaseBillInput, { mode: "link", xero_document: "invoice", xero_id: XERO_ID, ...common, items: [items[0], items[0]] }),
-    ["items.1.path_purchase_item"],
+    ["items.1.path_source_item"],
   );
   // A push of charge items alone is a bill; a push of nothing is not.
   const fee = { name: "Freight", ledger_account: 5100, amount_cents: 1500 };
@@ -1483,7 +1483,7 @@ Deno.test("CreatePurchaseCreditInput: a line names a purchase item OR a bill lin
   // An older client sending both still parses.
   assertEquals(issues([{ path_purchase_item: [iuid(1)], uid_purchase_bill: billA, path_bill_item: [P, iuid(1)], quantity: 1 }]), []);
   // Neither: refused at the purchase item, by name.
-  assertEquals(issues([{ quantity: 1 }]), ["items.0.path_purchase_item"]);
+  assertEquals(issues([{ quantity: 1 }]), ["items.0.path_source_item"]);
   // Half a bill line: one issue, the pairing one, not a second "names nothing".
   assertEquals(issues([{ uid_purchase_bill: billA, quantity: 1 }]), ["items.0.path_bill_item"]);
   // Two bills' lines at ONE path would store one credit row twice.
@@ -1509,7 +1509,7 @@ Deno.test("CreatePurchaseCreditInput: a line names a purchase item OR a bill lin
   );
   // A link names no bill line, so it still names its purchase item.
   const link = { mode: "link", reason: "supplier_adjustment", xero_id: "2c3d4e5f-0000-4000-8000-000000000001", uuid_session: SESSION, version: 0 };
-  assertEquals(issuePaths(CreatePurchaseCreditInput, { ...link, items: [{ quantity: 1 }] }), ["items.0.path_purchase_item"]);
+  assertEquals(issuePaths(CreatePurchaseCreditInput, { ...link, items: [{ quantity: 1 }] }), ["items.0.path_source_item"]);
 });
 
 // ── pack expansion (api-cloudrun#1081) ───────────────────────────────

@@ -842,6 +842,110 @@ export function exchangedForViolations(
 }
 
 /**
+ * The scope keys a billing or credit document's pair may carry: `uid_source`,
+ * and the two it replaces (ruling 109 of the one-document-model plan) —
+ * `uid_order` on an invoice's pair, `uid_purchase` on a bill's or supplier
+ * credit's. Which collection the uid names is the document's SIDE
+ * (`SIDE_CONTRACTS`), never stored.
+ */
+export interface PairSourceKeys {
+  uid_source?: string;
+  /** Retiring (ruling 109): an invoice pair's scope. Deleted in beta H2. */
+  uid_order?: string;
+  /** Retiring (ruling 109): a bill's or supplier credit's pair scope. Deleted in beta H2. */
+  uid_purchase?: string;
+}
+
+/**
+ * The initiator a billing or credit document's pair is scoped to: `uid_source`,
+ * else a retiring spelling. The ONE reader of the pair scope through beta H1;
+ * H2 deletes the old keys and this collapses to `pair.uid_source`. `undefined`
+ * only on a pair naming none, which the pair schemas refuse.
+ */
+export function pairSourceUid(pair: PairSourceKeys): string | undefined {
+  return pair.uid_source ?? pair.uid_order ?? pair.uid_purchase;
+}
+
+/** {@link pairSourceUid}, for a pair the schema has already admitted: throws on a pair naming no source. */
+export function requirePairSourceUid(pair: PairSourceKeys): string {
+  const uid = pairSourceUid(pair);
+  if (uid === undefined) throw new Error("a billing pair names its source document (uid_source)");
+  return uid;
+}
+
+/**
+ * The pair-scope refine every billing and credit pair schema runs through beta
+ * H1: the pair names its source under some spelling. Both keys are optional for
+ * the window, so this is what keeps a pair from naming none. Two spellings are
+ * not refused (F14 conformance: no core precedent); writers write `uid_source`
+ * alone and the migration leaves one.
+ */
+export function checkPairSourceKeys(pair: PairSourceKeys, ctx: z.RefinementCtx): void {
+  if (pairSourceUid(pair) === undefined) {
+    ctx.addIssue({ code: "custom", path: ["uid_source"], message: "a billing pair names its source document (uid_source)" });
+  }
+}
+
+/**
+ * The move-pointer keys a billing row may carry: `path_source_item`, and the two
+ * it replaces (ruling 109) — `path_order_item` on an invoice line,
+ * `path_purchase_item` on a bill or supplier-credit line.
+ */
+export interface MovePointerKeys {
+  path_source_item?: string[] | null;
+  /** Retiring (ruling 109): an invoice line's move pointer. Deleted in beta H2. */
+  path_order_item?: string[] | null;
+  /** Retiring (ruling 109): a bill or supplier-credit line's move pointer. Deleted in beta H2. */
+  path_purchase_item?: string[] | null;
+}
+
+/**
+ * A billing row's move pointer — the initiator line it bills from another
+ * position, initiator-relative — or `undefined`. The ONE reader through beta H1;
+ * H2 collapses it to `row.path_source_item`.
+ */
+export function rowSourcePath(row: MovePointerKeys): string[] | undefined {
+  return row.path_source_item ?? row.path_order_item ?? row.path_purchase_item ?? undefined;
+}
+
+/**
+ * `row` with its move pointer stated as `pointer` under the one key, every
+ * retiring spelling dropped; `undefined` clears it. Writers go through this, so
+ * no write re-mints an old key.
+ */
+export function withRowSourcePath<R extends object>(row: R, pointer: readonly string[] | undefined): R {
+  const { path_order_item: _o, path_purchase_item: _p, path_source_item: _s, ...rest } = row as R & MovePointerKeys;
+  return (pointer === undefined ? rest : { ...rest, path_source_item: [...pointer] }) as R;
+}
+
+/**
+ * A billing or credit document with every pair scope and move pointer under its
+ * one spelling (ruling 109): `uid_source` on each pair, `path_source_item` on
+ * each row, the retiring keys gone. The api's writers call it on the whole
+ * document before a write, so a pair or row a sync carried through unchanged
+ * cannot re-write an old key. Rows and pairs stating neither come back as they
+ * were (same object). Deleted with the old keys in beta H2.
+ */
+export function canonicalSourceKeys<D extends { destinations?: readonly object[]; items?: readonly object[] }>(doc: D): D {
+  const pair = <P extends object>(p: P): P => {
+    const k = p as P & PairSourceKeys;
+    if (k.uid_order === undefined && k.uid_purchase === undefined) return p;
+    const { uid_order: _o, uid_purchase: _p, ...rest } = k;
+    return { ...rest, uid_source: pairSourceUid(k) } as P;
+  };
+  const row = <R extends object>(r: R): R => {
+    const k = r as R & MovePointerKeys;
+    if (k.path_order_item === undefined && k.path_purchase_item === undefined) return r;
+    return withRowSourcePath(r, rowSourcePath(k));
+  };
+  return {
+    ...doc,
+    ...(doc.destinations !== undefined ? { destinations: doc.destinations.map(pair) } : {}),
+    ...(doc.items !== undefined ? { items: doc.items.map(row) } : {}),
+  };
+}
+
+/**
  * {@link exchangedForViolations} on a BILLING document (an invoice, a bill, a supplier
  * credit; ruling 82 of the one-document-model plan). Its rows sit one level deeper than
  * their source's (`[scope, leg, …]`, the scope divider being the source document's uid),
@@ -854,15 +958,13 @@ export function exchangedForViolations(
  * to check against the source's pairs (`unknownLegs: "defer"`). The parent leg always
  * resolves locally: it is named on the exchange pair itself (`exchange.uid_pair`).
  *
- * @param scopeKey - the pair field naming the source document: `uid_order` on an
- *   invoice, `uid_purchase` on a bill or credit.
+ * A pair's scope is read through {@link pairSourceUid}, one key on both sides (ruling 109).
  */
-export function billingExchangedForViolations<K extends string>(
+export function billingExchangedForViolations(
   doc: {
-    destinations: ReadonlyArray<{ uid: string; exchange?: DestinationExchangeType | null } & { [key in K]: string }>;
+    destinations: ReadonlyArray<{ uid: string; exchange?: DestinationExchangeType | null } & PairSourceKeys>;
     items: ReadonlyArray<{ path: readonly string[] }>;
   },
-  scopeKey: K,
 ): ExchangedForViolation[] {
   const scopes = new Map<string, number[]>();
   doc.items.forEach((item, i) => {
@@ -874,7 +976,7 @@ export function billingExchangedForViolations<K extends string>(
   const out: ExchangedForViolation[] = [];
   for (const [scope, indices] of scopes) {
     const items = indices.map((i) => ({ ...doc.items[i], path: doc.items[i].path.slice(1) }));
-    const destinations = doc.destinations.filter((p) => p[scopeKey] === scope);
+    const destinations = doc.destinations.filter((p) => pairSourceUid(p) === scope);
     for (const v of exchangedForViolations({ destinations, items }, { unknownLegs: "defer" })) {
       out.push({ ...v, index: indices[v.index] });
     }

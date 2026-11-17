@@ -142,6 +142,7 @@ import type {
   PurchaseReceiptItemType,
   Side,
 } from "../schemas/mod.ts";
+import { type MovePointerKeys, type PairSourceKeys, pairSourceUid, withRowSourcePath } from "../schemas/mod.ts";
 import { billsOutOfService, isDividerItemType, isLineItemType } from "../schemas/mod.ts";
 import { type LineMoneyLike, lineUnitsCents, payableStoredMoney, sliceStoredMoney } from "../schemas/_line-money.ts";
 import {
@@ -149,7 +150,6 @@ import {
   getOrderScopedItems,
   type InvoiceItem,
   invoiceAuthoredSubtrees,
-  type MovePointerCarrier,
   orderLineClaims,
   invoiceScopeDividersMatch,
   isInInvoiceAuthoredSubtree,
@@ -682,7 +682,7 @@ interface FoldReversal {
 interface FoldContext {
   documentUid: string;
   items: readonly InvoiceItem[];
-  destinations: readonly { uid: string; dates?: unknown; uid_order?: string; uid_purchase?: string }[];
+  destinations: readonly ({ uid: string; dates?: unknown } & PairSourceKeys)[];
   base: 0 | 1;
   /** Alignment-checked, listed in `compared`/`unaligned`, and reported in `document_only` sources. */
   billing: boolean;
@@ -700,10 +700,6 @@ interface FoldContext {
 export interface BillingFoldSide<B, C> {
   /** The scope divider's type on a billing document. */
   scopeType: "order" | "purchase";
-  /** The billing row's move pointer. */
-  pointerKey: keyof MovePointerCarrier;
-  /** The pair key naming the initiator a billing document's pair belongs to. */
-  pairScopeKey: "uid_order" | "uid_purchase";
   billingIsLive(doc: B): boolean;
   creditIsLive(doc: C): boolean;
   /** A billing document's header. */
@@ -796,8 +792,6 @@ function payableRow(row: InvoiceItem): PurchaseDocumentItem {
 /** The receivable side: orders, invoices, credit notes. */
 export const RECEIVABLE_BILLING_FOLD: BillingFoldSide<AccountedInvoice, AccountedCreditNote> = {
   scopeType: "order",
-  pointerKey: "path_order_item",
-  pairScopeKey: "uid_order",
   billingIsLive: (doc) => doc.status !== "void",
   creditIsLive: (doc) => doc.status === "issued" || doc.status === "applied",
   billingHeader: (doc) => ({
@@ -865,8 +859,6 @@ export const RECEIVABLE_BILLING_FOLD: BillingFoldSide<AccountedInvoice, Accounte
 /** The payable side: purchases, bills, supplier credits. */
 export const PAYABLE_BILLING_FOLD: BillingFoldSide<PayableFoldBill, PayableFoldCredit> = {
   scopeType: "purchase",
-  pointerKey: "path_purchase_item",
-  pairScopeKey: "uid_purchase",
   billingIsLive: purchaseBillIsLive,
   creditIsLive: purchaseCreditIsLive,
   billingHeader: (doc) => ({
@@ -1010,7 +1002,7 @@ export function billedByPath<S extends Side>(
     const { items, destinations } = fold.billingRows(doc);
     const uid = (doc as { uid: string }).uid;
     const scoped = scopeOf(items);
-    if (scoped.length > 0 && !invoiceScopeDividersMatch(scoped, initiatorItems, scopeUid, fold.pointerKey)) {
+    if (scoped.length > 0 && !invoiceScopeDividersMatch(scoped, initiatorItems, scopeUid)) {
       unaligned.push(uid);
       continue;
     }
@@ -1067,11 +1059,11 @@ export function billedByPath<S extends Side>(
     const anchors = liveInvoiceAnchors(scoped, initiatorItems, scopeUid);
     const extensionTargets = extensionSectionTargets(scoped, scopeUid);
     const authored = invoiceAuthoredSubtrees(scoped, initiatorItems, scopeUid);
-    const claims = orderLineClaims(scoped, scopeUid, fold.pointerKey);
+    const claims = orderLineClaims(scoped, scopeUid);
     const scopedByKey = new Map(scoped.map((it) => [key(it.path ?? []), it] as const));
     // A document on no pair bills on no window (AR's `destinations?.find`), so it extends nothing.
     const windowOf = (item: InvoiceItem) =>
-      pairWindow((ctx.destinations ?? []).find((pair) => pair.uid === (item.path ?? [])[1] && pair[fold.pairScopeKey] === scopeUid));
+      pairWindow((ctx.destinations ?? []).find((pair) => pair.uid === (item.path ?? [])[1] && pairSourceUid(pair) === scopeUid));
     const rowInfo = (item: InvoiceItem, via: BilledRow["via"]) => ({ documentUid: ctx.documentUid, item, via, window: windowOf(item) });
 
     for (const item of scoped) {
@@ -1110,7 +1102,7 @@ export function billedByPath<S extends Side>(
             if (ctx.billing && !entry.documents.includes(ctx.documentUid)) entry.documents.push(ctx.documentUid);
           } else {
             // The move pointer is the billing row's, never the line's.
-            const { path_order_item: _o, path_purchase_item: _p, ...row } = item as InvoiceItem & MovePointerCarrier;
+            const row = withRowSourcePath(item as InvoiceItem & MovePointerKeys, undefined);
             summed.set(k, { line: { ...row, path: placed }, quantity: units, cents, documents: ctx.billing ? [ctx.documentUid] : [] });
           }
           for (let depth = 2; depth < rel.length; depth++) {

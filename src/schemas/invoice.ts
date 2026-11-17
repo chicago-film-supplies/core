@@ -62,6 +62,8 @@ import type {
 } from "./purchase-bill.ts";
 import {
   billingExchangedForViolations,
+  checkPairSourceKeys,
+  type PairSourceKeys,
   checkLeadingDivider,
   checkStoredEndpoints,
   DestinationPairCore,
@@ -645,8 +647,14 @@ export interface InvoiceDocLineItemType {
    *
    * `.optional()` for `substituted_for`'s reasons (array-member-uncensusable,
    * meaningful on a handful of rows only).
+   *
+   * 🔴 **Renamed `path_source_item` (ruling 109), one key on both sides.** Beta
+   * H1 admits either spelling; read it through `rowSourcePath`, write
+   * it through `withRowSourcePath`. This key is deleted in H2.
    */
   path_order_item?: string[];
+  /** The move pointer (ruling 109): {@link path_order_item}'s one spelling on both sides. */
+  path_source_item?: string[];
   /**
    * An exchange line's take-back list, as the order line states it
    * (`OrderDocLineItemType.exchanged_for`; ruling 82 of the one-document-model
@@ -687,12 +695,12 @@ export interface InvoiceDocLineItemType {
  */
 export function checkInvoiceExchangedFor(
   inv: {
-    destinations: ReadonlyArray<{ uid: string; uid_order: string; exchange?: DocDestinationType["exchange"] }>;
+    destinations: ReadonlyArray<{ uid: string; exchange?: DocDestinationType["exchange"] } & PairSourceKeys>;
     items: ReadonlyArray<{ path: readonly string[] }>;
   },
   ctx: z.RefinementCtx,
 ): void {
-  for (const v of billingExchangedForViolations(inv, "uid_order")) {
+  for (const v of billingExchangedForViolations(inv)) {
     ctx.addIssue({
       code: "custom",
       path: v.entry === null ? ["items", v.index, "exchanged_for"] : ["items", v.index, "exchanged_for", v.entry, v.field],
@@ -755,6 +763,8 @@ const InvoiceDocLineItemInner = z.strictObject({
   // `path_invoice_item` is its twin one grain down.
   // `seed: false`: `[]` fails `.min(1)`, so the form seed must omit the key.
   path_order_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
+  // Its one spelling on both sides (ruling 109). Writers write it alone.
+  path_source_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
   // See the interface docblock. Plain `.optional()`, as the fulfillment line's.
   // `seed: false`, as `path_order_item`: a seeded `[]` claims the take-back list of
   // an exchange line on a line under no exchange pair, which `checkInvoiceExchangedFor`
@@ -1010,7 +1020,13 @@ const InvoiceDocTotals: z.ZodType<InvoiceDocTotalsType> = z.strictObject({
  * to propagate by default, which silently merged homonyms.
  */
 export interface InvoiceDocDestinationType extends DocDestinationType {
-  uid_order: string;
+  /**
+   * The source order this pair is scoped to (ruling 109: one key on both sides,
+   * the collection read off the side). Read it through `pairSourceUid`.
+   */
+  uid_source?: string;
+  /** Retiring (ruling 109): the scope's old spelling. Deleted in beta H2. */
+  uid_order?: string;
 }
 
 export const InvoiceDocDestination: z.ZodType<InvoiceDocDestinationType> = z
@@ -1019,7 +1035,10 @@ export const InvoiceDocDestination: z.ZodType<InvoiceDocDestinationType> = z
     // orders this pair is scoped to. It sits FIRST, which is what makes the spread
     // below order-preserving — `uid_order` was already the first key here, and
     // `DestinationPairCore` is the rest of this object in its existing order.
-    uid_order: FirestoreId,
+    // 🔴 Ruling 109: `uid_source` is the scope's one spelling on both sides, and
+    // `uid_order` retires in H2. `checkPairSourceKeys` requires exactly one.
+    uid_order: FirestoreId.optional(),
+    uid_source: FirestoreId.optional(),
     // 🔴 **THIS LIST USED TO INHERIT NOTHING.** It restated `DocDestination`'s six
     // keys by hand, and had already drifted: it kept `z.boolean().default(false)`
     // on `customer_collecting` / `customer_returning` after `9435a15` made both
@@ -1037,7 +1056,7 @@ export const InvoiceDocDestination: z.ZodType<InvoiceDocDestinationType> = z
     // keeps a divider the invoice already carries under the same uid), so a pair
     // projected by `toInvoiceDestinationPair` arrives already keyed correctly.
     ...DestinationPairCore,
-  });
+  }).superRefine(checkPairSourceKeys);
 
 /**
  * A destination pair as a client sends it to an invoice: the receivable pair
@@ -1049,16 +1068,20 @@ export const InvoiceDocDestination: z.ZodType<InvoiceDocDestinationType> = z
  * boundary, and a writer must read neither off it.
  */
 export interface InvoiceDestinationInputType extends DestinationType {
-  uid_order: string;
+  /** The source order (ruling 109); either spelling through beta H1, read with `pairSourceUid`. */
+  uid_source?: string;
+  /** Retiring (ruling 109): send {@link uid_source}. */
+  uid_order?: string;
   uid: string;
 }
 
 /** Zod schema for {@link InvoiceDestinationInputType}. */
 export const InvoiceDestinationInput: z.ZodType<InvoiceDestinationInputType> = z.object({
-  uid_order: FirestoreId,
+  uid_source: FirestoreId.optional(),
+  uid_order: FirestoreId.optional(),
   uid: z.uuid(),
   ...DestinationPairInputCore,
-});
+}).superRefine(checkPairSourceKeys);
 
 // ── Document schema ──────────────────────────────────────────────
 
@@ -1565,9 +1588,11 @@ export interface InvoiceItemInputLineType {
    * @see `InvoiceDocLineItemType.path_order_item`. Operator-authored (a drop or
    * a split in the manager), so it needs an input channel for the
    * `substituted_for` reason. The API checks it names a line of the row's own
-   * order (core#125 D3).
+   * order (core#125 D3). Retiring (ruling 109): send {@link path_source_item}.
    */
   path_order_item?: string[];
+  /** The move pointer's one spelling (ruling 109); the writer reads either through `rowSourcePath`. */
+  path_source_item?: string[];
 }
 
 // Un-annotated for `_zod.propValues`, `z.object` so unknown keys are stripped
@@ -1615,6 +1640,7 @@ const InvoiceItemInputLineInner = z.object({
   quantity_per_parent: z.number().min(0).nullable().optional(),
   out_of_service: OutOfServiceListInput.optional().meta({ seed: false }),
   path_order_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
+  path_source_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
   exchanged_for: ExchangedForListInput.optional().meta({ seed: false }),
 }).superRefine(checkItemPriceFormula).superRefine(checkOutOfServiceLineType);
 

@@ -2949,7 +2949,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDestinationInputType",
-          "declaration": "interface InvoiceDestinationInputType {\n  uid_order: string;\n  uid: string;\n}",
+          "declaration": "interface InvoiceDestinationInputType {\n  uid_source?: string;\n  uid_order?: string;\n  uid: string;\n}",
           "doc": "A destination pair as a client sends it to an invoice: the receivable pair\ninput ({@link DestinationPairInputCore}) scoped to its source order. `uid` is\nrequired, because a pair is addressed by `(uid_order, uid)`.\n\nThe input twin of {@link InvoiceDocDestination}. It strips rather than refuses,\nso a stored pair echoed back loses its `_fs` mirrors and `days_active` at the\nboundary, and a writer must read neither off it."
         },
         {
@@ -2973,7 +2973,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocDestinationType",
-          "declaration": "interface InvoiceDocDestinationType {\n  uid_order: string;\n}",
+          "declaration": "interface InvoiceDocDestinationType {\n  uid_source?: string;\n  uid_order?: string;\n}",
           "doc": "Destination pair on an invoice — mirrors the order's `DocDestinationType`\nwith a `uid_order` scope field so multi-order invoices can carry pairs\nfrom several orders and have them selectively synced per source order.\nCarries `dates` (rendered on the invoice) snapshotted from the source order.\n\n⭐ **A new field on this pair is now ONE edit, and it is not in this file.**\nIt used to be four, of which the compiler caught one. The `extends` below hands\nover the TYPE; `InvoiceDocDestination` restated the same six keys by hand and\ninherited nothing, so a field added to the order's pair type-checked here and\nwas then REFUSED at write. That is not hypothetical — it is how both flags kept\na `.default(false)` the order grain had already removed (core#101, 16 absent\nflags across 8 prod invoices). The schema now spreads `DestinationPairCore`, so\ndeclaring a field there lands it on both grains.\n\nThe other enumerators have all become walks and need no edit either:\n`toInvoiceDestinationPair` projects with `Object.entries` (its docblock says the\nspread is deliberate — do not tidy it into a field list), the merge reads the\nfield set off the two schemas (`orderInvoiceSharedFields`), and api-cloudrun's\nCRMS invoice webhook map is deleted.\n\n⭐ **A new field no longer needs an override RULING, and that is the point of\nthe campaign this paragraph used to describe.** It said a new field had to be\nplaced either in `INVOICE_OVERRIDABLE_PAIR_FIELDS` — payload the invoice owned\nand a separate carry reconciled — or left order-authored to freeze the whole\npair when it differed. Both that list and the whole-pair freeze are deleted.\nEvery shared field is now merged per field by construction: it follows the\norder unless the invoice's value differs from the order's PREVIOUS value.\n\n⚠️ **What a new field DOES need is a classification, and it is a declaration\nrather than a policy**: `.meta({ propagate: true })` for a payload field,\n`.meta({ derived: true })` if a derivation writes it (it is then never\ncompared and recomputed afterwards), or `.meta({ propagate: false })` if the\nkey means different things on the two documents. An untagged shared field is\nreported `undeclared` and both shared-field callers THROW (core#116) — it used\nto propagate by default, which silently merged homonyms."
         },
         {
@@ -3003,7 +3003,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocLineItemType",
-          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  xero_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  out_of_service?: OutOfServiceEntryType[];\n  path_order_item?: string[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  xero_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  out_of_service?: OutOfServiceEntryType[];\n  path_order_item?: string[];\n  path_source_item?: string[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "A billable line item on an invoice."
         },
         {
@@ -3075,7 +3075,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  uid_tax_class_override?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_order_item?: string[];\n}",
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  uid_tax_class_override?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_order_item?: string[];\n  path_source_item?: string[];\n}",
           "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItem`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
@@ -3521,6 +3521,12 @@
           "name": "MixedBookingGrain",
           "declaration": "interface MixedBookingGrain {\n  index: number;\n  uid: string;\n  types: [string, string];\n}",
           "doc": "Two lines of one booking grain that disagree on `type`."
+        },
+        {
+          "kind": "interface",
+          "name": "MovePointerKeys",
+          "declaration": "interface MovePointerKeys {\n  path_source_item?: string[] | null;\n  path_order_item?: string[] | null;\n  path_purchase_item?: string[] | null;\n}",
+          "doc": "The move-pointer keys a billing row may carry: `path_source_item`, and the two\nit replaces (ruling 109) — `path_order_item` on an invoice line,\n`path_purchase_item` on a bill or supplier-credit line."
         },
         {
           "kind": "interface",
@@ -4406,6 +4412,12 @@
         },
         {
           "kind": "interface",
+          "name": "PairSourceKeys",
+          "declaration": "interface PairSourceKeys {\n  uid_source?: string;\n  uid_order?: string;\n  uid_purchase?: string;\n}",
+          "doc": "The scope keys a billing or credit document's pair may carry: `uid_source`,\nand the two it replaces (ruling 109 of the one-document-model plan) —\n`uid_order` on an invoice's pair, `uid_purchase` on a bill's or supplier\ncredit's. Which collection the uid names is the document's SIDE\n(`SIDE_CONTRACTS`), never stored."
+        },
+        {
+          "kind": "interface",
           "name": "PartialNameParts",
           "declaration": "interface PartialNameParts {\n  first_name?: string;\n  middle_name?: string;\n  last_name?: string;\n  pronunciation?: string;\n}",
           "doc": "All-optional variant of `NameParts` — use for partial update input types\n(PUT endpoints) where callers may omit `first_name`, **and where there is no\nway to CLEAR a part.**\n\n⚠️ That last half is the whole difference from {@link PatchNameParts}, and it\nis deliberate rather than an oversight — see that block's table."
@@ -5031,7 +5043,7 @@
         {
           "kind": "interface",
           "name": "PurchaseBillDestinationInputType",
-          "declaration": "interface PurchaseBillDestinationInputType {\n  uid_purchase: string;\n}",
+          "declaration": "interface PurchaseBillDestinationInputType {\n  uid_source?: string;\n  uid_purchase?: string;\n}",
           "doc": "A bill's pair as a client sends it: a purchase's pair input scoped by\n`uid_purchase`, the `InvoiceDocDestination` input's twin."
         },
         {
@@ -5043,7 +5055,7 @@
         {
           "kind": "interface",
           "name": "PurchaseBillLineInputType",
-          "declaration": "interface PurchaseBillLineInputType {\n  type: SharedLineType;\n  uid: string;\n  path: string[];\n  name?: string;\n  description?: string;\n  quantity?: number;\n  ledger_account?: COACodeType | null;\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_purchase_item?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n  uid_tax_class_override?: string | null;\n  uid_tracking_category?: string | null;\n  price?: typeLiteral;\n}",
+          "declaration": "interface PurchaseBillLineInputType {\n  type: SharedLineType;\n  uid: string;\n  path: string[];\n  name?: string;\n  description?: string;\n  quantity?: number;\n  ledger_account?: COACodeType | null;\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_purchase_item?: string[];\n  path_source_item?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n  uid_tax_class_override?: string | null;\n  uid_tracking_category?: string | null;\n  price?: typeLiteral;\n}",
           "doc": "A line row of a bill's whole-array input.\n\nThe writer pairs each row to a stored one (exact path, then the row's uid and\nancestry), and the paired row is the base for every key this row omits, so a\nrow that moved keeps them. A row no stored row pairs with is, in order: a\nsplit's clone if it states {@link path_purchase_item}; a line of the purchase\nnamed by its path; or a line the bill itself authors, which states its name,\naccount, quantity and money; a sale or rental names its product by its uid.\n\nOn a TIME line `price.rates` restates each unit rate; a flat line states its\nGROSS as `price.stated_cents` (ruling 39, core beta B), and its stored\n`amount_cents` is derived from it.\n\n`path_purchase_item` absent keeps the stored pointer, and there is no `null`\nform: the writer stamps every moved row's pointer and clears one a move back\nmade pointless, so a stale client's identity-only rows cannot clear one.\nThe writer assigns the tax class and a bill-authored line's flat formula."
         },
         {
@@ -5109,7 +5121,7 @@
         {
           "kind": "interface",
           "name": "PurchaseCreditItemInputType",
-          "declaration": "interface PurchaseCreditItemInputType {\n  path_purchase_item?: string[];\n  counts?: TierCountType[];\n  uid_purchase_bill?: string;\n  path_bill_item?: string[];\n  price?: typeLiteral;\n}",
+          "declaration": "interface PurchaseCreditItemInputType {\n  path_purchase_item?: string[];\n  path_source_item?: string[];\n  counts?: TierCountType[];\n  uid_purchase_bill?: string;\n  path_bill_item?: string[];\n  price?: typeLiteral;\n}",
           "doc": "One line of a supplier CREDIT as an operator states it: a purchase item, or a\nbill line (one-document-model 6d), and what it un-bills.\n\n- **flat, naming no bill line** — `quantity` units, priced from the line's\n  billed pool (`billedPoolCreditMoney`): the pool's share, or the supplier's\n  memo, which the pool caps.\n- **flat, naming a bill line** — units `(c, c + quantity]` of that line, `c`\n  what live credits already took from it, priced first-come from the line's\n  own money with its discount terms (`billLineCreditMoney`), or the supplier's\n  memo, capped at what is left of it. The units are capped per bill line and\n  by the pools behind them (`creditableBillLines`).\n- **the memo** (6e-0b1 D4) is the credit line's own `price.stated_cents`, net\n  by nature, so the line stores `discount: null`.\n- **time** — credited by COUNTS, as an AR credit note is (0b ruling 3):\n  `quantity` units over `counts`, priced `rates × counts` like the bill line\n  it reverses. Absent `counts`, the writer takes the line's billed time\n  newest first and states its quantity-weighted mean (`creditTimeCounts`,\n  6e-0b2 F5). The per-unit windows this\n  input used to take retired with the unit charge windows\n  (one-document-model Phase 3)."
         },
         {
@@ -5175,7 +5187,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocDestination",
-          "declaration": "interface PurchaseDocDestination {\n  uid_purchase: string;\n  exchange: DestinationExchangeType | null;\n}",
+          "declaration": "interface PurchaseDocDestination {\n  uid_source?: string;\n  uid_purchase?: string;\n  exchange: DestinationExchangeType | null;\n}",
           "doc": "A bill's or supplier credit's destination pair — the purchase's pair\n({@link PurchaseDestination}) scoped by `uid_purchase`, the\n`InvoiceDocDestination` twin, so a document billing several purchases\ncarries each one's pairs."
         },
         {
@@ -5217,7 +5229,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocumentItemInputType",
-          "declaration": "interface PurchaseDocumentItemInputType {\n  path_purchase_item: string[];\n  quantity: number;\n}",
+          "declaration": "interface PurchaseDocumentItemInputType {\n  path_source_item?: string[];\n  path_purchase_item?: string[];\n  quantity: number;\n}",
           "doc": "A bill or credit item as an operator matches it to a purchase item."
         },
         {
@@ -5259,7 +5271,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocumentProductItem",
-          "declaration": "interface PurchaseDocumentProductItem {\n  ledger_account: COACodeType | null;\n  type: PurchaseProductItemTypeType;\n  path_purchase_item?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface PurchaseDocumentProductItem {\n  ledger_account: COACodeType | null;\n  type: PurchaseProductItemTypeType;\n  path_purchase_item?: string[];\n  path_source_item?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "A bill or credit item that PROJECTS a purchase item — some quantity of one\nsale (Buy) or rental (Subrent) item (D5). It sits AT that item's path under\nthe item's purchase divider, as an invoice line sits at its order line's\n(one-document-model Phase 3), and carries its own copy of the shared fields, each of\nwhich it may override until the bill is settled: the billed `quantity` and\n`amount_cents` (homonyms of the purchase item's ordered ones), `price`,\n`name`, `description`, `ledger_account`, `uid_tracking_category` and the tax\nclass (`propagate: true` on the shared declarations).\n\nOn a LINKED bill the posting is the Xero document's where it has one; the\npurchase item's is the expected one, so an account divergence is an ordinary\nfield difference between projection and source. The account still has to\nsit in the type's class (`payablePostingIssues`)."
         },
         {
@@ -5295,7 +5307,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocumentServiceItem",
-          "declaration": "interface PurchaseDocumentServiceItem {\n  type: \"service\";\n  path_purchase_item?: string[];\n}",
+          "declaration": "interface PurchaseDocumentServiceItem {\n  type: \"service\";\n  path_purchase_item?: string[];\n  path_source_item?: string[];\n}",
           "doc": "A bill or credit SERVICE (Charge) line — freight, a fee, a carrier line.\nPosts to its own account and never touches basis.\n\nA **document-only** service line (at a path its purchase does not carry, or\noutside any purchase divider) is the document's own row, like an invoice's\nloss-and-damage line: freight nobody expected. One that projects a purchase\n`service` item sits at its path.\n\nIts uid is its catalog service product's, else `custom-`, as on the purchase\n({@link payableLineUid}). No attribution key (owner, 2026-11-11): a carrier\nline's device is read through its units (api-cloudrun#1488)."
         },
         {
@@ -7856,14 +7868,9 @@
         {
           "kind": "function",
           "name": "billingExchangedForViolations",
-          "signature": "billingExchangedForViolations(doc: typeLiteral, scopeKey: K): ExchangedForViolation[]",
-          "doc": "{@link exchangedForViolations} on a BILLING document (an invoice, a bill, a supplier\ncredit; ruling 82 of the one-document-model plan). Its rows sit one level deeper than\ntheir source's (`[scope, leg, …]`, the scope divider being the source document's uid),\nits pairs are keyed `(scope, uid)`, and an `exchanged_for` entry stays SOURCE-relative,\nas every billing-line pointer does. So the rule runs once per scope over that scope's\nrows with the scope prefix stripped and that scope's pairs — the SAME rule, not a copy.\n\n⚠️ **One rule is deferred, never dropped:** an entry naming a leg this document does\nnot carry may be a sibling exchange billed on another document, so it is the writer's\nto check against the source's pairs (`unknownLegs: \"defer\"`). The parent leg always\nresolves locally: it is named on the exchange pair itself (`exchange.uid_pair`).",
-          "paramTags": [
-            {
-              "name": "scopeKey",
-              "doc": "the pair field naming the source document: `uid_order` on an\ninvoice, `uid_purchase` on a bill or credit."
-            }
-          ],
+          "signature": "billingExchangedForViolations(doc: typeLiteral): ExchangedForViolation[]",
+          "doc": "{@link exchangedForViolations} on a BILLING document (an invoice, a bill, a supplier\ncredit; ruling 82 of the one-document-model plan). Its rows sit one level deeper than\ntheir source's (`[scope, leg, …]`, the scope divider being the source document's uid),\nits pairs are keyed `(scope, uid)`, and an `exchanged_for` entry stays SOURCE-relative,\nas every billing-line pointer does. So the rule runs once per scope over that scope's\nrows with the scope prefix stripped and that scope's pairs — the SAME rule, not a copy.\n\n⚠️ **One rule is deferred, never dropped:** an entry naming a leg this document does\nnot carry may be a sibling exchange billed on another document, so it is the writer's\nto check against the source's pairs (`unknownLegs: \"defer\"`). The parent leg always\nresolves locally: it is named on the exchange pair itself (`exchange.uid_pair`).\n\nA pair's scope is read through {@link pairSourceUid}, one key on both sides (ruling 109).",
+          "paramTags": [],
           "returnsTag": null
         },
         {
@@ -7879,6 +7886,14 @@
           "name": "canOperatorTransition",
           "signature": "canOperatorTransition(from: string, to: string): boolean",
           "doc": "May an operator move `from` to `to` via `PUT /invoices/{uid}`?\n\nRead this rather than the column, so the manager cannot offer a button the\nserver will 400 — and so a status outside the vocabulary answers `false`\ninstead of throwing on an undefined lookup.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "canonicalSourceKeys",
+          "signature": "canonicalSourceKeys(doc: D): D",
+          "doc": "A billing or credit document with every pair scope and move pointer under its\none spelling (ruling 109): `uid_source` on each pair, `path_source_item` on\neach row, the retiring keys gone. The api's writers call it on the whole\ndocument before a write, so a pair or row a sync carried through unchanged\ncannot re-write an old key. Rows and pairs stating neither come back as they\nwere (same object). Deleted with the old keys in beta H2.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -7967,6 +7982,14 @@
           "name": "checkMixedBookingGrains",
           "signature": "checkMixedBookingGrains(items: ReadonlyArray<unknown>, ctx: z.RefinementCtx): void",
           "doc": "{@link mixedBookingGrains} as a refinement on the order's `items`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "checkPairSourceKeys",
+          "signature": "checkPairSourceKeys(pair: PairSourceKeys, ctx: z.RefinementCtx): void",
+          "doc": "The pair-scope refine every billing and credit pair schema runs through beta\nH1: the pair names its source under some spelling. Both keys are optional for\nthe window, so this is what keeps a pair from naming none. Two spellings are\nnot refused (F14 conformance: no core precedent); writers write `uid_source`\nalone and the migration leaves one.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -8756,6 +8779,14 @@
         },
         {
           "kind": "function",
+          "name": "pairSourceUid",
+          "signature": "pairSourceUid(pair: PairSourceKeys): string | undefined",
+          "doc": "The initiator a billing or credit document's pair is scoped to: `uid_source`,\nelse a retiring spelling. The ONE reader of the pair scope through beta H1;\nH2 deletes the old keys and this collapses to `pair.uid_source`. `undefined`\nonly on a pair naming none, which the pair schemas refuse.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "payableInputUidIssue",
           "signature": "payableInputUidIssue(line: typeLiteral): string | null",
           "doc": "Why a line INPUT carries a uid that cannot be its product, or `null`: a\n`sale` or `rental` input names its product BY its uid, so a `custom-` one is\nrefused. Any `service` or `replacement` input uid is accepted: the writer\nkeeps a catalog one (after checking the product's type) and mints `custom-`\nfor the rest.",
@@ -8901,7 +8932,7 @@
         {
           "kind": "function",
           "name": "purchaseLineKeyOf",
-          "signature": "purchaseLineKeyOf(row: Pick<PurchaseDocumentItem, \"path\" | \"path_purchase_item\" | \"uid_billing\">): string | null",
+          "signature": "purchaseLineKeyOf(row: Pick<PurchaseDocumentItem, \"path\" | \"path_purchase_item\" | \"path_source_item\" | \"uid_billing\">): string | null",
           "doc": "The purchase line a bill or credit line bills, as `[purchase uid, ...path in\nthat purchase]` joined by `/` — its move pointer when it has one, else its\nown path under its purchase divider — or `null` for a line outside any\npurchase divider. The one join key for \"which purchase line is this\".",
           "paramTags": [],
           "returnsTag": null
@@ -8932,6 +8963,14 @@
         },
         {
           "kind": "function",
+          "name": "requirePairSourceUid",
+          "signature": "requirePairSourceUid(pair: PairSourceKeys): string",
+          "doc": "{@link pairSourceUid}, for a pair the schema has already admitted: throws on a pair naming no source.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "resolveFieldMeta",
           "signature": "resolveFieldMeta(schema: z.ZodType, fieldPath: string): Record<string, unknown> | null",
           "doc": "Convenience: resolve a dotted path and read its meta in one call. Returns\n`null` when the path is unresolvable or the leaf has no meta.",
@@ -8951,6 +8990,14 @@
           "name": "roundComponentQuantity",
           "signature": "roundComponentQuantity(n: number): number",
           "doc": "Round a component quantity to {@link COMPONENT_QUANTITY_DECIMALS} — the writer's normalization.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "rowSourcePath",
+          "signature": "rowSourcePath(row: MovePointerKeys): string[] | undefined",
+          "doc": "A billing row's move pointer — the initiator line it bills from another\nposition, initiator-relative — or `undefined`. The ONE reader through beta H1;\nH2 collapses it to `row.path_source_item`.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -9063,6 +9110,14 @@
           "name": "usState",
           "signature": "usState(): z.ZodType<string, string>",
           "doc": "Schema factory for `Address.region` — canonicalizes to the USPS code on\nparse, the same shape as `chicagoInstant()` for datetimes.\n\n⚠️ **A transform on a DOCUMENT schema does not rewrite what gets stored.**\n`validateBeforeWrite` discards `result.data` on purpose (it would strip\nFieldValue sentinels), so this only materializes where the parsed output is\nwhat flows on — i.e. route input validation. A writer that builds an address\nfrom a source that never passes through an input schema (the CRMS webhooks)\nstill stores whatever it was handed. So consumers that care about the value\nmust call {@link toUsStateCode} themselves rather than trusting storage.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "withRowSourcePath",
+          "signature": "withRowSourcePath(row: R, pointer: readonly string[] | undefined): R",
+          "doc": "`row` with its move pointer stated as `pointer` under the one key, every\nretiring spelling dropped; `undefined` clears it. Writers go through this, so\nno write re-mints an old key.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -11712,7 +11767,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDestinationInputType",
-          "declaration": "interface InvoiceDestinationInputType {\n  uid_order: string;\n  uid: string;\n}",
+          "declaration": "interface InvoiceDestinationInputType {\n  uid_source?: string;\n  uid_order?: string;\n  uid: string;\n}",
           "doc": "A destination pair as a client sends it to an invoice: the receivable pair\ninput ({@link DestinationPairInputCore}) scoped to its source order. `uid` is\nrequired, because a pair is addressed by `(uid_order, uid)`.\n\nThe input twin of {@link InvoiceDocDestination}. It strips rather than refuses,\nso a stored pair echoed back loses its `_fs` mirrors and `days_active` at the\nboundary, and a writer must read neither off it."
         },
         {
@@ -11736,7 +11791,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocDestinationType",
-          "declaration": "interface InvoiceDocDestinationType {\n  uid_order: string;\n}",
+          "declaration": "interface InvoiceDocDestinationType {\n  uid_source?: string;\n  uid_order?: string;\n}",
           "doc": "Destination pair on an invoice — mirrors the order's `DocDestinationType`\nwith a `uid_order` scope field so multi-order invoices can carry pairs\nfrom several orders and have them selectively synced per source order.\nCarries `dates` (rendered on the invoice) snapshotted from the source order.\n\n⭐ **A new field on this pair is now ONE edit, and it is not in this file.**\nIt used to be four, of which the compiler caught one. The `extends` below hands\nover the TYPE; `InvoiceDocDestination` restated the same six keys by hand and\ninherited nothing, so a field added to the order's pair type-checked here and\nwas then REFUSED at write. That is not hypothetical — it is how both flags kept\na `.default(false)` the order grain had already removed (core#101, 16 absent\nflags across 8 prod invoices). The schema now spreads `DestinationPairCore`, so\ndeclaring a field there lands it on both grains.\n\nThe other enumerators have all become walks and need no edit either:\n`toInvoiceDestinationPair` projects with `Object.entries` (its docblock says the\nspread is deliberate — do not tidy it into a field list), the merge reads the\nfield set off the two schemas (`orderInvoiceSharedFields`), and api-cloudrun's\nCRMS invoice webhook map is deleted.\n\n⭐ **A new field no longer needs an override RULING, and that is the point of\nthe campaign this paragraph used to describe.** It said a new field had to be\nplaced either in `INVOICE_OVERRIDABLE_PAIR_FIELDS` — payload the invoice owned\nand a separate carry reconciled — or left order-authored to freeze the whole\npair when it differed. Both that list and the whole-pair freeze are deleted.\nEvery shared field is now merged per field by construction: it follows the\norder unless the invoice's value differs from the order's PREVIOUS value.\n\n⚠️ **What a new field DOES need is a classification, and it is a declaration\nrather than a policy**: `.meta({ propagate: true })` for a payload field,\n`.meta({ derived: true })` if a derivation writes it (it is then never\ncompared and recomputed afterwards), or `.meta({ propagate: false })` if the\nkey means different things on the two documents. An untagged shared field is\nreported `undeclared` and both shared-field callers THROW (core#116) — it used\nto propagate by default, which silently merged homonyms."
         },
         {
@@ -11766,7 +11821,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocLineItemType",
-          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  xero_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  out_of_service?: OutOfServiceEntryType[];\n  path_order_item?: string[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  xero_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  out_of_service?: OutOfServiceEntryType[];\n  path_order_item?: string[];\n  path_source_item?: string[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "A billable line item on an invoice."
         },
         {
@@ -11832,7 +11887,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  uid_tax_class_override?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_order_item?: string[];\n}",
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  uid_tax_class_override?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_order_item?: string[];\n  path_source_item?: string[];\n}",
           "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItem`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
@@ -12400,6 +12455,12 @@
           "doc": "Two lines of one booking grain that disagree on `type`."
         },
         {
+          "kind": "interface",
+          "name": "MovePointerKeys",
+          "declaration": "interface MovePointerKeys {\n  path_source_item?: string[] | null;\n  path_order_item?: string[] | null;\n  path_purchase_item?: string[] | null;\n}",
+          "doc": "The move-pointer keys a billing row may carry: `path_source_item`, and the two\nit replaces (ruling 109) — `path_order_item` on an invoice line,\n`path_purchase_item` on a bill or supplier-credit line."
+        },
+        {
           "kind": "variable",
           "name": "ORDER_COMPUTED_STATUSES",
           "declaration": "const ORDER_COMPUTED_STATUSES: \"active\" | \"complete\"[];",
@@ -12628,6 +12689,12 @@
           "doc": "The side-neutral half of a destination pair as a client sends it — the input\ntwin of {@link PairCore} (one-document-model Phase 5b). Every node strips, so a\nstored pair echoed back loses its `_fs` mirrors and `days_active` at the\nboundary instead of carrying a client's `{seconds, nanoseconds}` to a writer.\n\nOne standard on all four documents: `z.object` for input, `z.strictObject` for\nstored. `uid` is left out because it differs per grain: required on a purchase\nor invoice pair, optional on an order's until its endpoint derivation retires.\n\n⚠️ Separate composed types rather than one type with refines, because a refine\ndoes not narrow the TypeScript type. `tests/destination-pair-parity.test.ts`\nasserts instance identity on each input: a spread cannot see a shadowed key.\n\n⚠️ Not on the `@cfs/core/schemas` barrel, for the reason {@link PairCore} is not."
         },
         {
+          "kind": "interface",
+          "name": "PairSourceKeys",
+          "declaration": "interface PairSourceKeys {\n  uid_source?: string;\n  uid_order?: string;\n  uid_purchase?: string;\n}",
+          "doc": "The scope keys a billing or credit document's pair may carry: `uid_source`,\nand the two it replaces (ruling 109 of the one-document-model plan) —\n`uid_order` on an invoice's pair, `uid_purchase` on a bill's or supplier\ncredit's. Which collection the uid names is the document's SIDE\n(`SIDE_CONTRACTS`), never stored."
+        },
+        {
           "kind": "typeAlias",
           "name": "PlaceablePair",
           "declaration": "type PlaceablePair = typeLiteral;",
@@ -12714,14 +12781,17 @@
         {
           "kind": "function",
           "name": "billingExchangedForViolations",
-          "signature": "billingExchangedForViolations(doc: typeLiteral, scopeKey: K): ExchangedForViolation[]",
-          "doc": "{@link exchangedForViolations} on a BILLING document (an invoice, a bill, a supplier\ncredit; ruling 82 of the one-document-model plan). Its rows sit one level deeper than\ntheir source's (`[scope, leg, …]`, the scope divider being the source document's uid),\nits pairs are keyed `(scope, uid)`, and an `exchanged_for` entry stays SOURCE-relative,\nas every billing-line pointer does. So the rule runs once per scope over that scope's\nrows with the scope prefix stripped and that scope's pairs — the SAME rule, not a copy.\n\n⚠️ **One rule is deferred, never dropped:** an entry naming a leg this document does\nnot carry may be a sibling exchange billed on another document, so it is the writer's\nto check against the source's pairs (`unknownLegs: \"defer\"`). The parent leg always\nresolves locally: it is named on the exchange pair itself (`exchange.uid_pair`).",
-          "paramTags": [
-            {
-              "name": "scopeKey",
-              "doc": "the pair field naming the source document: `uid_order` on an\ninvoice, `uid_purchase` on a bill or credit."
-            }
-          ],
+          "signature": "billingExchangedForViolations(doc: typeLiteral): ExchangedForViolation[]",
+          "doc": "{@link exchangedForViolations} on a BILLING document (an invoice, a bill, a supplier\ncredit; ruling 82 of the one-document-model plan). Its rows sit one level deeper than\ntheir source's (`[scope, leg, …]`, the scope divider being the source document's uid),\nits pairs are keyed `(scope, uid)`, and an `exchanged_for` entry stays SOURCE-relative,\nas every billing-line pointer does. So the rule runs once per scope over that scope's\nrows with the scope prefix stripped and that scope's pairs — the SAME rule, not a copy.\n\n⚠️ **One rule is deferred, never dropped:** an entry naming a leg this document does\nnot carry may be a sibling exchange billed on another document, so it is the writer's\nto check against the source's pairs (`unknownLegs: \"defer\"`). The parent leg always\nresolves locally: it is named on the exchange pair itself (`exchange.uid_pair`).\n\nA pair's scope is read through {@link pairSourceUid}, one key on both sides (ruling 109).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "canonicalSourceKeys",
+          "signature": "canonicalSourceKeys(doc: D): D",
+          "doc": "A billing or credit document with every pair scope and move pointer under its\none spelling (ruling 109): `uid_source` on each pair, `path_source_item` on\neach row, the retiring keys gone. The api's writers call it on the whole\ndocument before a write, so a pair or row a sync carried through unchanged\ncannot re-write an old key. Rows and pairs stating neither come back as they\nwere (same object). Deleted with the old keys in beta H2.",
+          "paramTags": [],
           "returnsTag": null
         },
         {
@@ -12769,6 +12839,14 @@
           "name": "checkMixedBookingGrains",
           "signature": "checkMixedBookingGrains(items: ReadonlyArray<unknown>, ctx: z.RefinementCtx): void",
           "doc": "{@link mixedBookingGrains} as a refinement on the order's `items`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "checkPairSourceKeys",
+          "signature": "checkPairSourceKeys(pair: PairSourceKeys, ctx: z.RefinementCtx): void",
+          "doc": "The pair-scope refine every billing and credit pair schema runs through beta\nH1: the pair names its source under some spelling. Both keys are optional for\nthe window, so this is what keeps a pair from naming none. Two spellings are\nnot refused (F14 conformance: no core precedent); writers write `uid_source`\nalone and the migration leaves one.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -12867,6 +12945,30 @@
         },
         {
           "kind": "function",
+          "name": "pairSourceUid",
+          "signature": "pairSourceUid(pair: PairSourceKeys): string | undefined",
+          "doc": "The initiator a billing or credit document's pair is scoped to: `uid_source`,\nelse a retiring spelling. The ONE reader of the pair scope through beta H1;\nH2 deletes the old keys and this collapses to `pair.uid_source`. `undefined`\nonly on a pair naming none, which the pair schemas refuse.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "requirePairSourceUid",
+          "signature": "requirePairSourceUid(pair: PairSourceKeys): string",
+          "doc": "{@link pairSourceUid}, for a pair the schema has already admitted: throws on a pair naming no source.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "rowSourcePath",
+          "signature": "rowSourcePath(row: MovePointerKeys): string[] | undefined",
+          "doc": "A billing row's move pointer — the initiator line it bills from another\nposition, initiator-relative — or `undefined`. The ONE reader through beta H1;\nH2 collapses it to `row.path_source_item`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "takeBackReasonsFor",
           "signature": "takeBackReasonsFor(disposition: ExchangeDispositionType): readonly OOSReasonType[]",
           "doc": "**The take-back reasons an exchange of `disposition` may give** — why a unit\ncomes back on it (core#130 row 14). `lost` only on `send_now`: a lost unit\ncannot come back on the exchange's own trip. Every other disposition takes\nevery other reason. The one author: {@link exchangedForViolations} refuses\noutside it, the api's fulfillment edit refuses outside it, and the manager\noffers exactly it.",
@@ -12878,6 +12980,14 @@
           "name": "unplacedEndpoints",
           "signature": "unplacedEndpoints(status: string, destinations: ReadonlyArray<PlaceablePair>, items: ReadonlyArray<unknown>): UnplacedEndpoint[]",
           "doc": "Every endpoint half a document at `status` is missing — the rule\n{@link checkStoredEndpoints} enforces on the stored schemas, as data, so a\nWRITER can refuse the same input with a 400 before it builds a document the\nschema would reject with a 500. One author: the refinement is this function\nplus an `addIssue` per entry. Empty for every {@link UNPLACED_STATUSES} member\n— a draft, a canceled order or fulfillment, a void invoice.\n\n🔴 **`items` is what decides a `null` collection leg** (api-cloudrun#1154).\nA document whose items hold no line that comes back has nothing to collect,\nso its collection leg may be `null`; one that holds a rental needs a PLACED\nleg on every pair, and a `null` there is one `endpoint` gap. Without `items`\nthis function could not tell the two apart, which is why the signature grew.\n\n⚠️ **It does not require `null` on a sales-only document.** A placed\ncollection there is still accepted: 160 sales-only orders per project store\none today, and the refusal waits until the backfill has nulled them —\n`normalizeCollectionLegs` (`@cfs/core/utils/orders`) is what writes the\n`null` in the meantime.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "withRowSourcePath",
+          "signature": "withRowSourcePath(row: R, pointer: readonly string[] | undefined): R",
+          "doc": "`row` with its move pointer stated as `pointer` under the one key, every\nretiring spelling dropped; `undefined` clears it. Writers go through this, so\nno write re-mints an old key.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -14456,7 +14566,7 @@
         {
           "kind": "interface",
           "name": "PurchaseBillDestinationInputType",
-          "declaration": "interface PurchaseBillDestinationInputType {\n  uid_purchase: string;\n}",
+          "declaration": "interface PurchaseBillDestinationInputType {\n  uid_source?: string;\n  uid_purchase?: string;\n}",
           "doc": "A bill's pair as a client sends it: a purchase's pair input scoped by\n`uid_purchase`, the `InvoiceDocDestination` input's twin."
         },
         {
@@ -14468,7 +14578,7 @@
         {
           "kind": "interface",
           "name": "PurchaseBillLineInputType",
-          "declaration": "interface PurchaseBillLineInputType {\n  type: SharedLineType;\n  uid: string;\n  path: string[];\n  name?: string;\n  description?: string;\n  quantity?: number;\n  ledger_account?: COACodeType | null;\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_purchase_item?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n  uid_tax_class_override?: string | null;\n  uid_tracking_category?: string | null;\n  price?: typeLiteral;\n}",
+          "declaration": "interface PurchaseBillLineInputType {\n  type: SharedLineType;\n  uid: string;\n  path: string[];\n  name?: string;\n  description?: string;\n  quantity?: number;\n  ledger_account?: COACodeType | null;\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_purchase_item?: string[];\n  path_source_item?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n  uid_tax_class_override?: string | null;\n  uid_tracking_category?: string | null;\n  price?: typeLiteral;\n}",
           "doc": "A line row of a bill's whole-array input.\n\nThe writer pairs each row to a stored one (exact path, then the row's uid and\nancestry), and the paired row is the base for every key this row omits, so a\nrow that moved keeps them. A row no stored row pairs with is, in order: a\nsplit's clone if it states {@link path_purchase_item}; a line of the purchase\nnamed by its path; or a line the bill itself authors, which states its name,\naccount, quantity and money; a sale or rental names its product by its uid.\n\nOn a TIME line `price.rates` restates each unit rate; a flat line states its\nGROSS as `price.stated_cents` (ruling 39, core beta B), and its stored\n`amount_cents` is derived from it.\n\n`path_purchase_item` absent keeps the stored pointer, and there is no `null`\nform: the writer stamps every moved row's pointer and clears one a move back\nmade pointless, so a stale client's identity-only rows cannot clear one.\nThe writer assigns the tax class and a bill-authored line's flat formula."
         },
         {
@@ -14528,7 +14638,7 @@
         {
           "kind": "interface",
           "name": "PurchaseCreditItemInputType",
-          "declaration": "interface PurchaseCreditItemInputType {\n  path_purchase_item?: string[];\n  counts?: TierCountType[];\n  uid_purchase_bill?: string;\n  path_bill_item?: string[];\n  price?: typeLiteral;\n}",
+          "declaration": "interface PurchaseCreditItemInputType {\n  path_purchase_item?: string[];\n  path_source_item?: string[];\n  counts?: TierCountType[];\n  uid_purchase_bill?: string;\n  path_bill_item?: string[];\n  price?: typeLiteral;\n}",
           "doc": "One line of a supplier CREDIT as an operator states it: a purchase item, or a\nbill line (one-document-model 6d), and what it un-bills.\n\n- **flat, naming no bill line** — `quantity` units, priced from the line's\n  billed pool (`billedPoolCreditMoney`): the pool's share, or the supplier's\n  memo, which the pool caps.\n- **flat, naming a bill line** — units `(c, c + quantity]` of that line, `c`\n  what live credits already took from it, priced first-come from the line's\n  own money with its discount terms (`billLineCreditMoney`), or the supplier's\n  memo, capped at what is left of it. The units are capped per bill line and\n  by the pools behind them (`creditableBillLines`).\n- **the memo** (6e-0b1 D4) is the credit line's own `price.stated_cents`, net\n  by nature, so the line stores `discount: null`.\n- **time** — credited by COUNTS, as an AR credit note is (0b ruling 3):\n  `quantity` units over `counts`, priced `rates × counts` like the bill line\n  it reverses. Absent `counts`, the writer takes the line's billed time\n  newest first and states its quantity-weighted mean (`creditTimeCounts`,\n  6e-0b2 F5). The per-unit windows this\n  input used to take retired with the unit charge windows\n  (one-document-model Phase 3)."
         },
         {
@@ -14564,7 +14674,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocDestination",
-          "declaration": "interface PurchaseDocDestination {\n  uid_purchase: string;\n  exchange: DestinationExchangeType | null;\n}",
+          "declaration": "interface PurchaseDocDestination {\n  uid_source?: string;\n  uid_purchase?: string;\n  exchange: DestinationExchangeType | null;\n}",
           "doc": "A bill's or supplier credit's destination pair — the purchase's pair\n({@link PurchaseDestination}) scoped by `uid_purchase`, the\n`InvoiceDocDestination` twin, so a document billing several purchases\ncarries each one's pairs."
         },
         {
@@ -14606,7 +14716,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocumentItemInputType",
-          "declaration": "interface PurchaseDocumentItemInputType {\n  path_purchase_item: string[];\n  quantity: number;\n}",
+          "declaration": "interface PurchaseDocumentItemInputType {\n  path_source_item?: string[];\n  path_purchase_item?: string[];\n  quantity: number;\n}",
           "doc": "A bill or credit item as an operator matches it to a purchase item."
         },
         {
@@ -14648,7 +14758,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocumentProductItem",
-          "declaration": "interface PurchaseDocumentProductItem {\n  ledger_account: COACodeType | null;\n  type: PurchaseProductItemTypeType;\n  path_purchase_item?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface PurchaseDocumentProductItem {\n  ledger_account: COACodeType | null;\n  type: PurchaseProductItemTypeType;\n  path_purchase_item?: string[];\n  path_source_item?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "A bill or credit item that PROJECTS a purchase item — some quantity of one\nsale (Buy) or rental (Subrent) item (D5). It sits AT that item's path under\nthe item's purchase divider, as an invoice line sits at its order line's\n(one-document-model Phase 3), and carries its own copy of the shared fields, each of\nwhich it may override until the bill is settled: the billed `quantity` and\n`amount_cents` (homonyms of the purchase item's ordered ones), `price`,\n`name`, `description`, `ledger_account`, `uid_tracking_category` and the tax\nclass (`propagate: true` on the shared declarations).\n\nOn a LINKED bill the posting is the Xero document's where it has one; the\npurchase item's is the expected one, so an account divergence is an ordinary\nfield difference between projection and source. The account still has to\nsit in the type's class (`payablePostingIssues`)."
         },
         {
@@ -14684,7 +14794,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocumentServiceItem",
-          "declaration": "interface PurchaseDocumentServiceItem {\n  type: \"service\";\n  path_purchase_item?: string[];\n}",
+          "declaration": "interface PurchaseDocumentServiceItem {\n  type: \"service\";\n  path_purchase_item?: string[];\n  path_source_item?: string[];\n}",
           "doc": "A bill or credit SERVICE (Charge) line — freight, a fee, a carrier line.\nPosts to its own account and never touches basis.\n\nA **document-only** service line (at a path its purchase does not carry, or\noutside any purchase divider) is the document's own row, like an invoice's\nloss-and-damage line: freight nobody expected. One that projects a purchase\n`service` item sits at its path.\n\nIts uid is its catalog service product's, else `custom-`, as on the purchase\n({@link payableLineUid}). No attribution key (owner, 2026-11-11): a carrier\nline's device is read through its units (api-cloudrun#1488)."
         },
         {
@@ -14821,7 +14931,7 @@
         {
           "kind": "function",
           "name": "purchaseLineKeyOf",
-          "signature": "purchaseLineKeyOf(row: Pick<PurchaseDocumentItem, \"path\" | \"path_purchase_item\" | \"uid_billing\">): string | null",
+          "signature": "purchaseLineKeyOf(row: Pick<PurchaseDocumentItem, \"path\" | \"path_purchase_item\" | \"path_source_item\" | \"uid_billing\">): string | null",
           "doc": "The purchase line a bill or credit line bills, as `[purchase uid, ...path in\nthat purchase]` joined by `/` — its move pointer when it has one, else its\nown path under its purchase divider — or `null` for a line outside any\npurchase divider. The one join key for \"which purchase line is this\".",
           "paramTags": [],
           "returnsTag": null
@@ -19919,7 +20029,7 @@
         {
           "kind": "interface",
           "name": "BillingFoldSide",
-          "declaration": "interface BillingFoldSide {\n  scopeType: \"order\" | \"purchase\";\n  pointerKey: keyof MovePointerCarrier;\n  pairScopeKey: \"uid_order\" | \"uid_purchase\";\n  billingIsLive(doc: B): boolean;\n  creditIsLive(doc: C): boolean;\n  billingHeader(doc: B): Omit<BilledDocument, \"role\" | \"live\">;\n  creditHeader(doc: C): Omit<BilledDocument, \"role\" | \"live\">;\n  billingRows(doc: B): typeLiteral;\n  rowNetCents(row: InvoiceItem): number;\n  partCents(row: InvoiceItem, before: number, after: number): number;\n  placeCredits(billing: ReadonlyMap<string, FoldContext>, credits: readonly C[], unkeyed: Set<string>, scopeUid: string, initiatorPaths: ReadonlySet<string>): FoldContext[];\n}",
+          "declaration": "interface BillingFoldSide {\n  scopeType: \"order\" | \"purchase\";\n  billingIsLive(doc: B): boolean;\n  creditIsLive(doc: C): boolean;\n  billingHeader(doc: B): Omit<BilledDocument, \"role\" | \"live\">;\n  creditHeader(doc: C): Omit<BilledDocument, \"role\" | \"live\">;\n  billingRows(doc: B): typeLiteral;\n  rowNetCents(row: InvoiceItem): number;\n  partCents(row: InvoiceItem, before: number, after: number): number;\n  placeCredits(billing: ReadonlyMap<string, FoldContext>, credits: readonly C[], unkeyed: Set<string>, scopeUid: string, initiatorPaths: ReadonlySet<string>): FoldContext[];\n}",
           "doc": "**Everything that differs between the sides in the billing fold** — data,\nnever an `if side` (ruling 84), on the pattern of {@link ScopedSyncSide}.\nThe last two entries (how a credit reaches the row it reverses, and whose\nanchors and time test it reads) are ruling 34's to collapse into one keyer\n`(uid_billing, path_billing_item)`; until then they are named here."
         },
         {
@@ -20449,7 +20559,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItem",
-          "declaration": "interface InvoiceItem {\n  uid_order?: string | null;\n  description?: string;\n  price?: PriceObject | InvoiceDocItemPriceType;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  xero_id?: string | null;\n  crms_id?: number | string | null;\n  crms_opportunity_id?: number | null;\n  substituted_for?: SubstitutedForEntryType[];\n  out_of_service?: OutOfServiceEntryType[];\n  path_extension_for?: string[];\n  path_order_item?: string[];\n}",
+          "declaration": "interface InvoiceItem {\n  uid_order?: string | null;\n  description?: string;\n  price?: PriceObject | InvoiceDocItemPriceType;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  xero_id?: string | null;\n  crms_id?: number | string | null;\n  crms_opportunity_id?: number | null;\n  substituted_for?: SubstitutedForEntryType[];\n  out_of_service?: OutOfServiceEntryType[];\n  path_extension_for?: string[];\n  path_order_item?: string[];\n  path_source_item?: string[];\n}",
           "doc": "An invoice item with optional order-scoping and invoice-specific fields.\nExtends LineItem with properties that should be carried forward during sync\nand fields needed for Xero mapping.\n\n`price` accepts both the utility's intermediate PriceObject and the full\nInvoiceDocItemPriceType from schemas to avoid type drift."
         },
         {
@@ -20479,7 +20589,7 @@
         {
           "kind": "interface",
           "name": "LineClaimSide",
-          "declaration": "interface LineClaimSide {\n  scopeType: \"order\" | \"purchase\";\n  pointerKey: keyof MovePointerCarrier;\n}",
+          "declaration": "interface LineClaimSide {\n  scopeType: \"order\" | \"purchase\";\n}",
           "doc": "What {@link orderLineClaimIssues} needs to know about a SIDE: the pair\n{@link ScopedSyncSide} already carries. `L` is the side's line shape, which\nfixes what the `orderLines` callback returns."
         },
         {
@@ -20487,12 +20597,6 @@
           "name": "LineItem",
           "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  exchanged_for?: ExchangedForEntryType[];\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  amount_cents?: number | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
-        },
-        {
-          "kind": "interface",
-          "name": "MovePointerCarrier",
-          "declaration": "interface MovePointerCarrier {\n  path_order_item?: string[] | null;\n  path_purchase_item?: string[] | null;\n}",
-          "doc": "The two move-pointer keys a billing row may carry, one per side."
         },
         {
           "kind": "interface",
@@ -20582,7 +20686,7 @@
           "kind": "variable",
           "name": "RECEIVABLE_LINE_CLAIMS",
           "declaration": "const RECEIVABLE_LINE_CLAIMS: LineClaimSide<typeLiteral>;",
-          "doc": "The receivable side of {@link orderLineClaimIssues}: an invoice's `path_order_item`."
+          "doc": "The receivable side of {@link orderLineClaimIssues}: an invoice's move pointers."
         },
         {
           "kind": "variable",
@@ -20599,13 +20703,13 @@
         {
           "kind": "interface",
           "name": "ScopedPairSide",
-          "declaration": "interface ScopedPairSide {\n  scopeKey: \"uid_order\" | \"uid_purchase\";\n  fields(): readonly SharedField[];\n  project(pair: S, scopeUid: string): P;\n}",
+          "declaration": "interface ScopedPairSide {\n  fields(): readonly SharedField[];\n  project(pair: S, scopeUid: string): P;\n}",
           "doc": "**What the scoped pair sync needs to know about a SIDE**, the pair half of\n{@link ScopedSyncSide}: the shared pair fields, and an initiator pair in the\nbilling document's shape."
         },
         {
           "kind": "interface",
           "name": "ScopedSyncSide",
-          "declaration": "interface ScopedSyncSide {\n  scopeType: \"order\" | \"purchase\";\n  pointerKey: keyof MovePointerCarrier;\n  project(item: LineItem, scopeUid: string): R;\n  lineFields(item: LineItem): readonly SharedField[];\n  isStructural(item: LineItem): boolean;\n  adopts(item: LineItem, row: R): boolean;\n  requantify(row: R, quantity: number, ctx: typeLiteral): R;\n}",
+          "declaration": "interface ScopedSyncSide {\n  scopeType: \"order\" | \"purchase\";\n  project(item: LineItem, scopeUid: string): R;\n  lineFields(item: LineItem): readonly SharedField[];\n  isStructural(item: LineItem): boolean;\n  adopts(item: LineItem, row: R): boolean;\n  requantify(row: R, quantity: number, ctx: typeLiteral): R;\n}",
           "doc": "**What the scoped initiator → billing sync needs to know about a SIDE**\n(one-document-model Phase 3). The order → invoice sync and the purchase →\nbill sync are one engine, {@link syncOrderToInvoiceSelective}'s body; this is\nthe whole of what differs between them, so neither side branches on a\ncollection.\n\nThe substitution arm (`substituted_for`) runs on both sides: a bill's\nsubstitute stands in for a purchase line exactly as an invoice's does for an\norder line, and {@link ScopedSyncSide.requantify} is how a side whose money\ndoes not follow quantity keeps a row's money with its units\n(one-document-model W5). The date-extension arm (`path_extension_for`) runs\non both sides too: a bill bills owed time as an extension section, as an\ninvoice does (6e-0b2 F5, ruling 89), and the sync carries it as written. The\nlost/damaged arm (`out_of_service`) applies to both sides as written: a\nline billing a record is the billing document's own row."
         },
         {
@@ -21041,7 +21145,7 @@
         {
           "kind": "function",
           "name": "invoicePairKey",
-          "signature": "invoicePairKey(pair: typeLiteral): string",
+          "signature": "invoicePairKey(pair: PairSourceKeys & typeLiteral): string",
           "doc": "**The identity of an invoice's destination pair**: `{uid_order}/{uid}` — the\norder it is scoped to and its own uid (core#130 row 13). An invoice can bill\nseveral orders and each brings its own dividers, so a pair uid is unique only\nwithin one order's scope. The one spelling of *\"which pair is this pair\"*,\nfor this package's selective sync and for every api caller that used to\ntemplate the literal itself.\n\n⚠️ A reconciler already scoped to one order keys on the bare `pair.uid`; the\nscope is then in the partition, not the key.",
           "paramTags": [],
           "returnsTag": null
@@ -21049,7 +21153,7 @@
         {
           "kind": "function",
           "name": "invoiceScopeDividersMatch",
-          "signature": "invoiceScopeDividersMatch(scopedInvoiceItems: InvoiceItem[], orderItems: LineItem[], orderDividerUid: string, _: unknown): boolean",
+          "signature": "invoiceScopeDividersMatch(scopedInvoiceItems: InvoiceItem[], orderItems: LineItem[], orderDividerUid: string): boolean",
           "doc": "Is one order-scope of an invoice hung on the same divider skeleton as its\norder? The alignment predicate {@link adoptOrderDividerStructure} drives\ntoward, and the one definition of \"aligned\" the audit and the endpoint share.\n\n⚠️ **It compares DIVIDER paths, not all paths.** Full path-set equality is\nthe wrong criterion and would never go green: measured 2026-08-10, 15 of the\n102 prod pairs carrying a custom line carry a legitimate invoice-only line,\nwhich makes the path sets differ forever while the tree shapes agree\nperfectly. A line the order lacks is **line-level drift**, correctly reported\nby the diff (`computeDocumentDiffs`); conflating it with a\nstructural misalignment would make the two indistinguishable and the\nstructural repair unfinishable.\n\nThe invoice's own `order` divider is excluded — it has no order-side\ncounterpart by construction (`isDividerItemType(\"order\")` is `true`).\n\n🔴 **So is every invoice-authored subtree** ({@link invoiceAuthoredSubtrees},\ncore#124): a group or destination the invoice added is a SUPERSET of the\norder's skeleton, not a disagreement with it, and its lines bill no order\nline.\n\n🔴 **An order divider the invoice LACKS is not a disagreement either — it was\nDECLINED** (core#126, owner 2026-10-03): a group or destination is decided\nlike a line, so a partial invoice that bills one group of its order leaves\nthe others out and stays aligned. That costs the predicate the ability to\ntell a declined divider from a lost one, and it keeps exactly the part of the\ndistinction that protects money: **a missing divider whose order lines the\ninvoice bills ELSEWHERE** — the same uid at a path the order lacks, the\nflattened CRMS skeleton — is still unaligned. Read as declined, those lines\nwould count as unbilled and a remaining invoice would bill them twice.\n(api-cloudrun#1189's three prod invoices were the declined kind: each bills\none group, or only lost/damaged lines, and lacks the rest.)\n\nWhat fails is a divider the ORDER owns carried at another path, or a missing\none whose lines moved.",
           "paramTags": [],
           "returnsTag": null
@@ -21212,8 +21316,8 @@
         {
           "kind": "function",
           "name": "orderLineClaims",
-          "signature": "orderLineClaims(scopedInvoiceItems: readonly InvoiceItem[], orderDividerUid: string, _: unknown): Map<string, string[]>",
-          "doc": "Every LINE of one order scope that bills an order line from another position\n(core#125), keyed by the row's ORDER-relative path, valued by the\norder-relative path it bills.\n\nA root row states `path_order_item`; each line below it — a kit's components\n— bills the same suffix under the claimed path, so `[...P, c]` maps to\n`[...X, c]`. A pointer naming the row's own path claims nothing and is left\nout, so a caller never has to special-case it.\n\n⭐ **This is the one reader of the key.** The sync, coverage, the\naccounting walk and the diff all read claims through it, so they cannot\ndisagree about which rows bill which order line — the same reason\n{@link invoiceAuthoredSubtrees} exists.\n\n⚠️ It does not ask whether X is on the order. A claim on a line the order no\nlonger carries credits a path nothing reads, and the next order save drops\nthe pointer (owner, 2026-10-03).",
+          "signature": "orderLineClaims(scopedInvoiceItems: readonly InvoiceItem[], orderDividerUid: string): Map<string, string[]>",
+          "doc": "Every LINE of one order scope that bills an order line from another position\n(core#125), keyed by the row's ORDER-relative path, valued by the\norder-relative path it bills.\n\nA root row states its move pointer (`path_source_item`, read through\n`rowSourcePath` while the retiring spellings exist; ruling 109); each line below it — a kit's components\n— bills the same suffix under the claimed path, so `[...P, c]` maps to\n`[...X, c]`. A pointer naming the row's own path claims nothing and is left\nout, so a caller never has to special-case it.\n\n⭐ **This is the one reader of the key.** The sync, coverage, the\naccounting walk and the diff all read claims through it, so they cannot\ndisagree about which rows bill which order line — the same reason\n{@link invoiceAuthoredSubtrees} exists.\n\n⚠️ It does not ask whether X is on the order. A claim on a line the order no\nlonger carries credits a path nothing reads, and the next order save drops\nthe pointer (owner, 2026-10-03).",
           "paramTags": [
             {
               "name": "scopedInvoiceItems",
@@ -21221,11 +21325,7 @@
             },
             {
               "name": "orderDividerUid",
-              "doc": "The order divider's uid"
-            },
-            {
-              "name": "pointerKey",
-              "doc": "The move pointer to read: `path_order_item` on an invoice,\n`path_purchase_item` on a bill or credit (one-document-model Phase 3)."
+              "doc": "The order divider's uid — or a purchase's, on a bill or credit"
             }
           ],
           "returnsTag": null
@@ -22302,7 +22402,7 @@
         {
           "kind": "interface",
           "name": "ItemArrayDoc",
-          "declaration": "interface ItemArrayDoc {\n  items: readonly LineItem[];\n  destinations?: ReadonlyArray<typeLiteral>;\n  query_by_orders?: readonly string[];\n  query_by_purchases?: readonly string[];\n  sources?: ReadonlyArray<typeLiteral>;\n}",
+          "declaration": "interface ItemArrayDoc {\n  items: readonly LineItem[];\n  destinations?: ReadonlyArray<typeLiteral & PairSourceKeys>;\n  query_by_orders?: readonly string[];\n  query_by_purchases?: readonly string[];\n  sources?: ReadonlyArray<typeLiteral>;\n}",
           "doc": "The document fields {@link itemArrayIssues} reads."
         },
         {
@@ -25017,7 +25117,7 @@
         {
           "kind": "interface",
           "name": "ChargeWindowPair",
-          "declaration": "interface ChargeWindowPair {\n  uid?: string | null;\n  uid_order?: string | null;\n  uid_purchase?: string | null;\n  dates: typeLiteral;\n}",
+          "declaration": "interface ChargeWindowPair {\n  uid?: string | null;\n  uid_source?: string;\n  uid_order?: string;\n  uid_purchase?: string;\n  dates: typeLiteral;\n}",
           "doc": "The pair shape {@link chargeWindowContext} reads."
         },
         {
@@ -25842,7 +25942,7 @@
           "kind": "variable",
           "name": "PAYABLE_LINE_CLAIMS",
           "declaration": "const PAYABLE_LINE_CLAIMS: LineClaimSide<PurchaseRow>;",
-          "doc": "The payable side of `orderLineClaimIssues`: a bill or credit's\n`path_purchase_item`. A line closed to 0 is removed (ruling 47), so there is\nno closed line to refuse: a claim on it names a row that is not there, as on\nthe receivable side."
+          "doc": "The payable side of `orderLineClaimIssues`: a bill or credit's move\npointer (`path_source_item`, ruling 109). A line closed to 0 is removed (ruling 47), so there is\nno closed line to refuse: a claim on it names a row that is not there, as on\nthe receivable side."
         },
         {
           "kind": "interface",
