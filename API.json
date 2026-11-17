@@ -1681,6 +1681,18 @@
           "doc": "Input type for creating a variable-date holiday."
         },
         {
+          "kind": "variable",
+          "name": "CreditDocBillingItem",
+          "declaration": "const CreditDocBillingItem: z.ZodType<CreditDocBillingItemType>;",
+          "doc": "Zod schema for a credit's billing divider row."
+        },
+        {
+          "kind": "interface",
+          "name": "CreditDocBillingItemType",
+          "declaration": "interface CreditDocBillingItemType {\n  uid: string;\n  type: \"billing\";\n  name: string;\n  path: string[];\n  description: string;\n}",
+          "doc": "A credit's `billing` divider row (ruling 107) — see `BillingDividerArm`\n(`schemas/_dividers.ts`), declared once for both credit row unions."
+        },
+        {
           "kind": "interface",
           "name": "CreditNote",
           "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  items: CreditNoteDocItemType[];\n  destinations?: InvoiceDocDestinationType[];\n  totals: CreditNoteDocTotals;\n  remaining_credit_cents: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_id?: string | null;\n  xero_credit_note_id?: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
@@ -1693,10 +1705,22 @@
           "doc": "The billing-document facts {@link deriveCreditNoteSources} reads: an invoice and the orders it bills."
         },
         {
+          "kind": "variable",
+          "name": "CreditNoteDocItem",
+          "declaration": "const CreditNoteDocItem: z.ZodType<CreditNoteDocItemType>;",
+          "doc": "Zod schema for {@link CreditNoteDocItemType}."
+        },
+        {
           "kind": "interface",
           "name": "CreditNoteDocItemPrice",
           "declaration": "interface CreditNoteDocItemPrice {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  total_cents: number;\n}",
           "doc": "Pricing breakdown for a single credit-note line."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CreditNoteDocItemType",
+          "declaration": "type CreditNoteDocItemType = CreditNoteDocLineItem | CreditDocBillingItemType | InvoiceDocOrderItemType | InvoiceDocDestinationItemType | OrderDocGroupItemType;",
+          "doc": "Any row of an AR credit note's `items[]` (ruling 34 item 1): a line, or a\nbilling / order / destination / group divider, at\n`CREDIT_NOTE_ITEM_LEVELS` (`@cfs/core/utils/invoices`). A historic note holds\nlines only (ruling 53 keeps it flat)."
         },
         {
           "kind": "interface",
@@ -1724,6 +1748,12 @@
         },
         {
           "kind": "variable",
+          "name": "CreditNoteDocTotalsSchema",
+          "declaration": "const CreditNoteDocTotalsSchema: z.ZodType<CreditNoteDocTotals>;",
+          "doc": "Zod schema for {@link CreditNoteDocTotals} — the CREDIT role's totals on both sides (ruling 105)."
+        },
+        {
+          "kind": "variable",
           "name": "CreditNoteSchema",
           "declaration": "const CreditNoteSchema: z.ZodType<CreditNote>;",
           "doc": "Zod schema for a CreditNote."
@@ -1745,6 +1775,12 @@
           "name": "CreditNoteStatusType",
           "declaration": "type CreditNoteStatusType = indexedAccess;",
           "doc": "Allowed credit-note statuses."
+        },
+        {
+          "kind": "interface",
+          "name": "CreditSourceRow",
+          "declaration": "interface CreditSourceRow {\n  type?: string;\n  uid_billing?: string;\n  path_billing_item?: string[];\n  path_invoice_item?: string[];\n}",
+          "doc": "The row keys {@link deriveCreditNoteSources} reads: a divider's `type`, a line's pointer."
         },
         {
           "kind": "interface",
@@ -4395,7 +4431,7 @@
         {
           "kind": "typeAlias",
           "name": "PayableDividerType",
-          "declaration": "type PayableDividerType = \"purchase\" | \"destination\" | \"group\";",
+          "declaration": "type PayableDividerType = \"purchase\" | \"destination\" | \"group\" | \"billing\";",
           "doc": "The divider row types on either payable grain."
         },
         {
@@ -5037,8 +5073,8 @@
         {
           "kind": "interface",
           "name": "PurchaseBillTotals",
-          "declaration": "interface PurchaseBillTotals {\n  total_cents: number;\n  amount_paid_cents: number;\n  amount_credited_cents: number;\n  amount_void_cents: number;\n  amount_due_cents: number;\n  closure_count?: number;\n}",
-          "doc": "A bill's settlement projection — the invoice's keys, see the module docblock."
+          "declaration": "interface PurchaseBillTotals {\n  subtotal_cents?: number;\n  subtotal_discounted_cents?: number;\n  discount_amount_cents?: number;\n  taxes?: PriceModifierType[];\n  transaction_fees?: PriceModifierType[];\n  total_cents: number;\n  amount_paid_cents: number;\n  amount_credited_cents: number;\n  amount_void_cents: number;\n  amount_due_cents: number;\n  closure_count?: number;\n}",
+          "doc": "A bill's totals — the invoice's keys (ruling 105, one shape per role): the\nbreakdown `priceDocument`'s stage 5 sums from the stored lines, and the\nsettlement projection."
         },
         {
           "kind": "variable",
@@ -5061,7 +5097,7 @@
         {
           "kind": "interface",
           "name": "PurchaseCredit",
-          "declaration": "interface PurchaseCredit {\n  uid: string;\n  number: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  supplier: UidNameRefType;\n  origin: PurchaseDocumentOriginType;\n  reason: PurchaseCreditReasonType;\n  status: PurchaseCreditStatusType;\n  xero_id: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  items: PurchaseDocumentRow[];\n  destinations: PurchaseDocDestination[];\n  total_cents: number;\n  remaining_credit_cents: number;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface PurchaseCredit {\n  uid: string;\n  number: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  supplier: UidNameRefType;\n  origin: PurchaseDocumentOriginType;\n  reason: PurchaseCreditReasonType;\n  status: PurchaseCreditStatusType;\n  xero_id: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  items: PurchaseDocumentRow[];\n  destinations: PurchaseDocDestination[];\n  totals?: CreditNoteDocTotals;\n  total_cents: number;\n  remaining_credit_cents: number;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A supplier credit (ACCPAYCREDIT) against one purchase."
         },
         {
@@ -5247,7 +5283,7 @@
         {
           "kind": "typeAlias",
           "name": "PurchaseDocumentRow",
-          "declaration": "type PurchaseDocumentRow = PurchaseDocumentItem | PurchaseDocPurchaseItemType | InvoiceDocDestinationItemType | OrderDocGroupItemType;",
+          "declaration": "type PurchaseDocumentRow = PurchaseDocumentItem | PurchaseDocPurchaseItemType | CreditDocBillingItemType | InvoiceDocDestinationItemType | OrderDocGroupItemType;",
           "doc": "Any row of a bill's or supplier credit's `items[]`: a line, or a\npurchase / destination / group divider (`PURCHASE_DOCUMENT_ITEM_LEVELS`)."
         },
         {
@@ -5349,7 +5385,7 @@
         {
           "kind": "interface",
           "name": "PurchaseLinePrice",
-          "declaration": "interface PurchaseLinePrice {\n  price_formula: PriceFormulaRef;\n  rates: RateSnapshotType[];\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  replacement_cents?: number | null;\n  stated_cents?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  total_cents: number;\n}",
+          "declaration": "interface PurchaseLinePrice {\n  price_formula: PriceFormulaRef;\n  rates: RateSnapshotType[];\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  replacement_cents?: number | null;\n  stated_cents?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  total_cents: number;\n  counts?: TierCountType[];\n}",
           "doc": "How a purchase line is priced (purchases-as-documents Phase 2 rulings 1, 2,\n7): the formula it is priced by, the rates it snapshots, a supplier\ndiscount, and the money `priceDocument` computes from them.\n\n- A flat line states its WHOLE gross cost in `price.stated_cents` (the\n  DECLARED stated total: a buy, a fixed-cost subrent, freight or a fee) and\n  carries `rates: []`. Measured: most stored buys cost a total that does not\n  divide by their quantity, and every reader slices the total\n  (`sliceStoredMoney`), so no per-unit rate is stored.\n- The COMPUTED half is the receivable line's money (`subtotal_cents`,\n  `subtotal_discounted_cents`, `taxes`, `total_cents`) and the line's\n  `amount_cents`, written by `priceDocument`'s stated-total arm (ruling 39,\n  D7): subtotal = `stated_cents`, discounted = `amount_cents` =\n  `stated_cents − discount.amount_cents`, total = discounted + Σ taxes. Every\n  money reader reads it, as on an order line; `stated_cents` is the input.\n\n⚠️ **A TIME line** commits nothing here: its money is zero and its rates are\nthe formula's; its bills price it from their pair's windows\n(`priceDocument`'s time arms, one-document-model Phase 3).\n\n`discount` is core's `Discount`. On a payable line it records what came off\nthe operator's GROSS, so `discount.amount_cents` is declared, not derived;\n`amount_cents` is the NET — what CFS pays, which receipts, basis and bills\nslice.\n\n**Tax is EXEMPTION, not absence** (api-cloudrun's `one-document-model` plan):\na payable line is stamped with its type's default tax class like any other\npriced line (`LineTaxCore`), and the payable side resolves it exempt, so\n`taxes` is `[]`. `taxes_base` is the class's rates BEFORE the exemption, as\non an order line, so an exempt line records a non-empty base. A taxable\npurchase later (consumables, use tax) then needs no new path. Neither key\nreaches a Xero body or the bill's projection hash."
         },
         {
@@ -7984,6 +8020,54 @@
         },
         {
           "kind": "function",
+          "name": "creditLineBillingPointer",
+          "signature": "creditLineBillingPointer(line: Pick<CreditNoteDocLineItem, \"uid_billing\" | \"path_billing_item\" | \"path_invoice_item\">): typeLiteral | null",
+          "doc": "The billing row a credit line names: `uid_billing` + `path_billing_item`, else\nthe retiring `path_invoice_item` (whose invoice it cannot name, so `uid` is\n`undefined`). `null` for an unpointed line.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "creditLinePostingAccount",
+          "signature": "creditLinePostingAccount(line: Pick<CreditNoteDocLineItem, \"ledger_account\" | \"coa_posting\">): number | undefined",
+          "doc": "Where a credit line posts: `ledger_account`, else the retiring `coa_posting`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "creditLineShapeIssues",
+          "signature": "creditLineShapeIssues(line: typeLiteral, _: unknown): typeLiteral[]",
+          "doc": "**The credit line's shape rules, both sides** (ruling 34; Q4 ruling 106, Q6\nruling 108), keyed on the POINTER rather than the document type:\n\n- the pointer pair is set together (the payable rule, `purchase-bill.ts`);\n- a time-basis line naming no billing row states the time it moves of its own\n  (`counts` non-empty) — an unpointed credit, like an invoice line, prices\n  itself;\n- a line naming a billing row states only the time it takes BACK: empty\n  `counts` = whole units of the named row, non-empty = time per unit, which\n  only a time-basis row has (a flat row's `[flat 1/1]` copied onto a units\n  credit would read as a time credit).\n\n\"A credit naming an extension-section row states counts\" needs the billing\nrow, so the fold, not this refine, holds it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "creditLineSourceAccount",
+          "signature": "creditLineSourceAccount(line: Pick<CreditNoteDocLineItem, \"source_ledger_account\" | \"coa_revenue\">): COARevenueType | null",
+          "doc": "The revenue account credited: `source_ledger_account`, else the retiring `coa_revenue`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "creditNoteLines",
+          "signature": "creditNoteLines(rows: readonly CreditNoteDocItemType[]): CreditNoteDocLineItem[]",
+          "doc": "The lines of a credit note's rows, dividers dropped.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "creditNoteXeroId",
+          "signature": "creditNoteXeroId(note: Pick<CreditNote, \"xero_id\" | \"xero_credit_note_id\">): string | null",
+          "doc": "A credit note's Xero `CreditNoteID`: `xero_id`, else the retiring `xero_credit_note_id`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "custodyMovementSlot",
           "signature": "custodyMovementSlot(rule: CustodyRule, bookingType: \"rental\" | \"sale\"): string | null",
           "doc": "The movement-id slot an action occupies in one save, or `null` when it writes\nno movement for that booking type.\n\nA movement's id is `{session}|{type}|{booking}`, so two actions of one type\nagainst one booking in one save collide. The exception is a `flag` into or\nout of `cleaning`/`maintenance`, whose id is its reason's own (the api's\n`transitionMovementId`), so `flag_cleaning_returned` and\n`flag_damaged_returned` in one save are two slots.",
@@ -8339,6 +8423,14 @@
         },
         {
           "kind": "function",
+          "name": "isCreditNoteLine",
+          "signature": "isCreditNoteLine(row: CreditNoteDocItemType): row is CreditNoteDocLineItem",
+          "doc": "Whether a credit-note row is a line (every row but the four dividers).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "isCustomerCustodyStep",
           "signature": "isCustomerCustodyStep(type: MovementTypeType, custody: typeLiteral | null): boolean",
           "doc": "Whether a movement of `type` carrying `custody` is a step that happens\nentirely on the CUSTOMER's side: some rule whose `{from, to}` it carries has\nan arm writing `type` for a booking type that owns NEITHER end (`ownsKey`).\nToday that is a sale's `sale_lost` / `sale_damaged` and their undos.\n\nKeyed on the property, not on type names, so a new custody-only step past\nthe ownership boundary is covered without an edit. The roster fold reads it:\nsuch a step names units that are no longer on any roster, and changes none.",
@@ -8374,6 +8466,14 @@
           "name": "isEventCard",
           "signature": "isEventCard(doc: Pick<Card, \"sources\">): boolean",
           "doc": "An event card is one the fulfillment projection OWNS — `buildEventCards` built\nit, `reconcileEventCards` recomputes it, and a uid that does not parse as an\n{@link EventCardId} gets it hard-deleted. The discriminator is DERIVED rather\nthan stored, and `sources` is the only place it can be read from: a card\ncarrying a `fulfillments` source is this projection's. (The label was `orders`\nuntil both corpora were relabelled on 2026-09-21; an `orders` source now marks\nnothing.)\n\n⚠️ **Do not switch this to an id-shape test.** The id is what the projection\nMINTS; the source is what makes the card the projection's to mint. Keying the\nrefinement on the id would make a malformed id unrepresentable *and* exempt\nfrom every other rule here, which is backwards.\n`assertClientAuthoredCardShape` (`api-cloudrun/src/lib/serverOwnedCards.ts`)\nrefuses an event source from `POST /cards` and from a recurrence prototype,\nwhich is what makes this predicate an authorization fact rather than a\nheuristic. Exported since core#130 row 6, so no consumer spells it again.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isFlatMeterCounts",
+          "signature": "isFlatMeterCounts(counts: readonly TierCountType[]): boolean",
+          "doc": "Whether `counts` is the flat meter's output — its one tier at `1/1`\n(`meterUnits`' `unit: \"none\"` arm, `utils/price-formulas.ts`), the shape every\nAR flat line stores (one-document-model ruling 108).",
           "paramTags": [],
           "returnsTag": null
         },
@@ -8744,9 +8844,25 @@
         },
         {
           "kind": "function",
+          "name": "purchaseCreditLineBillPointer",
+          "signature": "purchaseCreditLineBillPointer(line: Pick<PurchaseDocumentLineBase, \"uid_billing\" | \"path_billing_item\" | \"uid_purchase_bill\" | \"path_bill_item\">): typeLiteral | null",
+          "doc": "The bill row a supplier credit line names: `uid_billing` + `path_billing_item`,\nelse the retiring `uid_purchase_bill` + `path_bill_item` (ruling 34; the AR\nnote's `creditLineBillingPointer`). `null` for an unpointed line. Deleted with\nthe old pair in beta H2.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "purchaseCreditPurchaseUid",
           "signature": "purchaseCreditPurchaseUid(credit: Pick<PurchaseCredit, \"sources\">): string | undefined",
           "doc": "The purchase a credit was raised on, or `undefined` when its sources name none.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "purchaseCreditTotalCents",
+          "signature": "purchaseCreditTotalCents(credit: Pick<PurchaseCredit, \"totals\" | \"total_cents\">): number",
+          "doc": "A supplier credit's total: `totals.total_cents`, else the retiring top-level `total_cents`.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -8785,7 +8901,7 @@
         {
           "kind": "function",
           "name": "purchaseLineKeyOf",
-          "signature": "purchaseLineKeyOf(row: Pick<PurchaseDocumentItem, \"path\" | \"path_purchase_item\">): string | null",
+          "signature": "purchaseLineKeyOf(row: Pick<PurchaseDocumentItem, \"path\" | \"path_purchase_item\" | \"uid_billing\">): string | null",
           "doc": "The purchase line a bill or credit line bills, as `[purchase uid, ...path in\nthat purchase]` joined by `/` — its move pointer when it has one, else its\nown path under its purchase divider — or `null` for a line outside any\npurchase divider. The one join key for \"which purchase line is this\".",
           "paramTags": [],
           "returnsTag": null
@@ -13770,7 +13886,7 @@
         {
           "kind": "typeAlias",
           "name": "PayableDividerType",
-          "declaration": "type PayableDividerType = \"purchase\" | \"destination\" | \"group\";",
+          "declaration": "type PayableDividerType = \"purchase\" | \"destination\" | \"group\" | \"billing\";",
           "doc": "The divider row types on either payable grain."
         },
         {
@@ -13908,7 +14024,7 @@
         {
           "kind": "interface",
           "name": "PurchaseLinePrice",
-          "declaration": "interface PurchaseLinePrice {\n  price_formula: PriceFormulaRef;\n  rates: RateSnapshotType[];\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  replacement_cents?: number | null;\n  stated_cents?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  total_cents: number;\n}",
+          "declaration": "interface PurchaseLinePrice {\n  price_formula: PriceFormulaRef;\n  rates: RateSnapshotType[];\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  replacement_cents?: number | null;\n  stated_cents?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  total_cents: number;\n  counts?: TierCountType[];\n}",
           "doc": "How a purchase line is priced (purchases-as-documents Phase 2 rulings 1, 2,\n7): the formula it is priced by, the rates it snapshots, a supplier\ndiscount, and the money `priceDocument` computes from them.\n\n- A flat line states its WHOLE gross cost in `price.stated_cents` (the\n  DECLARED stated total: a buy, a fixed-cost subrent, freight or a fee) and\n  carries `rates: []`. Measured: most stored buys cost a total that does not\n  divide by their quantity, and every reader slices the total\n  (`sliceStoredMoney`), so no per-unit rate is stored.\n- The COMPUTED half is the receivable line's money (`subtotal_cents`,\n  `subtotal_discounted_cents`, `taxes`, `total_cents`) and the line's\n  `amount_cents`, written by `priceDocument`'s stated-total arm (ruling 39,\n  D7): subtotal = `stated_cents`, discounted = `amount_cents` =\n  `stated_cents − discount.amount_cents`, total = discounted + Σ taxes. Every\n  money reader reads it, as on an order line; `stated_cents` is the input.\n\n⚠️ **A TIME line** commits nothing here: its money is zero and its rates are\nthe formula's; its bills price it from their pair's windows\n(`priceDocument`'s time arms, one-document-model Phase 3).\n\n`discount` is core's `Discount`. On a payable line it records what came off\nthe operator's GROSS, so `discount.amount_cents` is declared, not derived;\n`amount_cents` is the NET — what CFS pays, which receipts, basis and bills\nslice.\n\n**Tax is EXEMPTION, not absence** (api-cloudrun's `one-document-model` plan):\na payable line is stamped with its type's default tax class like any other\npriced line (`LineTaxCore`), and the payable side resolves it exempt, so\n`taxes` is `[]`. `taxes_base` is the class's rates BEFORE the exemption, as\non an order line, so an exempt line records a non-empty base. A taxable\npurchase later (consumables, use tax) then needs no new path. Neither key\nreaches a Xero body or the bill's projection hash."
         },
         {
@@ -14100,6 +14216,14 @@
           "name": "deriveQueryByProducts",
           "signature": "deriveQueryByProducts(rows: readonly PurchaseRow[]): string[]",
           "doc": "Derive `query_by_products` — the distinct products the items ORDER, in first\nappearance order. Attribution is not an order and is left out. The one author\nof the mirror, called by every writer.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isFlatMeterCounts",
+          "signature": "isFlatMeterCounts(counts: readonly TierCountType[]): boolean",
+          "doc": "Whether `counts` is the flat meter's output — its one tier at `1/1`\n(`meterUnits`' `unit: \"none\"` arm, `utils/price-formulas.ts`), the shape every\nAR flat line stores (one-document-model ruling 108).",
           "paramTags": [],
           "returnsTag": null
         },
@@ -14368,8 +14492,8 @@
         {
           "kind": "interface",
           "name": "PurchaseBillTotals",
-          "declaration": "interface PurchaseBillTotals {\n  total_cents: number;\n  amount_paid_cents: number;\n  amount_credited_cents: number;\n  amount_void_cents: number;\n  amount_due_cents: number;\n  closure_count?: number;\n}",
-          "doc": "A bill's settlement projection — the invoice's keys, see the module docblock."
+          "declaration": "interface PurchaseBillTotals {\n  subtotal_cents?: number;\n  subtotal_discounted_cents?: number;\n  discount_amount_cents?: number;\n  taxes?: PriceModifierType[];\n  transaction_fees?: PriceModifierType[];\n  total_cents: number;\n  amount_paid_cents: number;\n  amount_credited_cents: number;\n  amount_void_cents: number;\n  amount_due_cents: number;\n  closure_count?: number;\n}",
+          "doc": "A bill's totals — the invoice's keys (ruling 105, one shape per role): the\nbreakdown `priceDocument`'s stage 5 sums from the stored lines, and the\nsettlement projection."
         },
         {
           "kind": "variable",
@@ -14392,7 +14516,7 @@
         {
           "kind": "interface",
           "name": "PurchaseCredit",
-          "declaration": "interface PurchaseCredit {\n  uid: string;\n  number: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  supplier: UidNameRefType;\n  origin: PurchaseDocumentOriginType;\n  reason: PurchaseCreditReasonType;\n  status: PurchaseCreditStatusType;\n  xero_id: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  items: PurchaseDocumentRow[];\n  destinations: PurchaseDocDestination[];\n  total_cents: number;\n  remaining_credit_cents: number;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface PurchaseCredit {\n  uid: string;\n  number: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  supplier: UidNameRefType;\n  origin: PurchaseDocumentOriginType;\n  reason: PurchaseCreditReasonType;\n  status: PurchaseCreditStatusType;\n  xero_id: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  items: PurchaseDocumentRow[];\n  destinations: PurchaseDocDestination[];\n  totals?: CreditNoteDocTotals;\n  total_cents: number;\n  remaining_credit_cents: number;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A supplier credit (ACCPAYCREDIT) against one purchase."
         },
         {
@@ -14548,7 +14672,7 @@
         {
           "kind": "typeAlias",
           "name": "PurchaseDocumentRow",
-          "declaration": "type PurchaseDocumentRow = PurchaseDocumentItem | PurchaseDocPurchaseItemType | InvoiceDocDestinationItemType | OrderDocGroupItemType;",
+          "declaration": "type PurchaseDocumentRow = PurchaseDocumentItem | PurchaseDocPurchaseItemType | CreditDocBillingItemType | InvoiceDocDestinationItemType | OrderDocGroupItemType;",
           "doc": "Any row of a bill's or supplier credit's `items[]`: a line, or a\npurchase / destination / group divider (`PURCHASE_DOCUMENT_ITEM_LEVELS`)."
         },
         {
@@ -14664,9 +14788,25 @@
         },
         {
           "kind": "function",
+          "name": "purchaseCreditLineBillPointer",
+          "signature": "purchaseCreditLineBillPointer(line: Pick<PurchaseDocumentLineBase, \"uid_billing\" | \"path_billing_item\" | \"uid_purchase_bill\" | \"path_bill_item\">): typeLiteral | null",
+          "doc": "The bill row a supplier credit line names: `uid_billing` + `path_billing_item`,\nelse the retiring `uid_purchase_bill` + `path_bill_item` (ruling 34; the AR\nnote's `creditLineBillingPointer`). `null` for an unpointed line. Deleted with\nthe old pair in beta H2.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "purchaseCreditPurchaseUid",
           "signature": "purchaseCreditPurchaseUid(credit: Pick<PurchaseCredit, \"sources\">): string | undefined",
           "doc": "The purchase a credit was raised on, or `undefined` when its sources name none.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "purchaseCreditTotalCents",
+          "signature": "purchaseCreditTotalCents(credit: Pick<PurchaseCredit, \"totals\" | \"total_cents\">): number",
+          "doc": "A supplier credit's total: `totals.total_cents`, else the retiring top-level `total_cents`.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -14681,7 +14821,7 @@
         {
           "kind": "function",
           "name": "purchaseLineKeyOf",
-          "signature": "purchaseLineKeyOf(row: Pick<PurchaseDocumentItem, \"path\" | \"path_purchase_item\">): string | null",
+          "signature": "purchaseLineKeyOf(row: Pick<PurchaseDocumentItem, \"path\" | \"path_purchase_item\" | \"uid_billing\">): string | null",
           "doc": "The purchase line a bill or credit line bills, as `[purchase uid, ...path in\nthat purchase]` joined by `/` — its move pointer when it has one, else its\nown path under its purchase divider — or `null` for a line outside any\npurchase divider. The one join key for \"which purchase line is this\".",
           "paramTags": [],
           "returnsTag": null
@@ -14936,6 +15076,12 @@
         },
         {
           "kind": "variable",
+          "name": "CreditNoteDocTotalsSchema",
+          "declaration": "const CreditNoteDocTotalsSchema: z.ZodType<CreditNoteDocTotals>;",
+          "doc": "Zod schema for {@link CreditNoteDocTotals} — the CREDIT role's totals on both sides (ruling 105)."
+        },
+        {
+          "kind": "variable",
           "name": "CreditNoteSchema",
           "declaration": "const CreditNoteSchema: z.ZodType<CreditNote>;",
           "doc": "Zod schema for a CreditNote."
@@ -14983,7 +15129,7 @@
         {
           "kind": "function",
           "name": "creditLineShapeIssues",
-          "signature": "creditLineShapeIssues(line: typeLiteral): typeLiteral[]",
+          "signature": "creditLineShapeIssues(line: typeLiteral, _: unknown): typeLiteral[]",
           "doc": "**The credit line's shape rules, both sides** (ruling 34; Q4 ruling 106, Q6\nruling 108), keyed on the POINTER rather than the document type:\n\n- the pointer pair is set together (the payable rule, `purchase-bill.ts`);\n- a time-basis line naming no billing row states the time it moves of its own\n  (`counts` non-empty) — an unpointed credit, like an invoice line, prices\n  itself;\n- a line naming a billing row states only the time it takes BACK: empty\n  `counts` = whole units of the named row, non-empty = time per unit, which\n  only a time-basis row has (a flat row's `[flat 1/1]` copied onto a units\n  credit would read as a time credit).\n\n\"A credit naming an extension-section row states counts\" needs the billing\nrow, so the fold, not this refine, holds it.",
           "paramTags": [],
           "returnsTag": null
@@ -25494,7 +25640,7 @@
         {
           "kind": "function",
           "name": "assertPurchaseCreditAction",
-          "signature": "assertPurchaseCreditAction(credit: Pick<PurchaseCredit, \"status\" | \"total_cents\" | \"remaining_credit_cents\">, request: typeLiteral): void",
+          "signature": "assertPurchaseCreditAction(credit: Pick<PurchaseCredit, \"status\" | \"totals\" | \"total_cents\" | \"remaining_credit_cents\">, request: typeLiteral): void",
           "doc": "Refuse a supplier-credit action the ruleset does not offer. Operator routes only.",
           "paramTags": [],
           "returnsTag": null
@@ -25558,7 +25704,7 @@
         {
           "kind": "function",
           "name": "purchaseCreditActionsFor",
-          "signature": "purchaseCreditActionsFor(credit: Pick<PurchaseCredit, \"status\" | \"total_cents\" | \"remaining_credit_cents\">): PurchaseActionOffer[]",
+          "signature": "purchaseCreditActionsFor(credit: Pick<PurchaseCredit, \"status\" | \"totals\" | \"total_cents\" | \"remaining_credit_cents\">): PurchaseActionOffer[]",
           "doc": "Everything an operator may do to a supplier credit: void it while nothing has drawn on it.",
           "paramTags": [],
           "returnsTag": null

@@ -33,6 +33,7 @@ import {
   type PurchaseActionId,
   type PurchaseBill,
   type PurchaseCredit,
+  purchaseCreditTotalCents,
   type PurchaseDestination,
   type PurchaseDocumentItem,
   purchaseItemBasis,
@@ -561,15 +562,15 @@ export function purchaseBillCreditRefusal(
 
 /** Everything an operator may do to a supplier credit: void it while nothing has drawn on it. */
 export function purchaseCreditActionsFor(
-  credit: Pick<PurchaseCredit, "status" | "total_cents" | "remaining_credit_cents">,
+  credit: Pick<PurchaseCredit, "status" | "totals" | "total_cents" | "remaining_credit_cents">,
 ): PurchaseActionOffer[] {
   return purchaseCreditVoidRefusal(credit) === null ? [{ key: "void_credit", action: "void_credit" }] : [];
 }
 
 /** A credit nothing has drawn on, or why not. */
-function purchaseCreditVoidRefusal(credit: Pick<PurchaseCredit, "status" | "total_cents" | "remaining_credit_cents">): string | null {
+function purchaseCreditVoidRefusal(credit: Pick<PurchaseCredit, "status" | "totals" | "total_cents" | "remaining_credit_cents">): string | null {
   if (credit.status === "void") return "The credit is already void.";
-  if (credit.remaining_credit_cents !== credit.total_cents) {
+  if (credit.remaining_credit_cents !== purchaseCreditTotalCents(credit)) {
     return "The credit has been allocated or refunded. Remove those first, as Xero itself requires.";
   }
   return null;
@@ -645,7 +646,7 @@ export function assertPurchaseBillAction(
 
 /** Refuse a supplier-credit action the ruleset does not offer. Operator routes only. */
 export function assertPurchaseCreditAction(
-  credit: Pick<PurchaseCredit, "status" | "total_cents" | "remaining_credit_cents">,
+  credit: Pick<PurchaseCredit, "status" | "totals" | "total_cents" | "remaining_credit_cents">,
   request: { action: "void_credit" },
 ): void {
   const why = purchaseCreditVoidRefusal(credit);

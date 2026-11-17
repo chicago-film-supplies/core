@@ -186,6 +186,8 @@ import {
   RateKey,
   type RateSnapshotType,
   RateSnapshotSchema,
+  TierCountSchema,
+  type TierCountType,
 } from "./price-formula.ts";
 
 // ── Status ───────────────────────────────────────────────────────
@@ -368,6 +370,24 @@ export interface PurchaseLinePrice {
   subtotal_discounted_cents: number;
   /** The net plus Σ `taxes`. Computed by `priceDocument`. */
   total_cents: number;
+  /**
+   * The meter's own output for the line, the AR shape (one-document-model Q6,
+   * ruling 108): a flat line states its one tier, `[flat 1/1]`, as every AR
+   * flat line does. **Optional in beta H1**: no stored purchase line carries the
+   * key (442 in prod, 2026-11-16), the migration writes `[flat 1/1]` on each and
+   * beta H2 requires it. A bill or credit line redeclares it required
+   * ({@link PurchaseDocumentLinePrice}).
+   */
+  counts?: TierCountType[];
+}
+
+/**
+ * Whether `counts` is the flat meter's output — its one tier at `1/1`
+ * (`meterUnits`' `unit: "none"` arm, `utils/price-formulas.ts`), the shape every
+ * AR flat line stores (one-document-model ruling 108).
+ */
+export function isFlatMeterCounts(counts: readonly TierCountType[]): boolean {
+  return counts.length === 1 && counts[0].num === 1 && counts[0].den === 1;
 }
 
 /**
@@ -439,6 +459,8 @@ export const PurchaseLinePriceSchema: z.ZodType<PurchaseLinePrice> = z.strictObj
   replacement_cents: z.int().nullable().optional().meta({ column: true, label: "Replacement" }),
   ...PayableStatedCore,
   ...PayablePriceMoneyCore,
+  // Beta H1: optional (the interface docblock); derived by the meter, never merged.
+  counts: z.array(TierCountSchema).optional().meta({ derived: true, seed: false }),
 });
 
 /**
@@ -491,6 +513,12 @@ export function purchaseLineMoneyIssues(
     issues.push({ path: ["price", "stated_cents"], message: "a flat line states its gross" });
   }
   if (rates.length > 0) issues.push({ path: ["price", "rates"], message: "a flat line carries no rates" });
+  // Beta H1 (ruling 108): a flat line's counts are the meter's `[flat 1/1]`, or
+  // the `[]` every payable line stated before; H2 requires the first.
+  const counts = item.price?.counts;
+  if (counts !== undefined && counts.length > 0 && !isFlatMeterCounts(counts)) {
+    issues.push({ path: ["price", "counts"], message: "a flat line's counts are its one tier at 1/1" });
+  }
   if (item.price && item.amount_cents !== null) {
     issues.push(...statedTotalMoneyIssues(item.price, item.amount_cents));
   }
@@ -788,11 +816,11 @@ export type PurchaseItem = PurchaseSaleItem | PurchaseRentalItem | PurchaseServi
 export type PurchaseRow = PurchaseItem | OrderDocDestinationItemType | OrderDocGroupItemType;
 
 /** The divider row types on either payable grain. */
-export type PayableDividerType = "purchase" | "destination" | "group";
+export type PayableDividerType = "purchase" | "destination" | "group" | "billing";
 
 /** Is this row a line (not a divider)? */
 export function isPurchaseLine<T extends { type: string }>(row: T): row is Exclude<T, { type: PayableDividerType }> {
-  return row.type !== "destination" && row.type !== "group" && row.type !== "purchase";
+  return row.type !== "destination" && row.type !== "group" && row.type !== "purchase" && row.type !== "billing";
 }
 
 /**

@@ -3720,6 +3720,29 @@ interface CreateVariableHolidayInputType {
 }
 ```
 
+### `CreditDocBillingItem`
+
+Zod schema for a credit's billing divider row.
+
+```ts
+const CreditDocBillingItem: z.ZodType<CreditDocBillingItemType>;
+```
+
+### `CreditDocBillingItemType`
+
+A credit's `billing` divider row (ruling 107) — see `BillingDividerArm`
+(`schemas/_dividers.ts`), declared once for both credit row unions.
+
+```ts
+interface CreditDocBillingItemType {
+  uid: string;
+  type: "billing";
+  name: string;
+  path: string[];
+  description: string;
+}
+```
+
 ### `CreditNote`
 
 A credit note issued to an organization.
@@ -3763,6 +3786,14 @@ interface CreditNoteBillingSource {
 }
 ```
 
+### `CreditNoteDocItem`
+
+Zod schema for {@link CreditNoteDocItemType}.
+
+```ts
+const CreditNoteDocItem: z.ZodType<CreditNoteDocItemType>;
+```
+
 ### `CreditNoteDocItemPrice`
 
 Pricing breakdown for a single credit-note line.
@@ -3779,6 +3810,17 @@ interface CreditNoteDocItemPrice {
   taxes: PriceModifierType[];
   total_cents: number;
 }
+```
+
+### `CreditNoteDocItemType`
+
+Any row of an AR credit note's `items[]` (ruling 34 item 1): a line, or a
+billing / order / destination / group divider, at
+`CREDIT_NOTE_ITEM_LEVELS` (`@cfs/core/utils/invoices`). A historic note holds
+lines only (ruling 53 keeps it flat).
+
+```ts
+type CreditNoteDocItemType = CreditNoteDocLineItem | CreditDocBillingItemType | InvoiceDocOrderItemType | InvoiceDocDestinationItemType | OrderDocGroupItemType;
 ```
 
 ### `CreditNoteDocLineItem`
@@ -3877,6 +3919,14 @@ interface CreditNoteDocTotals {
 }
 ```
 
+### `CreditNoteDocTotalsSchema`
+
+Zod schema for {@link CreditNoteDocTotals} — the CREDIT role's totals on both sides (ruling 105).
+
+```ts
+const CreditNoteDocTotalsSchema: z.ZodType<CreditNoteDocTotals>;
+```
+
 ### `CreditNoteSchema`
 
 Zod schema for a CreditNote.
@@ -3917,6 +3967,19 @@ Allowed credit-note statuses.
 
 ```ts
 type CreditNoteStatusType = indexedAccess;
+```
+
+### `CreditSourceRow`
+
+The row keys {@link deriveCreditNoteSources} reads: a divider's `type`, a line's pointer.
+
+```ts
+interface CreditSourceRow {
+  type?: string;
+  uid_billing?: string;
+  path_billing_item?: string[];
+  path_invoice_item?: string[];
+}
 ```
 
 ### `CustodyArm`
@@ -9998,7 +10061,7 @@ interface PatchNameParts {
 The divider row types on either payable grain.
 
 ```ts
-type PayableDividerType = "purchase" | "destination" | "group";
+type PayableDividerType = "purchase" | "destination" | "group" | "billing";
 ```
 
 ### `PayableLineUidFields`
@@ -11377,10 +11440,17 @@ type PurchaseBillSettlement = PayableSettlement & typeLiteral;
 
 ### `PurchaseBillTotals`
 
-A bill's settlement projection — the invoice's keys, see the module docblock.
+A bill's totals — the invoice's keys (ruling 105, one shape per role): the
+breakdown `priceDocument`'s stage 5 sums from the stored lines, and the
+settlement projection.
 
 ```ts
 interface PurchaseBillTotals {
+  subtotal_cents?: number;
+  subtotal_discounted_cents?: number;
+  discount_amount_cents?: number;
+  taxes?: PriceModifierType[];
+  transaction_fees?: PriceModifierType[];
   total_cents: number;
   amount_paid_cents: number;
   amount_credited_cents: number;
@@ -11434,6 +11504,7 @@ interface PurchaseCredit {
   reference: string | null;
   items: PurchaseDocumentRow[];
   destinations: PurchaseDocDestination[];
+  totals?: CreditNoteDocTotals;
   total_cents: number;
   remaining_credit_cents: number;
   uid_thread?: string;
@@ -11836,7 +11907,7 @@ Any row of a bill's or supplier credit's `items[]`: a line, or a
 purchase / destination / group divider (`PURCHASE_DOCUMENT_ITEM_LEVELS`).
 
 ```ts
-type PurchaseDocumentRow = PurchaseDocumentItem | PurchaseDocPurchaseItemType | InvoiceDocDestinationItemType | OrderDocGroupItemType;
+type PurchaseDocumentRow = PurchaseDocumentItem | PurchaseDocPurchaseItemType | CreditDocBillingItemType | InvoiceDocDestinationItemType | OrderDocGroupItemType;
 ```
 
 ### `PurchaseDocumentRowSchema`
@@ -12084,6 +12155,7 @@ interface PurchaseLinePrice {
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   total_cents: number;
+  counts?: TierCountType[];
 }
 ```
 
@@ -17781,6 +17853,45 @@ The supplier's memo a credit item input states (6e-0b1 D4): its
 `price.stated_cents`. `undefined` when it states none, so the line is priced
 by its default partition.
 
+### `creditLineBillingPointer(line: Pick<CreditNoteDocLineItem, "uid_billing" | "path_billing_item" | "path_invoice_item">): typeLiteral | null`
+
+The billing row a credit line names: `uid_billing` + `path_billing_item`, else
+the retiring `path_invoice_item` (whose invoice it cannot name, so `uid` is
+`undefined`). `null` for an unpointed line.
+
+### `creditLinePostingAccount(line: Pick<CreditNoteDocLineItem, "ledger_account" | "coa_posting">): number | undefined`
+
+Where a credit line posts: `ledger_account`, else the retiring `coa_posting`.
+
+### `creditLineShapeIssues(line: typeLiteral, _: unknown): typeLiteral[]`
+
+**The credit line's shape rules, both sides** (ruling 34; Q4 ruling 106, Q6
+ruling 108), keyed on the POINTER rather than the document type:
+
+- the pointer pair is set together (the payable rule, `purchase-bill.ts`);
+- a time-basis line naming no billing row states the time it moves of its own
+  (`counts` non-empty) — an unpointed credit, like an invoice line, prices
+  itself;
+- a line naming a billing row states only the time it takes BACK: empty
+  `counts` = whole units of the named row, non-empty = time per unit, which
+  only a time-basis row has (a flat row's `[flat 1/1]` copied onto a units
+  credit would read as a time credit).
+
+"A credit naming an extension-section row states counts" needs the billing
+row, so the fold, not this refine, holds it.
+
+### `creditLineSourceAccount(line: Pick<CreditNoteDocLineItem, "source_ledger_account" | "coa_revenue">): COARevenueType | null`
+
+The revenue account credited: `source_ledger_account`, else the retiring `coa_revenue`.
+
+### `creditNoteLines(rows: readonly CreditNoteDocItemType[]): CreditNoteDocLineItem[]`
+
+The lines of a credit note's rows, dividers dropped.
+
+### `creditNoteXeroId(note: Pick<CreditNote, "xero_id" | "xero_credit_note_id">): string | null`
+
+A credit note's Xero `CreditNoteID`: `xero_id`, else the retiring `xero_credit_note_id`.
+
 ### `custodyMovementSlot(rule: CustodyRule, bookingType: "rental" | "sale"): string | null`
 
 The movement-id slot an action occupies in one save, or `null` when it writes
@@ -18252,6 +18363,10 @@ path segment, a route param, a Typesense alias. Most already ran a `if
 also narrow the type, so the runtime guard they already had starts paying for
 itself at compile time instead of being duplicated by one.
 
+### `isCreditNoteLine(row: CreditNoteDocItemType): row is CreditNoteDocLineItem`
+
+Whether a credit-note row is a line (every row but the four dividers).
+
 ### `isCustomerCustodyStep(type: MovementTypeType, custody: typeLiteral | null): boolean`
 
 Whether a movement of `type` carrying `custody` is a step that happens
@@ -18301,6 +18416,12 @@ from every other rule here, which is backwards.
 refuses an event source from `POST /cards` and from a recurrence prototype,
 which is what makes this predicate an authorization fact rather than a
 heuristic. Exported since core#130 row 6, so no consumer spells it again.
+
+### `isFlatMeterCounts(counts: readonly TierCountType[]): boolean`
+
+Whether `counts` is the flat meter's output — its one tier at `1/1`
+(`meterUnits`' `unit: "none"` arm, `utils/price-formulas.ts`), the shape every
+AR flat line stores (one-document-model ruling 108).
 
 ### `isFulfillableItem(item: OrderDocItemType): item is OrderDocLineItemType`
 
@@ -18809,9 +18930,20 @@ the engine's own guard read the same list.
 
 Returns `{ path, message }[]`; empty means the rule is well-formed.
 
+### `purchaseCreditLineBillPointer(line: Pick<PurchaseDocumentLineBase, "uid_billing" | "path_billing_item" | "uid_purchase_bill" | "path_bill_item">): typeLiteral | null`
+
+The bill row a supplier credit line names: `uid_billing` + `path_billing_item`,
+else the retiring `uid_purchase_bill` + `path_bill_item` (ruling 34; the AR
+note's `creditLineBillingPointer`). `null` for an unpointed line. Deleted with
+the old pair in beta H2.
+
 ### `purchaseCreditPurchaseUid(credit: Pick<PurchaseCredit, "sources">): string | undefined`
 
 The purchase a credit was raised on, or `undefined` when its sources name none.
+
+### `purchaseCreditTotalCents(credit: Pick<PurchaseCredit, "totals" | "total_cents">): number`
+
+A supplier credit's total: `totals.total_cents`, else the retiring top-level `total_cents`.
 
 ### `purchaseDocumentLines(rows: readonly PurchaseDocumentRow[]): PurchaseDocumentPostedItem[]`
 
@@ -18834,7 +18966,7 @@ The product an item ORDERS — a sale or rental line's uid — or `undefined`: a
 service line's `uid_product` is attribution, and a replacement's twin is not
 an order.
 
-### `purchaseLineKeyOf(row: Pick<PurchaseDocumentItem, "path" | "path_purchase_item">): string | null`
+### `purchaseLineKeyOf(row: Pick<PurchaseDocumentItem, "path" | "path_purchase_item" | "uid_billing">): string | null`
 
 The purchase line a bill or credit line bills, as `[purchase uid, ...path in
 that purchase]` joined by `/` — its move pointer when it has one, else its
@@ -29387,7 +29519,7 @@ const PURCHASE_STATUS_TRAITS: Readonly<Record<PurchaseStatusType, PurchaseStatus
 The divider row types on either payable grain.
 
 ```ts
-type PayableDividerType = "purchase" | "destination" | "group";
+type PayableDividerType = "purchase" | "destination" | "group" | "billing";
 ```
 
 ### `PayableLineUidFields`
@@ -29782,6 +29914,7 @@ interface PurchaseLinePrice {
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   total_cents: number;
+  counts?: TierCountType[];
 }
 ```
 
@@ -30157,6 +30290,12 @@ Derive `query_by_orders` — the distinct union of the rental items' `uid_orders
 Derive `query_by_products` — the distinct products the items ORDER, in first
 appearance order. Attribution is not an order and is left out. The one author
 of the mirror, called by every writer.
+
+### `isFlatMeterCounts(counts: readonly TierCountType[]): boolean`
+
+Whether `counts` is the flat meter's output — its one tier at `1/1`
+(`meterUnits`' `unit: "none"` arm, `utils/price-formulas.ts`), the shape every
+AR flat line stores (one-document-model ruling 108).
 
 ### `isKitHeaderLine(row: object): boolean`
 
@@ -30634,10 +30773,17 @@ const PurchaseBillSchema: z.ZodType<PurchaseBill>;
 
 ### `PurchaseBillTotals`
 
-A bill's settlement projection — the invoice's keys, see the module docblock.
+A bill's totals — the invoice's keys (ruling 105, one shape per role): the
+breakdown `priceDocument`'s stage 5 sums from the stored lines, and the
+settlement projection.
 
 ```ts
 interface PurchaseBillTotals {
+  subtotal_cents?: number;
+  subtotal_discounted_cents?: number;
+  discount_amount_cents?: number;
+  taxes?: PriceModifierType[];
+  transaction_fees?: PriceModifierType[];
   total_cents: number;
   amount_paid_cents: number;
   amount_credited_cents: number;
@@ -30691,6 +30837,7 @@ interface PurchaseCredit {
   reference: string | null;
   items: PurchaseDocumentRow[];
   destinations: PurchaseDocDestination[];
+  totals?: CreditNoteDocTotals;
   total_cents: number;
   remaining_credit_cents: number;
   uid_thread?: string;
@@ -31004,7 +31151,7 @@ Any row of a bill's or supplier credit's `items[]`: a line, or a
 purchase / destination / group divider (`PURCHASE_DOCUMENT_ITEM_LEVELS`).
 
 ```ts
-type PurchaseDocumentRow = PurchaseDocumentItem | PurchaseDocPurchaseItemType | InvoiceDocDestinationItemType | OrderDocGroupItemType;
+type PurchaseDocumentRow = PurchaseDocumentItem | PurchaseDocPurchaseItemType | CreditDocBillingItemType | InvoiceDocDestinationItemType | OrderDocGroupItemType;
 ```
 
 ### `PurchaseDocumentRowSchema`
@@ -31171,15 +31318,26 @@ bill its lines name, in line order. `query_by_sources` is
 The purchases a bill's `purchase` dividers name, in document order — the
 one author of `PurchaseBill.query_by_purchases`.
 
+### `purchaseCreditLineBillPointer(line: Pick<PurchaseDocumentLineBase, "uid_billing" | "path_billing_item" | "uid_purchase_bill" | "path_bill_item">): typeLiteral | null`
+
+The bill row a supplier credit line names: `uid_billing` + `path_billing_item`,
+else the retiring `uid_purchase_bill` + `path_bill_item` (ruling 34; the AR
+note's `creditLineBillingPointer`). `null` for an unpointed line. Deleted with
+the old pair in beta H2.
+
 ### `purchaseCreditPurchaseUid(credit: Pick<PurchaseCredit, "sources">): string | undefined`
 
 The purchase a credit was raised on, or `undefined` when its sources name none.
+
+### `purchaseCreditTotalCents(credit: Pick<PurchaseCredit, "totals" | "total_cents">): number`
+
+A supplier credit's total: `totals.total_cents`, else the retiring top-level `total_cents`.
 
 ### `purchaseDocumentLines(rows: readonly PurchaseDocumentRow[]): PurchaseDocumentPostedItem[]`
 
 The lines of a bill's or credit's rows, with dividers and kit headers dropped.
 
-### `purchaseLineKeyOf(row: Pick<PurchaseDocumentItem, "path" | "path_purchase_item">): string | null`
+### `purchaseLineKeyOf(row: Pick<PurchaseDocumentItem, "path" | "path_purchase_item" | "uid_billing">): string | null`
 
 The purchase line a bill or credit line bills, as `[purchase uid, ...path in
 that purchase]` joined by `/` — its move pointer when it has one, else its
@@ -31799,6 +31957,14 @@ interface CreditNoteDocTotals {
 }
 ```
 
+### `CreditNoteDocTotalsSchema`
+
+Zod schema for {@link CreditNoteDocTotals} — the CREDIT role's totals on both sides (ruling 105).
+
+```ts
+const CreditNoteDocTotalsSchema: z.ZodType<CreditNoteDocTotals>;
+```
+
 ### `CreditNoteSchema`
 
 Zod schema for a CreditNote.
@@ -31864,7 +32030,7 @@ the retiring `path_invoice_item` (whose invoice it cannot name, so `uid` is
 
 Where a credit line posts: `ledger_account`, else the retiring `coa_posting`.
 
-### `creditLineShapeIssues(line: typeLiteral): typeLiteral[]`
+### `creditLineShapeIssues(line: typeLiteral, _: unknown): typeLiteral[]`
 
 **The credit line's shape rules, both sides** (ruling 34; Q4 ruling 106, Q6
 ruling 108), keyed on the POINTER rather than the document type:
@@ -53104,7 +53270,7 @@ Refuse a purchase action the ruleset does not offer. Operator routes only.
 
 Refuse a bill action the ruleset does not offer, or one past its limit. Operator routes only.
 
-### `assertPurchaseCreditAction(credit: Pick<PurchaseCredit, "status" | "total_cents" | "remaining_credit_cents">, request: typeLiteral): void`
+### `assertPurchaseCreditAction(credit: Pick<PurchaseCredit, "status" | "totals" | "total_cents" | "remaining_credit_cents">, request: typeLiteral): void`
 
 Refuse a supplier-credit action the ruleset does not offer. Operator routes only.
 
@@ -53197,7 +53363,7 @@ allocation it holds.
 Only FLAT lines are read for the negative: a time line's billing is its
 metered time, which a void cannot strand a credit under.
 
-### `purchaseCreditActionsFor(credit: Pick<PurchaseCredit, "status" | "total_cents" | "remaining_credit_cents">): PurchaseActionOffer[]`
+### `purchaseCreditActionsFor(credit: Pick<PurchaseCredit, "status" | "totals" | "total_cents" | "remaining_credit_cents">): PurchaseActionOffer[]`
 
 Everything an operator may do to a supplier credit: void it while nothing has drawn on it.
 

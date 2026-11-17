@@ -153,7 +153,7 @@ export function purchaseDivider(uid: string, name = "Chicago") {
  */
 export function asCreditRows<R extends { type: string }>(rows: readonly R[]): R[] {
   return rows.map((r) =>
-    r.type === "purchase" || r.type === "destination" || r.type === "group" || "reverses_billing" in r
+    r.type === "purchase" || r.type === "destination" || r.type === "group" || r.type === "billing" || "reverses_billing" in r
       ? r
       : { ...r, reverses_billing: true }
   );

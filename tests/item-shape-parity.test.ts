@@ -368,7 +368,7 @@ function payableArmShapes(collection: (typeof PAYABLE_GRAINS)[number]): Record<s
   assertEquals(arr._zod.def.type, "array", `${collection}: items is not an array`);
   const union = arr._zod.def.element;
   assertEquals(union._zod.def.type, "union", `${collection}: items element is not a union`);
-  const DIVIDERS = new Set(["destination", "group", "purchase"]);
+  const DIVIDERS = new Set(["destination", "group", "purchase", "billing"]);
   // deno-lint-ignore no-explicit-any
   const shapes = (union._zod.def.options as any[]).map((o) => o._zod.def.shape);
   // The LINE arms: a divider arm's `type` literal is a divider type.

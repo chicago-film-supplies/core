@@ -20,6 +20,9 @@ import {
   type PurchaseServiceItem,
   PurchaseServiceItemSchema,
   derivePurchaseCreditSources,
+  purchaseCreditLineBillPointer,
+  purchaseCreditTotalCents,
+  purchaseLineKeyOf,
   INVOICE_FIELD_CLASSES,
   INVOICE_FIELD_FREEZE,
   PURCHASE_ITEM_TYPES,
@@ -1178,9 +1181,15 @@ Deno.test("PurchaseBillSchema: a bill line's price money is what its stated amou
   );
 });
 
-Deno.test("PurchaseBillSchema: a flat line meters nothing", () => {
-  const flat = billItem({ price: { ...flatPrice, counts: [{ rate_key: "week", num: 1, den: 1 }] } });
-  assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [flat] })), ["items.2.price.counts"]);
+Deno.test("PurchaseBillSchema: a flat line's counts are the meter's one tier at 1/1, or `[]` until beta H2 (ruling 108)", () => {
+  const counted = (counts: unknown[]) => billItem({ price: { ...flatPrice, counts } });
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [counted([])] })), []);
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [counted([{ rate_key: "flat", num: 1, den: 1 }])] })), []);
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [counted([{ rate_key: "week", num: 2, den: 1 }])] })), ["items.2.price.counts"]);
+  assertEquals(
+    issuePaths(PurchaseBillSchema, bill({ items: [counted([{ rate_key: "flat", num: 1, den: 1 }, { rate_key: "flat", num: 1, den: 1 }])] })),
+    ["items.2.price.counts"],
+  );
 });
 
 Deno.test("PurchaseBillSchema: every line states `price`; `units` and `dates` are retired (one-document-model Phase 3)", () => {
@@ -1245,7 +1254,8 @@ Deno.test("classifySharedFields(PurchaseSchema, bill/credit) is fail-closed — 
   assertEquals(group("items[].amount_cents"), "flat_money");
   assertEquals(kinds["items[].dates"], undefined);
   assertEquals(kinds["items[].units"], undefined);
-  assertEquals(kinds["items[].price.counts"], undefined);
+  // The meter's output on every grain since ruling 108 (Q6): shared, derived, never merged.
+  assertEquals(kinds["items[].price.counts"], "derived");
   // The pair follows as the order's does.
   assertEquals(kinds["destinations[].delivery"], "atom");
   assertEquals(kinds["destinations[].dates.delivery_start"], "propagated");
@@ -1308,6 +1318,62 @@ Deno.test("PurchaseBillSchema: the stored status is the derivation's, and void i
   assertEquals(paths({ status: "void", voided_at: mockTimestamp }), []);
   const closedOwing = bill({ totals: { ...bill().totals, closure_count: 1 } });
   assertEquals(issuePaths(PurchaseBillSchema, closedOwing), ["totals.closure_count"]);
+});
+
+Deno.test("PurchaseCreditSchema: a line naming a bill row sits under that bill's billing divider (ruling 34, 107)", () => {
+  const BILL = "testbill100000000000";
+  const billing = { uid: BILL, type: "billing", name: "Bill #1", path: [BILL], description: "" };
+  const pointed = (over: Record<string, unknown> = {}) =>
+    billItem({
+      quantity: 1,
+      amount_cents: 46995,
+      path: [BILL, P, D, lid(1)],
+      uid_billing: BILL,
+      path_billing_item: [P, D, lid(1)],
+      ...over,
+    });
+  const rows = (line: unknown) => asCreditRows([billing, { ...scope, path: [BILL, P] }, { ...docDivider, path: [BILL, P, D] }, line] as { type: string }[]);
+  const sources = derivePurchaseCreditSources(P, [pointed()] as never);
+  assertEquals(sources.query_by_sources, [`purchases:${P}`, `purchase-bills:${BILL}`]);
+  const doc = (line: unknown) => ({ ...credit(), items: rows(line), ...sources });
+  assertEquals(issuePaths(PurchaseCreditSchema, doc(pointed())), []);
+  // The pointer's document is the row's billing divider.
+  assertEquals(issuePaths(PurchaseCreditSchema, doc(pointed({ uid_billing: "testbill200000000000" }))).includes("items.3.path"), true);
+  // Both or neither.
+  const { path_billing_item: _p, ...half } = pointed() as Record<string, unknown>;
+  assertEquals(issuePaths(PurchaseCreditSchema, doc(half)).includes("items.3.path_billing_item"), true);
+  // A whole-unit credit of a flat row states no time of its own; `[flat 1/1]` would read as time.
+  const flatTime = pointed({ price: { ...flatPrice, counts: [{ rate_key: "flat", num: 1, den: 1 }] } });
+  assertEquals(issuePaths(PurchaseCreditSchema, doc(flatTime)).includes("items.3.price.counts"), true);
+  // The key and the pointer read through the billing level.
+  assertEquals(purchaseLineKeyOf(pointed() as never), [P, D, lid(1)].join("/"));
+  assertEquals(purchaseCreditLineBillPointer(pointed() as never), { uid: BILL, path: [P, D, lid(1)] });
+  assertEquals(
+    purchaseCreditLineBillPointer({ uid_purchase_bill: BILL, path_bill_item: [P, D, lid(1)] }),
+    { uid: BILL, path: [P, D, lid(1)] },
+    "the retiring pair reads the same until beta H2",
+  );
+  // A bill holds neither a billing divider nor the new pointer.
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [billItem({ uid_billing: BILL, path_billing_item: [P, D, lid(1)] })] })).includes("items"), true);
+  const withBilling = { ...bill(), items: [billing, ...bill().items] };
+  assertEquals(issuePaths(PurchaseBillSchema, withBilling).includes("items.0.type"), true);
+});
+
+Deno.test("PurchaseCreditSchema: `totals` is the note's shape, equal to `total_cents` through beta H1 (ruling 105)", () => {
+  const totals = { subtotal_cents: 46995, subtotal_discounted_cents: 46995, discount_amount_cents: 0, taxes: [], total_cents: 46995 };
+  assertEquals(issuePaths(PurchaseCreditSchema, credit({ totals })), []);
+  assertEquals(purchaseCreditTotalCents(credit({ totals: { ...totals, total_cents: 1 } }) as never), 1, "totals win");
+  assertEquals(issuePaths(PurchaseCreditSchema, credit({ totals: { ...totals, total_cents: 1 } })).includes("totals.total_cents"), true);
+  assertEquals(
+    issuePaths(PurchaseCreditSchema, credit({ totals: { ...totals, taxes: [{ uid: "tax", name: "T", rate: 1, type: "percent", amount_cents: 1 }] } })).includes("totals.taxes"),
+    true,
+    "payable is exempt",
+  );
+});
+
+Deno.test("PurchaseBillSchema: the invoice's breakdown keys are optional beside the settlement keys (ruling 105)", () => {
+  const breakdown = { subtotal_cents: 140985, subtotal_discounted_cents: 140985, discount_amount_cents: 0, taxes: [], transaction_fees: [] };
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ totals: { ...bill().totals, ...breakdown } })), []);
 });
 
 Deno.test("PurchaseCreditSchema: sources are derived from the lines; a line names a bill line with both keys or neither", () => {

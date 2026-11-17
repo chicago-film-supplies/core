@@ -514,20 +514,33 @@ export function creditNoteXeroId(note: Pick<CreditNote, "xero_id" | "xero_credit
  * "A credit naming an extension-section row states counts" needs the billing
  * row, so the fold, not this refine, holds it.
  */
-export function creditLineShapeIssues(line: {
-  uid_billing?: string;
-  path_billing_item?: string[];
-  path_invoice_item?: string[];
-  price: { price_formula: { basis: string } | null; counts: readonly unknown[] };
-}): { path: (string | number)[]; message: string }[] {
+export function creditLineShapeIssues(
+  line: {
+    uid_billing?: string;
+    path_billing_item?: string[];
+    /** The AR note's retiring pointer. */
+    path_invoice_item?: string[];
+    /** The supplier credit's retiring pointer (with `uid_purchase_bill`). */
+    path_bill_item?: string[];
+    price: { price_formula: { basis: string } | null; counts: readonly unknown[] };
+  },
+  opts: {
+    /**
+     * A LINKED payable document's money is Xero's, so an unpointed time line
+     * there states whatever counts the link could read (`purchase-bill.ts`).
+     */
+    linked?: boolean;
+  } = {},
+): { path: (string | number)[]; message: string }[] {
   const issues: { path: (string | number)[]; message: string }[] = [];
   if ((line.uid_billing === undefined) !== (line.path_billing_item === undefined)) {
     issues.push({ path: ["path_billing_item"], message: "uid_billing and path_billing_item are set together" });
   }
-  const pointed = line.path_billing_item !== undefined || line.path_invoice_item !== undefined;
+  const pointed = line.path_billing_item !== undefined || line.path_invoice_item !== undefined ||
+    line.path_bill_item !== undefined;
   const time = line.price.price_formula?.basis === "time";
   const counts = line.price.counts.length;
-  if (!pointed && time && counts === 0) {
+  if (!pointed && time && counts === 0 && opts.linked !== true) {
     issues.push({ path: ["price", "counts"], message: "a time line naming no billing row states the counts it moves" });
   }
   if (pointed && !time && counts > 0) {
@@ -613,7 +626,8 @@ export interface CreditNoteDocTotals {
   total_cents: number;
 }
 
-const CreditNoteDocTotalsSchema: z.ZodType<CreditNoteDocTotals> = z.strictObject({
+/** Zod schema for {@link CreditNoteDocTotals} — the CREDIT role's totals on both sides (ruling 105). */
+export const CreditNoteDocTotalsSchema: z.ZodType<CreditNoteDocTotals> = z.strictObject({
   subtotal_cents: z.int().meta({ column: true, label: "Subtotal" }),
   subtotal_discounted_cents: z.int().meta({ column: true, label: "Discounted Subtotal" }),
   discount_amount_cents: z.int().meta({ column: true, label: "Discount" }),

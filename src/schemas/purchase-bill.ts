@@ -107,10 +107,12 @@ import {
   DiscountInput,
   type DiscountInputType,
   PriceModifier,
+  type PriceModifierType,
   TaxRef,
 } from "./order.ts";
 import { LedgerPostingCore, LineItemCore, LineTaxCore, PayableKitLedgerAccount } from "./_items.ts";
-import { DestinationSectionDividerArm, GroupDividerArm } from "./_dividers.ts";
+import { BillingDividerArm, DestinationSectionDividerArm, GroupDividerArm } from "./_dividers.ts";
+import { type CreditDocBillingItemType, CreditNoteDocTotalsSchema, type CreditNoteDocTotals, creditLineShapeIssues } from "./credit-note.ts";
 import { extendChecked } from "./_extend.ts";
 import type { InvoiceDocDestinationItemType } from "./invoice.ts";
 import { PriceFormulaRefSchema, RateKey, RateSnapshotSchema, TierCountSchema, type TierCountType } from "./price-formula.ts";
@@ -247,10 +249,26 @@ interface PurchaseDocumentLineBase {
    * document, so the bill's uid has to travel with it. A close and a linked
    * credit name none: a close has no single bill, and Xero's allocation view
    * carries no lines (api-cloudrun#1439).
+   *
+   * ⚠️ **Retiring (ruling 34): renamed {@link uid_billing}**, the one pointer
+   * name on both sides. Beta H1 declares both, every writer writes only the new
+   * one and readers go through {@link purchaseCreditLineBillPointer}; 0 stored
+   * credit lines name a bill (2026-11-16), and beta H2 deletes this pair.
    */
   uid_purchase_bill?: string;
-  /** The `path` of the bill line credited — the AR credit note's `path_invoice_item`. */
+  /** The `path` of the bill line credited. Retiring: renamed {@link path_billing_item}. */
   path_bill_item?: string[];
+  /**
+   * **The billing document this credit line credits** (ruling 34, one name on
+   * both sides): a bill's uid here, an invoice's on an AR credit note. Set
+   * together with {@link path_billing_item} by every writer raising the credit
+   * from a bill row; absent on a pool, linked or charge-only credit line (ruling
+   * 104). A bill line carries neither. A pointed line sits under the bill's
+   * `billing` divider: `path[0] === uid_billing` (ruling 107).
+   */
+  uid_billing?: string;
+  /** The `path` of the bill row credited, on the bill (ruling 34). */
+  path_billing_item?: string[];
   /**
    * **The first unit of its SOURCE line this line covers** (one-document-model
    * D7): a bill line's units `(units_from, units_from + quantity]` of its
@@ -409,6 +427,9 @@ export const PurchaseDocPurchaseItem: z.ZodType<PurchaseDocPurchaseItemType> = P
 export type PurchaseDocumentRow =
   | PurchaseDocumentItem
   | PurchaseDocPurchaseItemType
+  // A supplier credit's billing divider (ruling 107): the shared credit arm,
+  // one level above the bill's own purchase divider. A bill refuses it.
+  | CreditDocBillingItemType
   // The billing destination divider, `path_extension_for` included (ruling 89):
   // a bill bills extra time as an extension section, as an invoice does.
   | InvoiceDocDestinationItemType
@@ -452,11 +473,34 @@ export const PurchaseDocDestinationSchema: z.ZodType<PurchaseDocDestination> = z
  * own path under its purchase divider — or `null` for a line outside any
  * purchase divider. The one join key for "which purchase line is this".
  */
-export function purchaseLineKeyOf(row: Pick<PurchaseDocumentItem, "path" | "path_purchase_item">): string | null {
-  if (row.path.length < 2) return null;
-  const uidPurchase = row.path[0];
-  const local = row.path_purchase_item ?? row.path.slice(1);
+export function purchaseLineKeyOf(
+  row: Pick<PurchaseDocumentItem, "path" | "path_purchase_item" | "uid_billing">,
+): string | null {
+  // A supplier credit line under its bill's `billing` divider (ruling 107)
+  // keys as the bill row it copies: the billing level is not the purchase's.
+  const path = row.uid_billing !== undefined && row.path[0] === row.uid_billing ? row.path.slice(1) : row.path;
+  if (path.length < 2) return null;
+  const uidPurchase = path[0];
+  const local = row.path_purchase_item ?? path.slice(1);
   return [uidPurchase, ...local].join("/");
+}
+
+/**
+ * The bill row a supplier credit line names: `uid_billing` + `path_billing_item`,
+ * else the retiring `uid_purchase_bill` + `path_bill_item` (ruling 34; the AR
+ * note's `creditLineBillingPointer`). `null` for an unpointed line. Deleted with
+ * the old pair in beta H2.
+ */
+export function purchaseCreditLineBillPointer(
+  line: Pick<PurchaseDocumentLineBase, "uid_billing" | "path_billing_item" | "uid_purchase_bill" | "path_bill_item">,
+): { uid: string; path: string[] } | null {
+  if (line.uid_billing !== undefined && line.path_billing_item !== undefined) {
+    return { uid: line.uid_billing, path: line.path_billing_item };
+  }
+  if (line.uid_purchase_bill !== undefined && line.path_bill_item !== undefined) {
+    return { uid: line.uid_purchase_bill, path: line.path_bill_item };
+  }
+  return null;
 }
 
 // The shared head, posting and tax cores (one instance per key) and the line's
@@ -480,9 +524,13 @@ const docItemShape = {
   // A linked document's Xero `LineItemID` (docblock above). Not shared.
   xero_line_id: z.uuid().optional(),
   // A credit line's pointer at the bill line it credits (the docblock above).
+  // Retiring in beta H1 (ruling 34): renamed `uid_billing` / `path_billing_item`.
   uid_purchase_bill: FirestoreId.optional().meta({ seed: false }),
   // `seed: false`: `[]` fails `.min(1)`, exactly as `path_invoice_item`.
   path_bill_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
+  // The one pointer name on both sides (ruling 34), the AR note's spelling.
+  uid_billing: FirestoreId.optional().meta({ seed: false }),
+  path_billing_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
   // A part's first unit of its source line (the docblock above). Writer-set.
   units_from: z.int().min(0).nullable().optional().meta({ seed: false }),
   // A credit line's billing-reversal marker (the docblock above). `seed: false`:
@@ -509,14 +557,13 @@ function documentLineIssues(
     "document",
   );
   issues.push(...payablePostingIssues(item.type, item.ledger_account), ...kitHeaderIssues(item), ...zeroPricedMoneyIssues(item));
-  const counts = item.price?.counts.length ?? 0;
-  const time = item.price?.price_formula.basis === "time";
-  if (!time && counts > 0) issues.push({ path: ["price", "counts"], message: "a flat line meters no counts" });
-  // A pushed time line's money IS its counts priced, so it states them; a linked
-  // one's money is Xero's, and its counts are whatever the link could read.
-  if (time && origin === "pushed" && counts === 0) {
-    issues.push({ path: ["price", "counts"], message: "a pushed time line states the counts it bills" });
-  }
+  // The credit line's shape rules, shared with the AR note and keyed on the
+  // POINTER (ruling 34; Q4 ruling 106, Q6 ruling 108): an unpointed time line
+  // states the counts it moves — a pushed one, since a linked one's money is
+  // Xero's and its counts are whatever the link could read — and a pointed line
+  // states only the time it takes back (`[]` = whole units of the bill row).
+  // A flat line's own counts are `purchaseLineMoneyIssues`'.
+  issues.push(...creditLineShapeIssues(item, { linked: origin === "linked" }));
   if ((item.uid_purchase_bill === undefined) !== (item.path_bill_item === undefined)) {
     issues.push({ path: ["path_bill_item"], message: "uid_purchase_bill and path_bill_item are set together" });
   }
@@ -581,6 +628,7 @@ export const PurchaseDocumentItemSchema: z.ZodType<PurchaseDocumentItem> = z.dis
 
 /** Zod schema for any {@link PurchaseDocumentRow}. */
 export const PurchaseDocumentRowSchema: z.ZodType<PurchaseDocumentRow> = z.discriminatedUnion("type", [
+  BillingDividerArm,
   PurchaseDocPurchaseItemInner,
   DestinationSectionDividerArm,
   GroupDividerArm,
@@ -636,8 +684,24 @@ function documentItemsIssues(
 
 // ── Purchase bill ────────────────────────────────────────────────
 
-/** A bill's settlement projection — the invoice's keys, see the module docblock. */
+/**
+ * A bill's totals — the invoice's keys (ruling 105, one shape per role): the
+ * breakdown `priceDocument`'s stage 5 sums from the stored lines, and the
+ * settlement projection.
+ */
 export interface PurchaseBillTotals {
+  /**
+   * The breakdown keys, the invoice's (`InvoiceDocTotalsType`). **Optional in
+   * beta H1**: the migration writes them on the 407 stored bills from their
+   * lines' stored money, every bill writer writes them, and beta H2 requires
+   * them. `taxes` is `[]` (payable is exempt); `transaction_fees` is `[]` (no
+   * payable fee line exists).
+   */
+  subtotal_cents?: number;
+  subtotal_discounted_cents?: number;
+  discount_amount_cents?: number;
+  taxes?: PriceModifierType[];
+  transaction_fees?: PriceModifierType[];
   total_cents: number;
   amount_paid_cents: number;
   amount_credited_cents: number;
@@ -652,6 +716,13 @@ export interface PurchaseBillTotals {
 
 /** Zod schema for PurchaseBillTotals. */
 export const PurchaseBillTotalsSchema: z.ZodType<PurchaseBillTotals> = z.strictObject({
+  // Beta H1: optional (the interface docblock); `seed: false` keeps a form seed
+  // from stating a breakdown its writer has not summed.
+  subtotal_cents: z.int().optional().meta({ seed: false, column: true, label: "Subtotal" }),
+  subtotal_discounted_cents: z.int().optional().meta({ seed: false, column: true, label: "Discounted Subtotal" }),
+  discount_amount_cents: z.int().optional().meta({ seed: false, column: true, label: "Discount" }),
+  taxes: z.array(PriceModifier).optional().meta({ seed: false, label: "Tax" }),
+  transaction_fees: z.array(PriceModifier).optional().meta({ seed: false, label: "Transaction Fee" }),
   total_cents: z.int().min(0).meta({ column: true, label: "Total" }),
   amount_paid_cents: z.int().meta({ column: true, label: "Paid" }),
   amount_credited_cents: z.int().meta({ column: true, label: "Credited" }),
@@ -665,7 +736,7 @@ export const PurchaseBillTotalsSchema: z.ZodType<PurchaseBillTotals> = z.strictO
  * one author of `PurchaseBill.query_by_purchases`.
  */
 export function deriveQueryByPurchases(rows: readonly Pick<PurchaseDocumentRow, "type" | "uid">[]): string[] {
-  return rows.filter((r) => r.type === "purchase").map((r) => r.uid);
+  return [...new Set(rows.filter((r) => r.type === "purchase").map((r) => r.uid))];
 }
 
 /** Every `purchase` divider names a distinct purchase, and the mirrors agree with them. */
@@ -675,7 +746,11 @@ function purchaseScopeIssues(
   uidPurchase?: string,
 ): void {
   const scoped = deriveQueryByPurchases(doc.items);
-  if (new Set(scoped).size !== scoped.length) {
+  // Per PARENT, not per document: a supplier credit naming two bills of one
+  // purchase holds its purchase divider once under each bill's `billing`
+  // divider (ruling 107). A bill's purchase dividers all sit at the root.
+  const dividerPaths = doc.items.filter((r) => r.type === "purchase").map((r) => r.path.join("/"));
+  if (new Set(dividerPaths).size !== dividerPaths.length) {
     ctx.addIssue({ code: "custom", path: ["items"], message: "a purchase is scoped by one purchase divider per document" });
   }
   if (doc.query_by_purchases !== undefined) {
@@ -809,8 +884,16 @@ function checkPurchaseBill(b: PurchaseBill, ctx: z.RefinementCtx): void {
   }
   checkBillStatus(b, ctx);
   purchaseDocumentLines(b.items).forEach((l) => {
-    if (l.uid_purchase_bill !== undefined || l.path_bill_item !== undefined) {
+    if (
+      l.uid_purchase_bill !== undefined || l.path_bill_item !== undefined ||
+      l.uid_billing !== undefined || l.path_billing_item !== undefined
+    ) {
       ctx.addIssue({ code: "custom", path: ["items"], message: "a bill line credits nothing; only a supplier credit line names a bill line" });
+    }
+  });
+  b.items.forEach((row, i) => {
+    if (row.type === "billing") {
+      ctx.addIssue({ code: "custom", path: ["items", i, "type"], message: "a bill holds no billing divider; only a credit sits under the document it credits" });
     }
   });
   // Every row, not `purchaseDocumentLines`: that drops kit headers, and a kit
@@ -954,6 +1037,22 @@ export interface PurchaseCredit {
   items: PurchaseDocumentRow[];
   /** The purchase's pairs the credited lines sit under ({@link PurchaseDocDestination}). */
   destinations: PurchaseDocDestination[];
+  /**
+   * The AR credit note's totals (ruling 105, one shape per role); `taxes` is
+   * `[]` (payable is exempt). Beta H1: optional beside the retiring
+   * {@link total_cents}, read through {@link purchaseCreditTotalCents}; the
+   * migration writes it on the 2 stored credits and beta H2 requires it.
+   */
+  totals?: CreditNoteDocTotals;
+  /**
+   * Retiring (ruling 105): moved into {@link totals}, deleted in beta H2.
+   *
+   * ⚠️ **Still REQUIRED through beta H1, and every writer states it beside
+   * `totals`, equal to `totals.total_cents`** — a deliberate departure from the
+   * spec's "both spellings optional": "one of two optional keys" is a refine the
+   * fixture contract (`getTestDoc`, required keys only) cannot satisfy, while a
+   * required old key costs nothing (H2's migration drops it with the rest).
+   */
   total_cents: number;
   /**
    * Credit not yet consumed: a **co-written projection** of the journal,
@@ -971,6 +1070,11 @@ export interface PurchaseCredit {
   updated_at: FirestoreTimestampType;
 }
 
+/** A supplier credit's total: `totals.total_cents`, else the retiring top-level `total_cents`. */
+export function purchaseCreditTotalCents(credit: Pick<PurchaseCredit, "totals" | "total_cents">): number {
+  return credit.totals?.total_cents ?? credit.total_cents;
+}
+
 /** The purchase a credit was raised on, or `undefined` when its sources name none. */
 export function purchaseCreditPurchaseUid(credit: Pick<PurchaseCredit, "sources">): string | undefined {
   return credit.sources.find((s) => s.collection === "purchases")?.uid;
@@ -985,7 +1089,7 @@ export function derivePurchaseCreditSources(
   uidPurchase: string,
   rows: readonly PurchaseDocumentRow[],
 ): Pick<PurchaseCredit, "sources" | "query_by_sources"> {
-  const bills = [...new Set(purchaseDocumentLines([...rows]).flatMap((l) => l.uid_purchase_bill ?? []))];
+  const bills = [...new Set(purchaseDocumentLines([...rows]).flatMap((l) => purchaseCreditLineBillPointer(l)?.uid ?? []))];
   const sources: DocSourceType[] = [
     { collection: "purchases", uid: uidPurchase },
     ...bills.map((uid) => ({ collection: "purchase-bills" as const, uid })),
@@ -994,7 +1098,22 @@ export function derivePurchaseCreditSources(
 }
 
 function checkPurchaseCredit(c: PurchaseCredit, ctx: z.RefinementCtx): void {
-  documentItemsIssues(c, c.total_cents, ["total_cents"], ctx);
+  if (c.totals !== undefined && c.totals.total_cents !== c.total_cents) {
+    ctx.addIssue({ code: "custom", path: ["totals", "total_cents"], message: "a supplier credit's totals.total_cents equals its total_cents until beta H2" });
+  }
+  const total = purchaseCreditTotalCents(c);
+  documentItemsIssues(c, total, c.totals !== undefined ? ["totals", "total_cents"] : ["total_cents"], ctx);
+  if (c.totals !== undefined && c.totals.taxes.length > 0) {
+    ctx.addIssue({ code: "custom", path: ["totals", "taxes"], message: "a supplier credit carries no taxes: the payable side is exempt" });
+  }
+  // A pointed line sits under the billing divider of the bill it names (ruling
+  // 107). Only a line on the new pointer: the retiring pair predates the divider.
+  c.items.forEach((row, i) => {
+    if (!isPurchaseLine(row) || row.uid_billing === undefined) return;
+    if (row.path[0] !== row.uid_billing) {
+      ctx.addIssue({ code: "custom", path: ["items", i, "path"], message: "a line naming a bill row sits under that bill's billing divider: path[0] is uid_billing" });
+    }
+  });
   // Every LINE row states whether it reverses billing (ruling 84, R1 beta B):
   // kit headers included, as the writer stamps them (`stampReversesBilling`),
   // dividers excluded. Absent never means a value: the fold reads `=== true`.
@@ -1022,7 +1141,7 @@ function checkPurchaseCredit(c: PurchaseCredit, ctx: z.RefinementCtx): void {
   if (c.origin === "linked" && c.xero_id === null) {
     ctx.addIssue({ code: "custom", path: ["xero_id"], message: "a linked credit names the Xero document it links" });
   }
-  if (c.remaining_credit_cents < 0 || c.remaining_credit_cents > c.total_cents) {
+  if (c.remaining_credit_cents < 0 || c.remaining_credit_cents > total) {
     ctx.addIssue({
       code: "custom",
       path: ["remaining_credit_cents"],
@@ -1035,7 +1154,7 @@ function checkPurchaseCredit(c: PurchaseCredit, ctx: z.RefinementCtx): void {
     ctx.addIssue({ code: "custom", path: ["status"], message: "a supplier credit has no draft status yet" });
   }
   // The stored status IS the derivation (ruling 34 Q1, the bill's precedent).
-  const derived = deriveCreditStatus(c, c.remaining_credit_cents, c.total_cents);
+  const derived = deriveCreditStatus(c, c.remaining_credit_cents, total);
   if (c.status !== derived) {
     ctx.addIssue({ code: "custom", path: ["status"], message: `a supplier credit with this balance is ${derived}, not ${c.status}` });
   }
@@ -1057,7 +1176,11 @@ export const PurchaseCreditSchema: z.ZodType<PurchaseCredit> = z.strictObject({
   reference: z.string().max(255).nullable().meta({ column: true, label: "Reference" }),
   items: z.array(PurchaseDocumentRowSchema).meta({ label: "Item" }),
   destinations: z.array(PurchaseDocDestinationSchema).meta({ label: "Destination" }),
-  total_cents: z.int().min(0).meta({ column: true, label: "Total" }),
+  // Beta H1 (ruling 105): `totals` beside the retiring `total_cents`, which
+  // stays required until H2 (the interface docblock). Its column is the old
+  // key's until beta T moves the Typesense field (one "Total" heading, T9).
+  totals: CreditNoteDocTotalsSchema.optional().meta({ seed: false }),
+  total_cents: z.int().min(0).meta({ column: true, label: "Total (Retiring)" }),
   remaining_credit_cents: z.int().meta({ column: true, label: "Remaining Credit" }),
   uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),

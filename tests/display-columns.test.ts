@@ -409,9 +409,13 @@ Deno.test("T14: the discriminated rate columns are the ones that exist", () => {
     "purchase-bill:items.price.discount.rate",
     "purchase-bill:items.price.taxes.rate",
     "purchase-bill:items.price.taxes_base.rate",
+    // Ruling 105: a bill carries the invoice's totals, a supplier credit the note's.
+    "purchase-bill:totals.taxes.rate",
+    "purchase-bill:totals.transaction_fees.rate",
     "purchase-credit:items.price.discount.rate",
     "purchase-credit:items.price.taxes.rate",
     "purchase-credit:items.price.taxes_base.rate",
+    "purchase-credit:totals.taxes.rate",
     "purchase:items.price.discount.rate",
     "purchase:items.price.taxes.rate",
     "purchase:items.price.taxes_base.rate",
