@@ -214,6 +214,30 @@ Deno.test("itemArrayIssues(credit_note): a flat historic note is legal, a divide
   assert(itemArrayIssues(leadsWithLine, "credit_note").some((i) => i.rule === "leading_divider"), "a divided note leads with a divider");
 });
 
+Deno.test("itemArrayIssues(credit_note): a row its invoice holds at the ROOT sits directly under the billing divider", () => {
+  // A flat invoice (no order divider: the CRMS-era 31, and any invoice billing a root
+  // line) gives each credited row the path [uid_billing, row]. The billing divider is
+  // that invoice's root, so every type an invoice admits at its root admits it.
+  const flatCredit: { items: Row[] } = {
+    items: [
+      { uid: INV_A, type: "billing", name: `Invoice ${INV_A}`, path: [INV_A] },
+      { uid: LINE, type: "sale", name: "Tape", quantity: 1, zero_priced: null, path: [INV_A, LINE] },
+      { uid: D, type: "destination", name: "Leg", path: [INV_A, D] },
+      { uid: G, type: "group", name: "Group", path: [INV_A, D, G] },
+      { uid: KIT, type: "rental", name: "Kit", quantity: 1, zero_priced: null, path: [INV_A, D, G, KIT] },
+    ],
+  };
+  assertEquals(itemArrayIssues(flatCredit, "credit_note").filter((i) => i.rule === "parentage"), []);
+  // The billing divider itself is still root-only: one under another is refused.
+  const nested: { items: Row[] } = {
+    items: [
+      { uid: INV_A, type: "billing", name: `Invoice ${INV_A}`, path: [INV_A] },
+      { uid: INV_B, type: "billing", name: `Invoice ${INV_B}`, path: [INV_A, INV_B] },
+    ],
+  };
+  assert(itemArrayIssues(nested, "credit_note").some((i) => i.rule === "parentage"));
+});
+
 Deno.test("itemArrayIssues(credit_note): an unpointed line written AFTER a billing divider nests under it, so it goes first", () => {
   const rows = twoInvoiceCredit().items;
   const goodwill: Row = { uid: "Goodwill", type: "service", name: "Goodwill", quantity: 1, zero_priced: null, path: ["Goodwill"] };

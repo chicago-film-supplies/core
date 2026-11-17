@@ -1256,10 +1256,15 @@ export interface ItemContract {
 // type that can be a kit parent. `transaction_fee` is excluded on both sides — a
 // fee is a document-level charge, so it neither nests under a product nor
 // carries components of its own.
+// `billing` is in every list below because a credit's billing divider stands in for
+// its billing document's ROOT (ruling 107): a row the invoice or bill holds at its
+// root — a flat CRMS-era line, a destination with no order divider above it — sits
+// directly under `billing` on the credit, where the document itself had no parent.
+// No other grain carries a `billing` divider, so the widening reaches credits only.
 const LINE_PARENTS: readonly ItemTypeType[] = [
-  "order", "purchase", "destination", "group", "rental", "replacement", "sale", "service", "surcharge",
+  "billing", "order", "purchase", "destination", "group", "rental", "replacement", "sale", "service", "surcharge",
 ];
-const DIVIDER_PARENTS: readonly ItemTypeType[] = ["order", "purchase", "destination", "group"];
+const DIVIDER_PARENTS: readonly ItemTypeType[] = ["billing", "order", "purchase", "destination", "group"];
 
 /**
  * The literal half of the contract table.
@@ -1326,8 +1331,8 @@ export const ITEM_CONTRACTS: Readonly<Record<ItemTypeType, ItemContract>> = {
   order: { ...ITEM_CONTRACTS_INNER.order, parentable_by: ["billing"] },
   purchase: { ...ITEM_CONTRACTS_INNER.purchase, parentable_by: ["billing"] },
   billing: { ...ITEM_CONTRACTS_INNER.billing, parentable_by: [] },
-  destination: { ...ITEM_CONTRACTS_INNER.destination, parentable_by: ["order", "purchase"] },
-  group: { ...ITEM_CONTRACTS_INNER.group, parentable_by: ["destination"] },
+  destination: { ...ITEM_CONTRACTS_INNER.destination, parentable_by: ["billing", "order", "purchase"] },
+  group: { ...ITEM_CONTRACTS_INNER.group, parentable_by: ["billing", "destination"] },
   rental: { ...ITEM_CONTRACTS_INNER.rental, parentable_by: LINE_PARENTS },
   replacement: { ...ITEM_CONTRACTS_INNER.replacement, parentable_by: LINE_PARENTS },
   sale: { ...ITEM_CONTRACTS_INNER.sale, parentable_by: LINE_PARENTS },
