@@ -474,8 +474,10 @@ export interface PurchaseDocDestination extends PairCoreType {
 
 /** Zod schema for {@link PurchaseDocDestination}. */
 export const PurchaseDocDestinationSchema: z.ZodType<PurchaseDocDestination> = z.strictObject({
-  uid_purchase: FirestoreId.optional(),
-  uid_source: FirestoreId.optional(),
+  // Neither seeded through H1 (ruling 109): a seeded `""` would read first through
+  // `pairSourceUid` and fail `FirestoreId` — the invoice pair's note.
+  uid_purchase: FirestoreId.optional().meta({ seed: false }),
+  uid_source: FirestoreId.optional().meta({ seed: false }),
   ...PairCore,
   exchange: DestinationPairCore.exchange,
 }).superRefine(checkPairSourceKeys);
@@ -1647,8 +1649,8 @@ export interface PurchaseBillDestinationInputType extends PurchaseDestinationInp
 
 /** Zod schema for {@link PurchaseBillDestinationInputType}. */
 export const PurchaseBillDestinationInput: z.ZodType<PurchaseBillDestinationInputType> = z.object({
-  uid_source: FirestoreId.optional(),
-  uid_purchase: FirestoreId.optional(),
+  uid_source: FirestoreId.optional().meta({ seed: false }),
+  uid_purchase: FirestoreId.optional().meta({ seed: false }),
   uid: z.uuid(),
   ...PairInputCore,
   exchange: DestinationPairInputCore.exchange,

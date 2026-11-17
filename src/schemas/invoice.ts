@@ -1036,9 +1036,13 @@ export const InvoiceDocDestination: z.ZodType<InvoiceDocDestinationType> = z
     // below order-preserving — `uid_order` was already the first key here, and
     // `DestinationPairCore` is the rest of this object in its existing order.
     // 🔴 Ruling 109: `uid_source` is the scope's one spelling on both sides, and
-    // `uid_order` retires in H2. `checkPairSourceKeys` requires exactly one.
-    uid_order: FirestoreId.optional(),
-    uid_source: FirestoreId.optional(),
+    // `uid_order` retires in H2. `checkPairSourceKeys` requires at least one.
+    // ⚠️ Neither is SEEDED (`seed: false`) through H1: seeded, both would be `""`,
+    // and `pairSourceUid` (new ?? old) reads a stated `""` before the key a writer
+    // set — and `""` is no `FirestoreId`, so the pair is refused at the write.
+    // H2 deletes `uid_order` and makes `uid_source` required and seeded again.
+    uid_order: FirestoreId.optional().meta({ seed: false }),
+    uid_source: FirestoreId.optional().meta({ seed: false }),
     // 🔴 **THIS LIST USED TO INHERIT NOTHING.** It restated `DocDestination`'s six
     // keys by hand, and had already drifted: it kept `z.boolean().default(false)`
     // on `customer_collecting` / `customer_returning` after `9435a15` made both
@@ -1077,8 +1081,9 @@ export interface InvoiceDestinationInputType extends DestinationType {
 
 /** Zod schema for {@link InvoiceDestinationInputType}. */
 export const InvoiceDestinationInput: z.ZodType<InvoiceDestinationInputType> = z.object({
-  uid_source: FirestoreId.optional(),
-  uid_order: FirestoreId.optional(),
+  // Neither seeded through H1, as on the stored pair above.
+  uid_source: FirestoreId.optional().meta({ seed: false }),
+  uid_order: FirestoreId.optional().meta({ seed: false }),
   uid: z.uuid(),
   ...DestinationPairInputCore,
 }).superRefine(checkPairSourceKeys);

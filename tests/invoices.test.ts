@@ -3342,3 +3342,14 @@ Deno.test("D6 xeroAccrecLineRefs: account, tracking and item code — line first
   ];
   for (const [label, line, p, want] of cases) assertEquals(xeroAccrecLineRefs(line, p, options, known), want, label);
 });
+
+Deno.test("a seeded billing pair states NEITHER source key through H1 (ruling 109)", async () => {
+  const { InvoiceDocDestination, InvoiceDestinationInput, PurchaseDocDestinationSchema, PurchaseBillDestinationInput } = await import("../src/schemas/mod.ts");
+  // Seeded, both keys would be "", and `pairSourceUid` (new ?? old) would read the
+  // stated "" ahead of the key the caller set — an empty scope, refused at the write.
+  for (const schema of [InvoiceDocDestination, InvoiceDestinationInput, PurchaseDocDestinationSchema, PurchaseBillDestinationInput]) {
+    const seeded = getInitialValues(schema) as Record<string, unknown>;
+    for (const key of ["uid_source", "uid_order", "uid_purchase"]) assert(!(key in seeded), `${key} is seeded`);
+    assertEquals(pairSourceUid({ ...seeded, uid_order: "Order000000000000001" }), "Order000000000000001");
+  }
+});
