@@ -52364,6 +52364,36 @@ Returns `[]` when every flagged line is a component.
 
 ## `@cfs/core/utils/price-document`
 
+### `BILLING_ROW_PART`
+
+**The money of units `(before, after]` of a billing row, per side** (ruling
+88): what the row's money IS decides the door.
+
+- **receivable:** a RATE row (rates, no stated total) through the one
+  line-money function, the gross and discount each a difference of cumulative
+  values; a stated or frozen row sliced from its stored gross and net.
+- **payable:** the row's stored money sliced (`payableStoredMoney`).
+
+Every door slices CUMULATIVE values, so the parts along any path from 0 to the
+row's quantity sum exactly to it on every figure.
+
+```ts
+const BILLING_ROW_PART: mapped;
+```
+
+### `BillingRowMoneyLike`
+
+A billing row as a credit part reads its money, on either side.
+
+```ts
+interface BillingRowMoneyLike {
+  type?: indexedAccess;
+  quantity: number;
+  amount_cents?: number | null;
+  price: typeLiteral;
+}
+```
+
 ### `ChargeWindowPair`
 
 The pair shape {@link chargeWindowContext} reads.
@@ -52408,6 +52438,18 @@ interface CreditLinePrice {
 }
 ```
 
+### `CreditMoney`
+
+One credit line's money (one-document-model 6e-0b1 D4, D7): by default the
+slice of what is credited; a supplier's MEMO overrides it as the credit line's
+own `price.stated_cents` with `discount: null` (a memo is net).
+
+```ts
+interface CreditMoney {
+  units_from: number | null;
+}
+```
+
 ### `CreditSelectionLine`
 
 One invoice line to credit, and how many of it.
@@ -52416,6 +52458,7 @@ One invoice line to credit, and how many of it.
 interface CreditSelectionLine {
   line: L;
   quantity: number;
+  credited: typeLiteral;
   credited_counts?: readonly TierCount[];
 }
 ```
@@ -52460,6 +52503,18 @@ The charge windows of one destination pair, as the pricer reads them.
 interface PairChargeWindows {
   divider_path: readonly string[];
   windows: readonly typeLiteral[];
+}
+```
+
+### `PartMoney`
+
+A part's money as a stored credit line states it (one-document-model D7).
+
+```ts
+interface PartMoney {
+  amount_cents: number;
+  stated_cents: number;
+  discount: DiscountType | null;
 }
 ```
 
@@ -52637,6 +52692,26 @@ interface StoredDaysRow {
 }
 ```
 
+### `billingRowCreditMoney(args: typeLiteral): CreditMoney`
+
+**What a credit of `n` units of one billing row is worth, on both sides**
+(ruling 34 F14 item 6; one-document-model 6d, D4): units `(c, c + n]` of the
+row, `c` the units live credits already took (`credited.quantity`), priced
+FIRST-COME through the side's part door ({@link BILLING_ROW_PART}), so
+crediting a row in parts sums to exactly its money — $100.00 over 3 units
+credited one at a time is 3333 + 3334 + 3333, never 9999. The credit
+INHERITS the row's discount terms, its record over the same units.
+
+- `memo_cents` (payable only: a supplier states what it credits): it
+  governs, refused above what is left of the row's money, and is stored as the
+  credit line's `price.stated_cents`.
+- The first-come share is capped at what is left of the row's money
+  (`credited.amount_cents` taken), so a row part-credited by a memo cannot be
+  over-credited.
+
+Pre-tax only: an AR credit's taxes are priced on the part by
+{@link priceCreditNote}.
+
 ### `carriedLines(items: readonly T[], document: PriceDocumentKind): ReadonlyMap<T, readonly TierCount[]>`
 
 **The lines that keep the counts they carry, and those counts**: on a
@@ -52758,10 +52833,15 @@ re-metering an extension row over its own (extension) pair (6e-0b2 F5).
 **Price a credit note from the invoice lines it credits** (api-cloudrun#997 D4).
 The server stores this result, and the manager renders it as a preview.
 
-- **Stages 2 + 3 only.** Each line goes through {@link priceLine} and
-  {@link assembleLinePrice} at the credited quantity, on the invoice line's own
-  rates and counts. Nothing scales money by `credited ÷ billed`: that would be
-  a float factor on cents.
+- **A whole-unit credit is a PART of its invoice row** (ruling 34 F14 item
+  6, ruling 39): units `(c, c + n]` priced first-come through
+  {@link billingRowCreditMoney}, so two partial credits of a row sum to the
+  whole row, to the cent. Its `counts` are `[]` (ruling 106: a units credit
+  of a named row states no time of its own). Its taxes are each tax of the
+  row priced on the part's net.
+- **A time credit** ({@link CreditSelectionLine.credited_counts}) is priced at
+  those counts through {@link priceLine}, minimum already out of them, and
+  stores them.
 - **Stage 1 is deliberately skipped.** The line keeps the tax refs STORED on
   the invoice line, so a credit is taxed at the rate that was charged.
 - **No D3 refusal.** Credit is raised on settled invoices as a matter of
@@ -52771,11 +52851,9 @@ The server stores this result, and the manager renders it as a preview.
   {@link CreditSelectionLine.credited_counts}: the line is priced at those
   counts, minimum already out of them.
 
-⚠️ **The credit composes to within a rounding of re-charging the difference,
-and that is the SHIPPED property rather than a defect.** Both round once,
-they just round different products. Measured worst 1¢ over the sweep in
-`tests/price-document.test.ts`. 🔴 **Do not "fix" it by pricing the credit as a
-difference of two charges.**
+Whole-count rate rows price exactly as before; a row with a fractional count
+or a percent discount moves by up to 1¢ per part against the per-line price
+it replaced, which ruling 39 overruled (a credit is a part, not a re-charge).
 
 ### `priceDocument(items: readonly T[], ctx: PriceDocumentContext): PricedDocument<T>`
 
@@ -53747,10 +53825,9 @@ interface BillTimeSplit {
 
 ### `CreditMoney`
 
-One credit line's money, as both credit arms price it (one-document-model
-6e-0b1 D4, D7): by default the slice of what is credited ({@link partMoney});
-a supplier's MEMO overrides it as the credit line's own `price.stated_cents`
-with `discount: null` (a memo is net). Every credit line states its gross.
+One credit line's money (one-document-model 6e-0b1 D4, D7): by default the
+slice of what is credited; a supplier's MEMO overrides it as the credit line's
+own `price.stated_cents` with `discount: null` (a memo is net).
 
 ```ts
 interface CreditMoney {
@@ -53771,7 +53848,7 @@ const PAYABLE_LINE_CLAIMS: LineClaimSide<PurchaseRow>;
 
 ### `PartMoney`
 
-A part's money as a stored row states it (one-document-model D7).
+A part's money as a stored credit line states it (one-document-model D7).
 
 ```ts
 interface PartMoney {
@@ -53907,8 +53984,8 @@ crediting a line in parts sums to exactly its amount — $100.00 over 3 units
 credited one at a time is 3333 + 3334 + 3333, never 9999. The credit line
 INHERITS the row's discount terms, its record over the same units (D4).
 
-⚠️ **Deliberately unlike AR, until 6e-0b2**, where each credit-note line
-re-prices on its own (`priceCreditNote`).
+The payable door onto {@link billingRowCreditMoney}, the one first-come
+function both sides price a credit of a billing row through (F14 item 6).
 
 - `memo_cents`: the supplier's memo governs, refused above what is left of
   the line's money, and is stored as the credit line's `price.stated_cents`.
@@ -53994,8 +54071,9 @@ writer does, or an open hire's pair meters nothing and no group is billed.
 
 **Units `(from, to]` of a source line, as a part stores them** (D7): its
 slices of the source's stored gross and discount cents, and the net as their
-difference. A part never re-applies a rate, so the parts of a line sum to it
-exactly on every figure and each part's own `net = gross − discount` holds.
+difference — the payable part door ({@link BILLING_ROW_PART}). A part never
+re-applies a rate, so the parts of a line sum to it exactly on every figure
+and each part's own `net = gross − discount` holds.
 
 ### `payableScopedSync(prev: Purchase, next: Purchase): typeLiteral`
 

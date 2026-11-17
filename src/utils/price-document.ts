@@ -70,6 +70,7 @@ import {
   type PurchaseDocumentRow,
   type PurchaseRow,
   purchaseLines,
+  type Side,
   SIDE_CONTRACTS,
   type TaxRefType,
   TERMINAL_ORDER_STATUSES,
@@ -104,6 +105,16 @@ import {
   type TierCount,
 } from "./price-formulas.ts";
 import { isPaidUp } from "../schemas/_invoice-freeze.ts";
+import {
+  type FormulaDiscount,
+  lineDiscountAtCents,
+  type LineMoneyLike,
+  lineUnitsCents,
+  type MoneySlice,
+  payableStoredMoney,
+  type PayableMoneyLineLike,
+  sliceStoredMoney,
+} from "../schemas/_line-money.ts";
 import { pairItemsAcrossRebuild, type PathedItem } from "./item-pairing.ts";
 import { assignLineTaxes, type DocumentTaxContext, type UnreviewedTaxWarning } from "./taxes.ts";
 import { pricingTaxesOf, type TaxCatalog } from "./tax-classes.ts";
@@ -1061,6 +1072,134 @@ export function priceDocument<T extends LineItem | PayableLine>(
   };
 }
 
+// ── A credit of a billing row: one first-come function, both sides (F14 item 6) ──
+
+/** A billing row as a credit part reads its money, on either side. */
+export interface BillingRowMoneyLike {
+  type?: LineItem["type"];
+  quantity: number;
+  /** A payable row's stored net. */
+  amount_cents?: number | null;
+  price: {
+    price_formula?: { basis: string } | null;
+    rates?: readonly RateSnapshot[];
+    counts?: readonly TierCount[];
+    discount: (FormulaDiscount & { amount_cents?: number }) | null;
+    stated_cents?: number | null;
+    /** A receivable row's stored gross and net. */
+    subtotal_cents?: number;
+    subtotal_discounted_cents?: number;
+  };
+}
+
+/**
+ * **The money of units `(before, after]` of a billing row, per side** (ruling
+ * 88): what the row's money IS decides the door.
+ *
+ * - **receivable:** a RATE row (rates, no stated total) through the one
+ *   line-money function, the gross and discount each a difference of cumulative
+ *   values; a stated or frozen row sliced from its stored gross and net.
+ * - **payable:** the row's stored money sliced (`payableStoredMoney`).
+ *
+ * Every door slices CUMULATIVE values, so the parts along any path from 0 to the
+ * row's quantity sum exactly to it on every figure.
+ */
+export const BILLING_ROW_PART: { [S in Side]: (row: BillingRowMoneyLike, before: number, after: number) => MoneySlice } = {
+  receivable: (row, before, after) => {
+    // A fold's credit row may carry no price at all (it moves no money of its own).
+    const price: Partial<BillingRowMoneyLike["price"]> = row.price ?? {};
+    const rates = price.rates ?? [];
+    if (rates.length > 0 && (price.stated_cents ?? null) === null) {
+      const line: LineMoneyLike = {
+        ...(row.type !== undefined ? { type: row.type } : {}),
+        quantity: row.quantity,
+        price: { rates, counts: price.counts ?? [], discount: price.discount ?? null, stated_cents: null },
+      };
+      const net = lineUnitsCents(line, before, after);
+      const discount = lineDiscountAtCents(line, after) - lineDiscountAtCents(line, before);
+      return { gross_cents: net + discount, discount_cents: discount, net_cents: net };
+    }
+    const net = price.subtotal_discounted_cents ?? 0;
+    const gross = price.subtotal_cents ?? net;
+    return sliceStoredMoney({ quantity: row.quantity, gross_cents: gross, discount_cents: gross - net }, before, after);
+  },
+  payable: (row, before, after) => sliceStoredMoney(payableStoredMoney(row as PayableMoneyLineLike), before, after),
+};
+
+/** A part's money as a stored credit line states it (one-document-model D7). */
+export interface PartMoney {
+  /** The net: `stated_cents − discount.amount_cents`. */
+  amount_cents: number;
+  /** The part's gross: its slice of the source's gross. */
+  stated_cents: number;
+  /** The source's discount TERMS, with the part's slice of its discount cents; `null` when it has none. */
+  discount: DiscountType | null;
+}
+
+/**
+ * One credit line's money (one-document-model 6e-0b1 D4, D7): by default the
+ * slice of what is credited; a supplier's MEMO overrides it as the credit line's
+ * own `price.stated_cents` with `discount: null` (a memo is net).
+ */
+export interface CreditMoney extends PartMoney {
+  /** The first unit of the billing row the credit covers; `null` on a memo or a pool credit, which is no slice. */
+  units_from: number | null;
+}
+
+/**
+ * **What a credit of `n` units of one billing row is worth, on both sides**
+ * (ruling 34 F14 item 6; one-document-model 6d, D4): units `(c, c + n]` of the
+ * row, `c` the units live credits already took (`credited.quantity`), priced
+ * FIRST-COME through the side's part door ({@link BILLING_ROW_PART}), so
+ * crediting a row in parts sums to exactly its money — $100.00 over 3 units
+ * credited one at a time is 3333 + 3334 + 3333, never 9999. The credit
+ * INHERITS the row's discount terms, its record over the same units.
+ *
+ * - `memo_cents` (payable only: a supplier states what it credits): it
+ *   governs, refused above what is left of the row's money, and is stored as the
+ *   credit line's `price.stated_cents`.
+ * - The first-come share is capped at what is left of the row's money
+ *   (`credited.amount_cents` taken), so a row part-credited by a memo cannot be
+ *   over-credited.
+ *
+ * Pre-tax only: an AR credit's taxes are priced on the part by
+ * {@link priceCreditNote}.
+ *
+ * @throws {RangeError} when `n` is outside `1..units left`, or a memo exceeds
+ *   the money left or is stated on a receivable row
+ */
+export function billingRowCreditMoney(args: {
+  side: Side;
+  row: BillingRowMoneyLike;
+  credited: { quantity: number; amount_cents: number };
+  n: number;
+  memo_cents?: number;
+}): CreditMoney {
+  const { side, row, credited, n, memo_cents } = args;
+  const left = row.quantity - credited.quantity;
+  if (!Number.isInteger(n) || n < 1 || n > left) {
+    throw new RangeError(`crediting ${n} exceeds the ${Math.max(0, left)} left on the billing row`);
+  }
+  const whole = BILLING_ROW_PART[side](row, 0, row.quantity).net_cents;
+  const room = Math.max(0, whole - credited.amount_cents);
+  if (memo_cents !== undefined) {
+    if (side !== "payable") throw new RangeError("a credit of a receivable row is priced from the row; it states no amount");
+    if (memo_cents > room) throw new RangeError(`a credit of ${memo_cents} cents exceeds the ${room} cents left on the billing row`);
+    return { amount_cents: memo_cents, discount: null, stated_cents: memo_cents, units_from: null };
+  }
+  const from = credited.quantity;
+  const slice = BILLING_ROW_PART[side](row, from, from + n);
+  // A row part-credited by a memo may have less left than the slice: what is left, as a net figure.
+  if (slice.net_cents > room) return { amount_cents: room, discount: null, stated_cents: room, units_from: null };
+  const terms = row.price.discount;
+  return {
+    amount_cents: slice.net_cents,
+    stated_cents: slice.gross_cents,
+    discount: terms === null ? null : { rate: terms.rate, type: terms.type, amount_cents: slice.discount_cents },
+    units_from: from,
+  };
+}
+
 /** The invoice-line surface a credit is priced from (api-cloudrun#997 D4). */
 export interface CreditSourceLine {
   uid: string;
@@ -1074,6 +1213,11 @@ export interface CreditSourceLine {
     counts: readonly TierCount[];
     discount: { rate: number; type: "percent" | "flat" } | null;
     taxes: readonly { uid: string }[];
+    /** A stated row's gross total; the receivable part door slices it. */
+    stated_cents?: number | null;
+    /** The row's stored gross and net, which a stated row's part slices. */
+    subtotal_cents?: number;
+    subtotal_discounted_cents?: number;
   };
 }
 
@@ -1081,6 +1225,12 @@ export interface CreditSourceLine {
 export interface CreditSelectionLine<L extends CreditSourceLine = CreditSourceLine> {
   line: L;
   quantity: number;
+  /**
+   * What live credits already took of this row: whole units (a time credit takes
+   * none, R3) and money. A whole-unit credit prices units `(c, c + quantity]`
+   * FIRST-COME ({@link billingRowCreditMoney}); a time credit ignores it.
+   */
+  credited: { quantity: number; amount_cents: number };
   /**
    * Credit TIME rather than whole units: a charge window the order SHORTENED
    * after this line was billed (api-cloudrun#1028 phase 1c) — the magnitude of
@@ -1118,10 +1268,15 @@ export interface PricedCreditNote {
  * **Price a credit note from the invoice lines it credits** (api-cloudrun#997 D4).
  * The server stores this result, and the manager renders it as a preview.
  *
- * - **Stages 2 + 3 only.** Each line goes through {@link priceLine} and
- *   {@link assembleLinePrice} at the credited quantity, on the invoice line's own
- *   rates and counts. Nothing scales money by `credited ÷ billed`: that would be
- *   a float factor on cents.
+ * - **A whole-unit credit is a PART of its invoice row** (ruling 34 F14 item
+ *   6, ruling 39): units `(c, c + n]` priced first-come through
+ *   {@link billingRowCreditMoney}, so two partial credits of a row sum to the
+ *   whole row, to the cent. Its `counts` are `[]` (ruling 106: a units credit
+ *   of a named row states no time of its own). Its taxes are each tax of the
+ *   row priced on the part's net.
+ * - **A time credit** ({@link CreditSelectionLine.credited_counts}) is priced at
+ *   those counts through {@link priceLine}, minimum already out of them, and
+ *   stores them.
  * - **Stage 1 is deliberately skipped.** The line keeps the tax refs STORED on
  *   the invoice line, so a credit is taxed at the rate that was charged.
  * - **No D3 refusal.** Credit is raised on settled invoices as a matter of
@@ -1131,11 +1286,9 @@ export interface PricedCreditNote {
  *   {@link CreditSelectionLine.credited_counts}: the line is priced at those
  *   counts, minimum already out of them.
  *
- * ⚠️ **The credit composes to within a rounding of re-charging the difference,
- * and that is the SHIPPED property rather than a defect.** Both round once,
- * they just round different products. Measured worst 1¢ over the sweep in
- * `tests/price-document.test.ts`. 🔴 **Do not "fix" it by pricing the credit as a
- * difference of two charges.**
+ * Whole-count rate rows price exactly as before; a row with a fractional count
+ * or a percent discount moves by up to 1¢ per part against the per-line price
+ * it replaced, which ruling 39 overruled (a credit is a part, not a re-charge).
  *
  * @throws Error on a line that is not a pre-tax line (a divider or a fee has no
  *   credit), on a quantity that is not a positive integer, and when assembled
@@ -1148,7 +1301,7 @@ export function priceCreditNote(
 ): PricedCreditNote {
   const prices: CreditLinePrice[] = [];
   const priced: LineItem[] = [];
-  for (const { line, quantity, credited_counts } of selection) {
+  for (const { line, quantity, credited, credited_counts } of selection) {
     if (!Number.isInteger(quantity) || quantity <= 0) {
       throw new PriceRefusalError(`Credit quantity for line ${line.uid} must be a positive integer, got ${quantity}`);
     }
@@ -1191,6 +1344,39 @@ export function priceCreditNote(
       // ⚠️ The DECLARED counts are what the stored line credited, so a time
       // credit carries the credited counts rather than the invoice line's own.
       counts = credited_counts.map((t) => ({ ...t }));
+    }
+    if (credited_counts === undefined) {
+      // A whole-unit credit: a first-come part of the row, taxed on its net.
+      const part = billingRowCreditMoney({ side: "receivable", row: line, credited, n: quantity });
+      const lineTaxes: PriceModifier[] = line.price.taxes.map((ref) => {
+        const taxDoc = taxes.find((t) => t.uid === ref.uid);
+        if (!taxDoc) throw new PriceRefusalError(`Unknown tax uid: ${ref.uid}`);
+        if (extension !== undefined && taxDoc.type === "flat") {
+          throw new PriceRefusalError(`An extension line cannot carry the flat tax "${taxDoc.name}"`);
+        }
+        return {
+          uid: taxDoc.uid,
+          name: taxDoc.name,
+          rate: taxDoc.rate,
+          type: taxDoc.type,
+          amount_cents: computeItemTaxAmountCents(taxDoc, part.amount_cents, quantity),
+        };
+      });
+      const unitItem = { ...source, price: { ...source.price, counts: [] } } as unknown as LineItem;
+      const price = assembleLinePrice(
+        { price_formula: line.price.price_formula, rates: [...line.price.rates], counts: [] },
+        {
+          subtotal_cents: part.stated_cents,
+          subtotal_discounted_cents: part.amount_cents,
+          discount: part.discount,
+          taxes: lineTaxes,
+          total_cents: part.amount_cents + lineTaxes.reduce((sum, t) => sum + t.amount_cents, 0),
+        },
+        unitItem,
+      ) as CreditLinePrice;
+      prices.push(price);
+      priced.push({ ...unitItem, price } as unknown as LineItem);
+      continue;
     }
     const item = { ...source, price: { ...source.price, counts } } as unknown as LineItem;
     const price = assembleLinePrice(

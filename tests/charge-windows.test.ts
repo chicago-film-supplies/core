@@ -602,6 +602,8 @@ Deno.test("priceDocument: an extension line bills its OWN stated counts, unfloor
   assertThrows(() => priceExt([]), PriceRefusalError, "states no counts");
 });
 
+const NONE_CREDITED = { quantity: 0, amount_cents: 0 };
+
 Deno.test("priceCreditNote: a line billed on a multi-window pair is credited at its stored counts", () => {
   const src = (counts: { rate_key: string; num: number; den: number }[]): CreditSourceLine => ({
     uid: "r1",
@@ -611,8 +613,8 @@ Deno.test("priceCreditNote: a line billed on a multi-window pair is credited at 
     price: { ...fdwPrice(10000), counts, discount: null, taxes: [] },
   });
   const billed = priced(line(["D"]), priceCtx(pairWith([3, 4, 2])));
-  assertEquals(priceCreditNote([{ line: src(billed.counts as never), quantity: 1 }], [], []).prices[0].subtotal_cents, billed.subtotal_cents);
-  assertEquals(priceCreditNote([{ line: src(fdwCounts(9)), quantity: 1 }], [], []).prices[0].subtotal_cents, 18000, "one window: its own days");
+  assertEquals(priceCreditNote([{ credited: NONE_CREDITED, line: src(billed.counts as never), quantity: 1 }], [], []).prices[0].subtotal_cents, billed.subtotal_cents);
+  assertEquals(priceCreditNote([{ credited: NONE_CREDITED, line: src(fdwCounts(9)), quantity: 1 }], [], []).prices[0].subtotal_cents, 18000, "one window: its own days");
 });
 
 // ── The pair invariant, checked on write (core#113) ──────────────────────────

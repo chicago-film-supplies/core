@@ -347,6 +347,9 @@ Deno.test("…and a fee costed on the PRE-TAX basis DOES disagree with it", () =
 
 // ── Credit notes: priced from the invoice line (#997 D4) ──
 
+/** No prior credit of the row: a credit takes its units from the first. */
+const NONE_CREDITED = { quantity: 0, amount_cents: 0 };
+
 const creditSource = (over: Partial<LineItem> = {}, price: Record<string, unknown> = {}) =>
   line(over, price) as unknown as Parameters<typeof priceCreditNote>[0][number]["line"];
 
@@ -357,7 +360,7 @@ Deno.test("priceCreditNote: credits a discounted, taxed line at the credited qua
     discount: { type: "percent", rate: 10, amount_cents: 0 },
     taxes: [{ uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent", amount_cents: 0 }],
   });
-  const r = priceCreditNote([{ line: src, quantity: 2 }], pricingTaxesOf(CAT), []);
+  const r = priceCreditNote([{ credited: NONE_CREDITED, line: src, quantity: 2 }], pricingTaxesOf(CAT), []);
   const price = r.prices[0];
   assertEquals(
     [price.subtotal_cents, price.subtotal_discounted_cents, price.discount?.amount_cents, price.total_cents],
@@ -383,8 +386,8 @@ Deno.test("priceCreditNote: keeps the charged rate VERSION, never today's, and a
     formula: "fixed", base_cents: 40000, chargeable_days: null,
     taxes: [{ uid: "chi-sales-old", name: "Chicago Sales Tax", rate: 10.25, type: "percent", amount_cents: 4100 }],
   });
-  const exempt = creditSource({ type: "sale" }, { formula: "fixed", base_cents: 1000, chargeable_days: null, taxes: [] });
-  const r = priceCreditNote([{ line: old, quantity: 1 }, { line: exempt, quantity: 3 }], versions, []);
+  const exempt = creditSource({ type: "sale", quantity: 3 }, { formula: "fixed", base_cents: 1000, chargeable_days: null, taxes: [] });
+  const r = priceCreditNote([{ credited: NONE_CREDITED, line: old, quantity: 1 }, { credited: NONE_CREDITED, line: exempt, quantity: 3 }], versions, []);
   assertEquals(r.prices.map((x) => x.total_cents), [44100, 3000]);
   assertEquals(r.totals.taxes.map((t) => [t.name, t.amount_cents]), [["Chicago Sales Tax", 4100]]);
   assertEquals(r.totals.total_cents, 47100);
@@ -402,7 +405,7 @@ Deno.test("priceCreditNote: credited_counts credits TIME at the line's terms, wi
     chargeable_days: 10,
     taxes: [{ uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent", amount_cents: 0 }],
   });
-  const r = priceCreditNote([{ line: src, quantity: 3, credited_counts: [tier("week", 4, 5)] }], pricingTaxesOf(CAT), []);
+  const r = priceCreditNote([{ credited: NONE_CREDITED, line: src, quantity: 3, credited_counts: [tier("week", 4, 5)] }], pricingTaxesOf(CAT), []);
   assertEquals([r.prices[0].subtotal_cents, r.prices[0].total_cents], [24000, 27600]);
   // The stored line says how much time it CREDITED, not how much the invoice charged.
   assertEquals(r.prices[0].counts, [tier("week", 4, 5)]);
@@ -413,7 +416,7 @@ Deno.test("priceCreditNote: a time credit refuses a line whose formula never rea
   // Crediting one would silently credit the whole line at its full amount.
   const fixed = creditSource({ type: "sale" }, { formula: "fixed", base_cents: 40000, chargeable_days: null, taxes: [] });
   assertThrows(
-    () => priceCreditNote([{ line: fixed, quantity: 1, credited_counts: [tier("flat", 1, 1)] }], pricingTaxesOf(CAT), []),
+    () => priceCreditNote([{ credited: NONE_CREDITED, line: fixed, quantity: 1, credited_counts: [tier("flat", 1, 1)] }], pricingTaxesOf(CAT), []),
     Error,
     "never read its time",
   );
@@ -423,7 +426,7 @@ Deno.test("priceCreditNote: credited_counts must name the line's own keys and cr
   const src = creditSource({ quantity: 1 }, { base_cents: 10000, chargeable_days: 10, taxes: [] });
   for (const bad of [[], [tier("week", 0, 1)], [tier("week", -2, 5)], [tier("month", 1, 1)]]) {
     assertThrows(
-      () => priceCreditNote([{ line: src, quantity: 1, credited_counts: bad }], pricingTaxesOf(CAT), []),
+      () => priceCreditNote([{ credited: NONE_CREDITED, line: src, quantity: 1, credited_counts: bad }], pricingTaxesOf(CAT), []),
       Error,
       "positive amount of time",
     );
@@ -443,11 +446,11 @@ Deno.test("priceCreditNote: a days credit composes to within a cent or two of re
     for (let billedDays = 6; billedDays <= 20; billedDays += 3) {
       for (let credited = 1; credited < billedDays - 4; credited += 2) {
         const at = (days: number) =>
-          priceCreditNote([{ line: creditSource({ quantity: 1 }, { base_cents: base, chargeable_days: days, taxes: [] }), quantity: 1 }], [], [])
+          priceCreditNote([{ credited: NONE_CREDITED, line: creditSource({ quantity: 1 }, { base_cents: base, chargeable_days: days, taxes: [] }), quantity: 1 }], [], [])
             .prices[0].subtotal_cents;
         const credit = priceCreditNote(
           [{
-            line: creditSource({ quantity: 1 }, { base_cents: base, chargeable_days: billedDays, taxes: [] }),
+            credited: NONE_CREDITED, line: creditSource({ quantity: 1 }, { base_cents: base, chargeable_days: billedDays, taxes: [] }),
             quantity: 1,
             credited_counts: [tier("week", credited, 5)],
           }],
@@ -462,6 +465,53 @@ Deno.test("priceCreditNote: a days credit composes to within a cent or two of re
   console.log(`  credit composition residual: worst ${worst}¢ (expected ≤ 2¢, a rounding apart)`);
 });
 
+Deno.test("priceCreditNote: whole-unit credits are first-come PARTS of the row — credited in parts, they sum to the row exactly (ruling 34 F14 item 6)", () => {
+  // A 33.3333%-off rental at a fractional count: the shape where pricing each
+  // credit as its own line at n units drifts a cent from the row.
+  let rows = 0, perLineMissed = 0;
+  for (let base = 101; base <= 2999; base += 97) {
+    for (let q = 2; q <= 7; q++) {
+      const src = creditSource({ quantity: q }, {
+        base_cents: base,
+        counts: [tier("week", 7, 5)],
+        discount: { type: "percent", rate: 33.3333, amount_cents: 0 },
+        taxes: [],
+      });
+      const whole = priceCreditNote([{ credited: NONE_CREDITED, line: src, quantity: q }], [], []).prices[0];
+      // Credit 1 unit at a time, first-come.
+      let c = 0, net = 0, gross = 0, perLine = 0;
+      while (c < q) {
+        const part = priceCreditNote([{ credited: { quantity: c, amount_cents: net }, line: src, quantity: 1 }], [], []).prices[0];
+        net += part.subtotal_discounted_cents;
+        gross += part.subtotal_cents;
+        perLine += priceCreditNote([{ credited: NONE_CREDITED, line: { ...src, quantity: 1 }, quantity: 1 }], [], []).prices[0].subtotal_discounted_cents;
+        c += 1;
+      }
+      assertEquals([net, gross], [whole.subtotal_discounted_cents, whole.subtotal_cents], `base ${base} × ${q}`);
+      if (perLine !== whole.subtotal_discounted_cents) perLineMissed++;
+      rows++;
+    }
+  }
+  // Companion: pricing each credit as its own one-unit line (the form ruling 39 overruled) misses the row.
+  assert(perLineMissed > 0, `per-line pricing matched every one of ${rows} rows — the corpus does not discriminate`);
+  console.log(`  per-line pricing missed ${perLineMissed} of ${rows} rows; first-come parts missed 0`);
+});
+
+Deno.test("priceCreditNote: a whole-unit credit states NO counts of its own (ruling 106), and a time credit states the time it takes back", () => {
+  const src = creditSource({ quantity: 3 }, { base_cents: 10000, chargeable_days: 10, taxes: [] });
+  assertEquals(priceCreditNote([{ credited: NONE_CREDITED, line: src, quantity: 1 }], [], []).prices[0].counts, []);
+  assertEquals(priceCreditNote([{ credited: NONE_CREDITED, line: src, quantity: 1, credited_counts: [tier("week", 1, 5)] }], [], []).prices[0].counts, [tier("week", 1, 5)]);
+});
+
+Deno.test("priceCreditNote: a credit takes units AFTER those already credited, and refuses more than are left", () => {
+  const src = creditSource({ quantity: 2 }, { base_cents: 10000, chargeable_days: 10, taxes: [] });
+  assertThrows(
+    () => priceCreditNote([{ credited: { quantity: 2, amount_cents: 40000 }, line: src, quantity: 1 }], [], []),
+    RangeError,
+    "left on the billing row",
+  );
+});
+
 Deno.test("priceCreditNote: an extension line is credited at its own added days, never floored to a week", () => {
   // Billed in an extension section: 10000 × 2 added days ÷ 5 = 4000, 15% tax → 4600.
   // Priced as an ordinary line, 2 days floors to a week: 10000 → 11500 credited.
@@ -470,21 +520,21 @@ Deno.test("priceCreditNote: an extension line is credited at its own added days,
     counts: fdwCounts(2, { stated: true }),
     taxes: [{ uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent", amount_cents: 0 }],
   });
-  const inSection = priceCreditNote([{ line: ext, quantity: 1 }], pricingTaxesOf(CAT), [{ divider_path: ["o", "dest-ext"] }]);
+  const inSection = priceCreditNote([{ credited: NONE_CREDITED, line: ext, quantity: 1 }], pricingTaxesOf(CAT), [{ divider_path: ["o", "dest-ext"] }]);
   assertEquals([inSection.prices[0].subtotal_cents, inSection.totals.total_cents], [4000, 4600]);
   // Outside a section a credit is at the line's OWN stored counts too — the
   // floor lived in the meter that wrote them, so nothing re-floors them here.
-  const outside = priceCreditNote([{ line: ext, quantity: 1 }], pricingTaxesOf(CAT), []);
+  const outside = priceCreditNote([{ credited: NONE_CREDITED, line: ext, quantity: 1 }], pricingTaxesOf(CAT), []);
   assertEquals(outside.prices[0].subtotal_cents, 4000);
 });
 
 Deno.test("priceCreditNote: refuses a divider, a fee, and a non-positive or fractional quantity", () => {
   const taxes = pricingTaxesOf(CAT);
   const divider = { ...line(), type: "destination" } as unknown as Parameters<typeof priceCreditNote>[0][number]["line"];
-  assertThrows(() => priceCreditNote([{ line: divider, quantity: 1 }], taxes, []), Error, "cannot be credited");
-  assertThrows(() => priceCreditNote([{ line: creditSource({ type: "transaction_fee" }), quantity: 1 }], taxes, []), Error, "cannot be credited");
+  assertThrows(() => priceCreditNote([{ credited: NONE_CREDITED, line: divider, quantity: 1 }], taxes, []), Error, "cannot be credited");
+  assertThrows(() => priceCreditNote([{ credited: NONE_CREDITED, line: creditSource({ type: "transaction_fee" }), quantity: 1 }], taxes, []), Error, "cannot be credited");
   for (const quantity of [0, -1, 1.5]) {
-    assertThrows(() => priceCreditNote([{ line: creditSource(), quantity }], taxes, []), Error, "positive integer");
+    assertThrows(() => priceCreditNote([{ credited: NONE_CREDITED, line: creditSource(), quantity }], taxes, []), Error, "positive integer");
   }
 });
 

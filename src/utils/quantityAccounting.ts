@@ -144,7 +144,7 @@ import type {
 } from "../schemas/mod.ts";
 import { type MovePointerKeys, type PairSourceKeys, pairSourceUid, withRowSourcePath } from "../schemas/mod.ts";
 import { billsOutOfService, isDividerItemType, isLineItemType } from "../schemas/mod.ts";
-import { type LineMoneyLike, lineUnitsCents, payableStoredMoney, sliceStoredMoney } from "../schemas/_line-money.ts";
+import { payableStoredMoney, sliceStoredMoney } from "../schemas/_line-money.ts";
 import {
   extensionSectionTargets,
   getOrderScopedItems,
@@ -177,7 +177,7 @@ export { substitutionCredit };
 import { chargeEnvelope, chicagoDayAtTimeOf, toChicagoYmd } from "./dates.ts";
 import { combineTierCounts, meterUnits, priceFromFormula, type PricingFormulas, type TierCount } from "./price-formulas.ts";
 import { isPreTaxItem, type LineItem } from "./orders.ts";
-import { priceLine } from "./price-document.ts";
+import { BILLING_ROW_PART, type BillingRowMoneyLike, priceLine } from "./price-document.ts";
 
 /** The invoice shape these functions read — every linked invoice, live or void. */
 export interface AccountedInvoice {
@@ -818,20 +818,12 @@ function receivableNetCents(row: { price?: unknown }): number {
 }
 
 /**
- * A receivable part (ruling 88): a RATE row through the one line-money function;
- * a stated row, or a credit-note line (which carries no rates), sliced from its
+ * A receivable part (ruling 88): the receivable door of {@link BILLING_ROW_PART},
+ * its net. A credit-note line (which carries no rates) is sliced from its
  * stored money.
  */
 function receivablePartCents(row: InvoiceItem, before: number, after: number): number {
-  const price = row.price as
-    | { rates?: unknown[]; stated_cents?: number | null; subtotal_cents?: number; subtotal_discounted_cents?: number; discount?: { amount_cents?: number } | null }
-    | undefined;
-  if ((price?.rates?.length ?? 0) > 0 && (price?.stated_cents ?? null) === null) {
-    return lineUnitsCents(row as unknown as LineMoneyLike, before, after);
-  }
-  const net = price?.subtotal_discounted_cents ?? 0;
-  const gross = price?.subtotal_cents ?? net;
-  return sliceStoredMoney({ quantity: row.quantity ?? 0, gross_cents: gross, discount_cents: gross - net }, before, after).net_cents;
+  return BILLING_ROW_PART.receivable(row as unknown as BillingRowMoneyLike, before, after).net_cents;
 }
 
 /** A payable row as the fold's typed accessors read it. */

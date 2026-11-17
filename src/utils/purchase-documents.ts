@@ -68,7 +68,6 @@ import {
   type PayableMoneyLineLike,
   applyDiscountTerms,
   payableStoredMoney,
-  sliceStoredMoney,
   statedLine,
 } from "../schemas/_line-money.ts";
 import { fitOutOfServiceEntries } from "./replacements.ts";
@@ -92,8 +91,12 @@ import {
 } from "./invoices.ts";
 import type { LineItem } from "./orders.ts";
 import {
+  BILLING_ROW_PART,
+  billingRowCreditMoney,
   chargeWindowContext,
+  type CreditMoney,
   flatPayablePrice,
+  type PartMoney,
   type PayablePriceDocumentContext,
   priceDocument,
   type PricingFormulas,
@@ -359,28 +362,21 @@ function sameWindowDates(a: readonly { start: string; end: string }[], b: readon
 
 // ── Money ───────────────────────────────────────────────────────
 
-/** A part's money as a stored row states it (one-document-model D7). */
-export interface PartMoney {
-  /** The net: `stated_cents − discount.amount_cents`. */
-  amount_cents: number;
-  /** The part's gross: its slice of the source's stated gross. */
-  stated_cents: number;
-  /** The source's discount TERMS, with the part's slice of its discount cents; `null` when it has none. */
-  discount: DiscountType | null;
-}
+export type { CreditMoney, PartMoney } from "./price-document.ts";
 
 /**
  * **Units `(from, to]` of a source line, as a part stores them** (D7): its
  * slices of the source's stored gross and discount cents, and the net as their
- * difference. A part never re-applies a rate, so the parts of a line sum to it
- * exactly on every figure and each part's own `net = gross − discount` holds.
+ * difference — the payable part door ({@link BILLING_ROW_PART}). A part never
+ * re-applies a rate, so the parts of a line sum to it exactly on every figure
+ * and each part's own `net = gross − discount` holds.
  */
 export function partMoney(
   line: PayableMoneyLineLike & { price: { discount: DiscountType | null } },
   from: number,
   to: number,
 ): PartMoney {
-  const slice = sliceStoredMoney(payableStoredMoney(line), from, to);
+  const slice = BILLING_ROW_PART.payable(line, from, to);
   const terms = line.price.discount;
   return {
     amount_cents: slice.net_cents,
@@ -394,17 +390,6 @@ function moneyIs(row: PayableMoneyLineLike & { price: { discount: DiscountType |
   const own = payableStoredMoney(row);
   return row.amount_cents === part.amount_cents && own.gross_cents === part.stated_cents &&
     own.discount_cents === (part.discount?.amount_cents ?? 0);
-}
-
-/**
- * One credit line's money, as both credit arms price it (one-document-model
- * 6e-0b1 D4, D7): by default the slice of what is credited ({@link partMoney});
- * a supplier's MEMO overrides it as the credit line's own `price.stated_cents`
- * with `discount: null` (a memo is net). Every credit line states its gross.
- */
-export interface CreditMoney extends PartMoney {
-  /** The first unit of the bill row the credit covers; `null` on a memo or a pool credit, which is no slice. */
-  units_from: number | null;
 }
 
 /**
@@ -503,8 +488,8 @@ export function billLineCredited(
  * credited one at a time is 3333 + 3334 + 3333, never 9999. The credit line
  * INHERITS the row's discount terms, its record over the same units (D4).
  *
- * ⚠️ **Deliberately unlike AR, until 6e-0b2**, where each credit-note line
- * re-prices on its own (`priceCreditNote`).
+ * The payable door onto {@link billingRowCreditMoney}, the one first-come
+ * function both sides price a credit of a billing row through (F14 item 6).
  *
  * - `memo_cents`: the supplier's memo governs, refused above what is left of
  *   the line's money, and is stored as the credit line's `price.stated_cents`.
@@ -520,21 +505,8 @@ export function billLineCreditMoney(args: {
   n: number;
   memo_cents?: number;
 }): CreditMoney {
-  const { line, credited, n, memo_cents } = args;
-  const left = line.quantity - credited.quantity;
-  if (!Number.isInteger(n) || n < 1 || n > left) {
-    throw new RangeError(`crediting ${n} exceeds the ${Math.max(0, left)} left on the bill line`);
-  }
-  const room = Math.max(0, line.amount_cents - credited.amount_cents);
-  if (memo_cents !== undefined) {
-    if (memo_cents > room) throw new RangeError(`a credit of ${memo_cents} cents exceeds the ${room} cents left on the bill line`);
-    return { amount_cents: memo_cents, discount: null, stated_cents: memo_cents, units_from: null };
-  }
-  const from = credited.quantity;
-  const part = partMoney(line, from, from + n);
-  // A line part-credited by a memo may have less left than the slice: what is left, as a net figure.
-  if (part.amount_cents > room) return { amount_cents: room, discount: null, stated_cents: room, units_from: null };
-  return { ...part, units_from: from };
+  const { line, ...rest } = args;
+  return billingRowCreditMoney({ side: "payable", row: line, ...rest });
 }
 
 /**

@@ -921,6 +921,9 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "chargeWindowPairViolations",
     // The credit-note author (#997 D4). A credit note template renders its stored money.
     "priceCreditNote",
+    // The one credit-of-a-billing-row pricer (F14 item 6): it prices a credit
+    // at write time; a template renders what was stored.
+    "billingRowCreditMoney",
     "priceDocument",
     // Stage 2 for one line (#997 D11). Re-pricing a stored line at render time is
     // the disagreement above, one line at a time.
