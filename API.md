@@ -43142,6 +43142,19 @@ interface AmbiguousItemPairing {
 }
 ```
 
+### `CREDIT_NOTE_ITEM_LEVELS`
+
+The divider hierarchy of an AR CREDIT NOTE's items, outermost first — the
+invoice's, headed by the credit role's `billing` divider (one-document-model
+ruling 107): `[uid_billing, ...invoice row path]` for a line naming the
+invoice row it credits. A historic flat note holds lines only (ruling 53),
+each at `[uid]`; unpointed lines precede every billing divider
+({@link PURCHASE_DOCUMENT_ITEM_LEVELS}' warning).
+
+```ts
+const CREDIT_NOTE_ITEM_LEVELS: "billing" | "order" | "destination" | "group"[];
+```
+
 ### `ConsolidatedItem`
 
 ```ts
@@ -43452,8 +43465,20 @@ slot, because one bill can bill several purchases (a supplier's monthly
 statement) as one invoice bills several orders (one-document-model Phase 3).
 A purchase's own items use {@link ORDER_ITEM_LEVELS}, as an order's do.
 
+**`billing` heads it for the CREDIT role** (one-document-model ruling 107): a
+supplier credit line naming a bill row sits under that bill's `billing`
+divider, the bill's own rows one level deeper, so two bills billing one
+purchase line cannot collide in one credit. A bill holds no `billing` row, so
+its paths are unchanged.
+
+⚠️ **No row closes a `billing` level but another `billing` divider**, so a
+credit's UNPOINTED rows (a pool or charge-only credit, under its purchase
+divider at the root) come FIRST, ahead of every billing divider; written after
+one, they would nest under it. {@link CREDIT_NOTE_ITEM_LEVELS} carries the
+same rule.
+
 ```ts
-const PURCHASE_DOCUMENT_ITEM_LEVELS: "purchase" | "destination" | "group"[];
+const PURCHASE_DOCUMENT_ITEM_LEVELS: "billing" | "purchase" | "destination" | "group"[];
 ```
 
 ### `PreTaxLineItem`
@@ -43946,6 +43971,12 @@ document, so on a cross-order view (a pick sheet) build one lookup per
 ⚠️ Pass the FULL array, before any rows are hidden. A row hidden from the
 render is still its children's ancestor, and dropping it first would pull its
 components up a level.
+
+### `computeCreditNoteItemPaths(items: T[]): T[]`
+
+Compute paths for a credit note's items — `computeItemPaths` at
+{@link CREDIT_NOTE_ITEM_LEVELS}, by name, as {@link computeInvoiceItemPaths}.
+Pure; generic in `T`.
 
 ### `computeInvoiceItemPaths(items: T[]): T[]`
 
@@ -45133,6 +45164,10 @@ defect this function exists to remove.
 An invoice item's path in the ORDER's path space, reading an extension
 section as the order divider it extends: `[O, E, …rest]` → `[…target, …rest]`.
 Any other item is {@link stripOrderPrefix}.
+
+### `validateCreditNoteItemPaths(items: T[]): ItemPathIssue[]`
+
+{@link validateInvoiceItemPaths}' twin at {@link CREDIT_NOTE_ITEM_LEVELS}.
 
 ### `validateInvoiceItemPaths(items: T[]): ItemPathIssue[]`
 
@@ -46725,7 +46760,7 @@ interface ItemArrayDoc {
 Which document an items array belongs to. Each grain has its own rule set.
 
 ```ts
-type ItemArrayGrain = "order" | "invoice" | "fulfillment" | "purchase" | "purchase_receipt" | "purchase_document";
+type ItemArrayGrain = "order" | "invoice" | "fulfillment" | "purchase" | "purchase_receipt" | "purchase_document" | "credit_note";
 ```
 
 ### `ItemArrayIssue`
@@ -46784,7 +46819,12 @@ certified clean).
   document's own identity;
 - a product's `components` — a different path convention; that is
   `validateComponentUniqueness`;
-- credit notes — they carry no structural paths.
+- an AR credit note's billing-row pointers — they name another document.
+
+A **credit note** (`credit_note`, ruling 34 item 2) runs the invoice's rules at
+`CREDIT_NOTE_ITEM_LEVELS`; its leading-divider rule runs only on a note
+holding a divider row, so the 13 historic flat notes, whose `sources` name
+orders, stay legal (ruling 53).
 
 Returns `[]` for a legal array.
 

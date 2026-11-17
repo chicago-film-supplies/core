@@ -2687,8 +2687,10 @@ export function computeItemPaths<T extends LineItem>(
   );
 
   const result: T[] = [];
-  // The uids of the structural dividers currently in scope, outermost first.
+  // The uids of the structural dividers currently in scope, outermost first,
+  // and each one's level.
   const stack: string[] = [];
+  const stackLevels: number[] = [];
 
   let i = 0;
   while (i < items.length) {
@@ -2698,8 +2700,17 @@ export function computeItemPaths<T extends LineItem>(
       // That one rule is what used to be `currentGroupUid = null` on a new
       // destination, and separately the order-divider scoping in
       // `computeInvoiceItemPaths`.
-      stack.length = Math.min(stack.length, level);
+      //
+      // ⚠️ Closed by LEVEL, not by stack length (one-document-model ruling
+      // 107): the two agree only while every outer level is present. A bill
+      // has no `billing` row above its `purchase` divider, so a length rule
+      // nested its second group under its first.
+      while (stackLevels.length > 0 && stackLevels[stackLevels.length - 1] >= level) {
+        stack.pop();
+        stackLevels.pop();
+      }
       stack.push(items[i].uid);
+      stackLevels.push(level);
       result.push({ ...items[i], path: [...stack] });
       i++;
       continue;

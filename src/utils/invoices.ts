@@ -2023,8 +2023,44 @@ export function validateInvoiceItemPaths<T extends InvoiceItem>(items: T[]): Ite
  * slot, because one bill can bill several purchases (a supplier's monthly
  * statement) as one invoice bills several orders (one-document-model Phase 3).
  * A purchase's own items use {@link ORDER_ITEM_LEVELS}, as an order's do.
+ *
+ * **`billing` heads it for the CREDIT role** (one-document-model ruling 107): a
+ * supplier credit line naming a bill row sits under that bill's `billing`
+ * divider, the bill's own rows one level deeper, so two bills billing one
+ * purchase line cannot collide in one credit. A bill holds no `billing` row, so
+ * its paths are unchanged.
+ *
+ * ⚠️ **No row closes a `billing` level but another `billing` divider**, so a
+ * credit's UNPOINTED rows (a pool or charge-only credit, under its purchase
+ * divider at the root) come FIRST, ahead of every billing divider; written after
+ * one, they would nest under it. {@link CREDIT_NOTE_ITEM_LEVELS} carries the
+ * same rule.
  */
-export const PURCHASE_DOCUMENT_ITEM_LEVELS = ["purchase", "destination", "group"] as const;
+export const PURCHASE_DOCUMENT_ITEM_LEVELS = ["billing", "purchase", "destination", "group"] as const;
+
+/**
+ * The divider hierarchy of an AR CREDIT NOTE's items, outermost first — the
+ * invoice's, headed by the credit role's `billing` divider (one-document-model
+ * ruling 107): `[uid_billing, ...invoice row path]` for a line naming the
+ * invoice row it credits. A historic flat note holds lines only (ruling 53),
+ * each at `[uid]`; unpointed lines precede every billing divider
+ * ({@link PURCHASE_DOCUMENT_ITEM_LEVELS}' warning).
+ */
+export const CREDIT_NOTE_ITEM_LEVELS = ["billing", "order", "destination", "group"] as const;
+
+/**
+ * Compute paths for a credit note's items — `computeItemPaths` at
+ * {@link CREDIT_NOTE_ITEM_LEVELS}, by name, as {@link computeInvoiceItemPaths}.
+ * Pure; generic in `T`.
+ */
+export function computeCreditNoteItemPaths<T extends InvoiceItem>(items: T[]): T[] {
+  return computeItemPaths(items, CREDIT_NOTE_ITEM_LEVELS);
+}
+
+/** {@link validateInvoiceItemPaths}' twin at {@link CREDIT_NOTE_ITEM_LEVELS}. */
+export function validateCreditNoteItemPaths<T extends InvoiceItem>(items: T[]): ItemPathIssue[] {
+  return validatePathsAgainst(items, computeCreditNoteItemPaths);
+}
 
 /**
  * Compute paths for a bill's or supplier credit's items — `computeItemPaths`

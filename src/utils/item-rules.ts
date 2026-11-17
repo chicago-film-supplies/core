@@ -46,16 +46,29 @@ import {
   validateItemUniqueness,
 } from "./orders.ts";
 import {
+  computeCreditNoteItemPaths,
   computeInvoiceItemPaths,
   computePurchaseDocumentItemPaths,
   type InvoiceItem,
+  validateCreditNoteItemPaths,
   validateInvoiceItemPaths,
   validateInvoiceItemUniqueness,
   validatePurchaseDocumentItemPaths,
 } from "./invoices.ts";
 
+/** The divider row types any grain carries: a row of one of these is not a line. */
+const DIVIDER_ROW_TYPES: ReadonlySet<string> = new Set(["billing", "order", "purchase", "destination", "group"]);
+
 /** Which document an items array belongs to. Each grain has its own rule set. */
-export type ItemArrayGrain = "order" | "invoice" | "fulfillment" | "purchase" | "purchase_receipt" | "purchase_document";
+export type ItemArrayGrain =
+  | "order"
+  | "invoice"
+  | "fulfillment"
+  | "purchase"
+  | "purchase_receipt"
+  | "purchase_document"
+  /** An AR credit note (ruling 34 item 2): the invoice's rules at `CREDIT_NOTE_ITEM_LEVELS`. */
+  | "credit_note";
 
 /** The document fields {@link itemArrayIssues} reads. */
 export interface ItemArrayDoc {
@@ -133,7 +146,12 @@ export type ItemArrayRule = ItemArrayIssue["rule"];
  *   document's own identity;
  * - a product's `components` — a different path convention; that is
  *   `validateComponentUniqueness`;
- * - credit notes — they carry no structural paths.
+ * - an AR credit note's billing-row pointers — they name another document.
+ *
+ * A **credit note** (`credit_note`, ruling 34 item 2) runs the invoice's rules at
+ * `CREDIT_NOTE_ITEM_LEVELS`; its leading-divider rule runs only on a note
+ * holding a divider row, so the 13 historic flat notes, whose `sources` name
+ * orders, stay legal (ruling 53).
  *
  * Returns `[]` for a legal array.
  */
@@ -149,11 +167,16 @@ export function itemArrayIssues(
     ? computeInvoiceItemPaths(raw as InvoiceItem[])
     : grain === "purchase_document"
     ? computePurchaseDocumentItemPaths(raw as InvoiceItem[])
+    : grain === "credit_note"
+    ? computeCreditNoteItemPaths(raw as InvoiceItem[])
     : computeItemPaths(raw);
   const issues: ItemArrayIssue[] = [];
 
-  const linked = (doc.query_by_orders?.length ?? 0) > 0 || (doc.query_by_purchases?.length ?? 0) > 0 ||
-    (doc.sources?.some((s) => s.collection === "purchases") ?? false);
+  // A credit note leads with a divider only when it holds one (ruling 34 item 2).
+  const linked = grain === "credit_note"
+    ? items.some((r) => DIVIDER_ROW_TYPES.has(r.type))
+    : (doc.query_by_orders?.length ?? 0) > 0 || (doc.query_by_purchases?.length ?? 0) > 0 ||
+      (doc.sources?.some((s) => s.collection === "purchases") ?? false);
   for (const v of leadingDividerViolations(items, grain, linked)) issues.push({ rule: "leading_divider", ...v });
   if (doc.destinations) {
     for (const v of destinationJoinViolations(items, doc.destinations)) {
@@ -161,7 +184,7 @@ export function itemArrayIssues(
     }
   }
   for (const v of validateItemParentage(items)) issues.push({ rule: "parentage", ...v });
-  const uniqueness = grain === "invoice" || grain === "purchase_document"
+  const uniqueness = grain === "invoice" || grain === "purchase_document" || grain === "credit_note"
     ? validateInvoiceItemUniqueness(items as InvoiceItem[])
     : validateItemUniqueness(items);
   for (const v of uniqueness) issues.push({ rule: "uniqueness", ...v });
@@ -175,6 +198,8 @@ export function itemArrayIssues(
     ? validateInvoiceItemPaths(items as InvoiceItem[])
     : grain === "purchase_document"
     ? validatePurchaseDocumentItemPaths(items as InvoiceItem[])
+    : grain === "credit_note"
+    ? validateCreditNoteItemPaths(items as InvoiceItem[])
     : validateItemPaths(items);
   for (const v of fixedPoint) issues.push({ rule: "path_fixed_point", ...v });
 

@@ -354,6 +354,9 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "computePurchaseDocumentItemPaths",
     "syncScopedDestinations",
     "validatePurchaseDocumentItemPaths",
+    // The credit role's path author and its fixed-point check (ruling 107) — write-path only.
+    "computeCreditNoteItemPaths",
+    "validateCreditNoteItemPaths",
     // core#130 row 13: a pair's identity key — a join key, never printed.
     "invoicePairKey",
     // The invoice totals AUDIT oracle (api-cloudrun#575, #997 step 2): re-derives

@@ -20405,6 +20405,12 @@
           "doc": "A uid that identifies more than one line on at least one side, so the k-th\noccurrence pairing in {@link adoptOrderDividerStructure} is a guess rather\nthan a fact. Reported, never silently resolved."
         },
         {
+          "kind": "variable",
+          "name": "CREDIT_NOTE_ITEM_LEVELS",
+          "declaration": "const CREDIT_NOTE_ITEM_LEVELS: \"billing\" | \"order\" | \"destination\" | \"group\"[];",
+          "doc": "The divider hierarchy of an AR CREDIT NOTE's items, outermost first — the\ninvoice's, headed by the credit role's `billing` divider (one-document-model\nruling 107): `[uid_billing, ...invoice row path]` for a line naming the\ninvoice row it credits. A historic flat note holds lines only (ruling 53),\neach at `[uid]`; unpointed lines precede every billing divider\n({@link PURCHASE_DOCUMENT_ITEM_LEVELS}' warning)."
+        },
+        {
           "kind": "typeAlias",
           "name": "ConsolidatedItem",
           "declaration": "type ConsolidatedItem = ConsolidatedItemType;",
@@ -20527,8 +20533,8 @@
         {
           "kind": "variable",
           "name": "PURCHASE_DOCUMENT_ITEM_LEVELS",
-          "declaration": "const PURCHASE_DOCUMENT_ITEM_LEVELS: \"purchase\" | \"destination\" | \"group\"[];",
-          "doc": "The divider hierarchy of a BILL's or SUPPLIER CREDIT's items, outermost\nfirst: the invoice's, with a `purchase` divider in the `order` divider's\nslot, because one bill can bill several purchases (a supplier's monthly\nstatement) as one invoice bills several orders (one-document-model Phase 3).\nA purchase's own items use {@link ORDER_ITEM_LEVELS}, as an order's do."
+          "declaration": "const PURCHASE_DOCUMENT_ITEM_LEVELS: \"billing\" | \"purchase\" | \"destination\" | \"group\"[];",
+          "doc": "The divider hierarchy of a BILL's or SUPPLIER CREDIT's items, outermost\nfirst: the invoice's, with a `purchase` divider in the `order` divider's\nslot, because one bill can bill several purchases (a supplier's monthly\nstatement) as one invoice bills several orders (one-document-model Phase 3).\nA purchase's own items use {@link ORDER_ITEM_LEVELS}, as an order's do.\n\n**`billing` heads it for the CREDIT role** (one-document-model ruling 107): a\nsupplier credit line naming a bill row sits under that bill's `billing`\ndivider, the bill's own rows one level deeper, so two bills billing one\npurchase line cannot collide in one credit. A bill holds no `billing` row, so\nits paths are unchanged.\n\n⚠️ **No row closes a `billing` level but another `billing` divider**, so a\ncredit's UNPOINTED rows (a pool or charge-only credit, under its purchase\ndivider at the root) come FIRST, ahead of every billing divider; written after\none, they would nest under it. {@link CREDIT_NOTE_ITEM_LEVELS} carries the\nsame rule."
         },
         {
           "kind": "interface",
@@ -20769,6 +20775,14 @@
           "name": "componentDepthOf",
           "signature": "componentDepthOf(items: readonly typeLiteral[]): fnOrConstructor",
           "doc": "How deep a line sits UNDER ANOTHER LINE — 0 for a top-level line, 1 for a kit\ncomponent, 2 for a component of a component. What a document indents by.\n\nReturns a lookup built once over `items`, because every row asks and the\nanswer needs the whole array: an ancestor counts only when it is a LINE\npresent in `items`, resolved by `path` prefix.\n\n⭐ **Counts line ancestors rather than subtracting divider levels**, so it is\nindifferent to how many divider levels a grain has — `[destination, group]`\non an order, `[order, destination, group]` on an invoice — and to a divider\nbeing ABSENT from the array. A pick-sheet leg carries its group dividers but\nnot its destination divider; a \"skip the divider uids\" form would count that\nmissing destination as a line and indent every row one level too deep.\n\n🔴 **One document's items, never a pool.** `path` is a row identity within ONE\ndocument, so on a cross-order view (a pick sheet) build one lookup per\n`(order, destination)` section.\n\n⚠️ Pass the FULL array, before any rows are hidden. A row hidden from the\nrender is still its children's ancestor, and dropping it first would pull its\ncomponents up a level.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "computeCreditNoteItemPaths",
+          "signature": "computeCreditNoteItemPaths(items: T[]): T[]",
+          "doc": "Compute paths for a credit note's items — `computeItemPaths` at\n{@link CREDIT_NOTE_ITEM_LEVELS}, by name, as {@link computeInvoiceItemPaths}.\nPure; generic in `T`.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -21477,6 +21491,14 @@
           "name": "toOrderRelativePath",
           "signature": "toOrderRelativePath(path: readonly string[], orderDividerUid: string, targets: ReadonlyMap<string, readonly string[]>): string[]",
           "doc": "An invoice item's path in the ORDER's path space, reading an extension\nsection as the order divider it extends: `[O, E, …rest]` → `[…target, …rest]`.\nAny other item is {@link stripOrderPrefix}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "validateCreditNoteItemPaths",
+          "signature": "validateCreditNoteItemPaths(items: T[]): ItemPathIssue[]",
+          "doc": "{@link validateInvoiceItemPaths}' twin at {@link CREDIT_NOTE_ITEM_LEVELS}.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -22286,7 +22308,7 @@
         {
           "kind": "typeAlias",
           "name": "ItemArrayGrain",
-          "declaration": "type ItemArrayGrain = \"order\" | \"invoice\" | \"fulfillment\" | \"purchase\" | \"purchase_receipt\" | \"purchase_document\";",
+          "declaration": "type ItemArrayGrain = \"order\" | \"invoice\" | \"fulfillment\" | \"purchase\" | \"purchase_receipt\" | \"purchase_document\" | \"credit_note\";",
           "doc": "Which document an items array belongs to. Each grain has its own rule set."
         },
         {
@@ -22311,7 +22333,7 @@
           "kind": "function",
           "name": "itemArrayIssues",
           "signature": "itemArrayIssues(doc: ItemArrayDoc, grain: ItemArrayGrain, _: unknown): ItemArrayIssue[]",
-          "doc": "Every way an items array breaks the rules of its grain.\n\n| rule | built from | grains |\n|---|---|---|\n| `leading_divider` | `leadingDividerViolations` (`linked` = `query_by_orders` / `query_by_purchases` non-empty, or `uid_purchase`) | all |\n| `destination_join` | `destinationJoinViolations` | all (needs `destinations`) |\n| `parentage` | `validateItemParentage` | all |\n| `uniqueness` | `validateItemUniqueness` / `validateInvoiceItemUniqueness` | all |\n| `path_empty`, `path_not_self` | asserted directly — invariants (4) and (5) | all |\n| `path_fixed_point` | `validateItemPaths` / `validateInvoiceItemPaths` | all |\n| `zero_priced_non_component`, `zero_priced_unstated` | `zeroPricedFlaggedNonComponents`, `zeroPricedUnstatedComponents` | all |\n| `zero_quantity_component`, `mixed_booking_grain` | `zeroQuantityComponents`, `mixedBookingGrains` | order |\n| `exchanged_for` | `exchangedForViolations` (the four custody grains); `billingExchangedForViolations` over `uid_order` (invoice) or `uid_purchase` (bill, credit) | all (needs `destinations`) |\n\n⚠️ **(4) and (5) are asserted directly, beside the fixed point, on purpose.**\nA fixed-point check can only agree with its normalizer; these hold whatever\nthe normalizer does (the `cfs-items` skill records the 79 items a fixed point\ncertified clean).\n\n**Deliberately OUT** — each needs context an items array does not carry:\n- `orderLineClaimIssues` — needs the OTHER orders' current items;\n- `chargeWindowPairViolations` — needs the pricing context;\n- the fulfillment's `uid_order` / `order_number` agreement — needs the\n  document's own identity;\n- a product's `components` — a different path convention; that is\n  `validateComponentUniqueness`;\n- credit notes — they carry no structural paths.\n\nReturns `[]` for a legal array.",
+          "doc": "Every way an items array breaks the rules of its grain.\n\n| rule | built from | grains |\n|---|---|---|\n| `leading_divider` | `leadingDividerViolations` (`linked` = `query_by_orders` / `query_by_purchases` non-empty, or `uid_purchase`) | all |\n| `destination_join` | `destinationJoinViolations` | all (needs `destinations`) |\n| `parentage` | `validateItemParentage` | all |\n| `uniqueness` | `validateItemUniqueness` / `validateInvoiceItemUniqueness` | all |\n| `path_empty`, `path_not_self` | asserted directly — invariants (4) and (5) | all |\n| `path_fixed_point` | `validateItemPaths` / `validateInvoiceItemPaths` | all |\n| `zero_priced_non_component`, `zero_priced_unstated` | `zeroPricedFlaggedNonComponents`, `zeroPricedUnstatedComponents` | all |\n| `zero_quantity_component`, `mixed_booking_grain` | `zeroQuantityComponents`, `mixedBookingGrains` | order |\n| `exchanged_for` | `exchangedForViolations` (the four custody grains); `billingExchangedForViolations` over `uid_order` (invoice) or `uid_purchase` (bill, credit) | all (needs `destinations`) |\n\n⚠️ **(4) and (5) are asserted directly, beside the fixed point, on purpose.**\nA fixed-point check can only agree with its normalizer; these hold whatever\nthe normalizer does (the `cfs-items` skill records the 79 items a fixed point\ncertified clean).\n\n**Deliberately OUT** — each needs context an items array does not carry:\n- `orderLineClaimIssues` — needs the OTHER orders' current items;\n- `chargeWindowPairViolations` — needs the pricing context;\n- the fulfillment's `uid_order` / `order_number` agreement — needs the\n  document's own identity;\n- a product's `components` — a different path convention; that is\n  `validateComponentUniqueness`;\n- an AR credit note's billing-row pointers — they name another document.\n\nA **credit note** (`credit_note`, ruling 34 item 2) runs the invoice's rules at\n`CREDIT_NOTE_ITEM_LEVELS`; its leading-divider rule runs only on a note\nholding a divider row, so the 13 historic flat notes, whose `sources` name\norders, stay legal (ruling 53).\n\nReturns `[]` for a legal array.",
           "paramTags": [],
           "returnsTag": null
         }

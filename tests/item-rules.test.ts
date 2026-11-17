@@ -20,8 +20,8 @@ type Row = any;
 
 /** A clean document of `grain`: one leg, one group, a kit and its component. */
 function clean(grain: ItemArrayGrain): ItemArrayDoc & { items: Row[] } {
-  const pre = grain === "invoice" || grain === "purchase_document" ? [ORDER] : [];
-  const scope = grain === "invoice" ? "order" : "purchase";
+  const pre = grain === "invoice" || grain === "purchase_document" || grain === "credit_note" ? [ORDER] : [];
+  const scope = grain === "invoice" || grain === "credit_note" ? "order" : "purchase";
   const items: Row[] = [
     ...(pre.length > 0 ? [{ uid: ORDER, type: scope, name: "Scope", path: [ORDER] }] : []),
     { uid: D, type: "destination", name: "Leg", path: [...pre, D] },
@@ -114,9 +114,16 @@ const RULES_BY_GRAIN: Record<ItemArrayGrain, ItemArrayRule[]> = {
     "leading_divider", "destination_join", "parentage", "uniqueness", "path_empty", "path_not_self",
     "path_fixed_point", "zero_priced_non_component", "zero_priced_unstated", "exchanged_for",
   ],
+  // The AR credit note (ruling 34 item 2): the invoice's structural rules at
+  // `CREDIT_NOTE_ITEM_LEVELS`. No `exchanged_for` arm: a credit copies its
+  // billing row's list and takes nothing back of its own.
+  credit_note: [
+    "leading_divider", "destination_join", "parentage", "uniqueness", "path_empty", "path_not_self",
+    "path_fixed_point", "zero_priced_non_component", "zero_priced_unstated",
+  ],
 };
 
-const GRAINS: ItemArrayGrain[] = ["order", "fulfillment", "invoice", "purchase", "purchase_receipt", "purchase_document"];
+const GRAINS: ItemArrayGrain[] = ["order", "fulfillment", "invoice", "purchase", "purchase_receipt", "purchase_document", "credit_note"];
 
 for (const grain of GRAINS) {
   Deno.test(`itemArrayIssues(${grain}): a clean document has no issues`, () => {
@@ -173,4 +180,55 @@ Deno.test("itemArrayIssues: an exchanged_for issue carries the refinement's own 
     field: "exchanged_for",
     message: "exchanged_for is valid only on a row under a destination pair marked as an exchange",
   });
+});
+
+// ── The credit role's billing level (one-document-model ruling 107) ──────────
+
+const INV_A = "InvoiceA000000000001";
+const INV_B = "InvoiceB000000000002";
+const LINE = "SaleLine";
+
+/** A credit crediting ONE order line billed by two invoices: a deposit and a final. */
+function twoInvoiceCredit(): ItemArrayDoc & { items: Row[] } {
+  const under = (inv: string): Row[] => [
+    { uid: inv, type: "billing", name: `Invoice ${inv}`, path: [inv] },
+    { uid: ORDER, type: "order", name: "Order #777", path: [inv, ORDER] },
+    { uid: D, type: "destination", name: "Leg", path: [inv, ORDER, D] },
+    { uid: LINE, type: "sale", name: "Tape", quantity: 1, zero_priced: null, path: [inv, ORDER, D, LINE] },
+  ];
+  return { items: [...under(INV_A), ...under(INV_B)] };
+}
+
+Deno.test("itemArrayIssues(credit_note): two invoices billing one order line do not collide under their billing dividers", () => {
+  assertEquals(itemArrayIssues(twoInvoiceCredit(), "credit_note"), []);
+  // Without the billing level the two rows are one path: the collision ruling 107 removes.
+  const flattened = { items: twoInvoiceCredit().items.filter((r) => r.type !== "billing").map((r) => ({ ...r, path: r.path.slice(1) })) };
+  assert(itemArrayIssues(flattened, "credit_note").some((i) => i.rule === "uniqueness"));
+});
+
+Deno.test("itemArrayIssues(credit_note): a flat historic note is legal, a divided one leads with a billing or order divider", () => {
+  const flat: { items: Row[] } = { items: [{ uid: LINE, type: "sale", name: "Tape", quantity: 1, zero_priced: null, path: [LINE] }] };
+  // Its `sources` name orders, and still no leading divider is owed (ruling 53).
+  assertEquals(itemArrayIssues({ ...flat, sources: [{ collection: "orders" }] }, "credit_note"), []);
+  const leadsWithLine = { items: [...flat.items, ...twoInvoiceCredit().items] };
+  assert(itemArrayIssues(leadsWithLine, "credit_note").some((i) => i.rule === "leading_divider"), "a divided note leads with a divider");
+});
+
+Deno.test("itemArrayIssues(credit_note): an unpointed line written AFTER a billing divider nests under it, so it goes first", () => {
+  const rows = twoInvoiceCredit().items;
+  const goodwill: Row = { uid: "Goodwill", type: "service", name: "Goodwill", quantity: 1, zero_priced: null, path: ["Goodwill"] };
+  assert(itemArrayIssues({ items: [...rows, goodwill] }, "credit_note").some((i) => i.rule === "path_fixed_point"));
+});
+
+Deno.test("itemArrayIssues(purchase_document): a supplier credit holds one purchase divider per bill it credits", () => {
+  const P = ORDER;
+  const under = (bill: string): Row[] => [
+    { uid: bill, type: "billing", name: `Bill ${bill}`, path: [bill] },
+    { uid: P, type: "purchase", name: "PO-1", path: [bill, P] },
+    { uid: D, type: "destination", name: "Leg", path: [bill, P, D] },
+    { uid: LINE, type: "sale", name: "Tape", quantity: 1, zero_priced: null, path: [bill, P, D, LINE] },
+  ];
+  assertEquals(itemArrayIssues({ items: [...under(INV_A), ...under(INV_B)], destinations: [{ uid: D }] }, "purchase_document"), []);
+  // A bill's paths do not move: no billing row, nothing above the purchase.
+  assertEquals(itemArrayIssues(clean("purchase_document"), "purchase_document"), []);
 });
