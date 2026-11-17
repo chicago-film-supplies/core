@@ -53940,8 +53940,9 @@ as the fold reads them; a spent one stands in for nothing and is not copied.
 ### `billLineCredited(uidBill: string, path: readonly string[], credits: readonly Pick<PurchaseCredit, "status" | "items">[]): BillLineCredited`
 
 **What live credits have taken from the bill line at `path` on bill
-`uidBill`** — every live credit line naming that `(uid_purchase_bill,
-path_bill_item)`. The per-line half of the credit cap (one-document-model 6d),
+`uidBill`** — every live credit line naming that `(uid_billing,
+path_billing_item)` (or the retiring `uid_purchase_bill` / `path_bill_item`
+through beta H1). The per-line half of the credit cap (one-document-model 6d),
 the twin of AR's `creditableLines` prior-note sum.
 
 **The CREDITED view of the one credit fold** (ruling 84): marker-free, every
@@ -54107,15 +54108,23 @@ projectPurchaseLineToBillLine}); a line at a path the purchase does not carry
 (a document-only charge, `[purchase uid, uid]`) sits directly under the
 purchase divider, ahead of the first destination, so contiguity holds.
 
-**A credit line copied from a BILL ROW keeps that row's path**
-(one-document-model 6d, ruling 23; owner 2026-11-11), even where the purchase
-has no row there: a W5 substitute, a bill-authored charge, a row the bill
-moved. Its dividers come from the bill named by `uid_purchase_bill`, which
-`opts.bills` must carry: one the purchase holds is taken as above, and one the
-BILL authored (a group, or a destination with its pair) is copied from the
-bill. The line goes at the end of its parent's direct lines (ahead of a
-destination's first group, as a divider closes every level below it), so the
-credit shows the bill's tree.
+**A credit line copied from a BILL ROW sits under that bill's `billing`
+divider** (ruling 107): its path is `[bill uid, ...the bill row's path]`,
+one block per bill in order of first appearance, after the unpointed lines'
+block (nothing but another billing divider closes a billing level). So a
+credit naming two bills of one purchase line holds both rows; placed by
+purchase-local path alone, one overwrote the other. Each line is written on
+the pointer's new spelling, `uid_billing` + `path_billing_item`.
+
+Inside a bill's block a line keeps the bill row's path (one-document-model
+6d, ruling 23; owner 2026-11-11), even where the purchase has no row there: a
+W5 substitute, a bill-authored charge, a row the bill moved. Its dividers come
+from the bill, which `opts.bills` must carry: one the purchase holds is taken
+as above, and one the BILL authored (a group, or a destination with its pair)
+is copied from the bill. The line goes at the end of its parent's direct lines
+(ahead of a destination's first group, as a divider closes every level below
+it), so the credit shows the bill's tree. A block's pairs are the bill's own
+where it authored them, else the purchase's.
 
 ### `purchaseInitiator(purchase: Pick<Purchase, "uid" | "items" | "destinations">): AccountedInitiator`
 

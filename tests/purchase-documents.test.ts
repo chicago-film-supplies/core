@@ -769,24 +769,50 @@ Deno.test("purchaseDocumentScope: a credit line copied from a bill row keeps the
   });
   const credited = (row: PurchaseDocumentItem) => ({ ...row, uid_purchase_bill: bill.uid, path_bill_item: [...row.path] });
   const scope = purchaseDocumentScope(purchase, [credited(c), project(b, 0, 1), credited(d), credited(y)], { bills: [bill] });
+  const B = bill.uid;
   assertEquals(scope.items.map((r) => [r.type, r.path.join("/")]), [
+    // The unpointed line's block comes first: nothing but a billing divider closes a billing level.
     ["purchase", PURCHASE],
     ["destination", `${PURCHASE}/${DIV}`],
-    // A line directly under a destination goes ahead of its first group, or it would read as the group's.
-    ["sale", `${PURCHASE}/${DIV}/${lid(7)}`],
     ["group", `${PURCHASE}/${DIV}/${g}`],
     ["sale", `${PURCHASE}/${DIV}/${g}/${lid(9)}`],
-    ["group", `${PURCHASE}/${DIV}/${h}`],
-    ["sale", `${PURCHASE}/${DIV}/${h}/${lid(8)}`],
-    ["destination", `${PURCHASE}/${e}`],
-    ["sale", `${PURCHASE}/${e}/${lid(6)}`],
+    // The bill's block, under its billing divider (ruling 107).
+    ["billing", B],
+    ["purchase", `${B}/${PURCHASE}`],
+    ["destination", `${B}/${PURCHASE}/${DIV}`],
+    // A line directly under a destination goes ahead of its first group, or it would read as the group's.
+    ["sale", `${B}/${PURCHASE}/${DIV}/${lid(7)}`],
+    ["group", `${B}/${PURCHASE}/${DIV}/${h}`],
+    ["sale", `${B}/${PURCHASE}/${DIV}/${h}/${lid(8)}`],
+    ["destination", `${B}/${PURCHASE}/${e}`],
+    ["sale", `${B}/${PURCHASE}/${e}/${lid(6)}`],
   ]);
   assertEquals(scope.destinations.map((p) => [pairSourceUid(p), p.uid]), [[PURCHASE, DIV], [PURCHASE, e]], "the bill's own pair comes with its destination");
   assertEquals(scope.items.find((r) => r.uid === g)!.name, "Spare", "a divider the purchase holds is the purchase's");
+  assertEquals(scope.items.find((r) => r.type === "billing")!.name, `Bill #${bill.number}`);
+  // Each pointed line is written on the new spelling, naming the bill row's own path.
+  const yRow = scope.items.find((r) => r.uid === lid(7)) as PurchaseDocumentItem;
+  assertEquals([yRow.uid_billing, yRow.path_billing_item, "uid_purchase_bill" in yRow, "path_bill_item" in yRow], [B, y.path, false, false]);
 
   // Companion: with no bill to read, a bill-row line cannot be placed and says so, rather than flattening.
   assertThrows(() => purchaseDocumentScope(purchase, [credited(y)]), Error, "was not passed");
   assertThrows(() => purchaseDocumentScope(purchase, [{ ...credited(y), path: [PURCHASE, DIV, lid(5)] }], { bills: [bill] }), Error, "holds no row");
+});
+
+Deno.test("purchaseDocumentScope: a credit naming TWO bills of one purchase line keeps both rows, one per billing divider (Q5)", () => {
+  const a = buyLine();
+  const purchase = purchaseDoc([a]);
+  const first = billDoc(1, [project(a, 0, 1)]);
+  const second = { ...billDoc(2, [project(a, 1, 1)]), uid: "secondbill0000000000" };
+  const credited = (bill: PurchaseBill) => {
+    const row = bill.items.find((r) => r.uid === a.uid) as PurchaseDocumentItem;
+    return { ...row, uid_billing: bill.uid, path_billing_item: [...row.path] };
+  };
+  const scope = purchaseDocumentScope(purchase, [credited(first), credited(second)], { bills: [first, second] });
+  const lines = scope.items.filter((r) => r.uid === a.uid) as PurchaseDocumentItem[];
+  assertEquals(lines.map((l) => [l.path[0], l.uid_billing]), [[first.uid, first.uid], [second.uid, second.uid]]);
+  // Companion: by purchase-local path alone the two lines share one key, the drop this fixes.
+  assertEquals(new Set(lines.map((l) => l.path.slice(1).join("/"))).size, 1);
 });
 
 Deno.test("lineUnitsCents (a stated line): past `quantity` it keeps the per-unit rate, as flatShareCents did (6e-0b1 S3)", () => {

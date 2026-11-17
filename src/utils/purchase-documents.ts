@@ -53,6 +53,7 @@ import {
   purchaseItemBasis,
   purchaseLines,
   purchaseLineKeyOf,
+  purchaseCreditLineBillPointer,
   type PurchaseRow,
   PurchaseSchema,
   type SubstitutedForEntryType,
@@ -455,8 +456,9 @@ export interface BillLineCredited {
 
 /**
  * **What live credits have taken from the bill line at `path` on bill
- * `uidBill`** — every live credit line naming that `(uid_purchase_bill,
- * path_bill_item)`. The per-line half of the credit cap (one-document-model 6d),
+ * `uidBill`** — every live credit line naming that `(uid_billing,
+ * path_billing_item)` (or the retiring `uid_purchase_bill` / `path_bill_item`
+ * through beta H1). The per-line half of the credit cap (one-document-model 6d),
  * the twin of AR's `creditableLines` prior-note sum.
  *
  * **The CREDITED view of the one credit fold** (ruling 84): marker-free, every
@@ -482,7 +484,9 @@ export function billLineCredited(
     // Every line row, kit headers included: a substitute kit's root is usually a
     // $0 header, and a credit of it copies it (`billLineCreditParts`).
     for (const line of credit.items) {
-      if (!isPurchaseLine(line) || line.uid_purchase_bill !== uidBill || line.path_bill_item?.join("/") !== key) continue;
+      if (!isPurchaseLine(line)) continue;
+      const pointer = purchaseCreditLineBillPointer(line);
+      if (pointer === null || pointer.uid !== uidBill || pointer.path.join("/") !== key) continue;
       out.quantity += line.quantity;
       out.amount_cents += line.amount_cents;
     }
@@ -839,15 +843,23 @@ export function purchaseScopeDivider(purchase: Pick<Purchase, "uid" | "number">)
  * (a document-only charge, `[purchase uid, uid]`) sits directly under the
  * purchase divider, ahead of the first destination, so contiguity holds.
  *
- * **A credit line copied from a BILL ROW keeps that row's path**
- * (one-document-model 6d, ruling 23; owner 2026-11-11), even where the purchase
- * has no row there: a W5 substitute, a bill-authored charge, a row the bill
- * moved. Its dividers come from the bill named by `uid_purchase_bill`, which
- * `opts.bills` must carry: one the purchase holds is taken as above, and one the
- * BILL authored (a group, or a destination with its pair) is copied from the
- * bill. The line goes at the end of its parent's direct lines (ahead of a
- * destination's first group, as a divider closes every level below it), so the
- * credit shows the bill's tree.
+ * **A credit line copied from a BILL ROW sits under that bill's `billing`
+ * divider** (ruling 107): its path is `[bill uid, ...the bill row's path]`,
+ * one block per bill in order of first appearance, after the unpointed lines'
+ * block (nothing but another billing divider closes a billing level). So a
+ * credit naming two bills of one purchase line holds both rows; placed by
+ * purchase-local path alone, one overwrote the other. Each line is written on
+ * the pointer's new spelling, `uid_billing` + `path_billing_item`.
+ *
+ * Inside a bill's block a line keeps the bill row's path (one-document-model
+ * 6d, ruling 23; owner 2026-11-11), even where the purchase has no row there: a
+ * W5 substitute, a bill-authored charge, a row the bill moved. Its dividers come
+ * from the bill, which `opts.bills` must carry: one the purchase holds is taken
+ * as above, and one the BILL authored (a group, or a destination with its pair)
+ * is copied from the bill. The line goes at the end of its parent's direct lines
+ * (ahead of a destination's first group, as a divider closes every level below
+ * it), so the credit shows the bill's tree. A block's pairs are the bill's own
+ * where it authored them, else the purchase's.
  *
  * @throws when a line names a bill `opts.bills` does not carry, or a row that
  *   bill does not hold
@@ -855,19 +867,78 @@ export function purchaseScopeDivider(purchase: Pick<Purchase, "uid" | "number">)
 export function purchaseDocumentScope(
   purchase: Pick<Purchase, "uid" | "number" | "items" | "destinations">,
   lines: readonly PurchaseDocumentItem[],
-  opts: { bills?: readonly Pick<PurchaseBill, "uid" | "items" | "destinations">[] } = {},
+  opts: { bills?: readonly Pick<PurchaseBill, "uid" | "number" | "items" | "destinations">[] } = {},
 ): { items: PurchaseDocumentRow[]; destinations: PurchaseDocDestination[] } {
-  const byLocal = new Map<string, PurchaseDocumentItem>();
-  const own: PurchaseDocumentItem[] = [];
-  const fromBill: PurchaseDocumentItem[] = [];
   for (const line of lines) {
     if (line.path[0] !== purchase.uid) {
       throw new Error(`purchaseDocumentScope: line ${line.uid} is not under purchase ${purchase.uid}`);
     }
+  }
+  const unpointed = lines.filter((line) => purchaseCreditLineBillPointer(line) === null);
+  const byBill = Map.groupBy(lines.filter((line) => purchaseCreditLineBillPointer(line) !== null), (line) =>
+    purchaseCreditLineBillPointer(line)!.uid);
+  const rows: PurchaseDocumentRow[] = [];
+  const pairs: PurchaseDocDestination[] = [];
+  const addPairs = (more: readonly PurchaseDocDestination[]) => {
+    for (const pair of more) if (!pairs.some((p) => p.uid === pair.uid)) pairs.push(pair);
+  };
+  if (unpointed.length > 0 || byBill.size === 0) {
+    const block = purchaseScopeBlock(purchase, unpointed, null);
+    rows.push(...block.rows);
+    addPairs(block.pairs);
+  }
+  for (const [uidBill, billLines] of byBill) {
+    const bill = opts.bills?.find((b) => b.uid === uidBill);
+    if (bill === undefined) {
+      throw new Error(`purchaseDocumentScope: line ${billLines[0].uid} names bill ${uidBill}, which was not passed`);
+    }
+    const block = purchaseScopeBlock(purchase, billLines, bill);
+    rows.push(billingDivider(bill));
+    for (const row of block.rows) {
+      const path = [bill.uid, ...row.path];
+      if (!isPurchaseLine(row)) {
+        rows.push({ ...row, path });
+        continue;
+      }
+      const pointer = purchaseCreditLineBillPointer(row);
+      if (pointer === null) {
+        rows.push({ ...row, path });
+        continue;
+      }
+      const { uid_purchase_bill: _u, path_bill_item: _p, ...rest } = row;
+      rows.push({ ...rest, path, uid_billing: pointer.uid, path_billing_item: [...pointer.path] });
+    }
+    addPairs(block.pairs);
+  }
+  return { items: computePurchaseDocumentItemPaths(rows), destinations: pairs };
+}
+
+/**
+ * A bill's `billing` divider on a supplier credit (ruling 107): the shared arm,
+ * its uid the bill's, its name machine-written.
+ */
+function billingDivider(bill: Pick<PurchaseBill, "uid" | "number">): PurchaseDocumentRow {
+  return { uid: bill.uid, type: "billing", name: `Bill #${bill.number}`, path: [bill.uid], description: "" };
+}
+
+/**
+ * One block of {@link purchaseDocumentScope}: the purchase divider, the dividers
+ * above `lines`, the lines, and their pairs, at purchase-relative paths. `bill`
+ * is the bill the lines all name, or null for lines naming none.
+ */
+function purchaseScopeBlock(
+  purchase: Pick<Purchase, "uid" | "number" | "items" | "destinations">,
+  lines: readonly PurchaseDocumentItem[],
+  bill: Pick<PurchaseBill, "uid" | "items" | "destinations"> | null,
+): { rows: PurchaseDocumentRow[]; pairs: PurchaseDocDestination[] } {
+  const byLocal = new Map<string, PurchaseDocumentItem>();
+  const own: PurchaseDocumentItem[] = [];
+  const fromBill: PurchaseDocumentItem[] = [];
+  for (const line of lines) {
     const local = line.path.slice(1).join("/");
     const onPurchase = purchase.items.some((r) => r.path.join("/") === local);
     if (onPurchase) byLocal.set(local, line);
-    else if (line.uid_purchase_bill !== undefined) fromBill.push(line);
+    else if (bill !== null) fromBill.push(line);
     else own.push(line);
   }
   // Every ancestor path of a billed line, so the dividers above it come along.
@@ -884,10 +955,7 @@ export function purchaseDocumentScope(
   const authored = new Map<string, PurchaseDocumentRow>();
   const authoredPairs: PurchaseDocDestination[] = [];
   for (const line of fromBill) {
-    const bill = opts.bills?.find((b) => b.uid === line.uid_purchase_bill);
-    if (bill === undefined) {
-      throw new Error(`purchaseDocumentScope: line ${line.uid} names bill ${line.uid_purchase_bill}, which was not passed`);
-    }
+    if (bill === null) continue;
     const billRows = new Map(bill.items.map((r) => [r.path.join("/"), r]));
     if (!billRows.has(line.path.join("/"))) {
       throw new Error(`purchaseDocumentScope: bill ${bill.uid} holds no row at ${line.path.join("/")}`);
@@ -959,8 +1027,8 @@ export function purchaseDocumentScope(
   }
   const dividers = new Set(rows.filter((r) => r.type === "destination").map((r) => r.uid));
   return {
-    items: computePurchaseDocumentItemPaths(rows),
-    destinations: [
+    rows,
+    pairs: [
       ...purchase.destinations.filter((d) => dividers.has(d.uid)).map((d) => ({ uid_source: purchase.uid, ...d })),
       ...authoredPairs.filter((d) => dividers.has(d.uid)),
     ],
