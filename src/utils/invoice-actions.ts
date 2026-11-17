@@ -89,6 +89,7 @@ import { invoiceStatusTracksXeroEdits, type InvoiceXeroSyncStatus } from "./invo
 import {
   type AccountedCreditNote,
   type AccountingContext,
+  type CreditDividerRow,
   type AccountedInvoice,
   accountBilling,
   addTime,
@@ -208,7 +209,8 @@ export interface CappedCreditLine extends KeyableCreditLine {
 /** A prior credit note, as the credit cap reads it. Void notes are skipped. */
 export interface CappedNote {
   status: string;
-  items: readonly CappedCreditLine[];
+  /** Its rows: lines, and on a divided note its dividers (skipped). */
+  items: readonly (CappedCreditLine | CreditDividerRow)[];
 }
 
 /** What {@link invoiceActionsFor} needs that the invoice alone does not carry. */

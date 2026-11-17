@@ -89,7 +89,7 @@ import {
   type ScopedSyncSide,
   syncScopedDestinations,
 } from "./invoices.ts";
-import type { LineItem } from "./orders.ts";
+import type { DocumentTotalsCore, LineItem } from "./orders.ts";
 import {
   BILLING_ROW_PART,
   billingRowCreditMoney,
@@ -1380,19 +1380,43 @@ export function syncPurchaseToBills(args: SyncPurchaseToBillsArgs): PurchaseBill
     });
     return {
       uid: bill.uid,
-      bill: { ...bill, items: priced.items, destinations, totals: withTotal(bill.totals, priced.totals.total_cents) },
+      bill: { ...bill, items: priced.items, destinations, totals: withTotal(bill.totals, priced.totals) },
       changed: true,
     };
   });
 }
 
 /**
- * The totals at a new `total_cents`, the identity kept: an unfrozen bill carries
- * no money settlement, so what moves is what is due.
+ * The totals at a new pricing, the identity kept: an unfrozen bill carries no
+ * money settlement, so what moves is what is due. The breakdown keys come with
+ * the total (ruling 105, {@link billTotalsBreakdown}).
  */
-function withTotal(totals: PurchaseBill["totals"], total: number): PurchaseBill["totals"] {
+function withTotal(totals: PurchaseBill["totals"], priced: DocumentTotalsCore): PurchaseBill["totals"] {
   const settled = totals.amount_paid_cents + totals.amount_credited_cents + totals.amount_void_cents;
-  return { ...totals, total_cents: total, amount_due_cents: total - settled };
+  return {
+    ...totals,
+    ...billTotalsBreakdown(priced),
+    total_cents: priced.total_cents,
+    amount_due_cents: priced.total_cents - settled,
+  };
+}
+
+/**
+ * **The one author of a bill's breakdown keys** (ruling 105, one totals shape per
+ * role): the invoice's five, read off `priceDocument`'s stage-5 sum. Every bill
+ * writer spreads it beside the settlement keys; a writer that only refolds the
+ * journal carries the stored ones.
+ */
+export function billTotalsBreakdown(
+  priced: DocumentTotalsCore,
+): Required<Pick<PurchaseBill["totals"], "subtotal_cents" | "subtotal_discounted_cents" | "discount_amount_cents" | "taxes" | "transaction_fees">> {
+  return {
+    subtotal_cents: priced.subtotal_cents,
+    subtotal_discounted_cents: priced.subtotal_discounted_cents,
+    discount_amount_cents: priced.discount_amount_cents,
+    taxes: priced.taxes,
+    transaction_fees: priced.transaction_fees,
+  };
 }
 
 // ── Re-keying payable lines by product (W4K) ─────────────────────

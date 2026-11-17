@@ -23,6 +23,7 @@ import {
   crmsAuthoredInvoices,
   type RemainingInvoice,
   type RemainingInvoiceSource,
+  rowCreditedBefore,
   unitsCreditedBefore,
 } from "../src/utils/quantityAccounting.ts";
 
@@ -1086,6 +1087,35 @@ Deno.test("unitsCreditedBefore: the CREDITED view — marker-free, non-void, uni
     { status: "issued", items: [{ quantity: 1, path_invoice_item: row.path }] }, // the retiring pointer names the invoice read
     { status: "issued", items: [{ quantity: 4 }] }, // no pointer: credits no row
   ]), 4);
+});
+
+Deno.test("rowCreditedBefore: units from unit credits, money from every keyed credit, dividers skipped", () => {
+  const rows = invoice("a", lightOrder(5, 10)).items.filter((it) => it.type === "rental");
+  const row = rows[0];
+  const n = (quantity: number, cents: number, extra: Record<string, unknown> = {}) => ({
+    quantity,
+    uid_billing: "a",
+    path_billing_item: row.path,
+    price: { counts: [], subtotal_discounted_cents: cents },
+    ...extra,
+  });
+  const out = rowCreditedBefore({ uid: "a", rows }, row, [
+    {
+      status: "issued",
+      items: [
+        // A note's billing divider (ruling 107): it credits nothing.
+        { uid: "a", type: "billing" as const, path: ["a"] },
+        n(1, 2000),
+      ],
+    },
+    // A time credit takes money and no units (R3): 2 × 3 days on a 10-day row.
+    { status: "applied", items: [n(2, 1200, { price: { counts: fdwCounts(3), subtotal_discounted_cents: 1200 } })] },
+    { status: "void", items: [n(4, 8000)] }, // void: nothing
+    { status: "issued", items: [n(3, 6000, { uid_billing: "b" })] }, // another invoice: not this row
+  ]);
+  assertEquals(out, { quantity: 1, amount_cents: 3200 });
+  // `unitsCreditedBefore` is its unit half.
+  assertEquals(unitsCreditedBefore({ uid: "a", rows }, row, [{ status: "issued", items: [n(1, 2000)] }]), 1);
 });
 
 // ── invoiceOnlyLines (api-cloudrun#1188) ──

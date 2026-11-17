@@ -19,6 +19,8 @@
 import { assert, assertEquals } from "@std/assert";
 import {
   type AccountedCreditNote,
+  type AccountedCreditNoteItem,
+  isCreditDividerRow,
   type AccountedInvoice,
   billedByPath,
   type PayableFoldBill,
@@ -110,7 +112,10 @@ Deno.test("billedByPath (AR): one note crediting two invoices that bill ONE orde
   // with two invoice sources cannot be placed — the reason ruling 107 exists.
   const legacy: AccountedCreditNote = {
     ...two,
-    items: two.items.filter((l) => l.type !== "billing").map(({ uid_billing: _u, path_billing_item, ...l }) => ({ ...l, path_invoice_item: path_billing_item })),
+    items: two.items.filter((l) => !isCreditDividerRow(l)).map((row) => {
+      const { uid_billing: _u, path_billing_item, ...l } = row as AccountedCreditNoteItem;
+      return { ...l, path_invoice_item: path_billing_item };
+    }),
   };
   const unplaced = billedByPath("receivable", { uid: O, items: ORDER_ITEMS }, [invoice("inv-1", 2, 2000), invoice("inv-2", 2, 1998)], [legacy]);
   assertEquals([unplaced.byPath.get(`${D}/${X}`)?.quantity, unplaced.credits_unkeyed], [4, ["cn-2"]]);

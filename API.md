@@ -42355,7 +42355,7 @@ A credit note as quantity accounting reads it.
 interface AccountedCreditNote {
   uid: string;
   status: CreditNoteStatusType;
-  items: readonly AccountedCreditNoteItem[];
+  items: readonly parenthesized[];
   destinations?: readonly parenthesized[];
   number?: number;
   version?: number;
@@ -42564,6 +42564,21 @@ interface BillingFoldSide {
   partCents(row: InvoiceItem, before: number, after: number): number;
   creditRows(doc: C): typeLiteral;
   creditLegacyBillingUid(doc: C): string | null;
+}
+```
+
+### `CreditDividerRow`
+
+A credit's divider row (ruling 107): a `billing`, `order`, `destination` or
+`group` divider. It credits nothing, so every reader of a credit's rows skips
+it ({@link isCreditDividerRow}); declared so a STORED note, dividers and all,
+is what these readers take.
+
+```ts
+interface CreditDividerRow {
+  uid: string;
+  type: "billing" | "order" | "destination" | "group";
+  path: readonly string[];
 }
 ```
 
@@ -43130,7 +43145,11 @@ A row a substitution explains is left out — its `substituted` entry is that
 row's answer, and a custody figure there would report it twice. A receipt
 carries no substitution, so the skip is vacuous there.
 
-### `keyCreditLines(billing: typeLiteral, lines: readonly L[], _: unknown): typeLiteral`
+### `isCreditDividerRow(row: object): row is CreditDividerRow`
+
+Whether a credit row is one of its dividers.
+
+### `keyCreditLines(billing: typeLiteral, rows: readonly parenthesized[], _: unknown): typeLiteral`
 
 **The one credit keyer, both sides** (ruling 34 F14 item 5): each line of
 `lines` that names a row of `billing` — by `(uid_billing, path_billing_item)`
@@ -43199,6 +43218,14 @@ TIME is its owed extension groups (`LineAccount.remaining.owed`), not this.
 
 - `item` — The initiator line (its ordered `quantity`)
 - `billedUnits` — Acted billed units, ≥ 0
+
+### `rowCreditedBefore(billing: typeLiteral, row: Pick<KeyedBillingRow, "path">, notes: readonly typeLiteral[]): typeLiteral`
+
+**What the non-void `notes` already took of `row`**: whole units
+({@link unitsCreditedBefore}'s `c`) and money, the net of every keyed credit
+line on it, time credits included (they take money, not units, R3). The AR
+twin of the payable `billLineCredited`, and the `credited` a first-come
+credit is priced from (`priceCreditNote`, `billingRowCreditMoney`).
 
 ### `sameWindowDates(a: readonly WindowBounds[], b: readonly WindowBounds[]): boolean`
 
@@ -45517,7 +45544,7 @@ A prior credit note, as the credit cap reads it. Void notes are skipped.
 ```ts
 interface CappedNote {
   status: string;
-  items: readonly CappedCreditLine[];
+  items: readonly parenthesized[];
 }
 ```
 
@@ -54039,6 +54066,13 @@ exactly AR's netting liveness.
 (owner ruling 22, as `path_invoice_item` does on AR): a credit raised before a
 move then no longer counts against the row. The pool cap
 ({@link purchaseBillingFold}) still sees it.
+
+### `billTotalsBreakdown(priced: DocumentTotalsCore): Required<Pick<indexedAccess, "subtotal_cents" | "subtotal_discounted_cents" | "discount_amount_cents" | "taxes" | "transaction_fees">>`
+
+**The one author of a bill's breakdown keys** (ruling 105, one totals shape per
+role): the invoice's five, read off `priceDocument`'s stage-5 sum. Every bill
+writer spreads it beside the settlement keys; a writer that only refolds the
+journal carries the stored ones.
 
 ### `billedPoolCreditMoney(args: typeLiteral): CreditMoney`
 

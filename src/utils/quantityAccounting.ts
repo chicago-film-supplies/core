@@ -403,12 +403,30 @@ export interface AccountedCreditNoteItem extends KeyableCreditLine {
   substituted_for?: readonly { path: readonly string[]; quantity: number }[];
 }
 
+/**
+ * A credit's divider row (ruling 107): a `billing`, `order`, `destination` or
+ * `group` divider. It credits nothing, so every reader of a credit's rows skips
+ * it ({@link isCreditDividerRow}); declared so a STORED note, dividers and all,
+ * is what these readers take.
+ */
+export interface CreditDividerRow {
+  uid: string;
+  type: "billing" | "order" | "destination" | "group";
+  path: readonly string[];
+}
+
+/** Whether a credit row is one of its dividers. */
+export function isCreditDividerRow(row: object): row is CreditDividerRow {
+  const type = (row as { type?: unknown }).type;
+  return typeof type === "string" && isDividerItemType(type);
+}
+
 /** A credit note as quantity accounting reads it. */
 export interface AccountedCreditNote {
   uid: string;
   status: CreditNoteStatusType;
   /** Its rows: lines, and on a divided note its dividers (skipped). */
-  items: readonly AccountedCreditNoteItem[];
+  items: readonly (AccountedCreditNoteItem | CreditDividerRow)[];
   /** The billing documents' pairs its rows sit under (F14 item 3). */
   destinations?: readonly ({ uid: string; dates?: unknown } & PairSourceKeys)[];
   number?: number;
@@ -485,14 +503,17 @@ export function creditLinePointer(
  */
 export function keyCreditLines<L extends KeyableCreditLine, R extends KeyedBillingRow>(
   billing: { uid: string; rows: readonly R[] },
-  lines: readonly L[],
+  rows: readonly (L | CreditDividerRow)[],
   opts: { legacyUid?: string | null } = {},
 ): { keyed: KeyedCredit<L, R>[]; unmatched: L[]; unpointed: L[] } {
   const byPath = new Map(billing.rows.map((r) => [key(r.path), r] as const));
   const keyed: KeyedCredit<L, R>[] = [];
   const unmatched: L[] = [];
   const unpointed: L[] = [];
-  for (const line of lines) {
+  for (const entry of rows) {
+    // A divider credits nothing (ruling 107): neither keyed nor unpointed.
+    if (isCreditDividerRow(entry)) continue;
+    const line = entry;
     const pointer = creditLinePointer(line);
     if (pointer === null) {
       unpointed.push(line);
@@ -529,17 +550,37 @@ export function keyCreditLines<L extends KeyableCreditLine, R extends KeyedBilli
 export function unitsCreditedBefore(
   billing: { uid: string; rows: readonly KeyedBillingRow[] },
   row: Pick<KeyedBillingRow, "path">,
-  notes: readonly { status: string; items: readonly KeyableCreditLine[] }[],
+  notes: readonly { status: string; items: readonly (KeyableCreditLine | CreditDividerRow)[] }[],
 ): number {
+  return rowCreditedBefore(billing, row, notes).quantity;
+}
+
+/**
+ * **What the non-void `notes` already took of `row`**: whole units
+ * ({@link unitsCreditedBefore}'s `c`) and money, the net of every keyed credit
+ * line on it, time credits included (they take money, not units, R3). The AR
+ * twin of the payable `billLineCredited`, and the `credited` a first-come
+ * credit is priced from (`priceCreditNote`, `billingRowCreditMoney`).
+ */
+export function rowCreditedBefore(
+  billing: { uid: string; rows: readonly KeyedBillingRow[] },
+  row: Pick<KeyedBillingRow, "path">,
+  notes: readonly {
+    status: string;
+    items: readonly ((KeyableCreditLine & { price?: { subtotal_discounted_cents?: number } }) | CreditDividerRow)[];
+  }[],
+): { quantity: number; amount_cents: number } {
   const k = key(row.path);
-  let c = 0;
+  const out = { quantity: 0, amount_cents: 0 };
   for (const note of notes) {
     if (note.status === "void") continue;
     for (const credit of keyCreditLines(billing, note.items, { legacyUid: billing.uid }).keyed) {
-      if (credit.kind === "units" && key(credit.row.path) === k) c += credit.line.quantity;
+      if (key(credit.row.path) !== k) continue;
+      if (credit.kind === "units") out.quantity += credit.line.quantity;
+      out.amount_cents += credit.line.price?.subtotal_discounted_cents ?? 0;
     }
   }
-  return c;
+  return out;
 }
 
 const key = (path: readonly string[]): string => path.join("/");

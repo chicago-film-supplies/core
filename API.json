@@ -19945,7 +19945,7 @@
         {
           "kind": "interface",
           "name": "AccountedCreditNote",
-          "declaration": "interface AccountedCreditNote {\n  uid: string;\n  status: CreditNoteStatusType;\n  items: readonly AccountedCreditNoteItem[];\n  destinations?: readonly parenthesized[];\n  number?: number;\n  version?: number;\n  sources?: readonly typeLiteral[];\n}",
+          "declaration": "interface AccountedCreditNote {\n  uid: string;\n  status: CreditNoteStatusType;\n  items: readonly parenthesized[];\n  destinations?: readonly parenthesized[];\n  number?: number;\n  version?: number;\n  sources?: readonly typeLiteral[];\n}",
           "doc": "A credit note as quantity accounting reads it."
         },
         {
@@ -20037,6 +20037,12 @@
           "name": "BillingFoldSide",
           "declaration": "interface BillingFoldSide {\n  scopeType: \"order\" | \"purchase\";\n  billingIsLive(doc: B): boolean;\n  creditIsLive(doc: C): boolean;\n  billingHeader(doc: B): Omit<BilledDocument, \"role\" | \"live\">;\n  creditHeader(doc: C): Omit<BilledDocument, \"role\" | \"live\">;\n  billingRows(doc: B): typeLiteral;\n  rowNetCents(row: InvoiceItem): number;\n  partCents(row: InvoiceItem, before: number, after: number): number;\n  creditRows(doc: C): typeLiteral;\n  creditLegacyBillingUid(doc: C): string | null;\n}",
           "doc": "**Everything that differs between the sides in the billing fold** — data,\nnever an `if side` (ruling 84), on the pattern of {@link ScopedSyncSide}.\nHow a credit reaches the row it reverses is NOT here: one keyer,\n`(uid_billing, path_billing_item)`, places every credit on both sides\n({@link keyCreditLines}, ruling 34)."
+        },
+        {
+          "kind": "interface",
+          "name": "CreditDividerRow",
+          "declaration": "interface CreditDividerRow {\n  uid: string;\n  type: \"billing\" | \"order\" | \"destination\" | \"group\";\n  path: readonly string[];\n}",
+          "doc": "A credit's divider row (ruling 107): a `billing`, `order`, `destination` or\n`group` divider. It credits nothing, so every reader of a credit's rows skips\nit ({@link isCreditDividerRow}); declared so a STORED note, dividers and all,\nis what these readers take."
         },
         {
           "kind": "interface",
@@ -20380,8 +20386,16 @@
         },
         {
           "kind": "function",
+          "name": "isCreditDividerRow",
+          "signature": "isCreditDividerRow(row: object): row is CreditDividerRow",
+          "doc": "Whether a credit row is one of its dividers.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "keyCreditLines",
-          "signature": "keyCreditLines(billing: typeLiteral, lines: readonly L[], _: unknown): typeLiteral",
+          "signature": "keyCreditLines(billing: typeLiteral, rows: readonly parenthesized[], _: unknown): typeLiteral",
           "doc": "**The one credit keyer, both sides** (ruling 34 F14 item 5): each line of\n`lines` that names a row of `billing` — by `(uid_billing, path_billing_item)`\n— matched to that row, with its kind. Every reader of a credit keys through\nit: the cap ({@link unitsCreditedBefore}, `creditableLines`) and the fold\n({@link billedByPath}).\n\n- A line naming ANOTHER billing document is not this document's: left out.\n- A line on the AR note's retiring `path_invoice_item` names\n  `opts.legacyUid` (the cap: the invoice it is reading; the fold: the note's\n  one invoice), and is `unmatched` when that is null.\n- A line naming a row `billing` does not carry is `unmatched`.\n- A line naming no billing row is `unpointed`.\n\nThe kind is the line's shape (ruling 106). ⚠️ Beta H1 only: a line on the\nretiring `path_invoice_item` self-priced its counts, so its kind is still\nread by comparing its time with the row's, as before ruling 106. The\nmigration rewrites that one stored line (CN-1030) and H2 deletes the arm.",
           "paramTags": [],
           "returnsTag": null
@@ -20433,6 +20447,14 @@
               "doc": "Acted billed units, ≥ 0"
             }
           ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "rowCreditedBefore",
+          "signature": "rowCreditedBefore(billing: typeLiteral, row: Pick<KeyedBillingRow, \"path\">, notes: readonly typeLiteral[]): typeLiteral",
+          "doc": "**What the non-void `notes` already took of `row`**: whole units\n({@link unitsCreditedBefore}'s `c`) and money, the net of every keyed credit\nline on it, time credits included (they take money, not units, R3). The AR\ntwin of the payable `billLineCredited`, and the `credited` a first-come\ncredit is priced from (`priceCreditNote`, `billingRowCreditMoney`).",
+          "paramTags": [],
           "returnsTag": null
         },
         {
@@ -21684,7 +21706,7 @@
         {
           "kind": "interface",
           "name": "CappedNote",
-          "declaration": "interface CappedNote {\n  status: string;\n  items: readonly CappedCreditLine[];\n}",
+          "declaration": "interface CappedNote {\n  status: string;\n  items: readonly parenthesized[];\n}",
           "doc": "A prior credit note, as the credit cap reads it. Void notes are skipped."
         },
         {
@@ -26085,6 +26107,14 @@
           "name": "billLineCredited",
           "signature": "billLineCredited(uidBill: string, path: readonly string[], credits: readonly Pick<PurchaseCredit, \"status\" | \"items\">[]): BillLineCredited",
           "doc": "**What live credits have taken from the bill line at `path` on bill\n`uidBill`** — every live credit line naming that `(uid_billing,\npath_billing_item)` (or the retiring `uid_purchase_bill` / `path_bill_item`\nthrough beta H1). The per-line half of the credit cap (one-document-model 6d),\nthe twin of AR's `creditableLines` prior-note sum.\n\n**The CREDITED view of the one credit fold** (ruling 84): marker-free, every\nnon-void credit — the same liveness the AR cap reads (`creditableLines`). The\nREVERSED view is the billing fold's ({@link purchaseBillingFold}), gated on `reverses_billing`.\nA supplier credit has no draft state, so non-void is \"issued or applied\",\nexactly AR's netting liveness.\n\n⚠️ Keyed on the pointer as written, which goes stale when the bill row moves\n(owner ruling 22, as `path_invoice_item` does on AR): a credit raised before a\nmove then no longer counts against the row. The pool cap\n({@link purchaseBillingFold}) still sees it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "billTotalsBreakdown",
+          "signature": "billTotalsBreakdown(priced: DocumentTotalsCore): Required<Pick<indexedAccess, \"subtotal_cents\" | \"subtotal_discounted_cents\" | \"discount_amount_cents\" | \"taxes\" | \"transaction_fees\">>",
+          "doc": "**The one author of a bill's breakdown keys** (ruling 105, one totals shape per\nrole): the invoice's five, read off `priceDocument`'s stage-5 sum. Every bill\nwriter spreads it beside the settlement keys; a writer that only refolds the\njournal carries the stored ones.",
           "paramTags": [],
           "returnsTag": null
         },
