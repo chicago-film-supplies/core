@@ -12,12 +12,16 @@ import { typesenseAddressFields } from "./types.ts";
  * There is deliberately **no `settlements` collection here**: settlements are
  * reached by query (`where("uid_invoice","==",…)`), not by search, and a journal
  * with no free-text field has nothing to match on.
+ *
+ * v4 (one-document-model F14, ruling 34): `items.coa_revenue` →
+ * `items.source_ledger_account` and `xero_credit_note_id` → `xero_id`, with the
+ * stored keys.
  */
 export const creditNotes: TypesenseCollectionConfig = {
   alias: "credit-notes",
-  version: 3,
+  version: 4,
   firestoreCollection: "credit-notes",
-  collectionName: "credit-notes_v3",
+  collectionName: "credit-notes_v4",
   // ENABLED 2026-08-07. This was `false` with a note saying "flip in Phase 6,
   // alongside the search UI", and it is worth recording why that instruction was
   // superseded rather than simply followed: **its stated reason had expired.**
@@ -46,7 +50,7 @@ export const creditNotes: TypesenseCollectionConfig = {
   // that did not exist when it ran.
   enabled: true,
   schema: {
-    name: "credit-notes_v3",
+    name: "credit-notes_v4",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -75,13 +79,13 @@ export const creditNotes: TypesenseCollectionConfig = {
       { name: "items.name", type: "string[]", stem: true, optional: true },
       { name: "items.quantity", type: "int32[]", optional: true },
       { name: "items.type", type: "string[]", facet: true, optional: true },
-      { name: "items.coa_revenue", type: "int32[]", facet: true, optional: true },
+      { name: "items.source_ledger_account", type: "int32[]", facet: true, optional: true },
       { name: "totals", type: "object", optional: true },
       { name: "totals.total_cents", type: "int64", sort: true, optional: true, money: true },
       { name: "totals.total_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "remaining_credit_cents", type: "int64", sort: true, optional: true, money: true },
       { name: "remaining_credit_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
-      { name: "xero_credit_note_id", type: "string", optional: true },
+      { name: "xero_id", type: "string", optional: true },
       { name: "created_by", type: "object", optional: true },
       { name: "created_by.uid", type: "string", facet: true, optional: true },
       { name: "created_by.name", type: "string", sort: true, stem: true, facet: true, optional: true },

@@ -110,7 +110,7 @@ interface OrderShape {
 function invoiceOf(order: OrderShape) {
   return {
     items: buildOrderScopedItems(order.items, ORDER).filter((it) => it.type !== "order"),
-    destinations: order.destinations.map((p) => ({ uid_order: ORDER, ...p }) as unknown as InvoiceDestinationPair),
+    destinations: order.destinations.map((p) => ({ uid_source: ORDER, ...p }) as unknown as InvoiceDestinationPair),
   };
 }
 

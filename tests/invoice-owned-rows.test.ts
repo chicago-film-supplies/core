@@ -76,7 +76,7 @@ function pair(uid: string, extra: Record<string, unknown> = {}): DocDestinationT
     ...extra,
   } as unknown as DocDestinationType;
 }
-const scoped = (p: DocDestinationType): InvoiceDestinationPair => ({ uid_order: O, ...p }) as InvoiceDestinationPair;
+const scoped = (p: DocDestinationType): InvoiceDestinationPair => ({ uid_source: O, ...p }) as InvoiceDestinationPair;
 
 /** The order: one leg D, a tripod straight on D, and a group G with a light. */
 const orderItems = (): LineItem[] => [dest(D), line(TRIPOD, [D, TRIPOD]), group(G, D), line(LIGHT, [D, G, LIGHT], 2)];

@@ -110,7 +110,7 @@ Deno.test("every shared field is the SAME INSTANCE on both grains", () => {
  * spread that moved a key would move the operator's column picker. That is
  * precisely why `schemas/_items.ts` references its shared fields per key instead:
  * the line item's six shared fields are not contiguous in any grain. Here they
- * are the whole object and `uid_order` was already first, which is what makes the
+ * are the whole object and the scope key (`uid_source`, which replaced `uid_order`) is first, which is what makes the
  * spread inert. This arm is what keeps it inert.
  */
 Deno.test("both grains' key order is exactly the shared shape (invoice prefixed by its scope keys)", () => {
@@ -122,9 +122,8 @@ Deno.test("both grains' key order is exactly the shared shape (invoice prefixed 
   );
   assertEquals(
     Object.keys(shapeOf(InvoiceDocDestination, "InvoiceDocDestination")),
-    // Beta H1 of ruling 109: the retiring `uid_order` beside `uid_source`; H2
-    // deletes the first.
-    ["uid_order", "uid_source", ...core],
+    // Ruling 109: one scope key, `uid_source`.
+    ["uid_source", ...core],
     "the invoice grain is its scope keys plus the shared shape, in that order — a new " +
       "key here is an operator-visible column move, so state it deliberately",
   );
@@ -148,7 +147,7 @@ Deno.test("DestinationPairCore is not vacuous", () => {
  */
 Deno.test("InvoiceDocDestination REFUSES a pair that omits customer_collecting/returning", () => {
   const base = {
-    uid_order: "testorder10000000000",
+    uid_source: "testorder10000000000",
     uid: "11111111-1111-4111-8111-111111111111",
     // ⚠️ **Complete on purpose, all nine keys** (fourteen until charge-windows
     // step 5 deleted the five legacy charge fields). This map used to state six
@@ -199,7 +198,7 @@ Deno.test("InvoiceDocDestination REFUSES a pair that omits customer_collecting/r
   if (stamped.success) {
     assertEquals(stamped.data.customer_collecting, false);
     assertEquals(stamped.data.customer_returning, false);
-    assertEquals(stamped.data.uid_order, "testorder10000000000");
+    assertEquals(stamped.data.uid_source, "testorder10000000000");
   }
 });
 
@@ -268,7 +267,7 @@ const CUSTOMER_KEYS = { customer_collecting: false, customer_returning: false, e
 Deno.test("a stored pair echoed through each input parses with its derived keys gone", () => {
   const stored = [
     ["Destination", Destination, { ...STORED_CORE(), ...CUSTOMER_KEYS }],
-    ["InvoiceDestinationInput", InvoiceDestinationInput, { uid_order: "testorder10000000000", ...STORED_CORE(), ...CUSTOMER_KEYS }],
+    ["InvoiceDestinationInput", InvoiceDestinationInput, { uid_source: "testorder10000000000", ...STORED_CORE(), ...CUSTOMER_KEYS }],
     ["PurchaseDestinationInput", PurchaseDestinationInput, STORED_CORE()],
   ] as const;
   for (const [label, schema, pair] of stored) {
@@ -289,7 +288,7 @@ Deno.test("every pair input strips an unknown key at every level instead of refu
     return {
       ...STORED_CORE(),
       ...CUSTOMER_KEYS,
-      uid_order: "testorder10000000000",
+      uid_source: "testorder10000000000",
       stray: 1,
       delivery: {
         ...delivery,
@@ -310,8 +309,8 @@ Deno.test("an invoice pair input requires its scope and identity; an order pair'
   const base = { uid_source: "testorder10000000000", ...STORED_CORE(), ...CUSTOMER_KEYS };
   const { uid_source: _o, ...noScope } = base;
   assertEquals(InvoiceDestinationInput.safeParse(noScope).error?.issues.map((i) => i.path.join(".")), ["uid_source"]);
-  // The retiring spelling still scopes the pair through beta H1 (ruling 109).
-  assertEquals(InvoiceDestinationInput.safeParse({ ...noScope, uid_order: "testorder10000000000" }).success, true);
+  // The retired spelling no longer scopes it (ruling 109): stripped, so still no scope.
+  assertEquals(InvoiceDestinationInput.safeParse({ ...noScope, uid_order: "testorder10000000000" }).error?.issues.map((i) => i.path.join(".")), ["uid_source"]);
   const { uid: _u, ...noUid } = base;
   assertEquals(InvoiceDestinationInput.safeParse(noUid).error?.issues.map((i) => i.path.join(".")), ["uid"]);
   const { uid: _v, ...orderPair } = { ...STORED_CORE(), ...CUSTOMER_KEYS };

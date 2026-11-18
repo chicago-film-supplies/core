@@ -157,17 +157,6 @@ Deno.test("sync: an UNCHANGED order leaves the moved line exactly as stored", ()
   assertEquals(syncOrderToInvoiceSelective(orderItems(), orderItems(), stored, O), stored);
 });
 
-Deno.test("ruling 109 window: a stored row on the retiring `path_order_item` claims the same, and the sync writes it back as `path_source_item`", () => {
-  const stored = movedInvoice().map((it) => {
-    const { path_source_item: x, ...rest } = it as InvoiceItem;
-    return (x === undefined ? it : { ...rest, path_order_item: x }) as InvoiceDocItemType;
-  });
-  assertEquals([...orderLineClaims(stored as InvoiceItem[], O)], [[AT.join("/"), X]]);
-  const out = syncOrderToInvoiceSelective(orderItems(), orderItems({ quantity: 6 }), stored, O);
-  const row = byKey(out, AT)!;
-  assertEquals([row.quantity, pointer(row), "path_order_item" in row], [6, X, false]);
-});
-
 Deno.test("🔴 sync: X moves on the order ⇒ the pointer re-points; the row stays put", () => {
   const prev = orderItems();
   const next = [dest(D), group(NEWG, "Lighting"), line(CSTAND, [D, NEWG, CSTAND], 4), group(MISC, "Misc"), line(TRIPOD, [D, MISC, TRIPOD])];

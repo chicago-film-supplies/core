@@ -15,6 +15,10 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  * v4 (one-document-model 7a): `items.uid_product` → `items.uid`. A line names its
  * product by its uid (owner, 2026-11-11); only a service line keeps a
  * `uid_product`, as attribution.
+ *
+ * v5 (one-document-model F14, ruling 105): `total_cents` → `totals.total_cents`,
+ * the AR credit note's totals shape, with the stored key.
+ *
  * `query_by_sources` is not indexed (the indexer strips every `query_by_*`), as
  * on `credit-notes`.
  *
@@ -27,12 +31,12 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  */
 export const purchaseCredits: TypesenseCollectionConfig = {
   alias: "purchase-credits",
-  version: 4,
+  version: 5,
   firestoreCollection: "purchase-credits",
-  collectionName: "purchase-credits_v4",
+  collectionName: "purchase-credits_v5",
   enabled: true,
   schema: {
-    name: "purchase-credits_v4",
+    name: "purchase-credits_v5",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -50,8 +54,9 @@ export const purchaseCredits: TypesenseCollectionConfig = {
       { name: "items.type", type: "string[]", facet: true, optional: true },
       { name: "items.uid", type: "string[]", facet: false, optional: true },
       { name: "items.name", type: "string[]", stem: true, optional: true },
-      { name: "total_cents", type: "int64", sort: true, optional: true, money: true },
-      { name: "total_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
+      { name: "totals", type: "object", optional: true },
+      { name: "totals.total_cents", type: "int64", sort: true, optional: true, money: true },
+      { name: "totals.total_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "remaining_credit_cents", type: "int64", sort: true, optional: true, money: true },
       { name: "remaining_credit_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "created_by", type: "object", optional: true },
@@ -74,7 +79,7 @@ export const purchaseCredits: TypesenseCollectionConfig = {
       "date_fs",
       "supplier.name",
       "reason",
-      "total_cents",
+      "totals.total_cents",
       "remaining_credit_cents",
     ],
     filters: { status: [] },

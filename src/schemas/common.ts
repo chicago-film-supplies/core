@@ -221,7 +221,7 @@ function uniqueOutOfServiceUids(entries: readonly OutOfServiceEntryType[], ctx: 
  * since the list cannot see its line.
  *
  * `.min(1)`: an absent key is "bills no record", and `[]` would be a second
- * spelling of it. Declare it with `seed: false`, as `path_order_item` is, since a
+ * spelling of it. Declare it with `seed: false`, as `path_source_item` is, since a
  * form seed of `[]` would fail.
  */
 export const OutOfServiceList: z.ZodType<OutOfServiceEntryType[]> = z.array(OutOfServiceEntry).min(1)

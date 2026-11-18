@@ -70,15 +70,6 @@ Deno.test("billing: pairs are scoped by `uid_source` — another order's exchang
   assertEquals(billingExchangedForViolations(d).map((x) => x.field), ["exchanged_for"]);
 });
 
-Deno.test("billing: a pair still stating the retiring `uid_order` / `uid_purchase` scopes the same (ruling 109, beta H1)", () => {
-  for (const key of ["uid_order", "uid_purchase"] as const) {
-    const d = doc([entry([EXCHANGE, X])]);
-    const { uid_source: _s, ...pair } = d.destinations[0];
-    const old = { ...d, destinations: [{ ...pair, [key]: O }] };
-    assertEquals(billingExchangedForViolations(old).map((x) => [x.index, x.field]), [[2, "path"]], key);
-  }
-});
-
 Deno.test("projection: an exchange line's list is carried ORDER-relative; a line stating none carries none", () => {
   const line = {
     uid: X,

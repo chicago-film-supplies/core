@@ -90,7 +90,7 @@ function invoice(uid: string, scopes: Array<{ order: string; items: LineItem[] }
   for (const s of scopes) {
     items.push({ uid: s.order, type: "order", name: `Order ${s.order}`, description: "", path: [s.order] } as unknown as InvoiceDocItemType);
     items.push(...buildOrderScopedItems(s.items, s.order));
-    destinations.push({ ...structuredClone(PAIR), uid_order: s.order });
+    destinations.push({ ...structuredClone(PAIR), uid_source: s.order });
   }
   return { uid, number, version: 1, status: "draft", items, destinations } as unknown as Invoice;
 }
@@ -395,7 +395,7 @@ Deno.test("documentDiff: pairs compare every payload field — an address correc
   const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
   (inv.destinations[0] as unknown as Record<string, unknown>).delivery = { address: { full: "3100 W Fillmore St" } };
   const diff = computeDocumentDiffs({ orders: [order()], invoices: [inv] }, { kind: "order", uid: O }, CONTEXT);
-  // `uid_order` sits on the invoice pair only and is identity, not payload: no entry for it.
+  // `uid_source` sits on the invoice pair only and is identity, not payload: no entry for it.
   assertEquals(summary(diff.pairs), {
     [D]: ['invoice#2241:pair_field(delivery=null→{"address":{"full":"3100 W Fillmore St"}})'],
   });
@@ -1186,10 +1186,10 @@ function creditNote(
     number,
     status,
     sources: invoices.map((i) => ({ collection: "invoices", uid: i })),
-    // A line naming its invoice states the new pointer; one that does not, the retiring path.
+    // A line with a path names its invoice: the one given, else the note's first.
     items: lines.map((l) => ({
       quantity: l.quantity,
-      ...(l.uid_billing !== undefined ? { uid_billing: l.uid_billing, path_billing_item: l.path } : { path_invoice_item: l.path }),
+      ...(l.path !== undefined ? { uid_billing: l.uid_billing ?? invoices[0], path_billing_item: l.path } : {}),
       reverses_billing: l.reverses_billing ?? false,
     })),
   };
@@ -1325,14 +1325,6 @@ Deno.test("documentDiff: a note crediting two invoices keys each line to the inv
   const at = (uid: string) => computeDocumentDiffs(sources, { kind: "invoice", uid }, CONTEXT).credits.get(LIGHT_ON_INVOICE.join("/"))?.map((c) => [c.uid_invoice, c.quantity]);
   assertEquals([at("inv-1"), at("inv-2")], [[["inv-1", 1]], [["inv-2", 2]]]);
   assertEquals(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-1" }, CONTEXT).unkeyed_credit_notes, []);
-});
-
-Deno.test("documentDiff: a line on the retiring pointer, on a note naming two invoices, cannot be keyed and is listed rather than dropped", () => {
-  const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
-  const cn = creditNote("cn-2src", 1060, ["inv-1", "inv-2"], [{ quantity: 1, path: LIGHT_ON_INVOICE }]);
-  const diff = computeDocumentDiffs({ orders: [order()], invoices: [inv], creditNotes: [cn] }, { kind: "invoice", uid: "inv-1" }, CONTEXT);
-  assertEquals(diff.credits.size, 0);
-  assertEquals(diff.unkeyed_credit_notes, [{ uid_credit_note: "cn-2src", number: 1060, uid_invoice: null }]);
 });
 
 Deno.test("documentDiff: a credit on a group the ORDER deleted (kept on the invoice) bills no order line — said, not netted, not owed (the CN-1027 case)", () => {

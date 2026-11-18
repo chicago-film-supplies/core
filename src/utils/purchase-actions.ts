@@ -33,7 +33,6 @@ import {
   type PurchaseActionId,
   type PurchaseBill,
   type PurchaseCredit,
-  purchaseCreditTotalCents,
   type PurchaseDestination,
   type PurchaseDocumentItem,
   purchaseItemBasis,
@@ -415,7 +414,7 @@ export function purchaseBillActionsFor(
  * never offered here.
  */
 export interface CreditableBillLine {
-  /** The bill line's `path`: what the credit line names as `path_bill_item`. */
+  /** The bill line's `path`: what the credit line names as `path_billing_item`. */
   path: string[];
   uid: string;
   /** Units the bill line bills. */
@@ -543,11 +542,11 @@ export function creditableBillLines(bill: PurchaseBillActionBill, ctx: PurchaseB
 export function purchaseBillCreditRefusal(
   bill: PurchaseBillActionBill,
   ctx: PurchaseBillContext,
-  lines: readonly { path_bill_item: readonly string[]; quantity: number }[],
+  lines: readonly { path_billing_item: readonly string[]; quantity: number }[],
 ): string | null {
   const offered = new Map(creditableBillLines(bill, ctx).map((l) => [l.path.join("/"), l]));
   const asked = new Map<string, number>();
-  for (const l of lines) asked.set(l.path_bill_item.join("/"), (asked.get(l.path_bill_item.join("/")) ?? 0) + l.quantity);
+  for (const l of lines) asked.set(l.path_billing_item.join("/"), (asked.get(l.path_billing_item.join("/")) ?? 0) + l.quantity);
   for (const [k, quantity] of asked) {
     const line = offered.get(k);
     if (line === undefined) return `bill ${bill.number} has no line at ${k} a credit may name`;
@@ -562,15 +561,15 @@ export function purchaseBillCreditRefusal(
 
 /** Everything an operator may do to a supplier credit: void it while nothing has drawn on it. */
 export function purchaseCreditActionsFor(
-  credit: Pick<PurchaseCredit, "status" | "totals" | "total_cents" | "remaining_credit_cents">,
+  credit: Pick<PurchaseCredit, "status" | "totals" | "remaining_credit_cents">,
 ): PurchaseActionOffer[] {
   return purchaseCreditVoidRefusal(credit) === null ? [{ key: "void_credit", action: "void_credit" }] : [];
 }
 
 /** A credit nothing has drawn on, or why not. */
-function purchaseCreditVoidRefusal(credit: Pick<PurchaseCredit, "status" | "totals" | "total_cents" | "remaining_credit_cents">): string | null {
+function purchaseCreditVoidRefusal(credit: Pick<PurchaseCredit, "status" | "totals" | "remaining_credit_cents">): string | null {
   if (credit.status === "void") return "The credit is already void.";
-  if (credit.remaining_credit_cents !== purchaseCreditTotalCents(credit)) {
+  if (credit.remaining_credit_cents !== credit.totals.total_cents) {
     return "The credit has been allocated or refunded. Remove those first, as Xero itself requires.";
   }
   return null;
@@ -608,7 +607,7 @@ export type PurchaseBillActionRequest =
   | { action: "push_to_xero"; status: PurchaseBillXeroSyncStatus }
   | { action: "allocate_credit"; amount_cents: number }
   /** A credit raised from this bill's lines: the bill line each names, and its units. */
-  | { action: "add_credit"; context: PurchaseBillContext; lines: readonly { path_bill_item: readonly string[]; quantity: number }[] };
+  | { action: "add_credit"; context: PurchaseBillContext; lines: readonly { path_billing_item: readonly string[]; quantity: number }[] };
 
 /** Refuse a bill action the ruleset does not offer, or one past its limit. Operator routes only. */
 export function assertPurchaseBillAction(
@@ -646,7 +645,7 @@ export function assertPurchaseBillAction(
 
 /** Refuse a supplier-credit action the ruleset does not offer. Operator routes only. */
 export function assertPurchaseCreditAction(
-  credit: Pick<PurchaseCredit, "status" | "totals" | "total_cents" | "remaining_credit_cents">,
+  credit: Pick<PurchaseCredit, "status" | "totals" | "remaining_credit_cents">,
   request: { action: "void_credit" },
 ): void {
   const why = purchaseCreditVoidRefusal(credit);

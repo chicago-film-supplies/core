@@ -23,6 +23,7 @@ import {
   PurchaseSaleItemSchema,
   type PurchaseServiceItem,
   PurchaseServiceItemSchema,
+  type TierCountType,
 } from "../../src/schemas/mod.ts";
 import { getTestDoc } from "../../src/schemas/testing.ts";
 import { canonicalChargeWindows } from "../../src/utils/dates.ts";
@@ -44,6 +45,9 @@ export function payablePrice(
     rates: [] as never[],
     discount,
     taxes,
+    // The meter's own output (ruling 108): a flat line's one tier; a time line
+    // states its own counts where it has any.
+    counts: (formula.basis === "time" ? [] : [{ rate_key: "flat", num: 1, den: 1 }]) as TierCountType[],
     ...(formula.basis === "time" ? {} : { stated_cents: amountCents + (discount?.amount_cents ?? 0) }),
     subtotal_cents: amountCents + (discount?.amount_cents ?? 0),
     subtotal_discounted_cents: amountCents,
@@ -51,12 +55,12 @@ export function payablePrice(
   };
 }
 
-/** {@link payablePrice} plus the bill/credit line's `counts: []`. */
+/** {@link payablePrice}, for a bill or credit line (the same counts since ruling 108). */
 export function payableDocPrice(
   amountCents: number,
   opts: { discount?: DiscountType | null; taxes?: PriceModifierType[]; formula?: PriceFormulaRef } = {},
 ) {
-  return { ...payablePrice(amountCents, opts), counts: [] as never[] };
+  return payablePrice(amountCents, opts);
 }
 
 /**
@@ -208,7 +212,9 @@ export function payableLine<K extends keyof PayableLineByType>(
   const uid = (over.uid as string | undefined) ?? seed.uid;
   const base = getTestDoc(
     seed.schema as typeof PurchaseSaleItemSchema,
-    { uid: seed.uid, path: [pair, seed.uid], ledger_account: seed.ledger_account, ...(seed.extra ?? {}) } as never,
+    // A flat price at zero: the stated gross and the meter's `[flat 1/1]` are
+    // cross-field refines, which the structural seed cannot derive.
+    { uid: seed.uid, path: [pair, seed.uid], ledger_account: seed.ledger_account, amount_cents: 0, price: payablePrice(0), ...(seed.extra ?? {}) } as never,
   ) as unknown as PayableLineByType[K];
   return withPayableMoney({ ...base, uid, path: [pair, uid], ...over } as PayableLineByType[K]);
 }

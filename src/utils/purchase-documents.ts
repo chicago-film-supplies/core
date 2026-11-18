@@ -17,7 +17,7 @@
  * A bill or credit line sits at `[purchase uid, ...its purchase line's path]`
  * under its purchase's `purchase` divider and takes the purchase line's uid,
  * exactly as an invoice line sits under its order divider at its order line's
- * path (one-document-model Phase 3). `path_purchase_item` survives only as a
+ * path (one-document-model Phase 3). `path_source_item` survives only as a
  * MOVE pointer. Every "which purchase line does this bill" question goes
  * through `purchaseLineKeyOf` (`schemas/purchase-bill.ts`).
  *
@@ -53,7 +53,7 @@ import {
   purchaseItemBasis,
   purchaseLines,
   purchaseLineKeyOf,
-  purchaseCreditLineBillPointer,
+  creditLineBillingPointer,
   type PurchaseRow,
   PurchaseSchema,
   type SubstitutedForEntryType,
@@ -442,8 +442,7 @@ export interface BillLineCredited {
 /**
  * **What live credits have taken from the bill line at `path` on bill
  * `uidBill`** — every live credit line naming that `(uid_billing,
- * path_billing_item)` (or the retiring `uid_purchase_bill` / `path_bill_item`
- * through beta H1). The per-line half of the credit cap (one-document-model 6d),
+ * path_billing_item)`. The per-line half of the credit cap (one-document-model 6d),
  * the twin of AR's `creditableLines` prior-note sum.
  *
  * **The CREDITED view of the one credit fold** (ruling 84): marker-free, every
@@ -453,7 +452,7 @@ export interface BillLineCredited {
  * exactly AR's netting liveness.
  *
  * ⚠️ Keyed on the pointer as written, which goes stale when the bill row moves
- * (owner ruling 22, as `path_invoice_item` does on AR): a credit raised before a
+ * (owner ruling 22, as `path_billing_item` does on AR): a credit raised before a
  * move then no longer counts against the row. The pool cap
  * ({@link purchaseBillingFold}) still sees it.
  */
@@ -470,7 +469,7 @@ export function billLineCredited(
     // $0 header, and a credit of it copies it (`billLineCreditParts`).
     for (const line of credit.items) {
       if (!isPurchaseLine(line)) continue;
-      const pointer = purchaseCreditLineBillPointer(line);
+      const pointer = creditLineBillingPointer(line);
       if (pointer === null || pointer.uid !== uidBill || pointer.path.join("/") !== key) continue;
       out.quantity += line.quantity;
       out.amount_cents += line.amount_cents;
@@ -845,9 +844,9 @@ export function purchaseDocumentScope(
       throw new Error(`purchaseDocumentScope: line ${line.uid} is not under purchase ${purchase.uid}`);
     }
   }
-  const unpointed = lines.filter((line) => purchaseCreditLineBillPointer(line) === null);
-  const byBill = Map.groupBy(lines.filter((line) => purchaseCreditLineBillPointer(line) !== null), (line) =>
-    purchaseCreditLineBillPointer(line)!.uid);
+  const unpointed = lines.filter((line) => creditLineBillingPointer(line) === null);
+  const byBill = Map.groupBy(lines.filter((line) => creditLineBillingPointer(line) !== null), (line) =>
+    creditLineBillingPointer(line)!.uid);
   const rows: PurchaseDocumentRow[] = [];
   const pairs: PurchaseDocDestination[] = [];
   const addPairs = (more: readonly PurchaseDocDestination[]) => {
@@ -871,13 +870,7 @@ export function purchaseDocumentScope(
         rows.push({ ...row, path });
         continue;
       }
-      const pointer = purchaseCreditLineBillPointer(row);
-      if (pointer === null) {
-        rows.push({ ...row, path });
-        continue;
-      }
-      const { uid_purchase_bill: _u, path_bill_item: _p, ...rest } = row;
-      rows.push({ ...rest, path, uid_billing: pointer.uid, path_billing_item: [...pointer.path] });
+      rows.push({ ...row, path });
     }
     addPairs(block.pairs);
   }
@@ -1122,7 +1115,7 @@ function asEngineSource(row: PurchaseRow): LineItem {
  * **The payable side of the scoped initiator → billing sync**
  * (`syncScopedDestinations`, `@cfs/core/utils/invoices`): the purchase → bill
  * sync IS the order → invoice sync, with a `purchase` scope divider, the
- * `path_purchase_item` move pointer, {@link projectPurchaseRowForBill} and the
+ * `path_source_item` move pointer, {@link projectPurchaseRowForBill} and the
  * purchase ↔ bill field set (one-document-model Phase 3).
  *
  * Built per sync over the two purchase revisions it converts
@@ -1500,8 +1493,8 @@ export function rekeyPayableLines<T extends RekeyablePayableRow>(items: readonly
 }
 
 /**
- * Rewrite a stored pointer (`path_purchase_item`, a `substituted_for` entry's
- * `path`, a movement's `path_source_item`, a credit's `path_bill_item`)
+ * Rewrite a stored pointer (a bill line's `path_source_item`, a `substituted_for`
+ * entry's `path`, a movement's `path_source_item`, a credit's `path_billing_item`)
  * through a re-key's `map`.
  *
  * A pointer at a row the document still holds maps exactly. One that names a
@@ -1511,8 +1504,8 @@ export function rekeyPayableLines<T extends RekeyablePayableRow>(items: readonly
  * it, as `repointExchangedFor` keeps a dangling `exchanged_for`.
  *
  * ⚠️ Pass the map of the document the pointer's path space belongs to: a bill
- * line's `path_purchase_item` and `substituted_for`, and a movement's
- * `path_source_item` (one-document-model ruling 65a), take the PURCHASE's; a credit's `path_bill_item` takes
+ * line's `path_source_item` and `substituted_for`, and a movement's
+ * `path_source_item` (one-document-model ruling 65a), take the PURCHASE's; a credit's `path_billing_item` takes
  * the BILL's.
  */
 export function rekeyPayablePointer(map: PathForwardMap, path: readonly string[]): { path: string[]; exact: boolean } {

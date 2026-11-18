@@ -283,7 +283,7 @@ export interface CreditNoteDocument {
     name?: string;
     quantity?: number;
     type?: string;
-    coa_revenue?: number;
+    source_ledger_account?: number;
   }>;
   totals?: {
     total_cents?: number;
@@ -291,7 +291,7 @@ export interface CreditNoteDocument {
   };
   remaining_credit_cents?: number;
   remaining_credit_cents_str?: string;
-  xero_credit_note_id?: string;
+  xero_id?: string;
   created_by?: TypesenseActorRef;
   updated_by?: TypesenseActorRef;
   date_fs: number;
@@ -1233,8 +1233,7 @@ export interface PurchaseCreditDocument {
   xero_id?: string;
   reference?: string;
   items?: Array<{ type?: string; uid?: string; name?: string }>;
-  total_cents?: number;
-  total_cents_str?: string;
+  totals?: { total_cents?: number; total_cents_str?: string };
   remaining_credit_cents?: number;
   remaining_credit_cents_str?: string;
   created_by?: TypesenseActorRef;

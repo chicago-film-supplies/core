@@ -238,7 +238,7 @@ Deno.test("the money marker names exactly the amount fields — pinned, not scat
     "purchase-bills:totals.amount_void_cents",
     "purchase-bills:totals.total_cents",
     "purchase-credits:remaining_credit_cents",
-    "purchase-credits:total_cents",
+    "purchase-credits:totals.total_cents",
     "purchases:totals.total_cents",
     "webshop-products:component_of.price.rates.amount_cents",
     "webshop-products:component_of.price.replacement_cents",

@@ -74,7 +74,6 @@ import {
   SIDE_CONTRACTS,
   type TaxRefType,
   TERMINAL_ORDER_STATUSES,
-  pairSourceUid,
 } from "../schemas/mod.ts";
 import {
   assembleLinePrice,
@@ -182,7 +181,7 @@ export interface StoredDaysRow extends PathedItem {
 export interface PairChargeWindows {
   /**
    * The path of the pair's destination divider: `[pair.uid]` on an order,
-   * `[uid_order, pair.uid]` on an invoice. A line belongs to the pair whose
+   * `[uid_source, pair.uid]` on an invoice. A line belongs to the pair whose
    * divider path is a prefix of its own.
    */
   divider_path: readonly string[];
@@ -195,10 +194,6 @@ export interface ChargeWindowPair {
   uid?: string | null;
   /** Set on a billing or credit document's pair: the initiator it is scoped to (ruling 109). */
   uid_source?: string;
-  /** Retiring (ruling 109): an invoice pair's scope. */
-  uid_order?: string;
-  /** Retiring (ruling 109): a bill's or supplier credit's pair scope. */
-  uid_purchase?: string;
   dates: {
     /** `null` on a pair that bills no days (a document with no rental). */
     charge_windows: readonly { start: string; end: string }[] | null;
@@ -245,7 +240,7 @@ export function statedChargeWindows(destinations: readonly ChargeWindowPair[]): 
     const windows = pair.dates?.charge_windows;
     if (!windows || windows.length === 0) continue;
     out.push({
-      divider_path: pairSourceUid(pair) !== undefined ? [pairSourceUid(pair)!, pair.uid] : [pair.uid],
+      divider_path: pair.uid_source !== undefined ? [pair.uid_source, pair.uid] : [pair.uid],
       windows: windows.map((w) => ({ start: w.start, end: w.end })),
     });
   }

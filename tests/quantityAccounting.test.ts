@@ -105,7 +105,7 @@ function invoice(
     uid,
     status,
     items: [divider, ...(buildOrderScopedItems(items, O) as unknown as InvoiceItem[])],
-    destinations: [{ ...pairFor(D, days, window?.end), uid_order: O }] as never,
+    destinations: [{ ...pairFor(D, days, window?.end), uid_source: O }] as never,
   };
 }
 
@@ -297,7 +297,7 @@ function extensionInvoice(uid: string, quantity: number, addedDays: number, targ
     line(LIGHT, [O, E, G, LIGHT], quantity, 1000, addedDays, { price: { ...line(LIGHT, [], 0, 1000).price, counts: fdwCounts(addedDays, { stated: true }) } }),
   ] as unknown as InvoiceItem[];
   // The section's own pair: it charges the added days, ending where the extended window now ends.
-  return { uid, status: "draft", items, destinations: [{ ...pairFor(E, addedDays, endFor(endDays)), uid_order: O }] as never };
+  return { uid, status: "draft", items, destinations: [{ ...pairFor(E, addedDays, endFor(endDays)), uid_source: O }] as never };
 }
 
 Deno.test("quantityAccounting: an extension section bills days, not units, and nets the extension to nothing", () => {
@@ -562,7 +562,7 @@ function multiInvoice(uid: string, items: LineItem[], windows: readonly { start:
     uid,
     status: "issued",
     items: [divider, ...(buildOrderScopedItems(items, O) as unknown as InvoiceItem[])],
-    destinations: [{ ...multiPair(D, windows), uid_order: O }] as never,
+    destinations: [{ ...multiPair(D, windows), uid_source: O }] as never,
   };
 }
 
@@ -743,7 +743,8 @@ const reversal = (
   sources: over.sources ?? [{ collection: "invoices", uid: inv }],
   items: [{
     quantity,
-    path_invoice_item: over.path ?? [O, D, G, LIGHT],
+    uid_billing: inv,
+    path_billing_item: over.path ?? [O, D, G, LIGHT],
     reverses_billing: over.reverses_billing ?? true,
   }],
 });
@@ -790,8 +791,8 @@ Deno.test("quantityAccounting: a reversal this cannot KEY is reported, never sil
   // so a caller can say so rather than reporting a clean zero.
   const { order, invoices } = overBilled();
   const noPath = { ...reversal("cn1", "a", 3), items: [{ quantity: 3, reverses_billing: true }] } as AccountedCreditNote;
-  const twoInvoices = reversal("cn2", "a", 3, { sources: [{ collection: "invoices", uid: "a" }, { collection: "invoices", uid: "b" }] });
-  for (const note of [noPath, twoInvoices]) {
+  const noRow = reversal("cn2", "a", 3, { path: [O, D, G, "prod-not-billed"] });
+  for (const note of [noPath, noRow]) {
     const out = remainderView(O, order, invoices, pairs(), CTX, [note]);
     // Nothing netted — the over-billing still stands…
     assertEquals(out.lines.map((l) => l.quantity), [-3]);
@@ -992,7 +993,7 @@ const creditOn = (uid: string, inv: string, lines: Array<[string[], number, Reco
   uid,
   status: "issued",
   sources: [{ collection: "invoices", uid: inv }],
-  items: lines.map(([path, quantity, extra]) => ({ quantity, path_invoice_item: [O, ...path], reverses_billing: true, ...extra })),
+  items: lines.map(([path, quantity, extra]) => ({ quantity, uid_billing: inv, path_billing_item: [O, ...path], reverses_billing: true, ...extra })),
 });
 
 Deno.test("one credit fold: a TIME credit nets counts, never units, and clears the shortening it answers (R3)", () => {
@@ -1009,8 +1010,8 @@ Deno.test("one credit fold: a TIME credit nets counts, never units, and clears t
   assertEquals(billedAR(O, order, invoices, [note]).byPath.get(lightKey)?.quantity, 3);
   // …and the week comes off the group: nothing is left either way.
   assertEquals(remainderView(O, order, invoices, pairs(5), CTX, [note]).lines, []);
-  // A credit of the row's whole billed time is a UNIT credit — same units, same money.
-  const whole = creditOn("cn2", "a", [[[D, G, LIGHT], 1, { price: { counts: fdwCounts(10) } }]]);
+  // A whole-unit credit states no time of its own (ruling 106: `[]`).
+  const whole = creditOn("cn2", "a", [[[D, G, LIGHT], 1, { price: { counts: [] } }]]);
   assertEquals(billedAR(O, order, invoices, [whole]).byPath.get(lightKey)?.quantity, 2);
 });
 
@@ -1084,9 +1085,8 @@ Deno.test("unitsCreditedBefore: the CREDITED view — marker-free, non-void, uni
     { status: "void", items: [n(5)] }, // void: nothing
     { status: "issued", items: [n(2, { price: { counts: fdwCounts(5) } })] }, // a time credit (non-empty counts): no units (R3)
     { status: "issued", items: [n(3, { uid_billing: "b" })] }, // another invoice's row at the same path: not this one's
-    { status: "issued", items: [{ quantity: 1, path_invoice_item: row.path }] }, // the retiring pointer names the invoice read
     { status: "issued", items: [{ quantity: 4 }] }, // no pointer: credits no row
-  ]), 4);
+  ]), 3);
 });
 
 Deno.test("rowCreditedBefore: units from unit credits, money from every keyed credit, dividers skipped", () => {

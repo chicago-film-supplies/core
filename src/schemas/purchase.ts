@@ -62,7 +62,7 @@
  * Each item carries its own **row identity** (`uid`, and `path` = `[uid]`
  * until a divider type exists — the writer is its one author), so one product
  * may sit on two items: a buy plus a re-order, or two hire windows. Bills and
- * credits name an item by `path` (`path_purchase_item`), the way an invoice line
+ * credits name an item by `path` (`path_source_item`), the way an invoice line
  * names its order line.
  *
  * Each item also carries its own **posting** — `ledger_account` and
@@ -373,12 +373,11 @@ export interface PurchaseLinePrice {
   /**
    * The meter's own output for the line, the AR shape (one-document-model Q6,
    * ruling 108): a flat line states its one tier, `[flat 1/1]`, as every AR
-   * flat line does. **Optional in beta H1**: no stored purchase line carries the
-   * key (442 in prod, 2026-11-16), the migration writes `[flat 1/1]` on each and
-   * beta H2 requires it. A bill or credit line redeclares it required
+   * flat line does (the F14 migration wrote it on every stored purchase line,
+   * 2026-11-18). A bill or credit line redeclares it
    * ({@link PurchaseDocumentLinePrice}).
    */
-  counts?: TierCountType[];
+  counts: TierCountType[];
 }
 
 /**
@@ -459,8 +458,8 @@ export const PurchaseLinePriceSchema: z.ZodType<PurchaseLinePrice> = z.strictObj
   replacement_cents: z.int().nullable().optional().meta({ column: true, label: "Replacement" }),
   ...PayableStatedCore,
   ...PayablePriceMoneyCore,
-  // Beta H1: optional (the interface docblock); derived by the meter, never merged.
-  counts: z.array(TierCountSchema).optional().meta({ derived: true, seed: false }),
+  // Derived by the meter, never merged (the interface docblock).
+  counts: z.array(TierCountSchema).meta({ derived: true }),
 });
 
 /**
@@ -484,6 +483,11 @@ export function purchaseLineMoneyIssues(
     amount_cents: number | null;
     /** The line's quantity, which a stated line's money is derived over. */
     quantity?: number;
+    /**
+     * A credit line naming a billing row (ruling 106): it states only the time it
+     * takes back, so a units credit of a flat row states `[]`, not the meter's tier.
+     */
+    pointed?: boolean;
   },
   grain: "purchase" | "document" = "purchase",
 ): { path: (string | number)[]; message: string }[] {
@@ -513,10 +517,10 @@ export function purchaseLineMoneyIssues(
     issues.push({ path: ["price", "stated_cents"], message: "a flat line states its gross" });
   }
   if (rates.length > 0) issues.push({ path: ["price", "rates"], message: "a flat line carries no rates" });
-  // Beta H1 (ruling 108): a flat line's counts are the meter's `[flat 1/1]`, or
-  // the `[]` every payable line stated before; H2 requires the first.
+  // Ruling 108: a flat line's counts are the meter's own output, `[flat 1/1]`.
+  // A pointed credit line states only what it takes back (`creditLineShapeIssues`).
   const counts = item.price?.counts;
-  if (counts !== undefined && counts.length > 0 && !isFlatMeterCounts(counts)) {
+  if (item.price && item.pointed !== true && (counts === undefined || !isFlatMeterCounts(counts))) {
     issues.push({ path: ["price", "counts"], message: "a flat line's counts are its one tier at 1/1" });
   }
   if (item.price && item.amount_cents !== null) {

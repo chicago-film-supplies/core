@@ -79,7 +79,7 @@ Deno.test("one credit fold sweep: AR units ≡ billed − reversed per path, unf
       const items = billed.map(([p, q]) => {
         const reverses = rand() < 0.8;
         if (!reverses) nonReversing++;
-        return { quantity: int(rand, q + 4), path_invoice_item: [O, D, G, p], reverses_billing: reverses };
+        return { quantity: int(rand, q + 4), uid_billing: `inv${i}`, path_billing_item: [O, D, G, p], reverses_billing: reverses };
       });
       notes.push({ uid: `cn${i}`, status: noteStatus, sources: [{ collection: "invoices", uid: inv.uid }], items });
       if (status === "void") continue;

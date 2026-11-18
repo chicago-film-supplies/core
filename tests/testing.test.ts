@@ -172,6 +172,8 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
         rates: [],
         discount: null,
         taxes: [],
+        // The flat meter's one tier (ruling 108), a cross-field refine.
+        counts: [{ rate_key: "flat", num: 1, den: 1 }],
         stated_cents: 0,
         subtotal_cents: 0,
         subtotal_discounted_cents: 0,
@@ -213,7 +215,7 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
         rates: [],
         discount: null,
         taxes: [],
-        counts: [],
+        counts: [{ rate_key: "flat", num: 1, den: 1 }],
         stated_cents: 0,
         subtotal_cents: 0,
         subtotal_discounted_cents: 0,

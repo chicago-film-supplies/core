@@ -1,53 +1,39 @@
 /**
- * Ruling 109 of the one-document-model plan, beta H1: a billing or credit
+ * Ruling 109 of the one-document-model plan, beta H2: a billing or credit
  * document's pair scope is `uid_source` and its rows' move pointer is
- * `path_source_item`, on both sides. Through the window the retiring spellings
- * (`uid_order` / `uid_purchase`, `path_order_item` / `path_purchase_item`) are
- * still READ, and nothing writes them. Beta H2 deletes them and this file's
- * window arms with them.
+ * `path_source_item`, on both sides. The H1 spellings (`uid_order` /
+ * `uid_purchase` on a pair, `path_order_item` / `path_purchase_item` on a row)
+ * are deleted, so a stored document still carrying one is refused rather than
+ * read.
  */
-import { assertEquals, assertStrictEquals } from "@std/assert";
-import {
-  canonicalSourceKeys,
-  pairSourceUid,
-  rowSourcePath,
-  withRowSourcePath,
-} from "../src/schemas/mod.ts";
+import { assert, assertEquals } from "@std/assert";
+import { mockTimestamp } from "./helpers/timestamp.ts";
+import { getTestDoc } from "../src/schemas/testing.ts";
+import { InvoiceDocDestination, PurchaseDocDestinationSchema, withRowSourcePath } from "../src/schemas/mod.ts";
 
 const O = "testorder10000000000";
+const NOW = { now: mockTimestamp };
 
-Deno.test("pairSourceUid: the one key first, then either retiring spelling", () => {
-  assertEquals(pairSourceUid({ uid_source: O }), O);
-  assertEquals(pairSourceUid({ uid_order: O }), O);
-  assertEquals(pairSourceUid({ uid_purchase: O }), O);
-  assertEquals(pairSourceUid({}), undefined);
+/** The keys a strict parse refused as unrecognized. */
+function unrecognized(result: { success: boolean; error?: { issues: readonly { code: string; keys?: readonly string[] }[] } }): string[] {
+  return (result.error?.issues ?? []).flatMap((i) => i.code === "unrecognized_keys" ? [...(i.keys ?? [])] : []);
+}
+
+Deno.test("an invoice pair names its order on uid_source; the retired uid_order is refused", () => {
+  const pair = getTestDoc(InvoiceDocDestination, { uid_source: O }, NOW);
+  assert(InvoiceDocDestination.safeParse(pair).success);
+  assertEquals(unrecognized(InvoiceDocDestination.safeParse({ ...pair, uid_order: O })), ["uid_order"]);
+  const { uid_source: _s, ...unscoped } = pair;
+  assert(!InvoiceDocDestination.safeParse(unscoped).success, "uid_source is required");
 });
 
-Deno.test("rowSourcePath / withRowSourcePath: read any spelling, write only the one", () => {
-  assertEquals(rowSourcePath({ path_order_item: ["a"] }), ["a"]);
-  assertEquals(rowSourcePath({ path_purchase_item: ["b"] }), ["b"]);
-  assertEquals(rowSourcePath({ path_source_item: ["c"], path_order_item: ["a"] }), ["c"]);
-  const moved = withRowSourcePath({ uid: "x", path_order_item: ["a"] }, ["d"]);
-  assertEquals(moved as unknown, { uid: "x", path_source_item: ["d"] });
-  const cleared = withRowSourcePath({ uid: "x", path_purchase_item: ["a"] }, undefined);
-  assertEquals(cleared as unknown, { uid: "x" });
+Deno.test("a bill pair names its purchase on uid_source; the retired uid_purchase is refused", () => {
+  const pair = getTestDoc(PurchaseDocDestinationSchema, { uid_source: O }, NOW);
+  assert(PurchaseDocDestinationSchema.safeParse(pair).success);
+  assertEquals(unrecognized(PurchaseDocDestinationSchema.safeParse({ ...pair, uid_purchase: O })), ["uid_purchase"]);
 });
 
-Deno.test("canonicalSourceKeys: every pair and row onto the one spelling; untouched ones are the same object", () => {
-  const plainRow = { uid: "p", path: [O, "p"] };
-  const plainPair = { uid: "q", uid_source: O };
-  const doc = {
-    uid: "inv",
-    destinations: [{ uid: "d", uid_order: O }, plainPair, { uid: "e", uid_purchase: O }],
-    items: [{ uid: "r", path: [O, "r"], path_order_item: ["x"] }, plainRow, { uid: "s", path: [O, "s"], path_purchase_item: ["y"] }],
-  };
-  const out = canonicalSourceKeys(doc);
-  assertEquals(out.destinations, [{ uid: "d", uid_source: O }, plainPair, { uid: "e", uid_source: O }] as typeof out.destinations);
-  assertEquals(out.items, [{ uid: "r", path: [O, "r"], path_source_item: ["x"] }, plainRow, { uid: "s", path: [O, "s"], path_source_item: ["y"] }] as typeof out.items);
-  assertStrictEquals(out.items[1], plainRow);
-  assertStrictEquals(out.destinations[1], plainPair);
-  assertEquals(out.uid, "inv");
-  // A document with neither array passes through with neither.
-  const bare: { uid: string; items?: object[] } = { uid: "x" };
-  assertEquals(Object.keys(canonicalSourceKeys(bare)), ["uid"]);
+Deno.test("withRowSourcePath: sets the one move pointer, and undefined clears it", () => {
+  assertEquals(withRowSourcePath({ uid: "x" }, ["d"]) as unknown, { uid: "x", path_source_item: ["d"] });
+  assertEquals(withRowSourcePath({ uid: "x", path_source_item: ["a"] }, undefined) as unknown, { uid: "x" });
 });

@@ -34,7 +34,6 @@ import {
   zeroPricedFlaggedNonComponents,
   zeroPricedUnstatedComponents,
   zeroQuantityComponents,
-  type PairSourceKeys,
 } from "../schemas/mod.ts";
 import {
   computeItemPaths,
@@ -76,7 +75,7 @@ export interface ItemArrayDoc {
   items: readonly LineItem[];
   /** The destination pairs. Absent ⇒ the `destination_join` and `exchanged_for` arms are skipped. */
   destinations?: ReadonlyArray<
-    { uid: string; exchange?: DestinationExchangeType | null } & PairSourceKeys
+    { uid: string; exchange?: DestinationExchangeType | null; uid_source?: string }
   >;
   /** An invoice's source orders; non-empty ⇒ it must lead with an `order` divider. */
   query_by_orders?: readonly string[];
@@ -133,7 +132,7 @@ export type ItemArrayRule = ItemArrayIssue["rule"];
  * | `path_fixed_point` | `validateItemPaths` / `validateInvoiceItemPaths` | all |
  * | `zero_priced_non_component`, `zero_priced_unstated` | `zeroPricedFlaggedNonComponents`, `zeroPricedUnstatedComponents` | all |
  * | `zero_quantity_component`, `mixed_booking_grain` | `zeroQuantityComponents`, `mixedBookingGrains` | order |
- * | `exchanged_for` | `exchangedForViolations` (the four custody grains); `billingExchangedForViolations` over `uid_order` (invoice) or `uid_purchase` (bill, credit) | all (needs `destinations`) |
+ * | `exchanged_for` | `exchangedForViolations` (the four custody grains); `billingExchangedForViolations` over each pair's `uid_source` (invoice, bill, credit) | all (needs `destinations`) |
  *
  * ⚠️ **(4) and (5) are asserted directly, beside the fixed point, on purpose.**
  * A fixed-point check can only agree with its normalizer; these hold whatever

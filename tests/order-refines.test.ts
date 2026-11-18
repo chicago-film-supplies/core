@@ -288,7 +288,7 @@ Deno.test("checkLeadingDivider: wired on the order, the fulfillment and the invo
   }
 
   await t.step("invoice: order-linked with no order divider first is refused", () => {
-    const base = { ...invoice(), destinations: invoicePairs([DIV_A]).map((p) => ({ ...p, uid_order: ORDER_UID })) };
+    const base = { ...invoice(), destinations: invoicePairs([DIV_A]).map((p) => ({ ...p, uid_source: ORDER_UID })) };
     const linked = { ...base, query_by_orders: [ORDER_UID] };
     const good = InvoiceSchema.safeParse({ ...linked, items: [orderDivider(), { ...divider(DIV_A), path: [ORDER_UID, DIV_A] }] });
     assertEquals(good.success, true, JSON.stringify(good.error?.issues));

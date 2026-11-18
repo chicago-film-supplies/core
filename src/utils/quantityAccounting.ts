@@ -142,7 +142,7 @@ import type {
   PurchaseReceiptItemType,
   Side,
 } from "../schemas/mod.ts";
-import { type MovePointerKeys, type PairSourceKeys, pairSourceUid, withRowSourcePath } from "../schemas/mod.ts";
+import { withRowSourcePath } from "../schemas/mod.ts";
 import { billsOutOfService, isDividerItemType, isLineItemType } from "../schemas/mod.ts";
 import { payableStoredMoney, sliceStoredMoney } from "../schemas/_line-money.ts";
 import {
@@ -365,14 +365,6 @@ export interface KeyableCreditLine {
   uid_billing?: string;
   /** The billing row it credits: that row's `path` on that document. */
   path_billing_item?: readonly string[];
-  /**
-   * The AR note's retiring pointer (beta H1, deleted in H2). It names no
-   * document, so the caller says which one it names.
-   */
-  path_invoice_item?: readonly string[];
-  /** The supplier credit's retiring pointer pair (beta H1, deleted in H2). */
-  uid_purchase_bill?: string;
-  path_bill_item?: readonly string[];
   price?: { counts?: readonly { num: number; den: number }[] };
 }
 
@@ -428,13 +420,10 @@ export interface AccountedCreditNote {
   /** Its rows: lines, and on a divided note its dividers (skipped). */
   items: readonly (AccountedCreditNoteItem | CreditDividerRow)[];
   /** The billing documents' pairs its rows sit under (F14 item 3). */
-  destinations?: readonly ({ uid: string; dates?: unknown } & PairSourceKeys)[];
+  destinations?: readonly { uid: string; dates?: unknown; uid_source: string }[];
   number?: number;
   version?: number;
-  /**
-   * Where the credit lands. A line on the retiring `path_invoice_item` names the
-   * one `invoices` entry, and is unkeyed when there is not exactly one.
-   */
+  /** Where the credit lands: its initiators, then its billing documents. */
   sources?: readonly { collection: string; uid: string }[];
 }
 
@@ -463,21 +452,13 @@ export interface KeyedCredit<L extends KeyableCreditLine = KeyableCreditLine, R 
 
 /**
  * The billing row a credit line names, on either side: `uid_billing` +
- * `path_billing_item`, else a side's retiring pointer. `uid` is absent on the
- * AR note's retiring `path_invoice_item`, which names no document; `legacyAr`
- * marks that spelling. `null` for a line naming no billing row.
+ * `path_billing_item`, or `null` for a line naming no billing row.
  */
 export function creditLinePointer(
   line: KeyableCreditLine,
-): { uid?: string; path: readonly string[]; legacyAr: boolean } | null {
-  if (line.path_billing_item !== undefined && line.path_billing_item.length > 0) {
-    return { uid: line.uid_billing, path: line.path_billing_item, legacyAr: false };
-  }
-  if (line.path_bill_item !== undefined && line.path_bill_item.length > 0) {
-    return { uid: line.uid_purchase_bill, path: line.path_bill_item, legacyAr: false };
-  }
-  if (line.path_invoice_item !== undefined && line.path_invoice_item.length > 0) {
-    return { path: line.path_invoice_item, legacyAr: true };
+): { uid: string; path: readonly string[] } | null {
+  if (line.uid_billing !== undefined && line.path_billing_item !== undefined && line.path_billing_item.length > 0) {
+    return { uid: line.uid_billing, path: line.path_billing_item };
   }
   return null;
 }
@@ -490,21 +471,14 @@ export function creditLinePointer(
  * ({@link billedByPath}).
  *
  * - A line naming ANOTHER billing document is not this document's: left out.
- * - A line on the AR note's retiring `path_invoice_item` names
- *   `opts.legacyUid` (the cap: the invoice it is reading; the fold: the note's
- *   one invoice), and is `unmatched` when that is null.
  * - A line naming a row `billing` does not carry is `unmatched`.
  * - A line naming no billing row is `unpointed`.
  *
- * The kind is the line's shape (ruling 106). ⚠️ Beta H1 only: a line on the
- * retiring `path_invoice_item` self-priced its counts, so its kind is still
- * read by comparing its time with the row's, as before ruling 106. The
- * migration rewrites that one stored line (CN-1030) and H2 deletes the arm.
+ * The kind is the line's shape (ruling 106).
  */
 export function keyCreditLines<L extends KeyableCreditLine, R extends KeyedBillingRow>(
   billing: { uid: string; rows: readonly R[] },
   rows: readonly (L | CreditDividerRow)[],
-  opts: { legacyUid?: string | null } = {},
 ): { keyed: KeyedCredit<L, R>[]; unmatched: L[]; unpointed: L[] } {
   const byPath = new Map(billing.rows.map((r) => [key(r.path), r] as const));
   const keyed: KeyedCredit<L, R>[] = [];
@@ -519,21 +493,15 @@ export function keyCreditLines<L extends KeyableCreditLine, R extends KeyedBilli
       unpointed.push(line);
       continue;
     }
-    const uid = pointer.legacyAr ? opts.legacyUid ?? null : pointer.uid ?? null;
-    if (uid === null) {
-      unmatched.push(line);
-      continue;
-    }
-    if (uid !== billing.uid) continue;
+    if (pointer.uid !== billing.uid) continue;
     const row = byPath.get(key(pointer.path));
     if (row === undefined) {
       unmatched.push(line);
       continue;
     }
     const own = line.price?.counts ?? [];
-    const rowTime = countsTime(row.price?.counts);
-    const time = own.length > 0 ? countsTime(own) : rowTime;
-    const kind = pointer.legacyAr ? (compareTime(time, rowTime) === 0 ? "units" : "time") : own.length > 0 ? "time" : "units";
+    const time = own.length > 0 ? countsTime(own) : countsTime(row.price?.counts);
+    const kind = own.length > 0 ? "time" : "units";
     keyed.push({ line, row, kind, time });
   }
   return { keyed, unmatched, unpointed };
@@ -574,7 +542,7 @@ export function rowCreditedBefore(
   const out = { quantity: 0, amount_cents: 0 };
   for (const note of notes) {
     if (note.status === "void") continue;
-    for (const credit of keyCreditLines(billing, note.items, { legacyUid: billing.uid }).keyed) {
+    for (const credit of keyCreditLines(billing, note.items).keyed) {
       if (key(credit.row.path) !== k) continue;
       if (credit.kind === "units") out.quantity += credit.line.quantity;
       out.amount_cents += credit.line.price?.subtotal_discounted_cents ?? 0;
@@ -778,7 +746,7 @@ interface FoldReversal {
 interface FoldContext {
   documentUid: string;
   items: readonly InvoiceItem[];
-  destinations: readonly ({ uid: string; dates?: unknown } & PairSourceKeys)[];
+  destinations: readonly { uid: string; dates?: unknown; uid_source: string }[];
   base: 0 | 1;
   /** Alignment-checked, listed in `compared`/`unaligned`, and reported in `document_only` sources. */
   billing: boolean;
@@ -814,12 +782,6 @@ export interface BillingFoldSide<B, C> {
   partCents(row: InvoiceItem, before: number, after: number): number;
   /** A credit document's rows and pairs. */
   creditRows(doc: C): { items: readonly InvoiceItem[]; destinations: FoldContext["destinations"] };
-  /**
-   * The billing document a line on the AR note's retiring `path_invoice_item`
-   * names: the note's one `invoices` source, else null (the line is unkeyed).
-   * Payable has no such spelling. Deleted in beta H2.
-   */
-  creditLegacyBillingUid(doc: C): string | null;
 }
 
 const emptyReversal = (): FoldReversal => ({ units: 0, cents: 0, standIn: new Map(), standInCents: new Map(), time: [], credits: new Set() });
@@ -897,10 +859,6 @@ export const RECEIVABLE_BILLING_FOLD: BillingFoldSide<AccountedInvoice, Accounte
   rowNetCents: receivableNetCents,
   partCents: receivablePartCents,
   creditRows: (doc) => ({ items: doc.items as unknown as InvoiceItem[], destinations: doc.destinations ?? [] }),
-  creditLegacyBillingUid: (doc) => {
-    const invoices = (doc.sources ?? []).filter((src) => src.collection === "invoices");
-    return invoices.length === 1 ? invoices[0].uid : null;
-  },
 };
 
 /** The payable side: purchases, bills, supplier credits. */
@@ -928,7 +886,6 @@ export const PAYABLE_BILLING_FOLD: BillingFoldSide<PayableFoldBill, PayableFoldC
   rowNetCents: (row) => payableRow(row).amount_cents ?? 0,
   partCents: (row, before, after) => sliceStoredMoney(payableStoredMoney(payableRow(row)), before, after).net_cents,
   creditRows: (doc) => ({ items: doc.items as unknown as InvoiceItem[], destinations: doc.destinations ?? [] }),
-  creditLegacyBillingUid: () => null,
 };
 
 /**
@@ -939,8 +896,7 @@ export const PAYABLE_BILLING_FOLD: BillingFoldSide<PayableFoldBill, PayableFoldC
  * - A line naming a billing row ({@link keyCreditLines}) reverses THAT row of
  *   that billing document: its anchors, move pointer and time are the billing
  *   row's. A billing document the fold is not reading (void, unaligned, another
- *   initiator's) takes nothing; a row it does not carry, or an AR line on the
- *   retiring pointer whose note names not exactly one invoice, makes the credit
+ *   initiator's) takes nothing; a row it does not carry makes the credit
  *   unkeyed.
  * - A line naming no billing row reverses its OWN row, in a context of the
  *   credit's own (`base: 0`), with its own anchors — when it sits in this
@@ -990,26 +946,19 @@ function placeCredits<B, C>(
       (row.type === undefined || !isDividerItemType(row.type)) && row.reverses_billing === true
     );
     if (reversing.length === 0) continue;
-    const legacyUid = fold.creditLegacyBillingUid(credit);
     // Each billing context reads every reversing line; a line naming another
     // document is left out by the keyer, so each line lands on at most one.
     const named = new Set<string>();
     for (const line of reversing) {
       const pointer = creditLinePointer(line);
-      if (pointer === null) continue;
-      const uid = pointer.legacyAr ? legacyUid : pointer.uid ?? null;
-      if (uid === null) unkeyed.add(creditUid);
-      else named.add(uid);
+      if (pointer !== null) named.add(pointer.uid);
     }
     for (const uid of named) {
       const ctx = billing.get(uid);
       if (ctx === undefined) continue;
       const rows = ctx.items.filter((it) => isLineItemType(it.type)) as KeyedBillingRow[];
-      const { keyed, unmatched } = keyCreditLines({ uid, rows }, reversing, { legacyUid });
-      if (unmatched.some((line) => {
-        const pointer = creditLinePointer(line);
-        return pointer !== null && (pointer.legacyAr ? legacyUid : pointer.uid) === uid;
-      })) unkeyed.add(creditUid);
+      const { keyed, unmatched } = keyCreditLines({ uid, rows }, reversing);
+      if (unmatched.some((line) => creditLinePointer(line)?.uid === uid)) unkeyed.add(creditUid);
       for (const credit of keyed) reverse(ctx.reversals, ctx.documentUid, credit.row.path, creditUid, credit.line, credit.kind === "time");
     }
     const unpointed = reversing.filter((line) => creditLinePointer(line) === null);
@@ -1170,7 +1119,7 @@ export function billedByPath<S extends Side>(
     const scopedByKey = new Map(scoped.map((it) => [key(it.path ?? []), it] as const));
     // A document on no pair bills on no window (AR's `destinations?.find`), so it extends nothing.
     const windowOf = (item: InvoiceItem) =>
-      pairWindow((ctx.destinations ?? []).find((pair) => pair.uid === (item.path ?? [])[1] && pairSourceUid(pair) === scopeUid));
+      pairWindow((ctx.destinations ?? []).find((pair) => pair.uid === (item.path ?? [])[1] && pair.uid_source === scopeUid));
     const rowInfo = (item: InvoiceItem, via: BilledRow["via"]) => ({ documentUid: ctx.documentUid, item, via, window: windowOf(item) });
 
     for (const item of scoped) {
@@ -1209,7 +1158,7 @@ export function billedByPath<S extends Side>(
             if (ctx.billing && !entry.documents.includes(ctx.documentUid)) entry.documents.push(ctx.documentUid);
           } else {
             // The move pointer is the billing row's, never the line's.
-            const row = withRowSourcePath(item as InvoiceItem & MovePointerKeys, undefined);
+            const row = withRowSourcePath(item, undefined);
             summed.set(k, { line: { ...row, path: placed }, quantity: units, cents, documents: ctx.billing ? [ctx.documentUid] : [] });
           }
           for (let depth = 2; depth < rel.length; depth++) {

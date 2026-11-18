@@ -580,9 +580,9 @@ Deno.test("chargeWindowContext: a pair whose windows are null bills no days and 
   assertThrows(() => lineCounts(line(["D"]), priceCtx([]), new Map()), PriceRefusalError, "under no destination pair with charge windows");
 });
 
-Deno.test("chargeWindowContext: an invoice pair's divider path is [uid_order, uid]", () => {
+Deno.test("chargeWindowContext: an invoice pair's divider path is [uid_source, uid]", () => {
   const windows = businessDayWindows([3, 4]);
-  const ctx = chargeWindowContext([{ uid: "D", uid_order: "O", dates: { charge_windows: windows } }]);
+  const ctx = chargeWindowContext([{ uid: "D", uid_source: "O", dates: { charge_windows: windows } }]);
   assertEquals(ctx, [{ divider_path: ["O", "D"], windows }]);
   const onInvoice = line(["O", "D"]);
   assertEquals(lineCounts(onInvoice, priceCtx(ctx), new Map()), [tier("week", 10, 5)]);
@@ -592,7 +592,7 @@ Deno.test("priceDocument: an extension line bills its OWN stated counts, unfloor
   const priceExt = (counts: ReturnType<typeof fdwCounts>) => {
     const ext = line(["O", "E"], { counts });
     return priceDocument([EXT_DIVIDER, ext], {
-      ...priceCtx(chargeWindowContext([{ uid: "E", uid_order: "O", dates: { charge_windows: businessDayWindows([4]) } }]), { kind: "invoice", status: "draft", has_settlement: false }),
+      ...priceCtx(chargeWindowContext([{ uid: "E", uid_source: "O", dates: { charge_windows: businessDayWindows([4]) } }]), { kind: "invoice", status: "draft", has_settlement: false }),
     }).items[1].price as unknown as { counts: { num: number; den: number }[]; subtotal_cents: number };
   };
   // The section's writer states the added days (ruling 8); the window's 4 business days are not consulted.
@@ -697,7 +697,7 @@ Deno.test("chargeWindowPairViolations: a document that keeps its stored days is 
 
 Deno.test("chargeWindowPairViolations: an extension line bills the days it ADDS, not its pair's total", () => {
   const ext = line(["O", "E"], { counts: fdwCounts(2, { stated: true }) });
-  const windows = chargeWindowContext([{ uid: "E", uid_order: "O", dates: { charge_windows: businessDayWindows([3, 4]) } }]);
+  const windows = chargeWindowContext([{ uid: "E", uid_source: "O", dates: { charge_windows: businessDayWindows([3, 4]) } }]);
   const document = { kind: "invoice", status: "draft", has_settlement: false } as const;
   // Under the section: exempt — 2 is the added days, while the windows meter 10.
   assertEquals(chargeWindowPairViolations([EXT_DIVIDER, ext], { document, charge_windows: windows, ...PAIR_CTX }), []);

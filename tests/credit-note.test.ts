@@ -48,6 +48,7 @@ function makeCreditNote(overrides: Record<string, unknown> = {}) {
     },
     items: [{
       uid: "cnitem10000000000000",
+      path: ["cnitem10000000000000"],
       type: "sale",
       name: "Location supplement",
       description: "",
@@ -60,11 +61,10 @@ function makeCreditNote(overrides: Record<string, unknown> = {}) {
         taxes: [],
         total_cents: 219600,
       },
-      coa_revenue: 4000,
-      coa_posting: 4000,
+      source_ledger_account: 4000,
+      ledger_account: 4000,
       uid_tracking_category: null,
       xero_id: null,
-      uid_invoice_item: null,
       // Required, and false on every line this feature did not write — see
       // `schemas/credit-note.ts`. Stated explicitly rather than omitted, which is
       // the whole reason it is not optional.
@@ -80,7 +80,8 @@ function makeCreditNote(overrides: Record<string, unknown> = {}) {
     remaining_credit_cents: 0,
     sources: [],
     query_by_sources: [],
-    xero_credit_note_id: null,
+    destinations: [],
+    xero_id: null,
     version: 0,
     created_by: { uid: "testuser100000000000", name: "Test User" },
     updated_by: { uid: "testuser100000000000", name: "Test User" },
@@ -188,23 +189,21 @@ Deno.test("a line must declare both accounts, and they are allowed to differ", (
   // A credit spanning lines with different COAs (#1689 hits 4000 and 4100)
   // cannot be posted from a document-level amount, and apportioning it
   // afterwards is inferring cause from effect.
-  // `coa_revenue` / `source_ledger_account` is optional in beta H1 (ruling 34,
-  // both spellings mid-rename), so dropping it parses until H2; the POSTING
-  // account is required in either spelling.
-
-  const noPosting = makeCreditNote().items.map(({ coa_posting: _d, ...rest }) => rest);
+  const noPosting = makeCreditNote().items.map(({ ledger_account: _d, ...rest }) => rest);
   assertEquals(CreditNoteSchema.safeParse(makeCreditNote({ items: noPosting })).success, false);
+  const noSource = makeCreditNote().items.map(({ source_ledger_account: _s, ...rest }) => rest);
+  assertEquals(CreditNoteSchema.safeParse(makeCreditNote({ items: noSource })).success, false);
 
-  // `coa_revenue` is nullable — a free-text credit line has no catalog product
+  // `source_ledger_account` is nullable — a free-text credit line has no catalog product
   // behind it, and CN-1012's sole line is exactly that. Stricter than the
   // invoice it credits would be unable to represent the corpus.
-  const nullRevenue = makeCreditNote().items.map((i) => ({ ...i, coa_revenue: null }));
+  const nullRevenue = makeCreditNote().items.map((i) => ({ ...i, source_ledger_account: null }));
   assertEquals(CreditNoteSchema.safeParse(makeCreditNote({ items: nullRevenue })).success, true);
 
   // The two are different facts. CN-1009 writes off 35 RENTAL lines (revenue
   // 4000) to 6900 Bad Debt; collapsing them loses the revenue attribution the
   // tracking-category rollups depend on.
-  const writeOff = makeCreditNote().items.map((i) => ({ ...i, coa_revenue: 4000, coa_posting: 6900 }));
+  const writeOff = makeCreditNote().items.map((i) => ({ ...i, source_ledger_account: 4000, ledger_account: 6900 }));
   assertEquals(CreditNoteSchema.safeParse(makeCreditNote({ items: writeOff })).success, true);
 });
 
@@ -266,21 +265,21 @@ Deno.test("CreditNoteSchema: an APPLIED or VOID credit note keeps line money its
 Deno.test("deriveCreditNoteSources: orders first, then invoices; a pointed line names only the order its path leads with", () => {
   const got = deriveCreditNoteSources(
     [{ uid: "inv1", query_by_orders: ["o1", "o2"] }],
-    [{ path_invoice_item: ["o2", "dest", "x"] }],
+    [{ uid_billing: "inv1", path_billing_item: ["o2", "dest", "x"] }],
   );
   assertEquals(got.sources, [{ collection: "orders", uid: "o2" }, { collection: "invoices", uid: "inv1" }]);
   assertEquals(got.query_by_sources, ["orders:o2", "invoices:inv1"]);
 });
 
 Deno.test("deriveCreditNoteSources: a path that leads with no order the invoice bills names no order (an invoice-authored subtree)", () => {
-  const got = deriveCreditNoteSources([{ uid: "inv1", query_by_orders: ["o1"] }], [{ path_invoice_item: ["authored", "x"] }]);
+  const got = deriveCreditNoteSources([{ uid: "inv1", query_by_orders: ["o1"] }], [{ uid_billing: "inv1", path_billing_item: ["authored", "x"] }]);
   assertEquals(got.query_by_sources, ["invoices:inv1"]);
 });
 
 Deno.test("deriveCreditNoteSources: an unpointed line names every order its invoice bills (ruling 52, the historic notes)", () => {
   const got = deriveCreditNoteSources(
     [{ uid: "inv1", query_by_orders: ["o1", "o2"] }, { uid: "inv2", query_by_orders: ["o2", "o3"] }],
-    [{ path_invoice_item: ["o1", "x"] }, {}],
+    [{ uid_billing: "inv1", path_billing_item: ["o1", "x"] }, {}],
   );
   assertEquals(got.query_by_sources, ["orders:o1", "orders:o2", "orders:o3", "invoices:inv1", "invoices:inv2"]);
 });
@@ -319,38 +318,39 @@ const issuePathsOf = (o: Record<string, unknown>) => {
   return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
 };
 
-Deno.test("H1: a line's posting account is required in EITHER spelling, and the new one alone parses", () => {
-  const { coa_posting: _p, coa_revenue: _r, ...rest } = baseLine();
-  assertEquals(issuePathsOf({ items: [{ ...rest, ledger_account: 6900, source_ledger_account: 4000 }] }), []);
-  assertEquals(issuePathsOf({ items: [rest] }), ["items.0.ledger_account"], "no posting account in either spelling");
+Deno.test("H2: the retired posting spellings are refused, and a line states its posting account", () => {
+  assertEquals(issuePathsOf({ items: [{ ...baseLine(), coa_posting: 6900 }] }), ["items.0"]);
+  assertEquals(issuePathsOf({ items: [{ ...baseLine(), coa_revenue: 4000 }] }), ["items.0"]);
+  const { ledger_account: _p, ...rest } = baseLine();
+  assertEquals(issuePathsOf({ items: [rest] }), ["items.0.ledger_account"]);
 });
 
-Deno.test("H1: uid_billing and path_billing_item are set together", () => {
-  assertEquals(issuePathsOf({ items: [{ ...baseLine(), uid_billing: INV }] }), ["items.0.path_billing_item"]);
+Deno.test("uid_billing and path_billing_item are set together", () => {
+  assertEquals(issuePathsOf({ items: [{ ...baseLine(), path: [INV, ORD, "cnitem10000000000000"], uid_billing: INV }] }), ["items.0.path_billing_item"]);
   assertEquals(
     issuePathsOf({ items: [{ ...baseLine(), path_billing_item: [ORD, "cnitem10000000000000"], price: { ...baseLine().price as object, counts: [] } }] }),
     ["items.0.path_billing_item"],
   );
 });
 
-Deno.test("H1 (ruling 106): a pointed line states only the time it takes back — none on a flat row", () => {
+Deno.test("(ruling 106): a pointed line states only the time it takes back — none on a flat row", () => {
   // A units credit of a flat row: counts [] (its money is the row's part).
-  const units = { ...baseLine(), uid_billing: INV, path_billing_item: [ORD, "cnitem10000000000000"], price: { ...baseLine().price as object, counts: [] } };
+  const units = { ...baseLine(), path: [INV, ORD, "cnitem10000000000000"], uid_billing: INV, path_billing_item: [ORD, "cnitem10000000000000"], price: { ...baseLine().price as object, counts: [] } };
   assertEquals(issuePathsOf({ items: [units] }), []);
   // Copying the flat row's `[flat 1/1]` onto the credit would read as a time credit.
-  const copied = { ...baseLine(), uid_billing: INV, path_billing_item: [ORD, "cnitem10000000000000"] };
+  const copied = { ...baseLine(), path: [INV, ORD, "cnitem10000000000000"], uid_billing: INV, path_billing_item: [ORD, "cnitem10000000000000"] };
   assertEquals(issuePathsOf({ items: [copied] }), ["items.0.price.counts"]);
 });
 
-Deno.test("H1 (ruling 106): an unpointed time line states the counts it moves", () => {
+Deno.test("(ruling 106): an unpointed time line states the counts it moves", () => {
   const price = { ...fdwPrice(10000, null), subtotal_cents: 0, subtotal_discounted_cents: 0, discount: null, taxes: [], total_cents: 0 };
   assertEquals(issuePathsOf({ items: [{ ...baseLine(), price }] }).includes("items.0.price.counts"), true);
   // Pointed, the same empty counts mean "whole units of the named row".
-  const pointed = { ...baseLine(), price, uid_billing: INV, path_billing_item: [ORD, "cnitem10000000000000"] };
+  const pointed = { ...baseLine(), price, path: [INV, ORD, "cnitem10000000000000"], uid_billing: INV, path_billing_item: [ORD, "cnitem10000000000000"] };
   assertEquals(issuePathsOf({ items: [pointed] }).includes("items.0.price.counts"), false);
 });
 
-Deno.test("H1 (ruling 107): a divided note leads with a billing or order divider; a flat one is unchecked", () => {
+Deno.test("(ruling 107): a divided note leads with a billing or order divider; a flat one is unchecked", () => {
   const billing = { uid: INV, type: "billing", name: "Invoice #2001", path: [INV], description: "" };
   const order = { uid: ORD, type: "order", name: "Order #1000", path: [INV, ORD], description: "" };
   const line = { ...baseLine(), path: [INV, ORD, "cnitem10000000000000"], uid_billing: INV, path_billing_item: [ORD, "cnitem10000000000000"], price: { ...baseLine().price as object, counts: [] } };
@@ -361,29 +361,29 @@ Deno.test("H1 (ruling 107): a divided note leads with a billing or order divider
   assertEquals(issuePathsOf({}), []);
 });
 
-Deno.test("H1 (ruling 107): a pointed line sits under its own billing document's divider", () => {
+Deno.test("(ruling 107): a pointed line sits under its own billing document's divider", () => {
   const billing = { uid: INV, type: "billing", name: "Invoice #2001", path: [INV], description: "" };
   const line = { ...baseLine(), path: [INV, "cnitem10000000000000"], uid_billing: INV2, path_billing_item: ["cnitem10000000000000"], price: { ...baseLine().price as object, counts: [] } };
   assertEquals(issuePathsOf({ items: [billing, line] }), ["items.1.path"]);
 });
 
-Deno.test("H1: destinations, when stated, answer the note's destination dividers", () => {
+Deno.test("destinations, when stated, answer the note's destination dividers", () => {
   const billing = { uid: INV, type: "billing", name: "Invoice #2001", path: [INV], description: "" };
   const order = { uid: ORD, type: "order", name: "Order #1000", path: [INV, ORD], description: "" };
   const dest = { uid: DEST, type: "destination", name: "Stage 2", path: [INV, ORD, DEST], description: "" };
   assertEquals(issuePathsOf({ items: [billing, order, dest], destinations: [] }).includes("items"), true);
 });
 
-Deno.test("H1 (ruling 103): a $0 note is issued, never applied", () => {
+Deno.test("(ruling 103): a $0 note is issued, never applied", () => {
   const zero = { totals: { subtotal_cents: 0, subtotal_discounted_cents: 0, discount_amount_cents: 0, taxes: [], total_cents: 0 }, items: [], remaining_credit_cents: 0 };
   assertEquals(issuePathsOf({ ...zero, status: "issued" }), []);
   assertEquals(issuePathsOf({ ...zero, status: "applied" }), ["status"]);
 });
 
-Deno.test("H1: xero_id is the header key; the retiring xero_credit_note_id parses beside it until H2", () => {
+Deno.test("H2: xero_id is the header key; the retired xero_credit_note_id is refused", () => {
   const X = "0b1d4c3e-1111-4111-8111-111111111111";
-  const { xero_credit_note_id: _x, ...rest } = makeCreditNote() as Record<string, unknown>;
-  assertEquals(CreditNoteSchema.safeParse({ ...rest, xero_id: X }).success, true);
+  assertEquals(CreditNoteSchema.safeParse(makeCreditNote({ xero_id: X })).success, true);
+  assertEquals(issuePathsOf({ xero_credit_note_id: X }), [""]);
 });
 
 Deno.test("deriveCreditNoteSources (ruling 34): each invoice in line order, and a pointer names only its own invoice", () => {

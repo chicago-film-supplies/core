@@ -19,8 +19,6 @@
 import { assert, assertEquals } from "@std/assert";
 import {
   type AccountedCreditNote,
-  type AccountedCreditNoteItem,
-  isCreditDividerRow,
   type AccountedInvoice,
   billedByPath,
   type PayableFoldBill,
@@ -56,7 +54,7 @@ const note = (quantity: number, cents: number, status: AccountedCreditNote["stat
   uid: "cn-1",
   status,
   sources: [{ collection: "invoices", uid: "inv-1" }],
-  items: [{ quantity, path_invoice_item: [O, D, X], reverses_billing: true, price: { subtotal_discounted_cents: cents } }],
+  items: [{ quantity, uid_billing: "inv-1", path_billing_item: [O, D, X], reverses_billing: true, price: { subtotal_discounted_cents: cents } }],
 });
 
 Deno.test("billedByPath (AR): folds each row's STORED net, summed across invoices", () => {
@@ -108,17 +106,6 @@ Deno.test("billedByPath (AR): one note crediting two invoices that bill ONE orde
   assertEquals([at?.quantity, at?.amount_cents], [1, 1000]);
   assertEquals(at?.rows.map((r) => [r.documentUid, r.quantity]), [["inv-1", 1]]);
   assertEquals(out.credits_unkeyed, []);
-  // Companion: the retiring pointer names no invoice, so the same lines on a note
-  // with two invoice sources cannot be placed — the reason ruling 107 exists.
-  const legacy: AccountedCreditNote = {
-    ...two,
-    items: two.items.filter((l) => !isCreditDividerRow(l)).map((row) => {
-      const { uid_billing: _u, path_billing_item, ...l } = row as AccountedCreditNoteItem;
-      return { ...l, path_invoice_item: path_billing_item };
-    }),
-  };
-  const unplaced = billedByPath("receivable", { uid: O, items: ORDER_ITEMS }, [invoice("inv-1", 2, 2000), invoice("inv-2", 2, 1998)], [legacy]);
-  assertEquals([unplaced.byPath.get(`${D}/${X}`)?.quantity, unplaced.credits_unkeyed], [4, ["cn-2"]]);
 });
 
 Deno.test("billedByPath (AR): a pointed line's kind is its SHAPE — non-empty counts take back time and no units (ruling 106)", () => {

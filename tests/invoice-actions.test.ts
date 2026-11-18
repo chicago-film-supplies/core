@@ -311,16 +311,6 @@ Deno.test("D3 creditableLines keys by (uid_billing, path_billing_item): a line n
   assertEquals(creditableLines({ uid: "inv-deposit", items }, [note("issued", other)])[0].units, 0);
 });
 
-Deno.test("D3 creditableLines: the retiring path_invoice_item names the invoice being read, its kind still by time comparison (H1 only)", () => {
-  const items = [line("cam", 5, 10)];
-  // A self-priced legacy whole-unit line states the row's own counts: units, as before ruling 106.
-  const legacy = { name: "cam", quantity: 2, path_invoice_item: ["ord", "dest", "cam"], price: { counts: fdwCounts(10) } };
-  assertEquals(creditableLines({ uid: INV, items }, [note("issued", legacy)])[0].units, 3);
-  // The same counts on the NEW pointer read as a time credit of 2 × the row's time: the same budget, so the same answer.
-  const pointed = { ...legacy, path_invoice_item: undefined, uid_billing: INV, path_billing_item: ["ord", "dest", "cam"] };
-  assertEquals(creditableLines({ uid: INV, items }, [note("issued", pointed)])[0].units, 3);
-});
-
 Deno.test("D3 creditNoteOverCredit: the api's two arms, with its messages", () => {
   const items = [line("cam", 5, 10)];
   // Arm A — more units than the row billed, checked first.
@@ -609,7 +599,7 @@ Deno.test("core#120: an order that is ONLY over-billed is offered the credit, no
       { uid: "dest", type: "destination", name: "Venue", description: "", path: ["ord", "dest"] },
       cam(["ord", "dest", "cam"], 3),
     ],
-    destinations: [{ ...pair, uid_order: "ord" }],
+    destinations: [{ ...pair, uid_source: "ord" }],
   } as unknown as AccountedInvoice;
   const offers = orderInvoiceActionsFor(overBilled, { invoices: [billed], creditNotes: [], accounting: { formulas: FORMULAS, holidays: [] } });
   assertEquals(has(offers, "credit_overbilling"), true, "the over-billing is real and offered");

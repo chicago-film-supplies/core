@@ -62,8 +62,6 @@ import type {
 } from "./purchase-bill.ts";
 import {
   billingExchangedForViolations,
-  checkPairSourceKeys,
-  type PairSourceKeys,
   checkLeadingDivider,
   checkStoredEndpoints,
   DestinationPairCore,
@@ -617,7 +615,7 @@ export interface InvoiceDocLineItemType {
    * It replaced the single `uid_out_of_service` (W4R), retired at W4K's
    * contract publish once every stored line was migrated.
    *
-   * `.optional()` with `seed: false`, as `path_order_item`: `[]` fails
+   * `.optional()` with `seed: false`, as `path_source_item`: `[]` fails
    * `.min(1)`, so the form seed must omit the key. Catalogued in
    * `tests/stored-optionality.test.ts` as array-member-uncensusable.
    */
@@ -627,7 +625,7 @@ export interface InvoiceDocLineItemType {
    * an operator dragged it into another group or destination inside its own
    * order block, or split some of its units into a new group. Order-relative —
    * no order-divider prefix — and stated on the ROOT row only; a kit's
-   * components follow by suffix (`[...row, c]` bills `[...path_order_item, c]`).
+   * components follow by suffix (`[...row, c]` bills `[...path_source_item, c]`).
    *
    * The row IS that order line, at another position: quantity, labels and
    * price merge three-way against it, and coverage credits it. That is why this
@@ -648,19 +646,16 @@ export interface InvoiceDocLineItemType {
    * `.optional()` for `substituted_for`'s reasons (array-member-uncensusable,
    * meaningful on a handful of rows only).
    *
-   * 🔴 **Renamed `path_source_item` (ruling 109), one key on both sides.** Beta
-   * H1 admits either spelling; read it through `rowSourcePath`, write
-   * it through `withRowSourcePath`. This key is deleted in H2.
+   * One key on both sides (ruling 109; it replaced `path_order_item`). Write it
+   * through `withRowSourcePath`.
    */
-  path_order_item?: string[];
-  /** The move pointer (ruling 109): {@link path_order_item}'s one spelling on both sides. */
   path_source_item?: string[];
   /**
    * An exchange line's take-back list, as the order line states it
    * (`OrderDocLineItemType.exchanged_for`; ruling 82 of the one-document-model
    * plan): the rows of the order this line goes out against, with how many units
    * and why each comes back. **Order-relative** — no order-divider prefix — as
-   * {@link path_order_item} and `substituted_for` are, so an un-overridden line
+   * {@link path_source_item} and `substituted_for` are, so an un-overridden line
    * takes the order's own (already re-pointed) list through the three-way merge,
    * and nothing re-paths it.
    *
@@ -695,7 +690,7 @@ export interface InvoiceDocLineItemType {
  */
 export function checkInvoiceExchangedFor(
   inv: {
-    destinations: ReadonlyArray<{ uid: string; exchange?: DocDestinationType["exchange"] } & PairSourceKeys>;
+    destinations: ReadonlyArray<{ uid: string; exchange?: DocDestinationType["exchange"]; uid_source: string }>;
     items: ReadonlyArray<{ path: readonly string[] }>;
   },
   ctx: z.RefinementCtx,
@@ -757,16 +752,14 @@ const InvoiceDocLineItemInner = z.strictObject({
   // Plain `.optional()`, matching `FulfillmentLineItem.substituted_for`
   // exactly — see the interface docblock for why this one is not `.nullable()`.
   substituted_for: SubstitutedForList.optional(),
-  // `seed: false`: `[]` fails `.min(1)`, as `path_order_item` just below.
+  // `seed: false`: `[]` fails `.min(1)`, as `path_source_item` just below.
   out_of_service: OutOfServiceList.optional().meta({ seed: false }),
   // See the interface docblock (core#125). The credit note's
-  // `path_invoice_item` is its twin one grain down.
+  // `path_billing_item` is its twin one grain down.
   // `seed: false`: `[]` fails `.min(1)`, so the form seed must omit the key.
-  path_order_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
-  // Its one spelling on both sides (ruling 109). Writers write it alone.
   path_source_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
   // See the interface docblock. Plain `.optional()`, as the fulfillment line's.
-  // `seed: false`, as `path_order_item`: a seeded `[]` claims the take-back list of
+  // `seed: false`, as `path_source_item`: a seeded `[]` claims the take-back list of
   // an exchange line on a line under no exchange pair, which `checkInvoiceExchangedFor`
   // refuses, so the form seed must omit the key.
   exchanged_for: ExchangedForList.optional().meta({ seed: false }),
@@ -984,7 +977,7 @@ const InvoiceDocTotals: z.ZodType<InvoiceDocTotalsType> = z.strictObject({
 
 /**
  * Destination pair on an invoice — mirrors the order's `DocDestinationType`
- * with a `uid_order` scope field so multi-order invoices can carry pairs
+ * with a `uid_source` scope field so multi-order invoices can carry pairs
  * from several orders and have them selectively synced per source order.
  * Carries `dates` (rendered on the invoice) snapshotted from the source order.
  *
@@ -1022,27 +1015,19 @@ const InvoiceDocTotals: z.ZodType<InvoiceDocTotalsType> = z.strictObject({
 export interface InvoiceDocDestinationType extends DocDestinationType {
   /**
    * The source order this pair is scoped to (ruling 109: one key on both sides,
-   * the collection read off the side). Read it through `pairSourceUid`.
+   * the collection read off the side).
    */
-  uid_source?: string;
-  /** Retiring (ruling 109): the scope's old spelling. Deleted in beta H2. */
-  uid_order?: string;
+  uid_source: string;
 }
 
 export const InvoiceDocDestination: z.ZodType<InvoiceDocDestinationType> = z
   .strictObject({
     // The one key the invoice grain adds: which of a multi-order invoice's source
-    // orders this pair is scoped to. It sits FIRST, which is what makes the spread
-    // below order-preserving — `uid_order` was already the first key here, and
-    // `DestinationPairCore` is the rest of this object in its existing order.
-    // 🔴 Ruling 109: `uid_source` is the scope's one spelling on both sides, and
-    // `uid_order` retires in H2. `checkPairSourceKeys` requires at least one.
-    // ⚠️ Neither is SEEDED (`seed: false`) through H1: seeded, both would be `""`,
-    // and `pairSourceUid` (new ?? old) reads a stated `""` before the key a writer
-    // set — and `""` is no `FirestoreId`, so the pair is refused at the write.
-    // H2 deletes `uid_order` and makes `uid_source` required and seeded again.
-    uid_order: FirestoreId.optional().meta({ seed: false }),
-    uid_source: FirestoreId.optional().meta({ seed: false }),
+    // orders this pair is scoped to (ruling 109: `uid_source`, one spelling on both
+    // sides; it replaced `uid_order`). It sits FIRST, which is what makes the spread
+    // below order-preserving: `DestinationPairCore` is the rest of this object in
+    // its existing order.
+    uid_source: FirestoreId,
     // 🔴 **THIS LIST USED TO INHERIT NOTHING.** It restated `DocDestination`'s six
     // keys by hand, and had already drifted: it kept `z.boolean().default(false)`
     // on `customer_collecting` / `customer_returning` after `9435a15` made both
@@ -1060,33 +1045,29 @@ export const InvoiceDocDestination: z.ZodType<InvoiceDocDestinationType> = z
     // keeps a divider the invoice already carries under the same uid), so a pair
     // projected by `toInvoiceDestinationPair` arrives already keyed correctly.
     ...DestinationPairCore,
-  }).superRefine(checkPairSourceKeys);
+  });
 
 /**
  * A destination pair as a client sends it to an invoice: the receivable pair
  * input ({@link DestinationPairInputCore}) scoped to its source order. `uid` is
- * required, because a pair is addressed by `(uid_order, uid)`.
+ * required, because a pair is addressed by `(uid_source, uid)`.
  *
  * The input twin of {@link InvoiceDocDestination}. It strips rather than refuses,
  * so a stored pair echoed back loses its `_fs` mirrors and `days_active` at the
  * boundary, and a writer must read neither off it.
  */
 export interface InvoiceDestinationInputType extends DestinationType {
-  /** The source order (ruling 109); either spelling through beta H1, read with `pairSourceUid`. */
-  uid_source?: string;
-  /** Retiring (ruling 109): send {@link uid_source}. */
-  uid_order?: string;
+  /** The source order (ruling 109). */
+  uid_source: string;
   uid: string;
 }
 
 /** Zod schema for {@link InvoiceDestinationInputType}. */
 export const InvoiceDestinationInput: z.ZodType<InvoiceDestinationInputType> = z.object({
-  // Neither seeded through H1, as on the stored pair above.
-  uid_source: FirestoreId.optional().meta({ seed: false }),
-  uid_order: FirestoreId.optional().meta({ seed: false }),
+  uid_source: FirestoreId,
   uid: z.uuid(),
   ...DestinationPairInputCore,
-}).superRefine(checkPairSourceKeys);
+});
 
 // ── Document schema ──────────────────────────────────────────────
 
@@ -1590,13 +1571,11 @@ export interface InvoiceItemInputLineType {
    */
   out_of_service?: OutOfServiceEntryType[];
   /**
-   * @see `InvoiceDocLineItemType.path_order_item`. Operator-authored (a drop or
+   * @see `InvoiceDocLineItemType.path_source_item`. Operator-authored (a drop or
    * a split in the manager), so it needs an input channel for the
    * `substituted_for` reason. The API checks it names a line of the row's own
-   * order (core#125 D3). Retiring (ruling 109): send {@link path_source_item}.
+   * order (core#125 D3).
    */
-  path_order_item?: string[];
-  /** The move pointer's one spelling (ruling 109); the writer reads either through `rowSourcePath`. */
   path_source_item?: string[];
 }
 
@@ -1644,7 +1623,6 @@ const InvoiceItemInputLineInner = z.object({
   zero_priced: z.boolean().nullable().optional(),
   quantity_per_parent: z.number().min(0).nullable().optional(),
   out_of_service: OutOfServiceListInput.optional().meta({ seed: false }),
-  path_order_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
   path_source_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
   exchanged_for: ExchangedForListInput.optional().meta({ seed: false }),
 }).superRefine(checkItemPriceFormula).superRefine(checkOutOfServiceLineType);
@@ -1894,7 +1872,7 @@ export interface UpdateInvoiceInputType {
   items?: InvoiceItemInputType[];
   /**
    * The invoice's OWN values for its destination pairs, matched by
-   * `(uid_order, uid)`. Every field the order → invoice shared-field
+   * `(uid_source, uid)`. Every field the order → invoice shared-field
    * classification calls `propagated` or `atom` is writable — dates, both
    * endpoints, the customer flags and `jurisdiction` (api-cloudrun#890; it was
    * `jurisdiction` alone before that). Derived fields (`_fs` mirrors, day

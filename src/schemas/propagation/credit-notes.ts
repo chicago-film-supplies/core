@@ -71,7 +71,7 @@ const CREDIT_POSTING_AGAINST_XERO: EnforcementRef = {
   kind: "audit",
   ref: "api-cloudrun/scripts/audit-credit-note-posting.ts",
   clause:
-    "the `coa_posting` clause — stored posting account vs `deriveCreditPostingAccount` vs Xero's own account code, naming the 4 historic miscodings as expected divergences. Covers neither `coa_revenue` nor the allocation edge.",
+    "the `ledger_account` clause — stored posting account vs `deriveCreditPostingAccount` vs Xero's own account code, naming the 4 historic miscodings as expected divergences. Covers neither `source_ledger_account` nor the allocation edge.",
   gates: true,
 };
 
@@ -180,15 +180,15 @@ const createCreditNoteRules: CollectionRule[] = [
     target: "credit-notes",
     mode: "derive",
     invariant:
-      "Each line's `coa_posting` is STORED, not derived on read — bad_debt posts to 6900 because the sale stands and the money is written off, while every other reason reverses the line's own revenue account",
+      "Each line's `ledger_account` is STORED, not derived on read — bad_debt posts to 6900 because the sale stands and the money is written off, while every other reason reverses the line's own revenue account",
     enforced_by: [CREDIT_POSTING_AGAINST_XERO],
     transaction: "create-credit-note",
     fields: [
       {
         source: ["reason"],
-        target: ["items", "coa_posting"],
+        target: ["items", "ledger_account"],
         transform:
-          "deriveCreditPostingAccount(reason, item.coa_revenue) — 6900 for bad_debt, the line's own coa_revenue otherwise, null for correction/unspecified (the caller must supply it, because a correction is bidirectional)",
+          "deriveCreditPostingAccount(reason, item.source_ledger_account) — 6900 for bad_debt, the line's own source_ledger_account otherwise, null for correction/unspecified (the caller must supply it, because a correction is bidirectional)",
       },
     ],
   },
@@ -257,7 +257,7 @@ const allocateCreditNoteRules: CollectionRule[] = [
         target: ["reason"],
         transform: "denormalized from the note",
       },
-      { source: ["xero_credit_note_id"], target: ["xero_credit_note_id"] },
+      { source: ["xero_id"], target: ["xero_credit_note_id"] },
       {
         source: [],
         target: ["date"],

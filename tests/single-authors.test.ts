@@ -463,8 +463,8 @@ Deno.test("row 12: per-grain folds, units and the unrecorded pool", () => {
 // ── Row 13: invoice pair key ─────────────────────────────────────────
 
 Deno.test("row 13: a pair's identity is scoped to its order", () => {
-  assertEquals(invoicePairKey({ uid_order: "O1", uid: "P" }), "O1/P");
-  assertEquals(invoicePairKey({ uid_order: "O2", uid: "P" }) === invoicePairKey({ uid_order: "O1", uid: "P" }), false);
+  assertEquals(invoicePairKey({ uid_source: "O1", uid: "P" }), "O1/P");
+  assertEquals(invoicePairKey({ uid_source: "O2", uid: "P" }) === invoicePairKey({ uid_source: "O1", uid: "P" }), false);
 });
 
 // ── Row 14: take-back reasons ────────────────────────────────────────

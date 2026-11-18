@@ -63,7 +63,7 @@ const placedEndpoint = {
 };
 
 const validDestination = {
-  uid_order: "testorder10000000000",
+  uid_source: "testorder10000000000",
   // The pair's identity — its destination divider's uid. See the twin in
   // `tests/order.test.ts`.
   uid: "11111111-1111-4111-8111-111111111111",

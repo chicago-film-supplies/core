@@ -272,7 +272,7 @@ export function creditableLines(
   for (const note of priorNotes) {
     if (note.status === "void") continue;
     // The credited view of the one keyer: marker-free, this invoice's rows only.
-    for (const { line, row, time } of keyCreditLines(billing, note.items, { legacyUid: invoice.uid }).keyed) {
+    for (const { line, row, time } of keyCreditLines(billing, note.items).keyed) {
       const k = pathKey(row.path);
       credited.set(k, addTime(credited.get(k) ?? { num: 0, den: 1 }, scaleTime(time, line.quantity)));
     }
@@ -361,7 +361,7 @@ export function creditNoteOverCredit(
   const billing = { uid: invoice.uid, rows: lines };
   const left = new Map(creditableLines(invoice, priorNotes).map((l) => [pathKey(l.path), l]));
   for (const line of requested) {
-    const keyed = keyCreditLines(billing, [line], { legacyUid: invoice.uid }).keyed[0];
+    const keyed = keyCreditLines(billing, [line]).keyed[0];
     const target = keyed?.row;
     const billed = target?.quantity ?? 0;
     if (line.quantity > billed) {

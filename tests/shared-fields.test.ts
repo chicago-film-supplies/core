@@ -664,7 +664,7 @@ Deno.test("mergeSharedFields: pair dates merge per leaf and never touch the deri
     collection_start: c, collection_start_fs: null, collection_end: c, collection_end_fs: null,
     days_active: days,
   });
-  const pair = (dd: ReturnType<typeof dates>) => ({ uid: "dest-1", uid_order: "order-1", dates: dd, delivery: null, collection: null, customer_collecting: false, customer_returning: false, jurisdiction: null });
+  const pair = (dd: ReturnType<typeof dates>) => ({ uid: "dest-1", uid_source: "order-1", dates: dd, delivery: null, collection: null, customer_collecting: false, customer_returning: false, jurisdiction: null });
   const prev = pair(dates("2026-10-01T00:00:00.000-05:00", "2026-10-05T00:00:00.000-05:00", 4));
   const next = pair(dates("2026-10-03T00:00:00.000-05:00", "2026-10-07T00:00:00.000-05:00", 4));
   // The invoice extended collection only.

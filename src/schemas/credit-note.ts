@@ -106,7 +106,7 @@ export const COA_BAD_DEBT = 6900;
  * `audit-credit-note-posting.ts` reports it. Xero still holds the original, so
  * nothing is lost by correcting.
  *
- * That is also why `coa_posting` is STORED rather than derived on read: the
+ * That is also why `ledger_account` is STORED rather than derived on read: the
  * stored value is what CFS asserts, this function is what CFS intends, and an
  * audit comparing them against Xero is a real guard precisely because the three
  * come from different places. Deriving on read would make the check a
@@ -232,11 +232,12 @@ const CreditNoteDocItemPriceSchema: z.ZodType<CreditNoteDocItemPrice> = z.strict
  * `LineItems: []`, and Odoo's users pay OCA for a module that adds line-level
  * provenance.
  *
- * **No dividers.** A credit note has no destinations and bills no orders, so the
- * whole `ORDER_ITEM_LEVELS` / `INVOICE_ITEM_LEVELS` hierarchy — and the `path`
- * machinery that goes with it — has nothing to organize here. Lines are flat.
+ * **Dividers only when raised from billing rows** (ruling 107): a credit row
+ * copies its billing row's path under that document's `billing` divider, so a
+ * note crediting rows carries the invoice's dividers and pairs; a historic or
+ * goodwill note is flat (each line's path is `[uid]`).
  *
- * ## `coa_revenue` and `coa_posting` are TWO facts, and a line has both
+ * ## `source_ledger_account` and `ledger_account` are TWO facts, and a line has both
  *
  * They are routinely different, and collapsing them loses real information.
  * Measured on the live tenant: CN-1009 writes off 35 lines whose products are
@@ -245,11 +246,11 @@ const CreditNoteDocItemPriceSchema: z.ZodType<CreditNoteDocItemPrice> = z.strict
  * revenue attribution that tracking-category rollups and the tax tables depend
  * on is gone; store only the revenue account and the write-off is invisible.
  *
- * - **`coa_revenue`** — the revenue account of the *thing being credited*.
+ * - **`source_ledger_account`** — the revenue account of the *thing being credited*.
  *   Product-sourced, same vocabulary as the invoice line it mirrors. Never the
  *   account the credit posts to, and — since the owner ruling of 2026-08-20 —
  *   never an input to what the line is taxed either.
- * - **`coa_posting`** — where this credit lands in the ledger. Any account in
+ * - **`ledger_account`** — where this credit lands in the ledger. Any account in
  *   the `chart-of-accounts` catalog, including the expense range, which is
  *   exactly why it cannot be `COARevenueEnum`: that enum is shared with
  *   `Product.price.coa_revenue`, and widening it would make a catalog product
@@ -263,33 +264,21 @@ export interface CreditNoteDocLineItem {
   quantity: number;
   price: CreditNoteDocItemPrice;
   /**
-   * The revenue account of the thing credited. **Nullable**, matching
-   * `InvoiceDocLineItemType` — a credit can be raised on a free-text line with no
-   * catalog product behind it, and the live tenant already holds one (CN-1012's
-   * sole line has no `ItemCode`). A schema stricter than the invoice it credits
-   * cannot represent the corpus.
+   * The account this credit posts to (ruling 34: `ledger_account`, one posting
+   * key on both sides; it replaced `coa_posting`). See
+   * {@link deriveCreditPostingAccount}: new notes derive it, history stores what
+   * actually happened.
    */
-  coa_revenue?: COARevenueType | null;
+  ledger_account: COACodeType;
   /**
-   * The account this credit posts to. See {@link deriveCreditPostingAccount} —
-   * new notes derive it, history stores what actually happened.
-   *
-   * ⚠️ **Retiring (ruling 34, Phase 8's rename folded in): `ledger_account` is
-   * its new name** and {@link coa_revenue}'s is `source_ledger_account`. Beta H1
-   * declares both spellings optional, every writer writes only the new one,
-   * every reader reads through {@link creditLinePostingAccount} /
-   * {@link creditLineSourceAccount}; the migration renames the stored keys and
-   * beta H2 deletes these two.
+   * The revenue account of the thing credited (ruling 34; it replaced
+   * `coa_revenue`). AR only: an AR credit can post away from the revenue it
+   * reverses (bad debt to 6900), so it records both accounts. **Nullable**,
+   * matching `InvoiceDocLineItemType`: a credit can be raised on a free-text
+   * line with no catalog product behind it (CN-1012's sole line has no
+   * `ItemCode`).
    */
-  coa_posting?: number;
-  /** Where this credit posts — {@link coa_posting}'s new name (ruling 34). */
-  ledger_account?: COACodeType;
-  /**
-   * The revenue account of the thing credited — {@link coa_revenue}'s new name
-   * (ruling 34). AR only: an AR credit can post away from the revenue it
-   * reverses (bad debt to 6900), so it records both accounts.
-   */
-  source_ledger_account?: COARevenueType | null;
+  source_ledger_account: COARevenueType | null;
   /**
    * The `tracking-categories` document the credited thing reports under — copied
    * from the invoice line it credits (`InvoiceDocLineItemType.uid_tracking_category`).
@@ -299,32 +288,14 @@ export interface CreditNoteDocLineItem {
   uid_tracking_category: string | null;
   xero_id: string | null;
   /**
-   * The invoice line this credits, when the credit was raised from one.
-   * **Retired** (ruling 34): 146 of 147 stored lines hold `null`, and the pointer
-   * is {@link uid_billing} + {@link path_billing_item}. Optional in beta H1,
-   * deleted in H2.
-   */
-  uid_invoice_item?: string | null;
-  /**
-   * The `path` of the invoice line this credits — its row identity on that
-   * invoice (api-cloudrun#680 R1).
-   *
-   * `uid_invoice_item` alone is ambiguous: `item.uid` repeats within one
-   * document, and an invoice holding a product in a full-window section and in
-   * a date-extension section carries it twice. A credit selects and caps by
-   * this path when present.
-   *
-   * ⚠️ Absent on every note stored before 2026-09-15; readers fall back to
-   * `uid_invoice_item`. No writer may set it until prod API and prod manager
-   * both run the beta that declares it (the schema is strict).
-   */
-  path_invoice_item?: string[];
-  /**
    * **The billing document this line credits** (ruling 34, one name on both
    * sides): an invoice's uid here, a bill's on a supplier credit. Set together
    * with {@link path_billing_item} by every writer raising the credit from a
-   * billing row; absent on a goodwill or bad-debt line (ruling 104). It replaces
-   * {@link path_invoice_item}, which could not say WHICH invoice.
+   * billing row; absent on a goodwill or bad-debt line (ruling 104). A path is
+   * a row identity within ONE document (`item.uid` repeats: a full-window and a
+   * date-extension section carry one product twice, api-cloudrun#680 R1), so
+   * the document travels with it. It replaced `path_invoice_item`, which could
+   * not say WHICH invoice.
    *
    * A pointed line sits under that document's `billing` divider:
    * `path[0] === uid_billing` (ruling 107).
@@ -335,13 +306,11 @@ export interface CreditNoteDocLineItem {
   /**
    * The row's identity on this note, self-inclusive (ruling 107):
    * `[uid_billing, ...billing row path]` for a pointed line, `[uid]` for a flat
-   * historic one. **Optional in beta H1**: the 147 stored lines carry none (prod,
-   * 2026-11-17) and none repeats a `uid` within its note, so the migration
-   * writes `[uid]` on each flat line and H2 requires it.
+   * historic one (the F14 migration wrote it on every stored line, 2026-11-18).
    */
-  path?: string[];
+  path: string[];
   /**
-   * This line reverses BILLING at {@link path_invoice_item} — it credits units
+   * This line reverses BILLING at {@link path_billing_item} — it credits units
    * the invoices billed beyond the order, so quantity accounting must stop
    * counting them as billed (api-cloudrun#1028).
    *
@@ -377,7 +346,7 @@ export interface CreditNoteDocLineItem {
    * exist before this beta — so no stored line can be reversing billing, and
    * `false` is a fact about the corpus. That is what makes the backfill legal
    * under this package's own *"find the value's AUTHOR"* rule, and it is why this
-   * field could be required in one step where `path_invoice_item` beside it could
+   * field could be required in one step where the row pointer beside it could
    * not: that one's value is a row identity nothing ever recorded
    * (api-cloudrun#1045).
    */
@@ -389,13 +358,13 @@ export interface CreditNoteDocLineItem {
    * A credit row is a billing row of sign −1, so it carries the pointers its
    * source row bills under, and one fold reads both.
    *
-   * ⚠️ **Entries stay ORDER-relative**, exactly as on the invoice line: a credit
-   * line has no dividers, so they resolve through the order its
-   * {@link path_invoice_item} leads with (`path_invoice_item[0]`, an order
-   * divider's uid), never through a path of this document.
+   * ⚠️ **Entries stay ORDER-relative**, exactly as on the invoice line: they
+   * resolve through the order its {@link path_billing_item} leads with
+   * (`path_billing_item[0]`, an order divider's uid), never through a path of
+   * this document.
    *
    * **Optional FOREVER, not mid-expand.** The 146 lines stored before this field
-   * name no invoice row ({@link path_invoice_item} is absent, ruling 53), so
+   * name no invoice row (no {@link path_billing_item}, ruling 53), so
    * there is no source row to copy from and no value to backfill. The invoice's
    * spelling — plain `.optional()`, array-member-uncensusable — so a copy and its
    * source agree on what absence means. Untagged: `CreditNoteSchema` is in none of
@@ -429,22 +398,16 @@ const CreditNoteDocLineItemInner = z.strictObject({
   // into the other is how a batch stops being reviewable. 146 of 146 stored
   // credit-note line rows state the key in both projects.
   quantity: z.int().meta({ column: true, label: "Quantity" }),
-  // Optional until H2 (the interface docblock); `seed: false` so a form seed
-  // does not state a path its writer has not computed.
-  path: z.array(ItemUid).min(1).optional().meta({ seed: false }),
+  // `seed: false` so a form seed does not state a path its writer has not computed.
+  path: z.array(ItemUid).min(1).meta({ seed: false }),
   price: CreditNoteDocItemPriceSchema,
-  // Beta H1 (ruling 34): both spellings optional, `seed: false` on the old ones
-  // so a form seed states only the new; the migration renames, H2 deletes.
-  coa_revenue: COARevenueEnum.nullable().optional().meta({ seed: false }),
-  coa_posting: COACode.optional().meta({ seed: false }),
-  ledger_account: COACode.optional(),
-  source_ledger_account: COARevenueEnum.nullable().optional(),
+  // The posting pair (ruling 34; the interface docblock).
+  ledger_account: COACode,
+  source_ledger_account: COARevenueEnum.nullable(),
   uid_tracking_category: FirestoreId.nullable(),
   xero_id: z.uuid().nullable(),
-  uid_invoice_item: ItemUid.nullable().optional().meta({ seed: false }),
-  // `seed: false`: `[]` fails `.min(1)`, so the form seed must omit the key (core#125).
-  path_invoice_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
   // The payable pair's spelling (`purchase-bill.ts`), paired-presence refined below.
+  // `seed: false`: `[]` fails `.min(1)`, so the form seed must omit the key.
   uid_billing: FirestoreId.optional().meta({ seed: false }),
   path_billing_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
   reverses_billing: z.boolean(),
@@ -456,46 +419,21 @@ const CreditNoteDocLineItemInner = z.strictObject({
   exchanged_for: ExchangedForList.optional().meta({ seed: false }),
 }).superRefine(checkItemPriceFormula).superRefine((line, ctx) => {
   for (const issue of creditLineShapeIssues(line)) ctx.addIssue({ code: "custom", ...issue });
-  if (creditLinePostingAccount(line) === undefined) {
-    ctx.addIssue({ code: "custom", path: ["ledger_account"], message: "a credit line states the account it posts to" });
-  }
 });
 
 /** Zod schema for a credit-note line item. */
 export const CreditNoteDocLineItem: z.ZodType<CreditNoteDocLineItem> = CreditNoteDocLineItemInner;
 
-// ── The renamed keys: one reader per pair (beta H1, deleted in H2) ─────────
-
-/** Where a credit line posts: `ledger_account`, else the retiring `coa_posting`. */
-export function creditLinePostingAccount(
-  line: Pick<CreditNoteDocLineItem, "ledger_account" | "coa_posting">,
-): number | undefined {
-  return line.ledger_account ?? line.coa_posting;
-}
-
-/** The revenue account credited: `source_ledger_account`, else the retiring `coa_revenue`. */
-export function creditLineSourceAccount(
-  line: Pick<CreditNoteDocLineItem, "source_ledger_account" | "coa_revenue">,
-): COARevenueType | null {
-  return line.source_ledger_account !== undefined ? line.source_ledger_account : line.coa_revenue ?? null;
-}
-
 /**
- * The billing row a credit line names: `uid_billing` + `path_billing_item`, else
- * the retiring `path_invoice_item` (whose invoice it cannot name, so `uid` is
- * `undefined`). `null` for an unpointed line.
+ * The billing row a credit line names (`uid_billing` + `path_billing_item`), or
+ * `null` for an unpointed line.
  */
 export function creditLineBillingPointer(
-  line: Pick<CreditNoteDocLineItem, "uid_billing" | "path_billing_item" | "path_invoice_item">,
-): { uid?: string; path: string[] } | null {
-  if (line.path_billing_item !== undefined) return { uid: line.uid_billing, path: line.path_billing_item };
-  if (line.path_invoice_item !== undefined) return { path: line.path_invoice_item };
-  return null;
-}
-
-/** A credit note's Xero `CreditNoteID`: `xero_id`, else the retiring `xero_credit_note_id`. */
-export function creditNoteXeroId(note: Pick<CreditNote, "xero_id" | "xero_credit_note_id">): string | null {
-  return note.xero_id !== undefined ? note.xero_id : note.xero_credit_note_id ?? null;
+  line: { uid_billing?: string; path_billing_item?: string[] },
+): { uid: string; path: string[] } | null {
+  return line.uid_billing !== undefined && line.path_billing_item !== undefined
+    ? { uid: line.uid_billing, path: line.path_billing_item }
+    : null;
 }
 
 /**
@@ -518,10 +456,6 @@ export function creditLineShapeIssues(
   line: {
     uid_billing?: string;
     path_billing_item?: string[];
-    /** The AR note's retiring pointer. */
-    path_invoice_item?: string[];
-    /** The supplier credit's retiring pointer (with `uid_purchase_bill`). */
-    path_bill_item?: string[];
     price: { price_formula: { basis: string } | null; counts: readonly unknown[] };
   },
   opts: {
@@ -536,8 +470,7 @@ export function creditLineShapeIssues(
   if ((line.uid_billing === undefined) !== (line.path_billing_item === undefined)) {
     issues.push({ path: ["path_billing_item"], message: "uid_billing and path_billing_item are set together" });
   }
-  const pointed = line.path_billing_item !== undefined || line.path_invoice_item !== undefined ||
-    line.path_bill_item !== undefined;
+  const pointed = line.path_billing_item !== undefined;
   const time = line.price.price_formula?.basis === "time";
   const counts = line.price.counts.length;
   if (!pointed && time && counts === 0 && opts.linked !== true) {
@@ -646,7 +579,7 @@ export interface CreditNote {
    * Xero frees a number when its holder is VOIDED or DELETED, and the live
    * tenant shows how routine that is: 4 of 12 notes are voided re-issues
    * (CN-1008→CN-1009, CN-1010+CN-1011→CN-1012). So **every match keys on `uid`
-   * or `xero_credit_note_id`, never on `number`.**
+   * or `xero_id`, never on `number`.**
    *
    * Stored bare. `CN-` is presentation only: no collection in this package
    * stores a prefixed string number, and `"CN-0001"` would break
@@ -673,10 +606,9 @@ export interface CreditNote {
   /**
    * The billing documents' pairs the note's destination dividers answer to —
    * COPIES of the credited invoices' pairs, never re-derived (ruling 34 item 3),
-   * as a supplier credit carries its purchase's. `[]` on a flat note. Optional in
-   * beta H1 (no stored note states it); the migration writes it, H2 requires it.
+   * as a supplier credit carries its purchase's. `[]` on a flat note.
    */
-  destinations?: InvoiceDocDestinationType[];
+  destinations: InvoiceDocDestinationType[];
   totals: CreditNoteDocTotals;
   /**
    * Value not yet consumed, in integer cents. `total_cents` minus every
@@ -704,12 +636,9 @@ export interface CreditNote {
   query_by_sources: string[];
   /**
    * Xero's `CreditNoteID` — the header key every billing and credit document
-   * spells `xero_id` (ruling 34 item 8). Beta H1: optional beside the retiring
-   * {@link xero_credit_note_id}; read through {@link creditNoteXeroId}.
+   * spells `xero_id` (ruling 34 item 8; it replaced `xero_credit_note_id`).
    */
-  xero_id?: string | null;
-  /** Retiring (ruling 34): renamed `xero_id`, deleted in beta H2. */
-  xero_credit_note_id?: string | null;
+  xero_id: string | null;
   uid_thread?: string;
   version: number;
   created_by: ActorRefType;
@@ -723,7 +652,6 @@ export interface CreditSourceRow {
   type?: string;
   uid_billing?: string;
   path_billing_item?: string[];
-  path_invoice_item?: string[];
 }
 
 /** The billing-document facts {@link deriveCreditNoteSources} reads: an invoice and the orders it bills. */
@@ -740,7 +668,7 @@ export interface CreditNoteBillingSource {
  * (`order.credit_notes[]`, the over-billing cap) queries on.
  *
  * Which orders: for each invoice, the order a pointed line's
- * `path_invoice_item[0]` names (an order divider's uid IS its order's uid), kept
+ * `path_billing_item[0]` names (an order divider's uid IS its order's uid), kept
  * only when the invoice bills that order — an invoice-authored subtree's first
  * segment names no order. An invoice that holds a line with NO pointer
  * contributes every order it bills, because the line cannot say which (ruling
@@ -751,8 +679,7 @@ export interface CreditNoteBillingSource {
  *
  * The order (ruling 34 item 8): the orders in order of first appearance, then
  * each invoice in line order. A line's `uid_billing` says which invoice its
- * pointer is on; a retiring `path_invoice_item` cannot, so it is matched against
- * every invoice. (The docblock this replaced claimed every note credits at most
+ * pointer is on. (The docblock this replaced claimed every note credits at most
  * one invoice; CN-1015 credits two, harmless only because its lines are
  * unpointed.)
  */
@@ -772,9 +699,8 @@ export function deriveCreditNoteSources(
   for (const uid of invoiceUids) {
     const invoice = byUid.get(uid);
     if (invoice === undefined) continue;
-    // A pointer names its invoice (`uid_billing`); a retiring `path_invoice_item`
-    // cannot, so it is matched against every invoice, as before ruling 34.
-    const pointed = pointers.flatMap((p) => p !== null && (p.uid === undefined || p.uid === uid) ? [p.path[0]] : []);
+    // A pointer names its invoice (`uid_billing`).
+    const pointed = pointers.flatMap((p) => p !== null && p.uid === uid ? [p.path[0]] : []);
     const named = anyUnpointed
       ? invoice.query_by_orders
       : invoice.query_by_orders.filter((o) => pointed.includes(o));
@@ -860,8 +786,8 @@ export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
   // this is a `z.strictObject`, so a schema that has dropped the key REJECTS
   // every stored document still carrying it. Optional → empty storage → delete.
   items: z.array(CreditNoteDocItem).meta({ label: "Item" }),
-  // Optional in beta H1 (the interface docblock).
-  destinations: z.array(InvoiceDocDestination).optional().meta({ label: "Destination" }),
+  // Copies of the credited invoices' pairs (the interface docblock); `[]` on a flat note.
+  destinations: z.array(InvoiceDocDestination).meta({ label: "Destination" }),
   totals: CreditNoteDocTotalsSchema,
   remaining_credit_cents: z.int().meta({ column: true, label: "Remaining Credit" }),
   // Bare `z.array(DocSource)` — the dropped `.default([])` is core#95 batch
@@ -869,8 +795,7 @@ export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
   // writes a literal `sources: []`).
   sources: z.array(DocSource),
   query_by_sources: z.array(z.string()),
-  xero_id: z.uuid().nullable().optional(),
-  xero_credit_note_id: z.uuid().nullable().optional().meta({ seed: false }),
+  xero_id: z.uuid().nullable(),
   uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),

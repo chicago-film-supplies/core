@@ -107,7 +107,7 @@ Deno.test("accountInitiator: what ACTS floors an over-credit; what is SHOWN does
     uid: "cn-1",
     status: "issued",
     sources: [{ collection: "invoices", uid: "inv-1" }],
-    items: [{ quantity: 4, path_invoice_item: [O, D, X], reverses_billing: true, price: { subtotal_discounted_cents: 4000 } }],
+    items: [{ quantity: 4, uid_billing: "inv-1", path_billing_item: [O, D, X], reverses_billing: true, price: { subtotal_discounted_cents: 4000 } }],
   };
   const line = accountAR(orderOf(3), [invoice("inv-1", 3)], [note]).lines[0];
   assertEquals([line.billed.quantity, line.quantity], [-1, 4]);

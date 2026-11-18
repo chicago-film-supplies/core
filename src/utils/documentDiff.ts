@@ -173,7 +173,6 @@ import type {
   Order,
   OrderDocItemType,
 } from "../schemas/mod.ts";
-import { pairSourceUid, type PairSourceKeys } from "../schemas/mod.ts";
 import {
   billsOutOfService,
   deriveQueryByPurchases,
@@ -314,7 +313,7 @@ export interface DocumentSubstitutionEntry {
 /**
  * An invoice row that bills an order line from ANOTHER position (core#125): an
  * operator dragged it into another group or destination of its order block, or
- * split units off into a new group, and the row's `path_order_item` names the
+ * split units off into a new group, and the row's `path_source_item` names the
  * order line it is. One difference, never `not_on_source` at the row plus an
  * unbilled order line.
  *
@@ -517,8 +516,7 @@ export interface DocumentDiffMap {
   credits: Map<string, DocumentCredit[]>;
   /**
    * Credit notes relevant to the viewed document with a line this cannot key: a
-   * line naming no billing row, or one on the retiring `path_invoice_item` whose
-   * note has not exactly one `invoices` source. Listed rather than dropped, like
+   * line naming no billing row. Listed rather than dropped, like
    * {@link unplaced_out_of_service} — "no credit shown" must never read as "no credit".
    */
   unkeyed_credit_notes: DocumentUnkeyedCredit[];
@@ -624,7 +622,7 @@ export interface DocumentDiffContext {
 }
 
 /** The pair keys a comparison is addressed BY, never part of what it compares. */
-const PAIR_IDENTITY_FIELDS: ReadonlySet<string> = new Set(["uid", "uid_source", "uid_order", "uid_purchase"]);
+const PAIR_IDENTITY_FIELDS: ReadonlySet<string> = new Set(["uid", "uid_source"]);
 
 /**
  * Pair fields a CUSTODY document does not own, skipped whenever one is on
@@ -989,7 +987,7 @@ function compareScope(
     const m = new Map<string, DocDestinationType>();
     for (const p of side.doc.destinations as readonly (DocDestinationType | InvoiceDocDestinationType)[]) {
       // A billing document's pairs name the initiator they bill (the side's scope key).
-      if (isBilling(side) && pairSourceUid(p as unknown as PairSourceKeys) !== orderUid) continue;
+      if (isBilling(side) && (p as unknown as { uid_source?: string }).uid_source !== orderUid) continue;
       m.set(p.uid, p);
     }
     return m;
@@ -1610,9 +1608,7 @@ interface CreditKeys {
  * the one credit pointer (`(uid_billing, path_billing_item)`,
  * `creditLinePointer` in `utils/quantityAccounting.ts`), WITHOUT the fold's
  * `reverses_billing` filter. A note may credit several invoices (ruling 107):
- * each line names its own. Only a line on the retiring `path_invoice_item`
- * reads the note's one `invoices` source. The `uid_invoice_item` guess is
- * retired (F14 item 4).
+ * each line names its own. The `uid_invoice_item` guess is retired (F14 item 4).
  */
 function creditKeys(notes: readonly DocumentDiffCreditNote[], invoices: readonly Invoice[], orders: readonly Order[]): CreditKeys {
   const invoiceByUid = new Map(invoices.map((i) => [i.uid, i]));
@@ -1636,7 +1632,7 @@ function creditKeys(notes: readonly DocumentDiffCreditNote[], invoices: readonly
     for (const line of note.items) {
       if (isCreditDividerRow(line)) continue;
       const pointer = creditLinePointer(line);
-      const uidInvoice = pointer === null ? null : pointer.legacyAr ? noteInvoice : pointer.uid ?? null;
+      const uidInvoice = pointer === null ? null : pointer.uid;
       const path = pointer?.path;
       const invoice = uidInvoice === null ? undefined : invoiceByUid.get(uidInvoice);
       if (uidInvoice === null || path === undefined) {

@@ -42,7 +42,7 @@ function firstBill(quantity: number, days: number): PayableFoldBill {
     uid: "bill-1",
     status: "issued",
     number: 1,
-    destinations: [{ uid: D, uid_purchase: P, dates: { charge_windows: [businessDayWindow(days)] } }],
+    destinations: [{ uid: D, uid_source: P, dates: { charge_windows: [businessDayWindow(days)] } }],
     items: [
       { uid: P, type: "purchase", path: [P], name: "PO-1", description: "" },
       { uid: D, type: "destination", path: [P, D], name: "Shop", description: "" },
