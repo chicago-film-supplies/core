@@ -223,8 +223,10 @@ import {
   creditLinePointer,
   type CustodyOnlyAccount,
   type CustodyRow,
+  type CreditDividerRow,
   custodyRows,
   type DocumentDiffOutOfService,
+  isCreditDividerRow,
   type InitiatorAccount,
   type LineAccount,
   orderOutOfServiceInputs,
@@ -556,10 +558,14 @@ export interface DocumentUnkeyedCredit {
 /** One credit note line, as the diff reads it. */
 export type DocumentDiffCreditNoteItem = AccountedCreditNoteItem;
 
-/** A credit note as the diff reads it: the accounting shape plus its number. */
+/**
+ * A credit note as the diff reads it: the accounting shape plus its number. Its
+ * `items` are the STORED rows, dividers included (ruling 107); the diff keys the
+ * lines and skips the dividers.
+ */
 export interface DocumentDiffCreditNote extends AccountedCreditNote {
   number: number;
-  items: readonly DocumentDiffCreditNoteItem[];
+  items: readonly (DocumentDiffCreditNoteItem | CreditDividerRow)[];
 }
 
 /** A lifecycle mismatch no per-line comparison can show. */
@@ -1628,7 +1634,7 @@ function creditKeys(notes: readonly DocumentDiffCreditNote[], invoices: readonly
     const sourced = (note.sources ?? []).filter((s) => s.collection === "invoices");
     const noteInvoice = sourced.length === 1 ? sourced[0].uid : null;
     for (const line of note.items) {
-      if (line.type !== undefined && isDividerItemType(line.type)) continue;
+      if (isCreditDividerRow(line)) continue;
       const pointer = creditLinePointer(line);
       const uidInvoice = pointer === null ? null : pointer.legacyAr ? noteInvoice : pointer.uid ?? null;
       const path = pointer?.path;

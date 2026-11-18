@@ -41933,12 +41933,14 @@ interface DocumentDiffContext {
 
 ### `DocumentDiffCreditNote`
 
-A credit note as the diff reads it: the accounting shape plus its number.
+A credit note as the diff reads it: the accounting shape plus its number. Its
+`items` are the STORED rows, dividers included (ruling 107); the diff keys the
+lines and skips the dividers.
 
 ```ts
 interface DocumentDiffCreditNote {
   number: number;
-  items: readonly DocumentDiffCreditNoteItem[];
+  items: readonly parenthesized[];
 }
 ```
 

@@ -1270,6 +1270,28 @@ Deno.test("documentDiff: a void credit note nets nothing and is not annotated", 
   assertEquals([diff.credits.size, diff.unkeyed_credit_notes.length], [0, 0]);
 });
 
+Deno.test("documentDiff: a STORED divided note — its billing, order, destination and group dividers in `items` — is a diff source, and only its line is keyed (ruling 107)", () => {
+  // The manager hands the diff its stored notes as they are, dividers and all; a
+  // diff source that typed `items` as lines alone refused every divided note.
+  const { o, inv } = overbilled();
+  const line = creditNote("cn-1", 1030, "inv-1", [{ quantity: 1, path: LIGHT_ON_INVOICE, uid_billing: "inv-1", reverses_billing: true }]);
+  const divided: DocumentDiffCreditNote = {
+    ...line,
+    items: [
+      { uid: "inv-1", type: "billing", path: ["inv-1"] },
+      { uid: O, type: "order", path: ["inv-1", O] },
+      { uid: D, type: "destination", path: ["inv-1", O, D] },
+      { uid: G, type: "group", path: ["inv-1", O, D, G] },
+      ...line.items,
+    ],
+  };
+  const expected = [{ uid_credit_note: "cn-1", number: 1030, uid_invoice: "inv-1", quantity: 1, reverses_billing: true, bills_order_line: true }];
+  const diff = computeDocumentDiffs({ orders: [o], invoices: [inv], creditNotes: [divided] }, { kind: "order", uid: O }, CONTEXT);
+  assertEquals(quantityAt(diff, LIGHT_REL), []);
+  assertEquals(diff.credits.get(LIGHT_REL), expected);
+  assertEquals(diff.unkeyed_credit_notes, []);
+});
+
 Deno.test("documentDiff: credits on two invoices of one order are attributed per invoice — both on the order view, each on its own invoice", () => {
   const a = invoice("inv-a", [{ order: O, items: orderItems() }], 2241);
   const b = invoice("inv-b", [{ order: O, items: orderItems() }], 2242);

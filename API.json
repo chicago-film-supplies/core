@@ -19822,8 +19822,8 @@
         {
           "kind": "interface",
           "name": "DocumentDiffCreditNote",
-          "declaration": "interface DocumentDiffCreditNote {\n  number: number;\n  items: readonly DocumentDiffCreditNoteItem[];\n}",
-          "doc": "A credit note as the diff reads it: the accounting shape plus its number."
+          "declaration": "interface DocumentDiffCreditNote {\n  number: number;\n  items: readonly parenthesized[];\n}",
+          "doc": "A credit note as the diff reads it: the accounting shape plus its number. Its\n`items` are the STORED rows, dividers included (ruling 107); the diff keys the\nlines and skips the dividers."
         },
         {
           "kind": "typeAlias",
