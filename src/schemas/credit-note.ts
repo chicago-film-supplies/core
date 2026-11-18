@@ -140,7 +140,7 @@ import { CreditNoteStatusEnum, type CreditNoteStatusType, deriveCreditStatus } f
  * note's transitions were implicit in its writers, and the manager offered Void
  * on any non-void note while the API 409'd it whenever an allocation was live.
  *
- * Read by `creditNoteActionsFor` (`@cfs/core/utils/invoice-actions`). Each
+ * Read by `creditActionsFor` (`@cfs/core/utils/document-actions`). Each
  * column is a STATUS gate only: the action also needs its own runtime condition
  * (no live allocation to void, remaining credit to allocate), which the ruleset
  * checks and this table cannot state.

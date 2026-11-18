@@ -360,7 +360,7 @@ const recordCreditNoteRefundRules: CollectionRule[] = [
     target: "settlements",
     mode: "co-write",
     invariant:
-      "An operator recording a cash refund appends ONE `type: refund` settlement naming the note and no invoice, with `xero_payment_id: null` — the CREDITNOTE webhook links it to Xero's `ARCREDITPAYMENT` later by amount, and an unlinked refund is never reaped. Legal only while the note accepts allocation and the amount is within its remaining credit — the `record_refund` action in `@cfs/core/utils/invoice-actions`.",
+      "An operator recording a cash refund appends ONE `type: refund` settlement naming the note and no invoice, with `xero_payment_id: null` — the CREDITNOTE webhook links it to Xero's `ARCREDITPAYMENT` later by amount, and an unlinked refund is never reaped. Legal only while the note accepts allocation and the amount is within its remaining credit — the `record_refund` action in `@cfs/core/utils/document-actions`.",
     enforced_by: [CREDIT_NOTE_REMAINING_FOLD],
     transaction: "record-credit-note-refund",
     fields: [

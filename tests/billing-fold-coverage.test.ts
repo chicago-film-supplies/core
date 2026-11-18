@@ -92,7 +92,9 @@ Deno.test("billingFoldCoverage — the deleted fold names stay deleted in src/",
 export const SIDE_COMPARISON_RE =
   /\bside\s*[!=]==?|[!=]==?\s*"(?:receivable|payable)"|"(?:receivable|payable)"\s*[!=]==?/;
 
-const SIDE_FREE_FILES = ["utils/quantityAccounting.ts", "utils/documentDiff.ts"];
+// `utils/document-actions.ts` joined with the one action catalog (F15 item 3): its side
+// differences are rows of `ACTION_SIDES`, `ACTION_GAPS` and `SIDE_ONLY_ACTIONS`.
+const SIDE_FREE_FILES = ["utils/quantityAccounting.ts", "utils/documentDiff.ts", "utils/document-actions.ts"];
 
 Deno.test("billingFoldCoverage — the fold and the diff never compare the side", async () => {
   const hits: Hit[] = [];

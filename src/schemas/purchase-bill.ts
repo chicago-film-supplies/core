@@ -1686,7 +1686,7 @@ export const VoidPurchaseCreditInput: z.ZodType<VoidPurchaseCreditInputType> = z
 /**
  * Input for voiding a supplier bill from CFS. `version` is the bill's. A pushed
  * bill only: a linked one is Xero's. The refusals are
- * `purchaseBillVoidRefusal` (`utils/purchase-actions.ts`).
+ * `voidRefusal` (`utils/document-actions.ts`).
  */
 export interface VoidPurchaseBillInputType {
   version: number;

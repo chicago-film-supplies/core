@@ -1121,21 +1121,12 @@ export {
   TAKE_BACK_ORDER,
 } from "./custody.ts";
 export {
-  PURCHASE_ACTION_IDS,
-  PURCHASE_ACTIONS,
-  type PurchaseActionDefinition,
-  type PurchaseActionId,
-  PurchaseActionIdEnum,
-  type PurchaseActionSubject,
-} from "./purchase-action.ts";
-export {
-  INVOICE_ACTION_IDS,
-  INVOICE_ACTIONS,
-  type InvoiceActionDefinition,
-  type InvoiceActionId,
-  InvoiceActionIdEnum,
-  type InvoiceActionSubject,
-} from "./invoice-action.ts";
+  DOCUMENT_ACTION_IDS,
+  DOCUMENT_ACTIONS,
+  type DocumentActionDefinition,
+  type DocumentActionId,
+  type DocumentActionRole,
+} from "./document-action.ts";
 
 export {
   ACCEPTS_PAYMENT_STATUSES,

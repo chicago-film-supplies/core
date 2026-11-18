@@ -657,6 +657,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // The remainder and the over-billing offer assembled from that account.
     "buildOverbillingCredits",
     "buildRemainingInvoice",
+    // The remainder's decision (ruling 101), read by both sides' row authors.
+    "remainingBilling",
     // Ruling 42's acted floor, remainder and "is it named": each reads the fold
     // over every billing document of an initiator, which no render context holds.
     "actedBilledUnits",
@@ -689,22 +691,27 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // sees its exports.
   // The record's status rule and breakdown sums. A rendered record carries its
   // stored `status` already; deriving it again at render time answers nothing.
-  // `utils/invoice-actions.ts` is the invoice lever's ruleset (invoice-actions
-  // plan, api-cloudrun#1169): which action an operator may take on an invoice,
-  // a credit note or an order's invoicing, and the route asserts that refuse
-  // the rest. Every export answers a question about a WRITE — a rendered
-  // document has no "next action" — exactly as `custody` below.
-  "invoice-actions": [
-    "assertCreditNoteAction",
-    "assertInvoiceAction",
-    "assertOrderInvoiceAction",
-    "creditNoteActionsFor",
-    "creditNoteOverCredit",
+  // `utils/document-actions.ts` is the one action catalog (one-document-model
+  // F15, ruling 43): which action an operator may take on an initiator, a billing
+  // document or a credit, on both sides, and the route asserts that refuse the
+  // rest. Every export answers a question about a WRITE — a rendered document has
+  // no "next action" — exactly as `custody` below.
+  "document-actions": [
+    "assertBillingAction",
+    "assertCreditAction",
+    "assertInitiatorAction",
+    "billingActionsFor",
+    "closeRefusal",
+    "creditActionsFor",
+    "creditParts",
+    "creditRefusal",
     "creditableLines",
-    "creditKitParts",
-    "invoiceActionSubject",
-    "invoiceActionsFor",
-    "orderInvoiceActionsFor",
+    "initiatorActionsFor",
+    "initiatorLineTouched",
+    "lineActionKey",
+    "pushRefusal",
+    "sideOffers",
+    "voidRefusal",
   ],
   // `utils/custody.ts` is the booking lever's ruleset (custody-actions plan):
   // which custody step is legal, what a list of actions does to a booking, and
@@ -782,19 +789,6 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // The cost-attribution join (C15) for the margin fold, the tracking default and
     // the api's readers. A render shows a placed charge in its tree, under its row.
     "costedProductUid",
-  ],
-  // `utils/purchase-actions.ts` is the purchase twin of `invoice-actions`: which
-  // action an operator may take. Every export answers a question about a WRITE.
-  "purchase-actions": [
-    "purchaseActionsFor",
-    "purchaseBillActionsFor",
-    "creditableBillLines",
-    "purchaseBillCreditRefusal",
-    "purchaseBillPushRefusal",
-    "purchaseBillVoidRefusal",
-    "purchaseCreditActionsFor",
-    "purchaseItemClosable",
-    "purchaseItemTouched",
   ],
   // `utils/purchase-bill-xero-sync.ts` is `invoice-xero-sync`'s twin: a bill against
   // its Xero watermark sidecar. A template renders the document alone.

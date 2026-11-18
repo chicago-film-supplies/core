@@ -80,7 +80,7 @@ export type PurchaseBillXeroSyncStatus = "in_sync" | "out_of_sync" | "unknown" |
  *
  * ⚠️ **A settled bill still compares.** Out of sync is a true statement about Xero
  * whether or not CFS can do anything about it; a settled bill only loses the push
- * (`purchaseBillPushRefusal`, `@cfs/core/utils/purchase-actions`).
+ * (`pushRefusal`, `@cfs/core/utils/document-actions`).
  */
 export function purchaseBillXeroSyncStatus(
   bill: PurchaseBillXeroFields & Pick<PurchaseBill, "origin" | "xero_id" | "totals" | "status">,

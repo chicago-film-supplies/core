@@ -255,7 +255,7 @@ const closeInvoiceRules: CollectionRule[] = [
     target: "invoices",
     mode: "co-write",
     invariant:
-      "An operator closes a $0 invoice by appending a `closure` row (api-cloudrun#1169). It moves NO money — `amount_cents` is 0 by contract — so it reaches the invoice through `closure_count`, never through a cents bucket, and the invoice reads `paid` and freezes for as long as the count is positive. It has its own transaction rather than riding `create-settlement`, because the two steps are not identical: that rule maps `amount_cents → amount_paid_cents`, and a closure maps nothing in cents. Legal only on a live invoice whose total is 0 with nothing money-settled and no live closure — the `close` action in `@cfs/core/utils/invoice-actions`.",
+      "An operator closes a $0 invoice by appending a `closure` row (api-cloudrun#1169). It moves NO money — `amount_cents` is 0 by contract — so it reaches the invoice through `closure_count`, never through a cents bucket, and the invoice reads `paid` and freezes for as long as the count is positive. It has its own transaction rather than riding `create-settlement`, because the two steps are not identical: that rule maps `amount_cents → amount_paid_cents`, and a closure maps nothing in cents. Legal only on a live invoice whose total is 0 with nothing money-settled and no live closure — the `close` action in `@cfs/core/utils/document-actions`.",
     enforced_by: [CLOSURE_FOLD],
     transaction: "close-invoice",
     fields: [

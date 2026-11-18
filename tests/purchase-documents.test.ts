@@ -71,7 +71,7 @@ import { accountBilling, actedBilledUnits } from "../src/utils/quantityAccountin
 import { purchaseLineMoneyIssues, purchaseTotalsIssues } from "../src/schemas/purchase.ts";
 import { applyDateEdit } from "../src/utils/dates.ts";
 import { orderLineClaimIssues } from "../src/utils/invoices.ts";
-import { purchaseActionsFor } from "../src/utils/purchase-actions.ts";
+import { initiatorActionsFor } from "../src/utils/document-actions.ts";
 import { supplyFromPurchase } from "../src/utils/stock.ts";
 import { FIXED, VISION } from "./helpers/formulas.ts";
 import { mockTimestamp, tsAt } from "./helpers/timestamp.ts";
@@ -1396,12 +1396,16 @@ Deno.test("purchase → bill sync: a left-out header stays out until a new compo
   assert(uidsOf(reopened.bill).includes(BAG));
 });
 
-Deno.test("purchaseActionsFor: a header offers removal only, and not once anything beneath it has happened", () => {
+Deno.test("initiatorActionsFor (payable): a header offers removal only, and not once anything beneath it has happened", () => {
   const offersOn = (lines: PurchaseItem[], received = 0) =>
-    purchaseActionsFor(
-      { uid: PURCHASE, status: "active", query_by_bills: [], destinations: purchaseDoc(lines).destinations, items: [header(), ...lines] },
-      { custody: new Map(lines.map((l) => [l.path.join("/"), { received, returned: 0 }])), now: jan(1), bills: [], credits: [] },
-    ).filter((o) => o.path_purchase_item?.at(-1) === KIT).map((o) => o.action);
+    initiatorActionsFor(
+      "payable",
+      { uid: PURCHASE, number: 1, status: "active", destinations: purchaseDoc(lines).destinations, items: [header(), ...lines] } as never,
+      {
+        custody: new Map(lines.map((l) => [l.path.join("/"), { received, returned: 0 }])), now: jan(1), billing: [], credits: [],
+        accounting: { formulas: FORMULAS, holidays: [] }, replacement_units: 0, on_request_units: 0,
+      },
+    ).filter((o) => o.path?.at(-1) === KIT).map((o) => o.action);
   assertEquals(offersOn([part(VEST)]), ["remove_item"]);
   assertEquals(offersOn([part(VEST)], 1), []);
 });

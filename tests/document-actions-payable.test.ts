@@ -1,44 +1,21 @@
 /**
- * The purchase action ruleset (`src/utils/purchase-actions.ts`). Most refusals
- * here restate by hand what the API refuses, because the API asserts only
- * `purchaseItemTouched`, `purchaseBillVoidRefusal` and `purchaseBillPushRefusal`;
- * the module docblock says so.
+ * The one action catalog on the PAYABLE side (`src/utils/document-actions.ts`;
+ * one-document-model F15). Each pre-F15 payable scenario, stated against the
+ * role functions through the thin adapters below, which map argument SHAPES only.
  */
 import { assert, assertEquals, assertThrows } from "@std/assert";
-import {
-  type PurchaseActionItem,
-  type PurchaseOfferContext,
-  assertPurchaseAction,
-  assertPurchaseBillAction,
-  assertPurchaseCreditAction,
-  creditableBillLines,
-  purchaseActionsFor,
-  purchaseBillCreditRefusal,
-  purchaseBillActionsFor,
-  purchaseBillPushRefusal,
-  purchaseBillVoidRefusal,
-  purchaseCreditActionsFor,
-  purchaseItemClosable,
-  purchaseItemTouched,
-} from "../src/utils/purchase-actions.ts";
+import * as cat from "../src/utils/document-actions.ts";
+import { DocumentActionRefusal } from "../src/utils/document-actions.ts";
 import { deriveInvoiceStatus } from "../src/utils/invoices.ts";
 import { billLineCreditMoney, billLineCreditParts, purchaseBillingFold } from "../src/utils/purchase-documents.ts";
 import { billingNamesLine } from "../src/utils/quantityAccounting.ts";
 import { billedNetAP } from "./helpers/account.ts";
 import { sliceSubstitutedFor } from "../src/utils/substitutions.ts";
-import { InvoiceActionRefusal } from "../src/utils/invoice-actions.ts";
 import type { PurchaseLineCustody } from "../src/utils/bookings-inbound.ts";
-import {
-  PURCHASE_ACTION_IDS,
-  PURCHASE_ACTIONS,
-  type PurchaseBill,
-  type PurchaseCredit,
-  type PurchaseDestination,
-  type PurchaseDocumentItem,
-  type PurchaseItem,
-} from "../src/schemas/mod.ts";
+import type { PurchaseBill, PurchaseCredit, PurchaseDestination, PurchaseDocumentItem, PurchaseItem } from "../src/schemas/mod.ts";
 import { priceFormulaRefOf } from "../src/utils/price-formulas.ts";
 import { FIXED, VISION } from "./helpers/formulas.ts";
+import type { PricingFormulas } from "../src/utils/price-formulas.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 import { asCreditRows, payablePrice, withPayableMoney } from "./helpers/payable.ts";
 
@@ -104,14 +81,92 @@ const offersOf = (purchase: ReturnType<typeof po>, got: Got = {}, extra: Partial
 const keys = (offers: { key: string }[]) => offers.map((o) => o.key);
 const offer = (offers: ReturnType<typeof purchaseActionsFor>, key: string) => offers.find((o) => o.key === key);
 
-Deno.test("PURCHASE_ACTION_IDS and PURCHASE_ACTIONS name the same actions, both ways", () => {
-  assertEquals([...PURCHASE_ACTION_IDS].sort(), Object.keys(PURCHASE_ACTIONS).sort());
-  assertEquals(new Set(PURCHASE_ACTION_IDS).size, PURCHASE_ACTION_IDS.length);
+// ── adapters onto the catalog ────────────────────────────────────────
+
+const InvoiceActionRefusal = DocumentActionRefusal;
+const ACCOUNTING = { formulas: new Map([[FIXED.uid, FIXED], [VISION.uid, VISION]]) as PricingFormulas, holidays: [] };
+type PurchaseActionItem = { type: "sale" | "rental" | "service" | "replacement"; uid: string; path: string[]; quantity: number; price: unknown };
+interface PurchaseOfferContext {
+  custody: Map<string, PurchaseLineCustody>;
+  now: string;
+  bills: PurchaseBill[];
+  credits: PurchaseCredit[];
+}
+type OldPurchase = { uid: string; status: "active" | "complete" | "canceled"; items: readonly unknown[]; destinations: readonly unknown[] };
+const initiatorCtx = (c: PurchaseOfferContext): cat.InitiatorOfferContext<"payable"> => ({
+  billing: c.bills, credits: c.credits, accounting: ACCOUNTING, custody: c.custody, now: c.now, replacement_units: 0, on_request_units: 0,
+});
+const asPurchase = (p: OldPurchase) => ({ number: 1, ...p }) as unknown as cat.InitiatorOfferDocuments["payable"];
+const purchaseActionsFor = (p: OldPurchase, c: PurchaseOfferContext) => cat.initiatorActionsFor("payable", asPurchase(p), initiatorCtx(c));
+const assertPurchaseAction = (p: OldPurchase, c: PurchaseOfferContext, request: cat.InitiatorActionRequest) =>
+  cat.assertInitiatorAction("payable", asPurchase(p), initiatorCtx(c), request);
+/** `create_billing`'s line for `path`, as `bill_item` used to be offered (ruling 114). */
+const billLine = (offers: cat.DocumentActionOffer[], path: string) =>
+  offers.find((o) => o.action === "create_billing")?.bill_lines?.find((l) => l.path.join("/") === path);
+
+/** The old per-purchase bill context, as the catalog's initiators and credits. */
+interface OldBillContext {
+  per_purchase: { uid_purchase: string; purchase: { items: readonly unknown[] }; bills: PurchaseBill[]; credits: PurchaseCredit[] }[];
+  xero_sync_status?: cat.BillingOfferContext<"payable">["xero_sync_status"];
+}
+const initiatorsOf = (c: OldBillContext): cat.OfferInitiatorDocuments<"payable">[] =>
+  c.per_purchase.map((p) => ({ initiator: { uid: p.uid_purchase, items: p.purchase.items as never }, billing: p.bills, credits: p.credits }));
+const creditsOf = (c: OldBillContext) => c.per_purchase.flatMap((p) => p.credits);
+const asBill = (b: PurchaseBill) => ({ ...b, xero_id: b.xero_id ?? null }) as unknown as cat.BillingOfferDocuments["payable"];
+/** A live closure row on a closed $0 bill: what `reverse_settlement` reverses (ruling 115). */
+const closureRows = (b: PurchaseBill) => (b.totals.closure_count ?? 0) > 0 ? [{ uid: "closure", type: "bill_closure" as const, reverses: null, xero_payment_id: null }] : [];
+const purchaseBillActionsFor = (b: PurchaseBill, c: OldBillContext) =>
+  cat.billingActionsFor("payable", asBill(b), {
+    settlements: closureRows(b), credits: creditsOf(c), initiators: initiatorsOf(c), xero_sync_status: c.xero_sync_status ?? "not_applicable",
+  });
+const purchaseBillVoidRefusal = (b: PurchaseBill, c: OldBillContext) => cat.voidRefusal("payable", asBill(b), creditsOf(c), initiatorsOf(c));
+const purchaseBillPushRefusal = (b: PurchaseBill, status: cat.BillingOfferContext<"payable">["xero_sync_status"]) => cat.pushRefusal("payable", asBill(b), status);
+const creditableBillLines = (b: PurchaseBill, c: OldBillContext) =>
+  cat.creditableLines("payable", asBill(b), { credits: creditsOf(c), initiators: initiatorsOf(c) })
+    .map(({ billed_time: _t, unit_time: _u, ...line }) => line);
+const asRequested = (b: PurchaseBill, lines: readonly { path_billing_item: readonly string[]; quantity: number }[]) =>
+  lines.map((l) => ({ name: l.path_billing_item.join("/"), quantity: l.quantity, uid_billing: b.uid, path_billing_item: l.path_billing_item }));
+const purchaseBillCreditRefusal = (b: PurchaseBill, c: OldBillContext, lines: readonly { path_billing_item: readonly string[]; quantity: number }[]) =>
+  cat.creditRefusal("payable", asBill(b), { credits: creditsOf(c), initiators: initiatorsOf(c) }, asRequested(b, lines));
+type OldBillRequest =
+  | { action: "void"; context: OldBillContext }
+  | { action: "close" }
+  | { action: "push_to_xero"; status: cat.BillingOfferContext<"payable">["xero_sync_status"] }
+  | { action: "allocate_credit"; amount_cents: number }
+  | { action: "add_credit"; context: OldBillContext; lines: readonly { path_billing_item: readonly string[]; quantity: number }[] };
+function assertPurchaseBillAction(b: PurchaseBill, r: OldBillRequest): void {
+  const bill = asBill(b);
+  switch (r.action) {
+    case "void":
+      return cat.assertBillingAction("payable", bill, { action: "void", credits: creditsOf(r.context), initiators: initiatorsOf(r.context) });
+    case "push_to_xero":
+      return cat.assertBillingAction("payable", bill, { action: "push_to_xero", xero_sync_status: r.status });
+    case "add_credit":
+      return cat.assertBillingAction("payable", bill, { action: "add_credit", lines: asRequested(b, r.lines), credits: creditsOf(r.context), initiators: initiatorsOf(r.context) });
+    default:
+      return cat.assertBillingAction("payable", bill, r);
+  }
+}
+
+Deno.test("the catalog's payable gaps and side-only entries: each names why, and the gap table only SHRINKS (ruling 116)", () => {
+  // The baseline at F15. A row may be DELETED as its slice lands; adding one fails here.
+  const BASELINE: Record<string, string[]> = {
+    receivable: ["close_remaining", "close_item"],
+    payable: ["add_payment", "record_refund", "edit_counterparty", "create_replacement_billing", "credit_overbilling"],
+  };
+  for (const side of ["receivable", "payable"] as const) {
+    for (const [id, gap] of Object.entries(cat.ACTION_GAPS[side])) {
+      assert(BASELINE[side].includes(id), `${side} gained a gap: ${id}`);
+      assert(gap!.reason.length > 0 && gap!.removed_by.length > 0, id);
+    }
+  }
+  for (const entry of Object.values(cat.SIDE_ONLY_ACTIONS).flat()) assert(entry.reason.length > 0, entry.action);
 });
 
 Deno.test("purchaseItemClosable: units to arrive, an unbilled charge, a time line's open window; never a subrent with units out", () => {
+  // A line is closable exactly when the catalog offers `close_item` on it.
   const closable = (item: PurchaseActionItem, custody = NONE, end: string | null = null) =>
-    purchaseItemClosable(item, custody, pairFor(item.path[0], end), NOW, foldOf([item]));
+    offer(offersOf(po([item], "active", [], end), { [item.path[0]]: custody }), `close_item:${item.path.join("/")}`) !== undefined;
   assert(closable(buy()));
   assert(!closable(buy(), { received: 3, returned: 0 }));
   assert(closable(subrent()));
@@ -126,11 +181,14 @@ Deno.test("purchaseItemClosable: units to arrive, an unbilled charge, a time lin
   assert(closable(timeCharge()), "a standing hire runs on");
   assert(closable(timeCharge(), NONE, AFTER));
   assert(!closable(timeCharge(), NONE, BEFORE), "a window already ended has nothing to close");
-  assert(!purchaseItemClosable(timeCharge(), NONE, undefined, NOW, foldOf([])), "no pair, no window to end: fail closed");
+  const noPair = { ...po([timeCharge()]), destinations: [] };
+  assertEquals(offer(purchaseActionsFor(noPair, ctx()), "close_item:c"), undefined, "no pair, no window to end: fail closed");
 });
 
 Deno.test("purchaseItemTouched: custody, a bill, and a time line a bill names — billed is the fold (ruling 42)", () => {
-  const touched = (item: PurchaseActionItem, custody = NONE) => purchaseItemTouched(item, foldOf([item]), custody);
+  // A line is touched exactly when the catalog no longer offers its removal.
+  const touched = (item: PurchaseActionItem, custody = NONE) =>
+    offer(offersOf(po([item]), { [item.path[0]]: custody }), `remove_item:${item.path.join("/")}`) === undefined;
   assert(!touched(buy()));
   assert(touched(buy(), { received: 1, returned: 0 }));
   assert(touched(buy({ billed: 1 })));
@@ -142,10 +200,10 @@ Deno.test("purchaseItemTouched: custody, a bill, and a time line a bill names �
 Deno.test("purchaseItemTouched: a line whose bill was voided but whose credit stands is touched (ruling 102, the account's named)", () => {
   const line = buy();
   const voided = voidBill("v", [["b", 2]], { voided_at: mockTimestamp });
-  assert(!purchaseItemTouched(line, foldOf([line], [voided]), NONE), "a voided bill alone names nothing");
-  const credit = voidCredit([["b", 1]]);
-  assert(purchaseItemTouched(line, foldOf([line], [voided], [credit]), NONE), "a live reversing credit names the line");
-  assert(!purchaseItemTouched(line, foldOf([line], [voided], [voidCredit([["b", 1]], "void")]), NONE), "a void credit names nothing");
+  const touched = (credits: PurchaseCredit[]) => offer(offersOf(po([line]), {}, { bills: [voided], credits }), "remove_item:b") === undefined;
+  assert(!touched([]), "a voided bill alone names nothing");
+  assert(touched([voidCredit([["b", 1]])]), "a live reversing credit names the line");
+  assert(!touched([voidCredit([["b", 1]], "void")]), "a void credit names nothing");
 });
 
 Deno.test("the fold names a line: a voided bill names nothing; another purchase's lines are not this one's", () => {
@@ -166,19 +224,19 @@ Deno.test("the fold names a line: a voided bill names nothing; another purchase'
 Deno.test("close: refused whole while a subrent has units out, even with another line open", () => {
   const out = subrent({ quantity: 1 });
   const offers = offersOf(po([buy(), out]), { s: { received: 1 } });
-  assertEquals(offer(offers, "close"), undefined);
+  assertEquals(offer(offers, "close_remaining"), undefined);
   assert(offer(offers, "close_item:b"), "the open buy still closes on its own");
   assertEquals(offer(offers, "close_item:s"), undefined);
 });
 
 Deno.test("close: only an active purchase, and only with something to close", () => {
-  assertEquals(offer(offersOf(po([buy()], "complete")), "close"), undefined);
-  assertEquals(offer(offersOf(po([buy()]), { b: { received: 3 } }), "close"), undefined);
+  assertEquals(offer(offersOf(po([buy()], "complete")), "close_remaining"), undefined);
+  assertEquals(offer(offersOf(po([buy()]), { b: { received: 3 } }), "close_remaining"), undefined);
 });
 
 Deno.test("close outcome: cancel only when nothing was received or billed", () => {
   const outcome = (items: PurchaseActionItem[], got: Got = {}, extra: Partial<PurchaseOfferContext> = {}) =>
-    offer(offersOf(po(items), got, extra), "close")?.outcome;
+    offer(offersOf(po(items), got, extra), "close_remaining")?.outcome;
   assertEquals(outcome([buy()]), "cancel");
   assertEquals(outcome([buy()], { b: { received: 1 } }), "close");
   // A part-billed flat charge keeps its billed unit, so the purchase ends complete.
@@ -191,25 +249,27 @@ Deno.test("close outcome: cancel only when nothing was received or billed", () =
 });
 
 Deno.test("add_bill: any purchase that is not canceled, fully billed included (owner, 2026-11-05)", () => {
-  assert(offer(offersOf(po([buy({ billed: 3 })], "complete"), { b: { received: 3 } }), "add_bill"));
-  assertEquals(offer(offersOf(po([buy()], "canceled")), "add_bill"), undefined);
+  assert(offer(offersOf(po([buy({ billed: 3 })], "complete"), { b: { received: 3 } }), "create_billing"));
+  assertEquals(offer(offersOf(po([buy()], "canceled")), "create_billing"), undefined);
 });
 
 Deno.test("add_credit: a billed line, or any bill, which reaches a time-only purchase", () => {
   assertEquals(offer(offersOf(po([timeCharge()])), "add_credit"), undefined);
   assert(offer(offersOf(po([buy({ billed: 1 })])), "add_credit"));
-  assert(offer(offersOf(po([timeCharge()], "active", ["bill1"])), "add_credit"));
+  // Read off the billing documents the context carries, never `query_by_bills` (F15: one input per fact).
+  assert(offer(offersOf(po([timeCharge()]), {}, { bills: [voidBill("bill1", [])] }), "add_credit"));
 });
 
-Deno.test("bill_item: a flat line's remaining units; an over-billed line offers none", () => {
-  assertEquals(offer(offersOf(po([buy({ billed: 1 })])), "bill_item:b")?.max_quantity, 2);
-  assertEquals(offer(offersOf(po([buy({ billed: 4 })])), "bill_item:b"), undefined);
-  assertEquals(offer(offersOf(po([buy()], "canceled")), "bill_item:b"), undefined);
+Deno.test("create_billing lines: a flat line's remaining units; an over-billed line offers none", () => {
+  // Ruling 114: `bill_item` retired into `create_billing`'s lines.
+  assertEquals(billLine(offersOf(po([buy({ billed: 1 })])), "b")?.max_quantity, 2);
+  assertEquals(billLine(offersOf(po([buy({ billed: 4 })])), "b"), undefined);
+  assertEquals(billLine(offersOf(po([buy()], "canceled")), "b"), undefined);
 });
 
-Deno.test("bill_item: a time line offers its open units — nothing is metered until Phase 3", () => {
+Deno.test("create_billing lines: a time line offers its open units — nothing is metered until Phase 3", () => {
   const line = subrent({ uid: "t", path: ["t"], price: TIME_PRICE, quantity: 1 }) as unknown as PurchaseActionItem;
-  assertEquals(offer(offersOf(po([line]), { t: { received: 1, returned: 1 } }), "bill_item:t")?.max_quantity, 1);
+  assertEquals(billLine(offersOf(po([line]), { t: { received: 1, returned: 1 } }), "t")?.max_quantity, 1);
 });
 
 Deno.test("remove_item and change_basis: only an untouched line, a billed time line included", () => {
@@ -257,11 +317,11 @@ Deno.test("purchaseBillVoidRefusal: one row per reason, and the offer follows it
   const ctx = (bills: PurchaseBill[], credits: PurchaseCredit[] = []) => ({ per_purchase: [{ uid_purchase: PU, purchase: { items }, bills, credits }] });
   const refuse = (b: PurchaseBill, c: ReturnType<typeof ctx>, reason: string) => {
     assertEquals(purchaseBillVoidRefusal(b, c)?.includes(reason), true, purchaseBillVoidRefusal(b, c) ?? "no refusal");
-    assertEquals(purchaseBillActionsFor(b, c).some((a) => a.action === "void_bill"), false);
+    assertEquals(purchaseBillActionsFor(b, c).some((a) => a.action === "void"), false);
   };
   const allow = (b: PurchaseBill, c: ReturnType<typeof ctx>) => {
     assertEquals(purchaseBillVoidRefusal(b, c), null);
-    assertEquals(purchaseBillActionsFor(b, c).filter((a) => a.action === "void_bill"), [{ key: "void_bill", action: "void_bill" }]);
+    assertEquals(purchaseBillActionsFor(b, c).filter((a) => a.action === "void"), [{ key: "void", action: "void" }]);
   };
 
   const live = voidBill("a", [["b", 5]]);
@@ -270,16 +330,16 @@ Deno.test("purchaseBillVoidRefusal: one row per reason, and the offer follows it
   allow(free, ctx([free]));
 
   const stamped = voidBill("a", [["b", 5]], { voided_at: mockTimestamp });
-  refuse(stamped, ctx([stamped]), "already void");
+  refuse(stamped, ctx([stamped]), "cannot be voided");
   const annulled = voidBill("a", [["b", 5]], { totals_over: { amount_void_cents: 1000, amount_due_cents: 0 } });
-  refuse(annulled, ctx([annulled]), "already void");
+  refuse(annulled, ctx([annulled]), "cannot be voided");
 
   const linked = voidBill("a", [["b", 5]], { origin: "linked", xero_id: "x" });
   refuse(linked, ctx([linked]), "linked");
   const paid = voidBill("a", [["b", 5]], { totals_over: { amount_paid_cents: 1, amount_due_cents: 999 } });
-  refuse(paid, ctx([paid]), "payments or supplier credits");
+  refuse(paid, ctx([paid]), "payments or credits");
   const credited = voidBill("a", [["b", 5]], { totals_over: { amount_credited_cents: 1, amount_due_cents: 999 } });
-  refuse(credited, ctx([credited]), "payments or supplier credits");
+  refuse(credited, ctx([credited]), "payments or credits");
 });
 
 Deno.test("purchaseBillVoidRefusal: refused only when the void leaves a credit with no bill under it", () => {
@@ -287,7 +347,7 @@ Deno.test("purchaseBillVoidRefusal: refused only when the void leaves a credit w
   const a = voidBill("a", [["b", 5]]);
   const b = voidBill("b", [["b", 5]]);
   const refused = (bills: PurchaseBill[], credits: PurchaseCredit[]) =>
-    purchaseBillVoidRefusal(a, { per_purchase: [{ uid_purchase: PU, purchase: { items }, bills, credits }] })?.includes("Void the credit first") === true;
+    purchaseBillVoidRefusal(a, { per_purchase: [{ uid_purchase: PU, purchase: { items }, bills, credits }] })?.includes("void the supplier credit first") === true;
 
   assertEquals(refused([a], [voidCredit([["b", 2]])]), true, "bill 5, credit 2, nothing else billed: net −2");
   assertEquals(refused([a, b], [voidCredit([["b", 2]])]), false, "the other bill still covers it: net 3");
@@ -297,7 +357,7 @@ Deno.test("purchaseBillVoidRefusal: refused only when the void leaves a credit w
   assertEquals(refused([a, { ...b, status: "void" as const, voided_at: mockTimestamp }], [voidCredit([["b", 2]])]), true, "a void bill covers nothing");
   assertEquals(refused([a], [voidCredit([["other", 2]])]), false, "a line stranded already, which this bill does not name, is not its problem");
   assertEquals(
-    purchaseBillVoidRefusal(a, { per_purchase: [{ uid_purchase: PU, purchase: { items }, bills: [], credits: [voidCredit([["b", 2]])] }] })?.includes("Void the credit first"),
+    purchaseBillVoidRefusal(a, { per_purchase: [{ uid_purchase: PU, purchase: { items }, bills: [], credits: [voidCredit([["b", 2]])] }] })?.includes("void the supplier credit first"),
     true,
     "the bill itself need not be in the list",
   );
@@ -311,12 +371,22 @@ Deno.test("purchaseBillVoidRefusal: a time line counts nothing, so its credit re
   );
 });
 
-Deno.test("purchaseCreditActionsFor: void only while nothing has drawn on it", () => {
-  const totals = (cents: number) => ({ subtotal_cents: cents, subtotal_discounted_cents: cents, discount_amount_cents: 0, taxes: [], total_cents: cents });
-  const credit = (status: "issued" | "applied" | "void", remaining: number) => ({ status, totals: totals(1000), remaining_credit_cents: remaining });
-  assertEquals(purchaseCreditActionsFor(credit("issued", 1000)), [{ key: "void_credit", action: "void_credit" }]);
-  assertEquals(purchaseCreditActionsFor(credit("issued", 999)), []);
-  assertEquals(purchaseCreditActionsFor(credit("void", 1000)), []);
+Deno.test("supplier credit: void only while nothing has drawn on it, read off its journal (F15)", () => {
+  const credit = (status: "issued" | "applied" | "void", remaining: number) =>
+    ({ uid: "pc", status, remaining_credit_cents: remaining, supplier: { uid: "sup", name: "S" } }) as unknown as cat.CreditOfferDocuments["payable"];
+  const keysOf = (c: cat.CreditOfferDocuments["payable"], allocations: cat.OfferCreditRow[]) =>
+    cat.creditActionsFor("payable", c, { allocations, target: null }).map((o) => o.key);
+  // The payable twin of AR's rule: no live allocation, no live refund. `record_refund` is a payable gap.
+  assertEquals(keysOf(credit("issued", 1000), []), ["void_credit", "allocate_credit"]);
+  assertEquals(keysOf(credit("issued", 999), [{ uid: "a", type: "bill_credit", reverses: null }]), ["allocate_credit"]);
+  assertEquals(keysOf(credit("issued", 1000), [{ uid: "a", type: "bill_credit", reverses: null }, { uid: "r", type: "bill_credit_reversal", reverses: "a" }]), ["void_credit", "allocate_credit"]);
+  assertEquals(keysOf(credit("issued", 999), [{ uid: "a", type: "supplier_refund", reverses: null }]), ["allocate_credit"]);
+  assertEquals(keysOf(credit("void", 1000), []), []);
+  assertThrows(
+    () => cat.assertCreditAction("payable", credit("issued", 1000), { action: "record_refund", amount_cents: 1 }),
+    DocumentActionRefusal,
+    "recorded in Xero",
+  );
 });
 
 Deno.test("deriveInvoiceStatus reads a bill as it reads an invoice: every member, off the totals", () => {
@@ -351,11 +421,11 @@ Deno.test("purchaseBillPushRefusal: one row per reason, and the offer follows it
     assertEquals(purchaseBillPushRefusal(live, status), null);
     assertEquals(pushes(live, status), [{ key: "push_to_xero", action: "push_to_xero" }]);
   }
-  assertEquals(purchaseBillPushRefusal(live, "in_sync")?.includes("already has"), true);
+  assertEquals(purchaseBillPushRefusal(live, "in_sync")?.includes("in_sync with Xero"), true);
   assertEquals(pushes(live, "in_sync"), []);
   assertEquals(pushes(live), [], "no status given, no offer");
 
-  refuse(voidBill("a", [], { totals_over: { amount_void_cents: 1000, amount_due_cents: 0 } }), "is void");
+  refuse(voidBill("a", [], { totals_over: { amount_void_cents: 1000, amount_due_cents: 0 } }), "not pushed to Xero");
   // A linked bill may be pushed while unpaid, as a pushed one; a settled one may not.
   assertEquals(purchaseBillPushRefusal(voidBill("a", [], { origin: "linked" }), "out_of_sync"), null);
   refuse(voidBill("a", [], { origin: "linked", totals_over: { amount_paid_cents: 1000, amount_due_cents: 0 } }), "linked");
@@ -377,18 +447,30 @@ Deno.test("purchaseActionsFor: a divider row is no line — it offers nothing an
   assertEquals(purchaseActionsFor(withDivider, ctx({}, { bills: [] })), offersOf(po(lines)));
 });
 
-Deno.test("a $0 bill offers Mark Paid until it is closed, then Reopen; the assert follows the offer", () => {
+Deno.test("a $0 bill offers Mark Paid until it is closed, then the closure's reversal (ruling 115); the assert follows the offer", () => {
   const zero = (closure_count = 0) =>
     voidBill("a", [], { totals_over: { total_cents: 0, amount_due_cents: 0, closure_count } });
-  const has = (b: PurchaseBill, action: string) => purchaseBillActionsFor(b, noDocuments).some((o) => o.action === action);
-  assert(has(zero(), "close_bill"));
-  assert(!has(zero(), "reopen_bill"));
-  assert(!has(zero(1), "close_bill"), "already closed");
-  assert(has(zero(1), "reopen_bill"));
-  assert(!has(voidBill("a", []), "close_bill"), "only a bill totalling $0 closes");
-  assertPurchaseBillAction(zero(), { action: "close_bill" });
-  assertThrows(() => assertPurchaseBillAction(voidBill("a", []), { action: "close_bill" }), InvoiceActionRefusal, "totalling $0");
-  assertThrows(() => assertPurchaseBillAction(zero(), { action: "reopen_bill" }), InvoiceActionRefusal, "not marked paid");
+  const has = (b: PurchaseBill, key: string) => purchaseBillActionsFor(b, noDocuments).some((o) => o.key === key);
+  assert(has(zero(), "close"));
+  assert(!has(zero(), "reverse_settlement:closure"));
+  assert(!has(zero(1), "close"), "already closed");
+  assert(has(zero(1), "reverse_settlement:closure"), "un-closed by reversing its closure row, as an invoice is");
+  assert(!has(voidBill("a", []), "close"), "only a bill totalling $0 closes");
+  assertPurchaseBillAction(zero(), { action: "close" });
+  assertThrows(() => assertPurchaseBillAction(voidBill("a", []), { action: "close" }), InvoiceActionRefusal, "totalling $0");
+  // Until 6e-0b3 a payment row is not the operator's to reverse here (ruling 116), linked or not.
+  const paymentRows = [{ uid: "p", type: "bill_payment" as const, reverses: null, xero_payment_id: null }];
+  assertThrows(
+    () => cat.assertBillingAction("payable", asBill(zero(1)), { action: "reverse_settlement", uid_settlement: "p", settlements: paymentRows }),
+    DocumentActionRefusal,
+    "only a closure is",
+  );
+  for (const type of ["bill_payment", "bill_credit", "supplier_refund"] as const) {
+    const offers = cat.billingActionsFor("payable", asBill(voidBill("a", [])), {
+      settlements: [{ uid: "r", type, reverses: null, xero_payment_id: null }], credits: [], initiators: [], xero_sync_status: "in_sync",
+    });
+    assertEquals(offers.some((o) => o.action === "reverse_settlement"), false, type);
+  }
 });
 
 Deno.test("assertPurchaseBillAction: allocate caps at what is due; void reads the shared refusal", () => {
@@ -397,21 +479,22 @@ Deno.test("assertPurchaseBillAction: allocate caps at what is due; void reads th
   assertThrows(() => assertPurchaseBillAction(bill, { action: "allocate_credit", amount_cents: 401 }), InvoiceActionRefusal, "exceeds");
   assertThrows(() => assertPurchaseBillAction(bill, { action: "allocate_credit", amount_cents: 0 }), InvoiceActionRefusal);
   const linked = voidBill("a", [], { origin: "linked", xero_id: "x" });
-  assertThrows(() => assertPurchaseBillAction(linked, { action: "void_bill", context: noDocuments }), InvoiceActionRefusal, "linked");
+  assertThrows(() => assertPurchaseBillAction(linked, { action: "void", context: noDocuments }), InvoiceActionRefusal, "linked");
 });
 
-Deno.test("assertPurchaseCreditAction and assertPurchaseAction refuse what is not offered, and allow what is", () => {
+Deno.test("the credit and initiator asserts refuse what is not offered, and allow what is", () => {
   const credit = {
     status: "issued" as const,
     totals: { subtotal_cents: 10, subtotal_discounted_cents: 10, discount_amount_cents: 0, taxes: [], total_cents: 10 },
     remaining_credit_cents: 10,
   };
-  assertPurchaseCreditAction(credit, { action: "void_credit" });
-  assertThrows(() => assertPurchaseCreditAction({ ...credit, remaining_credit_cents: 4 }, { action: "void_credit" }), InvoiceActionRefusal, "allocated");
-  assertThrows(() => assertPurchaseCreditAction({ ...credit, status: "void" }, { action: "void_credit" }), InvoiceActionRefusal, "void");
-  assertPurchaseAction(po([timeCharge()]), ctx(), { action: "remove_item", path_purchase_item: ["c"] });
+  const pc = { uid: "pc", ...credit, supplier: { uid: "sup", name: "S" } } as unknown as cat.CreditOfferDocuments["payable"];
+  cat.assertCreditAction("payable", pc, { action: "void_credit", allocations: [] });
+  assertThrows(() => cat.assertCreditAction("payable", pc, { action: "void_credit", allocations: [{ uid: "a", type: "bill_credit", reverses: null }] }), InvoiceActionRefusal, "live allocation");
+  assertThrows(() => cat.assertCreditAction("payable", { ...pc, status: "void" }, { action: "void_credit", allocations: [] }), InvoiceActionRefusal, "void");
+  assertPurchaseAction(po([timeCharge()]), ctx(), { action: "remove_item", path: ["c"] });
   assertThrows(
-    () => assertPurchaseAction(po([timeCharge()]), ctx({}, { bills: billedBills([timeCharge({ billed: 1 })]) }), { action: "remove_item", path_purchase_item: ["c"] }),
+    () => assertPurchaseAction(po([timeCharge()]), ctx({}, { bills: billedBills([timeCharge({ billed: 1 })]) }), { action: "remove_item", path: ["c"] }),
     InvoiceActionRefusal,
     "remove_item",
   );
@@ -442,7 +525,7 @@ Deno.test("creditableBillLines: units left per bill line, net of credits naming 
   assertEquals(unitsAt(a, ctx6d([a], [credit6d([named("A", ["x"], 5)])])), { x: 0 }, "fully credited");
   assertEquals(purchaseBillActionsFor(a, ctx6d([a], [credit6d([named("A", ["x"], 5)])])).some((o) => o.action === "add_credit"), false, "0 left is absent");
   const offered = purchaseBillActionsFor(a, ctx6d([a])).find((o) => o.action === "add_credit");
-  assertEquals(offered, { key: "add_credit", action: "add_credit", lines: [{ path: [PU, "x"], uid: "x", billed: 5, units: 5 }] });
+  assertEquals(offered?.lines?.map(({ billed_time: _t, unit_time: _u, ...l }) => l), [{ path: [PU, "x"], uid: "x", billed: 5, units: 5 }]);
 });
 
 Deno.test("creditableBillLines: the per-line cap binds while the pool still has room from another bill (6d item 2)", () => {
@@ -452,11 +535,12 @@ Deno.test("creditableBillLines: the per-line cap binds while the pool still has 
   // The pool is 10 − 5 = 5, yet bill A's line has nothing left.
   assertEquals(unitsAt(a, c), { x: 0 });
   assertEquals(unitsAt(b, c), { x: 5 });
-  assertEquals(purchaseBillCreditRefusal(a, c, [{ path_billing_item: [PU, "x"], quantity: 1 }])?.includes("(0 of 5)"), true);
+  // Arm B in the row's own terms first: a flat row's budget is its units (AR's wording, F15 item 5).
+  assertEquals(purchaseBillCreditRefusal(a, c, [{ path_billing_item: [PU, "x"], quantity: 1 }])?.includes("less what is already credited (5)"), true);
   assertThrows(
     () => assertPurchaseBillAction(a, { action: "add_credit", context: c, lines: [{ path_billing_item: [PU, "x"], quantity: 1 }] }),
     InvoiceActionRefusal,
-    "left to credit",
+    "already credited",
   );
   assertPurchaseBillAction(b, { action: "add_credit", context: c, lines: [{ path_billing_item: [PU, "x"], quantity: 5 }] });
 });
@@ -471,16 +555,17 @@ Deno.test("creditableBillLines: the pool caps a line too, when a purchase-form c
   assertEquals(purchaseBillCreditRefusal(a, c, [{ path_billing_item: [PU, "x"], quantity: 3 }])?.includes("(2 of 5)"), true);
 });
 
-Deno.test("creditableBillLines: absent — a time line, a kit header, a $0 line, another purchase's line, a bill not live (6d)", () => {
+Deno.test("creditableBillLines: a time line and a $0 line are offered (F15 item 5, ruling 118); a kit header, another purchase's line and a bill not live are not", () => {
   const time = row(["t"], 2, { price: { ...TIME_PRICE, counts: [{ rate_key: "week", num: 1, den: 1 }] } });
   const header = row(["k"], 1, { ledger_account: null, amount_cents: 0 });
   const free = row(["z"], 1, { amount_cents: 0 });
   const elsewhere = { ...row(["x"], 1), path: ["otherpurch0000000000", "x"] } as PurchaseDocumentItem;
   const a = bill6d("A", [time, header, free, elsewhere, row(["x"], 1)]);
-  assertEquals(Object.keys(unitsAt(a, ctx6d([a]))), ["x"]);
+  assertEquals(Object.keys(unitsAt(a, ctx6d([a]))), ["t", "z", "x"]);
   const voided = bill6d("A", [row(["x"], 1)], { status: "void" });
   assertEquals(creditableBillLines(voided, ctx6d([voided])), []);
-  assertEquals(purchaseBillCreditRefusal(a, ctx6d([a]), [{ path_billing_item: [PU, "t"], quantity: 1 }])?.includes("no line at"), true, "a time line is refused by name");
+  assertEquals(purchaseBillCreditRefusal(a, ctx6d([a]), [{ path_billing_item: [PU, "t"], quantity: 1 }]), null, "a time line is creditable, as on AR");
+  assertEquals(purchaseBillCreditRefusal(a, ctx6d([a]), [{ path_billing_item: [PU, "k"], quantity: 1 }])?.includes("no line at"), true, "a kit header is refused by name");
 });
 
 Deno.test("creditableBillLines: a bill-authored line is creditable, capped by its own join (6d, ruling 23)", () => {
@@ -508,9 +593,10 @@ Deno.test("creditableBillLines: a substituted kit's component is never offered a
   const pricedRoot = row(["y"], 2, { substituted_for: [{ path: ["k"], quantity: 2 }] });
   const b = bill6d("A", [pricedRoot, component]);
   assertEquals(Object.keys(unitsAt(b, ctx6d([b], [], items))), ["y"]);
-  // A substitute kit whose rows carry no money at all is not offered.
+  // A substitute kit whose rows carry no money is offered too (ruling 118): a units
+  // credit of it still un-bills the units the fold counts.
   const free = bill6d("A", [headerRoot, { ...component, amount_cents: 0 } as PurchaseDocumentItem]);
-  assertEquals(creditableBillLines(free, ctx6d([free], [], items)), []);
+  assertEquals(creditableBillLines(free, ctx6d([free], [], items)).map((l) => l.uid), ["y"]);
 });
 
 Deno.test("billLineCreditParts: a substitute kit's root credit copies its subtree by the bill's ratio, and nets X and its components to 0 (api-cloudrun#1475)", () => {

@@ -2283,10 +2283,53 @@ export function buildRemainingInvoice(
 ): RemainingInvoice {
   const crmsAuthored = liveCrmsAuthored(account);
   const empty = { items: [], destinations: [], overbilled: [], compared: account.compared, unaligned: account.unaligned, crms_authored: crmsAuthored };
-  if (account.refused) return empty;
-  const overbilled: RemainingInvoice["overbilled"] = [];
+  const decision = remainingBilling(account);
+  if (decision.refused) return empty;
+  for (const entries of decision.owed.values()) {
+    const bySubstitute = entries.find((e) => e.group.via === "substitute");
+    if (bySubstitute !== undefined) {
+      throw new Error(
+        `Order line ${bySubstitute.line.name} was billed by a substitute; an extension on a substituted line cannot be built yet (manager#414)`,
+      );
+    }
+  }
+  if (decision.units.size === 0 && decision.owed.size === 0) return { ...empty, overbilled: decision.overbilled };
+  const { items, destinations } = assembleRemainder(order, decision.units, decision.owed, mintUid);
+  return { items, destinations, overbilled: decision.overbilled, compared: account.compared, unaligned: [], crms_authored: [] };
+}
+
+/** {@link remainingBilling}'s answer: what a remainder bills, line by line. */
+export interface RemainingBilling {
+  /** Whether a remainder bills anything: a line the account says it bills (`LineAccount.remaining.bills`). */
+  bills: boolean;
+  /** Units left per initiator line, by its path key. Only lines with units > 0. */
+  units: Map<string, number>;
+  /** Extension groups not shortened, per initiator destination uid, with the line they extend. */
+  owed: Map<string, Array<{ line: LineItem; group: ExtensionGroup }>>;
+  /** The lines and extension groups billed BEYOND the initiator: a credit's to settle, never a remainder's. */
+  overbilled: { path: string[]; quantity: number; extension_counts: readonly TierCount[] }[];
+  /** The account refused (an unaligned scope, a live CRMS-authored invoice): nothing is decided. */
+  refused: boolean;
+}
+
+/**
+ * **The remainder's DECISION, both sides** (one-document-model ruling 101; F15
+ * item 6): per line, the units and the extension groups a billing document of
+ * "what is left" bills, read off the account ({@link LineAccount.remaining},
+ * {@link LineAccount.extension}), never re-derived. Each side keeps its own ROW
+ * author: {@link buildRemainingInvoice} on the receivable side; the bill writer
+ * on the payable side, whose rows take `from = actedBilledUnits`, a pair windowed
+ * at the bill date, an ancestors-only scope and a `PO-N` divider. The manager's
+ * bill form seeds from it.
+ *
+ * Fails closed on the account's shared refusal ({@link InitiatorAccount.refused}),
+ * deciding nothing.
+ */
+export function remainingBilling(account: InitiatorAccount): RemainingBilling {
   const units = new Map<string, number>();
-  const owed = new Map<string, Array<{ line: LineItem; group: ExtensionGroup }>>();
+  const owed: RemainingBilling["owed"] = new Map();
+  const overbilled: RemainingBilling["overbilled"] = [];
+  if (account.refused) return { bills: false, units, owed, overbilled, refused: true };
   for (const line of account.lines) {
     const k = key(line.path);
     if (line.remaining.units > 0) units.set(k, line.remaining.units);
@@ -2296,19 +2339,12 @@ export function buildRemainingInvoice(
         overbilled.push({ path: [...line.path], quantity: group.quantity, extension_counts: group.extension_counts });
         continue;
       }
-      if (group.via === "substitute") {
-        throw new Error(
-          `Order line ${line.item.name} was billed by a substitute; an extension on a substituted line cannot be built yet (manager#414)`,
-        );
-      }
       const destination = line.path[0];
       if (!owed.has(destination)) owed.set(destination, []);
       owed.get(destination)!.push({ line: line.item, group });
     }
   }
-  if (units.size === 0 && owed.size === 0) return { ...empty, overbilled };
-  const { items, destinations } = assembleRemainder(order, units, owed, mintUid);
-  return { items, destinations, overbilled, compared: account.compared, unaligned: [], crms_authored: [] };
+  return { bills: account.lines.some((l) => l.remaining.bills), units, owed, overbilled, refused: false };
 }
 
 /** The live CRMS-authored billing documents, from the account's headers. */

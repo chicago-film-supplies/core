@@ -1,5 +1,6 @@
 /**
- * The invoice action ruleset (`utils/invoice-actions.ts`, api-cloudrun#1169).
+ * The one action catalog on the RECEIVABLE side (`utils/document-actions.ts`;
+ * api-cloudrun#1169, one-document-model F15).
  *
  * Inputs are built from the VOCABULARIES — every invoice status, every
  * credit-note status, every settlement type — never from the tables under test,
@@ -11,36 +12,113 @@ import { fdwCounts, fdwPrice, FORMULAS } from "./helpers/formulas.ts";
 import {
   CREDIT_NOTE_STATUS_CONTRACTS,
   type CreditNoteStatusType,
-  INVOICE_ACTION_IDS,
-  INVOICE_ACTIONS,
+  DOCUMENT_ACTION_IDS,
+  DOCUMENT_ACTIONS,
   INVOICE_FIELD_CLASSES,
   INVOICE_FIELD_FREEZE,
   INVOICE_STATUS_CONTRACTS,
-  type InvoiceActionId,
+  type DocumentActionId,
   type InvoiceDocItemType,
   type InvoiceFieldClass,
   type InvoiceStatusType,
   SETTLEMENT_CONTRACTS,
   type SettlementTypeType,
 } from "../src/schemas/mod.ts";
-import {
-  assertCreditNoteAction,
-  assertInvoiceAction,
-  assertOrderInvoiceAction,
-  type CappedNote,
-  creditableLines,
-  creditKitParts,
-  creditNoteActionsFor,
-  creditNoteOverCredit,
-  type InvoiceActionOffer,
-  InvoiceActionRefusal,
-  invoiceActionsFor,
-  type OfferCreditNote,
-  type OfferInvoice,
-  type OfferOrder,
-  type OfferSettlement,
-  orderInvoiceActionsFor,
-} from "../src/utils/invoice-actions.ts";
+import * as cat from "../src/utils/document-actions.ts";
+import { DocumentActionRefusal, type DocumentActionOffer } from "../src/utils/document-actions.ts";
+
+// ── The F15 port: each pre-F15 receivable scenario, against the one catalog ──
+// These adapters only map the old argument SHAPES onto the role functions; every
+// assertion below states the catalog's own ids and behaviour.
+type InvoiceActionOffer = DocumentActionOffer;
+const InvoiceActionRefusal = DocumentActionRefusal;
+type OfferInvoice = Omit<cat.BillingOfferDocuments["receivable"], "number" | "items" | "xero_id"> & {
+  number?: number;
+  items?: readonly InvoiceDocItemType[];
+  xero_id?: string | null;
+};
+type CappedNote = { status: string; items: readonly unknown[] };
+type OfferCreditNote = Omit<cat.CreditOfferDocuments["receivable"], "uid">;
+type OfferOrder = cat.InitiatorOfferDocuments["receivable"];
+type OfferSettlement = cat.OfferSettlement;
+interface InvoiceCtx {
+  settlements?: readonly OfferSettlement[];
+  creditNotes?: readonly CappedNote[];
+  xero_sync_status?: InvoiceXeroSyncStatus;
+}
+const asDoc = (inv: OfferInvoice): cat.BillingOfferDocuments["receivable"] =>
+  ({ ...inv, number: inv.number ?? 2001, items: (inv.items ?? []) as never, xero_id: inv.xero_id ?? null });
+const billingCtx = (ctx: InvoiceCtx = {}): cat.BillingOfferContext<"receivable"> => ({
+  settlements: ctx.settlements ?? [],
+  credits: (ctx.creditNotes ?? []) as never,
+  initiators: [],
+  xero_sync_status: ctx.xero_sync_status ?? "not_applicable",
+});
+const invoiceActionsFor = (inv: OfferInvoice, ctx: InvoiceCtx = {}) => cat.billingActionsFor("receivable", asDoc(inv), billingCtx(ctx));
+type InvoiceRequest =
+  | { action: "add_payment"; amount_cents: number }
+  | { action: "reverse_settlement"; uid_settlement: string }
+  | { action: "add_credit"; invoice_number: number; lines: readonly cat.CappedCreditLine[] }
+  | { action: "edit_items"; money_moved: boolean }
+  | { action: "issue" | "void" | "close" | "edit_counterparty" | "edit_date" | "push_to_xero" };
+function assertInvoiceAction(inv: OfferInvoice, ctx: InvoiceCtx, request: InvoiceRequest): void {
+  const doc = asDoc(inv);
+  const c = billingCtx(ctx);
+  switch (request.action) {
+    case "reverse_settlement":
+      return cat.assertBillingAction("receivable", doc, { ...request, settlements: c.settlements });
+    case "add_credit":
+      return cat.assertBillingAction("receivable", { ...doc, number: request.invoice_number }, { action: "add_credit", lines: request.lines, credits: c.credits, initiators: [] });
+    case "void":
+      return cat.assertBillingAction("receivable", doc, { action: "void", credits: c.credits, initiators: [] });
+    case "push_to_xero":
+      if (ctx.xero_sync_status === undefined) throw new DocumentActionRefusal("push_to_xero", "the sync status is unknown to the caller");
+      return cat.assertBillingAction("receivable", doc, { action: "push_to_xero", xero_sync_status: ctx.xero_sync_status });
+    default:
+      return cat.assertBillingAction("receivable", doc, request as cat.BillingActionRequest<"receivable">);
+  }
+}
+const creditableLines = (invoice: { uid: string; items: readonly InvoiceDocItemType[] }, prior: readonly CappedNote[]) =>
+  cat.creditableLines("receivable", { uid: invoice.uid, status: "issued", items: invoice.items as never }, { credits: prior as never, initiators: [] });
+const creditKitParts = (invoice: { uid: string; items: readonly InvoiceDocItemType[] }, path: string[], n: number, prior: readonly CappedNote[]) =>
+  cat.creditParts({ uid: invoice.uid, items: invoice.items as never }, path, n, prior as never);
+const creditNoteOverCredit = (
+  num: number,
+  invoice: { uid: string; items: readonly InvoiceDocItemType[] },
+  requested: readonly cat.CappedCreditLine[],
+  prior: readonly CappedNote[],
+) => cat.creditRefusal("receivable", { uid: invoice.uid, number: num, status: "issued", items: invoice.items as never }, { credits: prior as never, initiators: [] }, requested);
+const creditNoteActionsFor = (n: OfferCreditNote, ctx: { allocations: cat.CreditOfferContext<"receivable">["allocations"]; invoice?: cat.AllocationTargets["receivable"] }) =>
+  cat.creditActionsFor("receivable", { uid: "cn", ...n }, { allocations: ctx.allocations, target: ctx.invoice ?? null });
+function assertCreditNoteAction(
+  n: OfferCreditNote,
+  ctx: { allocations: cat.CreditOfferContext<"receivable">["allocations"]; invoice?: cat.AllocationTargets["receivable"] },
+  request: { action: "void_credit" } | { action: "allocate_credit" | "record_refund"; amount_cents: number },
+): void {
+  const note = { uid: "cn", ...n };
+  if (request.action === "void_credit") return cat.assertCreditAction("receivable", note, { action: "void_credit", allocations: ctx.allocations });
+  if (request.action === "record_refund") return cat.assertCreditAction("receivable", note, { action: "record_refund", amount_cents: request.amount_cents });
+  return cat.assertCreditAction("receivable", note, { action: "allocate_credit", amount_cents: request.amount_cents, target: ctx.invoice ?? null });
+}
+interface OrderCtx {
+  invoices?: readonly AccountedInvoice[];
+  creditNotes?: readonly unknown[];
+  accounting?: cat.InitiatorOfferContext<"receivable">["accounting"];
+  replacement_units?: number;
+  on_request_units?: number;
+}
+const orderCtx = (ctx: OrderCtx): cat.InitiatorOfferContext<"receivable"> => ({
+  billing: ctx.invoices ?? [],
+  credits: (ctx.creditNotes ?? []) as never,
+  accounting: ctx.accounting ?? { formulas: FORMULAS, holidays: [] },
+  custody: new Map(),
+  now: "2026-11-18T12:00:00.000-06:00",
+  replacement_units: ctx.replacement_units ?? 0,
+  on_request_units: ctx.on_request_units ?? 0,
+});
+const orderInvoiceActionsFor = (order: OfferOrder, ctx: OrderCtx = {}) => cat.initiatorActionsFor("receivable", order, orderCtx(ctx));
+const assertOrderInvoiceAction = (order: OfferOrder, ctx: OrderCtx, request: cat.InitiatorActionRequest) =>
+  cat.assertInitiatorAction("receivable", order, orderCtx(ctx), request);
 import type { InvoiceXeroSyncStatus } from "../src/utils/invoice-xero-sync.ts";
 import { invoiceFieldIsFrozen } from "../src/utils/invoices.ts";
 import type { AccountedInvoice } from "../src/utils/quantityAccounting.ts";
@@ -89,7 +167,7 @@ function invoice(
 }
 
 const ids = (offers: InvoiceActionOffer[]) => offers.map((o) => o.action);
-const has = (offers: InvoiceActionOffer[], id: InvoiceActionId) => offers.some((o) => o.action === id);
+const has = (offers: InvoiceActionOffer[], id: DocumentActionId) => offers.some((o) => o.action === id);
 const row = (uid: string, type: SettlementTypeType, o: Partial<OfferSettlement> = {}): OfferSettlement => ({
   uid,
   type,
@@ -100,17 +178,18 @@ const row = (uid: string, type: SettlementTypeType, o: Partial<OfferSettlement> 
 
 // ── vocabulary ───────────────────────────────────────────────────────
 
-Deno.test("INVOICE_ACTION_IDS and INVOICE_ACTIONS name the same actions, both ways", () => {
-  assertEquals([...INVOICE_ACTION_IDS].sort(), Object.keys(INVOICE_ACTIONS).sort());
-  assertEquals(new Set(INVOICE_ACTION_IDS).size, INVOICE_ACTION_IDS.length, "no duplicate id");
+Deno.test("DOCUMENT_ACTION_IDS and DOCUMENT_ACTIONS name the same actions, both ways", () => {
+  assertEquals([...DOCUMENT_ACTION_IDS].sort(), Object.keys(DOCUMENT_ACTIONS).sort());
+  assertEquals(new Set(DOCUMENT_ACTION_IDS).size, DOCUMENT_ACTION_IDS.length, "no duplicate id");
+  for (const id of DOCUMENT_ACTION_IDS) assertEquals(DOCUMENT_ACTIONS[id].roles.length > 0, true, id);
 });
 
 /**
- * The coverage oracle: which actions of `subject` never appear in `seen`. A
- * row that has silently become unreachable is exactly an id this returns.
+ * The coverage oracle: which receivable billing-role actions never appear in
+ * `seen`. A row that has silently become unreachable is exactly an id this returns.
  */
-function unreached(subject: "invoice" | "credit_note" | "order", seen: Set<InvoiceActionId>): InvoiceActionId[] {
-  return INVOICE_ACTION_IDS.filter((id) => INVOICE_ACTIONS[id].subject === subject && !seen.has(id));
+function unreached(role: "billing" | "credit" | "initiator", seen: Set<DocumentActionId>): DocumentActionId[] {
+  return DOCUMENT_ACTION_IDS.filter((id) => cat.sideOffers("receivable", role, id) && !DOCUMENT_ACTIONS[id].per_line && !seen.has(id));
 }
 
 /** Every offer across a sweep of invoices built from the status × settlement vocabulary. */
@@ -132,25 +211,26 @@ function invoiceSweep(): InvoiceActionOffer[][] {
   return out;
 }
 
-Deno.test("every invoice action is OFFERED somewhere and REFUSED somewhere in the vocabulary sweep", () => {
+Deno.test("every receivable billing action is OFFERED somewhere and REFUSED somewhere in the vocabulary sweep", () => {
   const sweep = invoiceSweep();
   const offered = new Set(sweep.flatMap(ids));
-  assertEquals(unreached("invoice", offered), []);
+  // `add_credit` needs a credit-left line, which every fixture invoice has.
+  assertEquals(unreached("billing", offered), []);
   // …and none is offered everywhere, except `edit_items`, which D8 keeps open on
   // every status (money freezes, labels do not).
-  for (const id of INVOICE_ACTION_IDS.filter((i) => INVOICE_ACTIONS[i].subject === "invoice")) {
+  for (const id of DOCUMENT_ACTION_IDS.filter((i) => cat.sideOffers("receivable", "billing", i))) {
     const everywhere = sweep.every((offers) => has(offers, id));
     assertEquals(everywhere, id === "edit_items", id);
   }
-  // Only invoice-subject ids are ever offered on an invoice.
-  for (const id of offered) assertEquals(INVOICE_ACTIONS[id].subject, "invoice", id);
+  // Only billing-role ids are ever offered on a billing document (F15 item 1).
+  for (const id of offered) assertEquals(DOCUMENT_ACTIONS[id].roles.includes("billing"), true, id);
 });
 
 Deno.test("the coverage oracle can fail — deleting a reachable action turns it red", () => {
   // A guard that cannot go red is not one. Drop `close` from the sweep's
   // results, as a deleted row in the ruleset would, and the oracle names it.
   const mutated = new Set(invoiceSweep().flatMap(ids).filter((id) => id !== "close"));
-  assertEquals(unreached("invoice", mutated), ["close"]);
+  assertEquals(unreached("billing", mutated), ["close"]);
 });
 
 Deno.test("a status outside the vocabulary offers nothing and asserts a refusal", () => {
@@ -330,12 +410,12 @@ Deno.test("D3 creditNoteOverCredit: the api's two arms, with its messages", () =
 
 Deno.test("D3 add_credit_note: offered on a status live in Xero with credit left", () => {
   for (const status of INVOICE_STATUSES) {
-    assertEquals(has(invoiceActionsFor(invoice(status)), "add_credit_note"), INVOICE_STATUS_CONTRACTS[status].live_in_xero, status);
+    assertEquals(has(invoiceActionsFor(invoice(status)), "add_credit"), INVOICE_STATUS_CONTRACTS[status].live_in_xero, status);
   }
   const spent = invoiceActionsFor(invoice("issued"), { creditNotes: [note("issued", credit("cam", 5))] });
-  assertEquals(has(spent, "add_credit_note"), false, "every unit already credited");
+  assertEquals(has(spent, "add_credit"), false, "every unit already credited");
   assertThrows(
-    () => assertInvoiceAction(invoice("draft"), {}, { action: "add_credit_note", invoice_number: 9, lines: [credit("cam", 1)] }),
+    () => assertInvoiceAction(invoice("draft"), {}, { action: "add_credit", invoice_number: 9, lines: [credit("cam", 1)] }),
     InvoiceActionRefusal,
     "issued invoice",
   );
@@ -354,7 +434,7 @@ Deno.test("D8 edit_items: always offered; money frozen with the freeze, labels n
   assertInvoiceAction(paidUp, {}, { action: "edit_items", money_moved: false });
   // A closed $0 invoice is frozen (R1); reopening it unfreezes.
   const closed = invoice("paid", { total_cents: 0, closure_count: 1 });
-  assertEquals(has(invoiceActionsFor(closed), "edit_organization"), false);
+  assertEquals(has(invoiceActionsFor(closed), "edit_counterparty"), false);
   assertEquals(has(invoiceActionsFor(invoice("issued", { total_cents: 0, closure_count: 0 })), "edit_date"), true);
 });
 
@@ -371,7 +451,7 @@ Deno.test("D4 frozen_classes: literal per fixture — draft, issued, part_paid w
     assertEquals(o.frozen_classes, want, label);
     assertEquals(o.money_frozen, want.includes("line_money"), label);
     assertEquals(INVOICE_FIELD_CLASSES.filter((c) => invoiceFieldIsFrozen(inv, c)), want, label);
-    assertEquals(has(invoiceActionsFor(inv), "edit_organization"), !want.includes("counterparty"), label);
+    assertEquals(has(invoiceActionsFor(inv), "edit_counterparty"), !want.includes("counterparty"), label);
     assertEquals(has(invoiceActionsFor(inv), "edit_date"), !want.includes("date"), label);
   }
   // The text class is never frozen — on a void invoice included.
@@ -394,18 +474,16 @@ Deno.test("D4 INVOICE_FIELD_FREEZE: every class has a row, and no field sits in 
   assertEquals(INVOICE_FIELD_FREEZE.ledger_account.xero_accepts_on_settled, false);
 });
 
-Deno.test("D8 void: refused while Xero holds a settlement; absent or false keeps the offer", () => {
-  const inv = invoice("part_paid", { amount_paid_cents: 1 });
-  assertEquals(has(invoiceActionsFor(inv), "void"), true, "absent ⇒ unchanged");
-  assertEquals(has(invoiceActionsFor(inv, { xero_held_settlements: false }), "void"), true);
-  assertEquals(has(invoiceActionsFor(inv, { xero_held_settlements: true }), "void"), false);
-  assertThrows(
-    () => assertInvoiceAction(inv, { xero_held_settlements: true }, { action: "void" }),
-    InvoiceActionRefusal,
-    "Xero holds",
-  );
-  assertInvoiceAction(inv, {}, { action: "void" });
-  // Still the status gate first: a void invoice is refused for its status, not for Xero.
+Deno.test("ruling 117 void: refused while anything is paid or credited against the invoice, Xero's or CFS's", () => {
+  // AR used to void and RELEASE its settlements, refused only when Xero held one;
+  // a CFS-recorded payment Xero had not yet seen then silently disappeared.
+  for (const money of [{ amount_paid_cents: 1 }, { amount_credited_cents: 1 }]) {
+    const inv = invoice("part_paid", money);
+    assertEquals(has(invoiceActionsFor(inv), "void"), false, JSON.stringify(money));
+    assertThrows(() => assertInvoiceAction(inv, {}, { action: "void" }), InvoiceActionRefusal, "payments or credits");
+  }
+  assertInvoiceAction(invoice("issued"), {}, { action: "void" });
+  // Still the status gate first: a void invoice is refused for its status.
   assertThrows(() => assertInvoiceAction(invoice("void"), {}, { action: "void" }), InvoiceActionRefusal, "cannot be voided");
 });
 
@@ -467,28 +545,28 @@ const target = (status: InvoiceStatusType = "issued", due = 3_000, xero_id: stri
 });
 
 Deno.test("credit-note actions sweep the status vocabulary", () => {
-  const seen = new Set<InvoiceActionId>();
+  const seen = new Set<DocumentActionId>();
   for (const status of NOTE_STATUSES) {
     const offers = creditNoteActionsFor(cn(status), { allocations: [] });
     offers.forEach((o) => seen.add(o.action));
-    assertEquals(has(offers, "void_credit_note"), CREDIT_NOTE_STATUS_CONTRACTS[status].voidable, status);
-    assertEquals(has(offers, "allocate_credit_note"), CREDIT_NOTE_STATUS_CONTRACTS[status].accepts_allocation, status);
+    assertEquals(has(offers, "void_credit"), CREDIT_NOTE_STATUS_CONTRACTS[status].voidable, status);
+    assertEquals(has(offers, "allocate_credit"), CREDIT_NOTE_STATUS_CONTRACTS[status].accepts_allocation, status);
     assertEquals(has(offers, "record_refund"), CREDIT_NOTE_STATUS_CONTRACTS[status].accepts_allocation, status);
   }
-  assertEquals(unreached("credit_note", seen), []);
+  assertEquals(unreached("credit", seen), []);
 });
 
 Deno.test("D4 void_credit_note: not while an allocation is live", () => {
   const live = [{ uid: "a1", type: "credit" as const, reverses: null }];
   const retracted = [...live, { uid: "a1r", type: "credit_reversal" as const, reverses: "a1" }];
-  assertEquals(has(creditNoteActionsFor(cn("applied", 0), { allocations: live }), "void_credit_note"), false);
-  assertEquals(has(creditNoteActionsFor(cn("issued"), { allocations: retracted }), "void_credit_note"), true);
-  assertThrows(() => assertCreditNoteAction(cn("applied", 0), { allocations: live }, { action: "void_credit_note" }), InvoiceActionRefusal, "live allocation");
+  assertEquals(has(creditNoteActionsFor(cn("applied", 0), { allocations: live }), "void_credit"), false);
+  assertEquals(has(creditNoteActionsFor(cn("issued"), { allocations: retracted }), "void_credit"), true);
+  assertThrows(() => assertCreditNoteAction(cn("applied", 0), { allocations: live }, { action: "void_credit" }), InvoiceActionRefusal, "live allocation");
 });
 
 Deno.test("D5/D6 allocate_credit_note: credit left, an invoice that accepts payment, the same Xero contact", () => {
   const offer = (n: OfferCreditNote, inv?: ReturnType<typeof target>) =>
-    creditNoteActionsFor(n, { allocations: [], invoice: inv }).find((o) => o.action === "allocate_credit_note");
+    creditNoteActionsFor(n, { allocations: [], invoice: inv }).find((o) => o.action === "allocate_credit");
   assertEquals(offer(cn("issued"))?.max_cents, 5_000, "note-level: the remaining credit");
   assertEquals(offer(cn("issued"), target())?.max_cents, 3_000, "capped at the amount due");
   assertEquals(offer(cn("issued", 0)), undefined, "D6: nothing left");
@@ -499,19 +577,19 @@ Deno.test("D5/D6 allocate_credit_note: credit left, an invoice that accepts paym
   assertEquals(offer(cn("issued"), target("issued", 3_000, "contact-2")), undefined, "D5: another Xero contact");
   assertEquals(offer(cn("issued", 5_000, null), target("issued", 3_000, null)), undefined, "no contact is not a match");
   assertThrows(
-    () => assertCreditNoteAction(cn("issued"), { allocations: [], invoice: target() }, { action: "allocate_credit_note", amount_cents: 3_001 }),
+    () => assertCreditNoteAction(cn("issued"), { allocations: [], invoice: target() }, { action: "allocate_credit", amount_cents: 3_001 }),
     InvoiceActionRefusal,
     "exceeds",
   );
-  assertCreditNoteAction(cn("issued"), { allocations: [], invoice: target() }, { action: "allocate_credit_note", amount_cents: 3_000 });
+  assertCreditNoteAction(cn("issued"), { allocations: [], invoice: target() }, { action: "allocate_credit", amount_cents: 3_000 });
 });
 
 Deno.test("void_credit_note: not while a refund is live (api-cloudrun#1207)", () => {
   const live = [{ uid: "r1", type: "refund" as const, reverses: null }];
   const reaped = [...live, { uid: "r1r", type: "refund_reversal" as const, reverses: "r1" }];
-  assertEquals(has(creditNoteActionsFor(cn("applied", 0), { allocations: live }), "void_credit_note"), false);
-  assertEquals(has(creditNoteActionsFor(cn("issued"), { allocations: reaped }), "void_credit_note"), true);
-  assertThrows(() => assertCreditNoteAction(cn("applied", 0), { allocations: live }, { action: "void_credit_note" }), InvoiceActionRefusal, "live refund");
+  assertEquals(has(creditNoteActionsFor(cn("applied", 0), { allocations: live }), "void_credit"), false);
+  assertEquals(has(creditNoteActionsFor(cn("issued"), { allocations: reaped }), "void_credit"), true);
+  assertThrows(() => assertCreditNoteAction(cn("applied", 0), { allocations: live }, { action: "void_credit" }), InvoiceActionRefusal, "live refund");
 });
 
 Deno.test("record_refund: note-level, credit left, capped at the remaining credit", () => {
@@ -536,13 +614,15 @@ Deno.test("D7: the three create actions refuse a canceled order, and only that",
   for (const status of statuses) {
     const offers = orderInvoiceActionsFor(order(status), { replacement_units: 2, on_request_units: 1 });
     const open = status !== "canceled";
-    assertEquals(has(offers, "create_invoice"), open, status);
-    assertEquals(has(offers, "create_remaining_invoice"), open, `${status}: invoices unknown ⇒ offered`);
-    assertEquals(has(offers, "create_replacement_invoice"), open, status);
-    assertEquals(has(offers, "create_service_charge_invoice"), open, status);
+    assertEquals(has(offers, "create_billing"), open, status);
+    // F15: the context is REQUIRED, so "invoices unknown ⇒ offered" is gone; an
+    // order with no line has nothing remaining on any status.
+    assertEquals(has(offers, "create_remaining_billing"), false, `${status}: nothing remains`);
+    assertEquals(has(offers, "create_replacement_billing"), open, status);
+    assertEquals(has(offers, "create_service_charge_billing"), open, status);
   }
   assertThrows(
-    () => assertOrderInvoiceAction(order("canceled"), {}, { action: "create_invoice" }),
+    () => assertOrderInvoiceAction(order("canceled"), {}, { action: "create_billing" }),
     InvoiceActionRefusal,
     "canceled",
   );
@@ -551,21 +631,21 @@ Deno.test("D7: the three create actions refuse a canceled order, and only that",
 Deno.test("api-cloudrun#1163: lost/damaged and cleaning/maintenance are offered independently", () => {
   const ids = (ctx: { replacement_units?: number; on_request_units?: number }) =>
     orderInvoiceActionsFor(order("active"), ctx).map((o) => o.action).filter((a) =>
-      a === "create_replacement_invoice" || a === "create_service_charge_invoice"
+      a === "create_replacement_billing" || a === "create_service_charge_billing"
     );
-  assertEquals(ids({ replacement_units: 1 }), ["create_replacement_invoice"]);
-  assertEquals(ids({ on_request_units: 1 }), ["create_service_charge_invoice"]);
-  assertEquals(ids({ replacement_units: 1, on_request_units: 1 }), ["create_replacement_invoice", "create_service_charge_invoice"]);
+  assertEquals(ids({ replacement_units: 1 }), ["create_replacement_billing"]);
+  assertEquals(ids({ on_request_units: 1 }), ["create_service_charge_billing"]);
+  assertEquals(ids({ replacement_units: 1, on_request_units: 1 }), ["create_replacement_billing", "create_service_charge_billing"]);
   assertEquals(ids({ replacement_units: 0, on_request_units: 0 }), []);
 });
 
 Deno.test("D7: Invoice Remaining reads remainingForOrder once the invoices are known", () => {
   // No lines, invoices known ⇒ nothing remains ⇒ not offered.
   const offers = orderInvoiceActionsFor(order("active"), { invoices: [], accounting: { formulas: FORMULAS, holidays: [] } });
-  assertEquals(has(offers, "create_remaining_invoice"), false);
+  assertEquals(has(offers, "create_remaining_billing"), false);
   assertEquals(has(offers, "credit_overbilling"), false);
-  assertEquals(has(offers, "create_replacement_invoice"), false, "absent replacement_units ⇒ 0");
-  assertEquals(has(offers, "create_service_charge_invoice"), false, "absent on_request_units ⇒ 0");
+  assertEquals(has(offers, "create_replacement_billing"), false, "absent replacement_units ⇒ 0");
+  assertEquals(has(offers, "create_service_charge_billing"), false, "absent on_request_units ⇒ 0");
 });
 
 Deno.test("core#120: an order that is ONLY over-billed is offered the credit, not Invoice Remaining", () => {
@@ -603,9 +683,9 @@ Deno.test("core#120: an order that is ONLY over-billed is offered the credit, no
   } as unknown as AccountedInvoice;
   const offers = orderInvoiceActionsFor(overBilled, { invoices: [billed], creditNotes: [], accounting: { formulas: FORMULAS, holidays: [] } });
   assertEquals(has(offers, "credit_overbilling"), true, "the over-billing is real and offered");
-  assertEquals(has(offers, "create_remaining_invoice"), false, "and there is nothing to invoice");
+  assertEquals(has(offers, "create_remaining_billing"), false, "and there is nothing to invoice");
   assertThrows(
-    () => assertOrderInvoiceAction(overBilled, { invoices: [billed], creditNotes: [], accounting: { formulas: FORMULAS, holidays: [] } }, { action: "create_remaining_invoice" }),
+    () => assertOrderInvoiceAction(overBilled, { invoices: [billed], creditNotes: [], accounting: { formulas: FORMULAS, holidays: [] } }, { action: "create_remaining_billing" }),
     InvoiceActionRefusal,
     "nothing to do",
   );

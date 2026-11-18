@@ -3937,7 +3937,7 @@ What one credit-note status admits (api-cloudrun#1169). Until this table the
 note's transitions were implicit in its writers, and the manager offered Void
 on any non-void note while the API 409'd it whenever an allocation was live.
 
-Read by `creditNoteActionsFor` (`@cfs/core/utils/invoice-actions`). Each
+Read by `creditActionsFor` (`@cfs/core/utils/document-actions`). Each
 column is a STATUS gate only: the action also needs its own runtime condition
 (no live allocation to void, remaining credit to allocate), which the ruleset
 checks and this table cannot state.
@@ -4079,6 +4079,25 @@ three properties. See `api-cloudrun/.claude/data/destination-tree/properties.yam
 
 ```ts
 const DESTINATION_LEVELS: "property" | "unit"[];
+```
+
+### `DOCUMENT_ACTIONS`
+
+Every action, keyed by id. `Readonly<Record<DocumentActionId, …>>` makes an id
+with no row a type error; the both-ways test makes a row with no id one.
+
+```ts
+const DOCUMENT_ACTIONS: Readonly<Record<DocumentActionId, DocumentActionDefinition>>;
+```
+
+### `DOCUMENT_ACTION_IDS`
+
+Every document action id. `tests/document-actions.test.ts` asserts it equals
+{@link DOCUMENT_ACTIONS}' keys in both directions, and the manager
+de-duplicates its menus by an offer's `key`, never by a label.
+
+```ts
+const DOCUMENT_ACTION_IDS: readonly ["create_billing", "create_remaining_billing", "create_replacement_billing", "create_service_charge_billing", "credit_overbilling", "close_remaining", "close_item", "remove_item", "change_basis", "add_credit", "issue", "void", "close", "add_payment", "reverse_settlement", "edit_items", "edit_date", "edit_counterparty", "push_to_xero", "allocate_credit", "void_credit", "record_refund"];
 ```
 
 ### `DOC_LINE_ITEM_TYPES`
@@ -4678,6 +4697,34 @@ interface DocSourceType {
   uid: string;
   label?: string | null;
 }
+```
+
+### `DocumentActionDefinition`
+
+One row of {@link DOCUMENT_ACTIONS}.
+
+```ts
+interface DocumentActionDefinition {
+  roles: readonly DocumentActionRole[];
+  per_line: boolean;
+  description: string;
+}
+```
+
+### `DocumentActionId`
+
+One document action id.
+
+```ts
+type DocumentActionId = indexedAccess;
+```
+
+### `DocumentActionRole`
+
+The roles an operator action is offered on. Custody is the levers'.
+
+```ts
+type DocumentActionRole = "initiator" | "billing" | "credit";
 ```
 
 ### `DocumentOrganizationSnapshot`
@@ -5949,25 +5996,6 @@ the history keys, alphabetized, as `BOOKING_UNIT_BUCKETS` is.
 const INBOUND_UNIT_BUCKETS: "damaged" | "lost" | "received" | "sent_back" | "stocked" | "transit_inbound" | "transit_outbound"[];
 ```
 
-### `INVOICE_ACTIONS`
-
-Every action, keyed by id. `Readonly<Record<InvoiceActionId, …>>` makes an id
-with no row a type error; the both-ways test makes a row with no id one.
-
-```ts
-const INVOICE_ACTIONS: Readonly<Record<InvoiceActionId, InvoiceActionDefinition>>;
-```
-
-### `INVOICE_ACTION_IDS`
-
-Every invoice action id. `tests/invoice-actions.test.ts` asserts it equals
-{@link INVOICE_ACTIONS}' keys in both directions, and the manager
-de-duplicates its menus by these ids, never by a label.
-
-```ts
-const INVOICE_ACTION_IDS: "issue" | "void" | "close" | "add_payment" | "reverse_settlement" | "add_credit_note" | "edit_items" | "edit_organization" | "edit_date" | "push_to_xero" | "void_credit_note" | "allocate_credit_note" | "record_refund" | "create_invoice" | "create_remaining_invoice" | "create_replacement_invoice" | "create_service_charge_invoice" | "credit_overbilling"[];
-```
-
 ### `INVOICE_FIELD_CLASSES`
 
 The classes a billing document's editable fields fall into, for the freeze
@@ -6479,41 +6507,6 @@ interface Invoice {
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
 }
-```
-
-### `InvoiceActionDefinition`
-
-One row of {@link INVOICE_ACTIONS}.
-
-```ts
-interface InvoiceActionDefinition {
-  subject: InvoiceActionSubject;
-  description: string;
-}
-```
-
-### `InvoiceActionId`
-
-One invoice action id.
-
-```ts
-type InvoiceActionId = indexedAccess;
-```
-
-### `InvoiceActionIdEnum`
-
-Zod schema for {@link InvoiceActionId}.
-
-```ts
-const InvoiceActionIdEnum: z.ZodType<InvoiceActionId>;
-```
-
-### `InvoiceActionSubject`
-
-Which document an action acts on — and so which offer function lists it.
-
-```ts
-type InvoiceActionSubject = "invoice" | "credit_note" | "order";
 ```
 
 ### `InvoiceAging`
@@ -9833,24 +9826,6 @@ purchase line's money shape (flat ⇒ a stated `amount_cents`, time ⇒ dated
 const PRICE_FORMULA_BASES: "flat" | "time"[];
 ```
 
-### `PURCHASE_ACTIONS`
-
-Every action, keyed by id. `Readonly<Record<PurchaseActionId, …>>` makes an id
-with no row a type error; the both-ways test makes a row with no id one.
-
-```ts
-const PURCHASE_ACTIONS: Readonly<Record<PurchaseActionId, PurchaseActionDefinition>>;
-```
-
-### `PURCHASE_ACTION_IDS`
-
-Every purchase action id. `tests/purchase-actions.test.ts` asserts it equals
-{@link PURCHASE_ACTIONS}' keys in both directions.
-
-```ts
-const PURCHASE_ACTION_IDS: "close" | "add_bill" | "add_credit" | "close_item" | "bill_item" | "remove_item" | "change_basis" | "allocate_credit" | "void_bill" | "close_bill" | "reopen_bill" | "push_to_xero" | "void_credit"[];
-```
-
 ### `PURCHASE_BILL_XERO_DOCUMENTS`
 
 Which Xero collection a bill's `xero_id` lives in. A GUID cannot say: ACCPAY
@@ -11245,41 +11220,6 @@ interface Purchase {
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
 }
-```
-
-### `PurchaseActionDefinition`
-
-One row of {@link PURCHASE_ACTIONS}.
-
-```ts
-interface PurchaseActionDefinition {
-  subject: PurchaseActionSubject;
-  description: string;
-}
-```
-
-### `PurchaseActionId`
-
-One purchase action id.
-
-```ts
-type PurchaseActionId = indexedAccess;
-```
-
-### `PurchaseActionIdEnum`
-
-Zod schema for {@link PurchaseActionId}.
-
-```ts
-const PurchaseActionIdEnum: z.ZodType<PurchaseActionId>;
-```
-
-### `PurchaseActionSubject`
-
-What an action acts on — and so which offer function lists it.
-
-```ts
-type PurchaseActionSubject = "purchase" | "purchase_item" | "purchase_bill" | "purchase_credit";
 ```
 
 ### `PurchaseBill`
@@ -17138,7 +17078,7 @@ const VoidPurchaseBillInput: z.ZodType<VoidPurchaseBillInputType>;
 
 Input for voiding a supplier bill from CFS. `version` is the bill's. A pushed
 bill only: a linked one is Xero's. The refusals are
-`purchaseBillVoidRefusal` (`utils/purchase-actions.ts`).
+`voidRefusal` (`utils/document-actions.ts`).
 
 ```ts
 interface VoidPurchaseBillInputType {
@@ -31239,7 +31179,7 @@ const VoidPurchaseBillInput: z.ZodType<VoidPurchaseBillInputType>;
 
 Input for voiding a supplier bill from CFS. `version` is the bill's. A pushed
 bill only: a linked one is Xero's. The refusals are
-`purchaseBillVoidRefusal` (`utils/purchase-actions.ts`).
+`voidRefusal` (`utils/document-actions.ts`).
 
 ```ts
 interface VoidPurchaseBillInputType {
@@ -31948,7 +31888,7 @@ What one credit-note status admits (api-cloudrun#1169). Until this table the
 note's transitions were implicit in its writers, and the manager offered Void
 on any non-void note while the API 409'd it whenever an allocation was live.
 
-Read by `creditNoteActionsFor` (`@cfs/core/utils/invoice-actions`). Each
+Read by `creditActionsFor` (`@cfs/core/utils/document-actions`). Each
 column is a STATUS gate only: the action also needs its own runtime condition
 (no live allocation to void, remaining credit to allocate), which the ruleset
 checks and this table cannot state.
@@ -36970,7 +36910,7 @@ type CloudTaskEventMsg = indexedAccess;
 Msg literals this archetype absorbs.
 
 ```ts
-const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "store_destination_no_default" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_invoice_count_high" | "invoice_created" | "invoice_updated" | "organization_check_failed" | "organization_no_xero_id" | "organization_xero_id_shared" | "organization_merged" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "document_ref_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "oos_overbilled" | "checkout_shelf_shortfall" | "custody_delta_unmatched" | "substitution_custody_kept" | "invoice_action_unoffered" | "fulfillment_custom_item_qty_override" | "fulfillment_sync_items_skipped_no_bookings" | "fulfillment_sync_frozen_rows" | "recurrence_horizon_failed" | "tax_priced_on_unreviewed_rate" | "invoice_sync_organization_kept" | "destination_pair_unjoined" | "purchase_landed_cost_stranded"[];
+const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "store_destination_no_default" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_invoice_count_high" | "invoice_created" | "invoice_updated" | "organization_check_failed" | "organization_no_xero_id" | "organization_xero_id_shared" | "organization_merged" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "document_ref_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "oos_overbilled" | "checkout_shelf_shortfall" | "custody_delta_unmatched" | "substitution_custody_kept" | "fulfillment_custom_item_qty_override" | "fulfillment_sync_items_skipped_no_bookings" | "fulfillment_sync_frozen_rows" | "recurrence_horizon_failed" | "tax_priced_on_unreviewed_rate" | "invoice_sync_organization_kept" | "destination_pair_unjoined" | "purchase_landed_cost_stranded"[];
 ```
 
 ### `DmarcAggregateLogRecord`
@@ -37042,10 +36982,6 @@ interface DomainEventLogRecord {
   status_to?: string | null;
   quantity_held?: number;
   quantity_available?: number;
-  invoice_action?: string;
-  action_subject?: "invoice" | "credit_note" | "order";
-  action_subject_uid?: string;
-  refusal?: string;
   mirror?: "orders.credit_notes" | "purchases.bills" | "purchases.credits";
   uid_initiator?: string;
   uid_source?: string;
@@ -42639,6 +42575,20 @@ The receivable side: orders, invoices, credit notes.
 const RECEIVABLE_BILLING_FOLD: BillingFoldSide<AccountedInvoice, AccountedCreditNote>;
 ```
 
+### `RemainingBilling`
+
+{@link remainingBilling}'s answer: what a remainder bills, line by line.
+
+```ts
+interface RemainingBilling {
+  bills: boolean;
+  units: Map<string, number>;
+  owed: Map<string, Array<typeLiteral>>;
+  overbilled: typeLiteral[];
+  refused: boolean;
+}
+```
+
 ### `RemainingInvoice`
 
 ```ts
@@ -42989,6 +42939,20 @@ F12, rulings 96–99): the payable twin of {@link orderOutOfServiceInputs}.
 A record may also name an order (a customer's loss of a subrented unit); it
 then surfaces on both initiators, each against its own billing documents.
 
+### `remainingBilling(account: InitiatorAccount): RemainingBilling`
+
+**The remainder's DECISION, both sides** (one-document-model ruling 101; F15
+item 6): per line, the units and the extension groups a billing document of
+"what is left" bills, read off the account ({@link LineAccount.remaining},
+{@link LineAccount.extension}), never re-derived. Each side keeps its own ROW
+author: {@link buildRemainingInvoice} on the receivable side; the bill writer
+on the payable side, whose rows take `from = actedBilledUnits`, a pair windowed
+at the bill date, an ancestors-only scope and a `PO-N` divider. The manager's
+bill form seeds from it.
+
+Fails closed on the account's shared refusal ({@link InitiatorAccount.refused}),
+deciding nothing.
+
 ### `remainingToBill(item: typeLiteral, billedUnits: number): number`
 
 **Units of a line still to bill** (ruling 42's one remaining-to-bill engine):
@@ -43053,6 +43017,613 @@ credits take no units (R3), so they do not advance it.
 **Parameters**
 
 - `billing` — The billing document `row` is on, and its line rows
+
+## `@cfs/core/utils/document-actions`
+
+**The one action catalog, keyed by role** (one-document-model ruling 43; F15,
+rulings 110–118) — ONE answer, for the manager and the API alike and for both
+sides, to "what may an operator do to this initiator, this billing document,
+or this credit?".
+
+Three offer functions, one per ROLE, each over both sides and each returning
+only ids from `DOCUMENT_ACTION_IDS` whose `roles` include its role:
+
+- {@link initiatorActionsFor} — on an order or a purchase, and its lines;
+- {@link billingActionsFor} — on an invoice or a bill;
+- {@link creditActionsFor} — on a credit note or a supplier credit;
+
+and an `assert*` per function, throwing {@link DocumentActionRefusal}, that the
+API runs on its OPERATOR routes, so a button cannot be offered that the server
+refuses. It replaced `utils/invoice-actions.ts` and `utils/purchase-actions.ts`,
+both deleted with F15.
+
+## The side is DATA, never a branch
+
+Everything that differs between the sides is a row of {@link ACTION_SIDES} (the
+`BILLING_FOLD` / `DIFF_SIDES` form), each with its reason, or an entry of
+{@link ACTION_GAPS} / {@link SIDE_ONLY_ACTIONS}. `tests/billing-fold-coverage.test.ts`
+holds this file to `SIDE_FREE_FILES`, so a `side ===` here fails the suite.
+
+## Rules every caller keeps
+
+1. 🔴 **Operator policy is not legality.** The `assert*` functions belong on
+   operator routes only — never on the Xero webhook, the reap, void-from-cancel
+   or a status derivation. Xero is the authority on payments.
+2. **Fail closed.** Every context is REQUIRED: an absent list used to read as
+   "nothing billed" (and offered a removal) or "unknown" (and offered a remainder
+   the server then refused). A status outside the vocabulary offers nothing.
+3. **An offer is a snapshot** of the documents it was handed; the server
+   re-checks inside its transaction.
+
+## Calling an `assert*` on a write path — what to hand it
+
+The `assert*` takes a per-action REQUEST carrying only what that action reads,
+so no caller reads more than its transaction may:
+
+- 🔴 **`reverse_settlement` needs only the TARGET row and any row that NAMES
+  it** — never the whole settlement list. A range read inside the reversal's
+  transaction would block every concurrent appender, and a pre-read outside it
+  would decide on a stale Xero id (the #358 hoist-data-not-ids prohibition).
+- `close` and `add_payment` assert against the transaction's own snapshot of
+  the document: the totals they test can change under any read outside it.
+  `add_payment`'s cap is only as strong as that read — two concurrent payments
+  can still overpay between them, and the fold keeps that visible.
+
+### `ACTION_GAPS`
+
+**What each side does not offer YET, because no route performs it** (ruling
+116). Every row names the slice that removes it, and
+`tests/document-actions.test.ts` asserts the table only SHRINKS. An `assert*`
+refuses a gap by its reason.
+
+```ts
+const ACTION_GAPS: Readonly<Record<Side, Readonly<Partial<Record<DocumentActionId, ActionGap>>>>>;
+```
+
+### `ACTION_SIDES`
+
+The two sides' action data.
+
+```ts
+const ACTION_SIDES: Readonly<Record<Side, ActionSide>>;
+```
+
+### `ActionGap`
+
+One action a side does not offer until its route exists (ruling 116).
+
+```ts
+interface ActionGap {
+  reason: string;
+  removed_by: string;
+}
+```
+
+### `ActionSide`
+
+**Everything that differs between the sides in the action catalog** — data,
+never an `if side`, each entry a domain fact with its reason (ruling 51).
+
+```ts
+interface ActionSide {
+  nouns: Readonly<Record<DocumentActionRole, string>>;
+  pushCreates: boolean;
+  creditCapsByPool: boolean;
+  creditNeedsScope: boolean;
+  closeWaitsForReturn: boolean;
+  authorship(doc: object): BillingAuthorship;
+  takesCredit(doc: object): boolean;
+  reversible(contract: SettlementContract): boolean;
+  counterparty(doc: object): string | null;
+}
+```
+
+### `AllocationTargets`
+
+A billing document a credit might be allocated to, per side.
+
+```ts
+interface AllocationTargets {
+  receivable: typeLiteral;
+  payable: typeLiteral & Pick<PurchaseBill, "xero_document">;
+}
+```
+
+### `BillableLine`
+
+One initiator line {@link DocumentActionOffer} `create_billing` may bill, and the most it may.
+
+```ts
+interface BillableLine {
+  path: string[];
+  uid: string;
+  max_quantity: number;
+}
+```
+
+### `BillingActionRequest`
+
+What an operator route asks to do to a billing document: each request carries only what its action reads.
+
+```ts
+type BillingActionRequest = typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral | parenthesized;
+```
+
+### `BillingAuthorship`
+
+A billing document's authorship: CFS on the receivable side; `pushed` or `linked` on the payable.
+
+```ts
+type BillingAuthorship = "cfs" | "pushed" | "linked";
+```
+
+### `BillingOfferContext`
+
+What {@link billingActionsFor} needs that the document alone does not carry. Every key is required.
+
+```ts
+interface BillingOfferContext {
+  settlements: readonly OfferSettlement[];
+  credits: readonly indexedAccess[];
+  initiators: readonly OfferInitiatorDocuments<S>[];
+  xero_sync_status: InvoiceXeroSyncStatus;
+}
+```
+
+### `BillingOfferDocuments`
+
+A billing document, per side: a bill also says who authored it and which Xero document it is.
+
+```ts
+interface BillingOfferDocuments {
+  receivable: OfferBillingCore;
+  payable: OfferBillingCore & Pick<PurchaseBill, "origin" | "xero_document">;
+}
+```
+
+### `CappedCreditLine`
+
+A requested credit line, as {@link creditRefusal} reads it.
+
+```ts
+interface CappedCreditLine {
+  name: string;
+  quantity: number;
+  price?: typeLiteral;
+}
+```
+
+### `CreditActionRequest`
+
+What an operator route asks to do to a credit.
+
+```ts
+type CreditActionRequest = typeLiteral | typeLiteral | typeLiteral;
+```
+
+### `CreditOfferContext`
+
+What {@link creditActionsFor} needs that the credit alone does not carry.
+
+```ts
+interface CreditOfferContext {
+  allocations: readonly OfferCreditRow[];
+  target: indexedAccess | null;
+}
+```
+
+### `CreditOfferDocuments`
+
+A credit, per side, as the offers read it.
+
+```ts
+interface CreditOfferDocuments {
+  receivable: Pick<CreditNote, "uid" | "status" | "remaining_credit_cents"> & typeLiteral;
+  payable: Pick<PurchaseCredit, "uid" | "status" | "remaining_credit_cents" | "supplier">;
+}
+```
+
+### `CreditPart`
+
+One row a credit of `n` units of a billing row pre-fills: {@link creditParts}' element.
+
+```ts
+interface CreditPart {
+  path: string[];
+  uid: string;
+  quantity: number;
+  bound: boolean;
+}
+```
+
+### `CreditableContext`
+
+What {@link creditableLines} reads besides the billing document.
+
+```ts
+interface CreditableContext {
+  credits: readonly indexedAccess[];
+  initiators: readonly OfferInitiatorDocuments<S>[];
+}
+```
+
+### `CreditableLine`
+
+One line a billing document may still be credited (F15 item 5) — one element,
+both sides, keyed by the billing row's PATH (its row identity).
+
+```ts
+interface CreditableLine {
+  path: string[];
+  uid: string;
+  billed: number;
+  billed_time: TimeAmount;
+  unit_time: TimeAmount;
+  units: number;
+  stands_in_for?: string[];
+}
+```
+
+### `DocumentActionOffer`
+
+One action the UI may offer. `key` is what a menu de-duplicates on: the action
+id, `<id>:<path>` for a per-line action, or `reverse_settlement:<uid>`.
+
+```ts
+interface DocumentActionOffer {
+  key: string;
+  action: DocumentActionId;
+  path?: string[];
+  max_cents?: number;
+  uid_settlement?: string;
+  lines?: CreditableLine[];
+  bill_lines?: BillableLine[];
+  money_frozen?: boolean;
+  frozen_classes?: readonly InvoiceFieldClass[];
+  outcome?: "cancel" | "close";
+}
+```
+
+### `DocumentActionRefusal`
+
+_(class — see source)_
+
+### `InitiatorActionRequest`
+
+What an operator route asks to do from an initiator.
+
+```ts
+type InitiatorActionRequest = typeLiteral | typeLiteral;
+```
+
+### `InitiatorLineCustody`
+
+One initiator line's custody, side-neutral: `received` is the units custody
+has MOVED for the line (payable: arrived; receivable: left the shelf for it),
+`returned` the units no longer away (payable: back with the supplier;
+receivable: back from the customer). Build the payable map with
+`custodyBySourceItem`.
+
+```ts
+type InitiatorLineCustody = PurchaseLineCustody;
+```
+
+### `InitiatorOfferContext`
+
+What {@link initiatorActionsFor} needs that the initiator alone does not carry. Every key is required.
+
+```ts
+interface InitiatorOfferContext {
+  billing: readonly indexedAccess[];
+  credits: readonly indexedAccess[];
+  accounting: AccountingContext;
+  custody: ReadonlyMap<string, InitiatorLineCustody>;
+  now: string;
+  replacement_units: number;
+  on_request_units: number;
+}
+```
+
+### `InitiatorOfferDocuments`
+
+An initiator, per side, as the offers read it.
+
+```ts
+interface InitiatorOfferDocuments {
+  receivable: Pick<Order, "uid" | "number" | "status" | "items" | "destinations">;
+  payable: Pick<Purchase, "uid" | "number" | "status" | "items" | "destinations">;
+}
+```
+
+### `OfferBillingCore`
+
+What every billing document carries for the offers.
+
+```ts
+interface OfferBillingCore {
+  uid: string;
+  number: number;
+  status: InvoiceStatusType;
+  totals: InvoiceSettledTotals & typeLiteral;
+  items: readonly OfferRow[];
+  xero_id: string | null;
+}
+```
+
+### `OfferCreditRow`
+
+A settlement row drawing on a credit, as the credit's offers read it.
+
+```ts
+type OfferCreditRow = Pick<Settlement, "uid" | "type" | "reverses">;
+```
+
+### `OfferInitiatorDocuments`
+
+One initiator a billing document bills, with EVERY billing and credit document
+of it — the stranded-credit rule's fold, and the payable credit pool.
+
+```ts
+interface OfferInitiatorDocuments {
+  initiator: typeLiteral;
+  billing: readonly indexedAccess[];
+  credits: readonly indexedAccess[];
+}
+```
+
+### `OfferRow`
+
+A billing row as the offers read it: a line or a divider of an invoice or a bill.
+
+```ts
+interface OfferRow {
+  uid: string;
+  type: string;
+  path: readonly string[];
+  quantity?: number;
+  price?: typeLiteral;
+  substituted_for?: readonly typeLiteral[];
+  ledger_account?: unknown;
+}
+```
+
+### `OfferSettlement`
+
+A settlement row as `reverse_settlement` reads it.
+
+```ts
+type OfferSettlement = Pick<Settlement, "uid" | "type" | "reverses" | "xero_payment_id">;
+```
+
+### `RemainingBilling`
+
+{@link remainingBilling}'s answer: what a remainder bills, line by line.
+
+```ts
+interface RemainingBilling {
+  bills: boolean;
+  units: Map<string, number>;
+  owed: Map<string, Array<typeLiteral>>;
+  overbilled: typeLiteral[];
+  refused: boolean;
+}
+```
+
+### `SIDE_ONLY_ACTIONS`
+
+**The actions a role offers on one side only, keyed by the side that offers
+them, and why** — the contract half of ruling 51's single list of differences.
+Not a gap: nothing removes these by building a route.
+
+```ts
+const SIDE_ONLY_ACTIONS: Readonly<Record<Side, readonly SideOnlyAction[]>>;
+```
+
+### `SideOnlyAction`
+
+One action a role offers on ONE side only, BY DESIGN — a contract entry, not a gap.
+
+```ts
+interface SideOnlyAction {
+  action: DocumentActionId;
+  role: DocumentActionRole;
+  reason: string;
+}
+```
+
+### `TimeAmount`
+
+An exact, non-negative-denominator rational — a quantity of a formula's periods.
+
+```ts
+interface TimeAmount {
+  num: number;
+  den: number;
+}
+```
+
+### `assertBillingAction(side: S, doc: indexedAccess, request: BillingActionRequest<S>): void`
+
+Refuse a billing action the catalog does not offer, or one past its offer's limit. Operator routes only.
+
+### `assertCreditAction(side: S, credit: indexedAccess, request: CreditActionRequest<S>): void`
+
+Refuse a credit action the catalog does not offer, or one past its limit. Operator routes only.
+
+### `assertInitiatorAction(side: S, initiator: indexedAccess, ctx: InitiatorOfferContext<S>, request: InitiatorActionRequest): void`
+
+Refuse an initiator action the catalog does not offer. Operator routes only.
+
+### `billingActionsFor(side: S, doc: indexedAccess, ctx: BillingOfferContext<S>): DocumentActionOffer[]`
+
+**Every action an operator may take on this billing document** (F15 items 3–4).
+
+- `issue` — `canOperatorTransition(…, "issued")`. A bill is never a draft until
+  6e-0d, so the status contract fails closed with no branch.
+- `void` — {@link voidRefusal}.
+- `close` — {@link closeRefusal}.
+- `add_payment` — the status `accepts_payment` and something is due; `max_cents`
+  is the amount due.
+- `allocate_credit` — the document has credit room (due, and the side takes credit on it).
+- `reverse_settlement` — one offer per reversible row ({@link reversalRefusal}); a
+  $0 document is un-closed by reversing its closure row (ruling 115).
+- `add_credit` — a status live in Xero with credit left on a line ({@link creditableLines}).
+- `edit_items` — always; `frozen_classes` from `INVOICE_FIELD_FREEZE`, both sides.
+- `edit_date` / `edit_counterparty` — while their field class is not frozen.
+- `push_to_xero` — {@link pushRefusal}.
+
+Gaps ({@link ACTION_GAPS}) are never offered.
+
+### `closeRefusal(side: Side, doc: Pick<OfferBillingCore, "status" | "totals">): string | null`
+
+Why `doc` may not be marked paid at $0, or `null` when it may — one rule for an invoice and a bill.
+
+### `countsTime(counts: readonly typeLiteral[] | null | undefined): TimeAmount`
+
+**One unit's billed time**: Σ a line's `counts`, exact. A line with no counts
+(none stored) counts as one period, so the budget is exactly its unit count.
+
+### `creditActionsFor(side: S, credit: indexedAccess, ctx: CreditOfferContext<S>): DocumentActionOffer[]`
+
+**Every action an operator may take on this credit.**
+
+- `void_credit` — the status is voidable and no allocation or refund is live.
+- `allocate_credit` — credit left; with a target, one that accepts credit,
+  owes something and shares the counterparty. `max_cents` is the remaining
+  credit, capped by the target's due.
+- `record_refund` — credit-level only (no target), credit left.
+
+### `creditParts(billing: Pick<OfferBillingCore, "uid" | "items">, path: readonly string[], n: number, credits: readonly indexedAccess[]): CreditPart[]`
+
+**The rows a credit of `n` units of the billing row at `path` pre-fills** —
+one function, both sides (F15 item 5): the row itself, then, when it is a KIT
+(ordinary or substitute), every line row below it at the document's own ratio.
+A row of `q` units under a root of `Q` takes `(⌊cq/Q⌉, ⌊(c + n)q/Q⌉]`, `c` the
+root's units already credited, half-up, so credits that sum to the root's
+quantity sum to each row's. A row the ratio gives no unit is left out.
+
+BINDING only below a substitute kit's root (the fold reads its entries off the
+root); a SUGGESTION below an ordinary kit's.
+
+Quantities only: each part's money is the writer's (`priceCreditNote`,
+`billLineCreditParts`).
+
+**Returns** — `[]` when no line row sits at `path`, or `n` is not positive
+
+### `creditRefusal(side: S, billing: Pick<OfferBillingCore, "uid" | "number" | "status" | "items">, ctx: CreditableContext<S>, requested: readonly CappedCreditLine[]): string | null`
+
+**Why crediting `requested` from this billing document would exceed what it
+billed, or `null`** — the server's half of {@link creditableLines}, both sides
+(F15 item 5). Requests naming one row are SUMMED (the stricter rule):
+
+- arm A: the units named on one row may not exceed the units it billed;
+- a units credit takes at most the row's offered `units` (segment, time and,
+  payable, pool);
+- arm B: every request's time on one row together fits its unit-time budget.
+
+A line naming no row of this document, or a row the offer does not list, is
+refused by name.
+
+### `creditableLines(side: S, billing: Pick<OfferBillingCore, "uid" | "status" | "items">, ctx: CreditableContext<S>): CreditableLine[]`
+
+**What each line of a billing document may still be credited** — ONE function,
+both sides (ruling 43's second clause; F15 item 5).
+
+- **A unit-TIME budget**: `billed × billed_time − Σ prior`, exact, every prior
+  credit line keyed to the row counted (a units credit by the row's time, a
+  time credit by its own; ruling 106).
+- **First-come units, one segment per credit**: a row's first units stand in
+  for its live substitution entries, in stored order, then its own. Only a
+  UNITS credit advances `c` (`rowCreditedBefore`); a time credit takes time,
+  never units (R3). A credit row's fold splits its money over its entries, so
+  a credit spanning two segments could move a cent between two lines.
+- **Time lines on both sides; $0 lines on both** (ruling 118): a $0 line
+  credits no money, but a units credit of it un-bills units the fold counts.
+- **A substitute kit's root** is offered for its whole subtree, a $0 header
+  included; its components never alone ({@link creditRows}).
+- **Per side** ({@link ACTION_SIDES}): the payable pool cap and scope arm.
+
+A document not live in Xero offers nothing.
+
+### `initiatorActionsFor(side: S, initiator: indexedAccess, ctx: InitiatorOfferContext<S>): DocumentActionOffer[]`
+
+**Every action an operator may take on this initiator and its lines.** Per-line
+offers follow the initiator-level ones, in line order.
+
+- `create_billing` — the initiator is not canceled; `bill_lines` names every
+  line with something to bill (ruling 114): a flat line's units the account
+  leaves (`remaining.units`), a TIME line its ordered units (what is left of its
+  time is the writer's split, `splitBillTime`).
+- `create_remaining_billing` — the account finds a line the remainder would bill
+  ({@link remainingBilling}). An over-billed line is not one: it is `credit_overbilling`'s.
+- `create_replacement_billing` / `create_service_charge_billing` — their unit counts.
+- `credit_overbilling` — `buildOverbillingCredits` offers at least one note.
+- `close_remaining` — an active initiator with a closable line and, where the
+  side's close waits for returns, no subrented unit out; `outcome` says
+  whether it cancels.
+- `add_credit` — (payable, until ruling 112) any billing document exists.
+- per line: `close_item`; `remove_item` and `change_basis` on an untouched
+  line ({@link initiatorLineTouched}), `change_basis` only on a line with a
+  formula. A kit header (payable) may be removed while nothing under it is touched.
+
+### `initiatorLineTouched(side: Side, line: Pick<LineAccount, "named" | "item">, custody: InitiatorLineCustody): boolean`
+
+**Has anything happened to this line that makes it history as well as an
+order?** Ruling 102: the account NAMES it (a live billing row, a substitute
+standing in for it, a live credit that took something back), or, on a line
+that moves custody, custody has moved units for it. A touched line is neither
+removed nor moved across bases.
+
+### `lineActionKey(action: DocumentActionId, path: readonly string[]): string`
+
+A per-line offer's key: the action and the line's path, the row identity.
+
+### `pushRefusal(side: S, doc: indexedAccess, status: InvoiceXeroSyncStatus): string | null`
+
+Why an operator may not ask for this billing document to be pushed to Xero, or
+`null`. One refusal (F15 item 4): a status that tracks Xero edits, a sync
+status Xero is behind on, a document already linked where the side's push
+does not create ({@link ActionSide.pushCreates}), and never a LINKED document
+once settled.
+
+### `remainingBilling(account: InitiatorAccount): RemainingBilling`
+
+**The remainder's DECISION, both sides** (one-document-model ruling 101; F15
+item 6): per line, the units and the extension groups a billing document of
+"what is left" bills, read off the account ({@link LineAccount.remaining},
+{@link LineAccount.extension}), never re-derived. Each side keeps its own ROW
+author: {@link buildRemainingInvoice} on the receivable side; the bill writer
+on the payable side, whose rows take `from = actedBilledUnits`, a pair windowed
+at the bill date, an ancestors-only scope and a `PO-N` divider. The manager's
+bill form seeds from it.
+
+Fails closed on the account's shared refusal ({@link InitiatorAccount.refused}),
+deciding nothing.
+
+### `sideOffers(side: Side, role: DocumentActionRole, action: DocumentActionId): boolean`
+
+Is `action` offered on `role` of `side`? Its `roles`, less this side's gaps,
+and less an entry some side offers ONLY that this side does not list.
+
+### `voidRefusal(side: S, doc: indexedAccess, credits: readonly indexedAccess[], initiators: readonly OfferInitiatorDocuments<S>[]): string | null`
+
+**Why an operator may not void this billing document, or `null`** (F15 item 4;
+ruling 117). One rule, both sides:
+
+1. the status admits a void (`canOperatorTransition`);
+2. not a LINKED document (its money is Xero's: void it in Xero);
+3. nothing paid or credited against it, on the FOLDED totals (ruling 117 —
+   a CFS-recorded payment Xero has not yet seen is still money the operator
+   reverses first; release-on-void is how a payment silently disappeared);
+4. 🔴 **the POINTER arm**: no live credit has a line naming this document
+   (`uid_billing`). The fold arm below cannot see one: `placeCredits` skips a
+   credit line naming a billing document the fold is not reading, so a
+   pointed credit of the voided document never showed and was stranded;
+5. the FOLD arm: voiding leaves no flat initiator line it names billed below
+   zero by an unpointed reversing credit. A time line's billing is its metered
+   time, which a void cannot strand a credit under.
+
+A void from Xero is never refused and never reads this.
 
 ## `@cfs/core/utils/icons`
 
@@ -45241,387 +45812,6 @@ written at issue described a body an edit would not have sent.
 A `custom-` line is never matched to a product, whatever the caller passes.
 The tax mapping and the money stay in the API (`XeroTaxContext`,
 `xeroLineMoney`).
-
-## `@cfs/core/utils/invoice-actions`
-
-The invoice action ruleset — ONE answer, for the manager and the API alike, to
-"what may an operator do to this invoice, this credit note, or this order's
-invoicing?" (api-cloudrun#1169, R3).
-
-Three offer functions, each returning only ids from `INVOICE_ACTION_IDS`:
-
-- {@link invoiceActionsFor} — on an invoice;
-- {@link creditNoteActionsFor} — on a credit note;
-- {@link orderInvoiceActionsFor} — creating invoices or credits from an order.
-
-and an `assert*` per function, throwing {@link InvoiceActionRefusal}, that the
-API runs on its OPERATOR routes. The shape is custody's (`utils/custody.ts`):
-the UI renders the offers, the server asserts the same rules, so a button
-cannot be offered that the server refuses.
-
-## Two rules every caller must keep
-
-1. 🔴 **Operator policy is not legality.** The `assert*` functions belong on
-   operator routes only — never on the Xero webhook, the reap, void-from-cancel
-   or {@link deriveInvoiceStatus}. Xero is the authority on payments: an
-   overpayment that arrives from Xero is a fact to record, not a request to
-   refuse. `add_payment`'s cap applies to the operator, never to the ledger.
-2. **Fail closed.** An action this module does not offer is refused, and an
-   unknown status offers nothing rather than throwing.
-
-## What stays server-only
-
-Referenced by the ruleset, never duplicated into it: `lineMoneyAgrees` (it
-needs the REBUILT lines, so `edit_items` takes its answer as `money_moved`),
-the organization tombstone and Xero-contact re-address checks, the automatic
-Xero pushes and `XERO_RETRACTION`, CAS/version checks, idempotency and counter
-allocation. An offer is a snapshot of the documents it was handed; the server
-re-checks.
-
-The one Xero push an OPERATOR may request is `push_to_xero`
-(api-cloudrun#1332). It only enqueues the edit push; the task re-plans and
-still stops at its own seams. Like `edit_items`, it takes a server-computed
-answer, `xero_sync_status`, because the status needs the invoice's whole Xero
-projection and its sidecar.
-
-## Calling an `assert*` on a write path — what to hand it
-
-The `api-cloudrun` `firestore-transactions` skill decides this, and two
-contexts are easy to get wrong:
-
-- 🔴 **`reverse_settlement` needs only the TARGET row and any row that NAMES
-  it** — never the invoice's whole settlement list. Inside the reversal's
-  transaction pass `[target]`, plus the derived reverser when its point-get
-  exists. A `uid_invoice` range read there would block every concurrent
-  appender (the range-lock family). A pre-read outside the transaction would
-  decide on a stale `xero_payment_id`, which `linkSettlementToXero` binds
-  null → value after the row is written: the #358 hoist-data-not-ids
-  prohibition.
-- **`add_payment`'s cap is only as strong as the read it is checked against.**
-  The payment path claims its row and then CASes the invoice outside any
-  transaction, and a refusal after the claim would strand a committed row.
-  So the cap is checked against the read the claim was decided on, and two
-  concurrent payments can still overpay between them. The fold keeps that
-  visible as a negative `amount_due_cents`; it does not prevent it.
-- `close` needs no context at all: assert it against the transaction's own
-  invoice snapshot. The total it tests can change under any read outside the
-  transaction.
-
-### `CappedCreditLine`
-
-A credit-note line, as the credit cap reads it: keyed by its billing pointer
-({@link keyCreditLines}). A line naming another invoice does not count here.
-
-```ts
-interface CappedCreditLine {
-  name: string;
-  quantity: number;
-  price: typeLiteral;
-}
-```
-
-### `CappedNote`
-
-A prior credit note, as the credit cap reads it. Void notes are skipped.
-
-```ts
-interface CappedNote {
-  status: string;
-  items: readonly parenthesized[];
-}
-```
-
-### `CreditKitPart`
-
-One row a credit of a kit pre-fills: {@link creditKitParts}' element.
-
-```ts
-interface CreditKitPart {
-  path: string[];
-  uid: string;
-  quantity: number;
-}
-```
-
-### `CreditNoteActionRequest`
-
-What an operator route asks to do to a credit note.
-
-```ts
-type CreditNoteActionRequest = typeLiteral | typeLiteral | typeLiteral;
-```
-
-### `CreditNoteOfferContext`
-
-What {@link creditNoteActionsFor} needs that the note alone does not carry.
-
-```ts
-interface CreditNoteOfferContext {
-  allocations: readonly Pick<Settlement, "uid" | "type" | "reverses">[];
-  invoice?: OfferAllocationTarget;
-}
-```
-
-### `CreditableLine`
-
-What one billed line may still be credited (D3) — arm B of the credit-note
-cap, as an offer. All three numbers are net of every prior non-void note.
-
-```ts
-interface CreditableLine {
-  path: string[];
-  uid: string;
-  billed: number;
-  billed_time: TimeAmount;
-  unit_time: TimeAmount;
-  units: number;
-}
-```
-
-### `InvoiceActionOffer`
-
-One action the UI may offer. `key` is what a menu de-duplicates on: the action
-id, or `reverse_settlement:<uid>` for a per-row reversal.
-
-```ts
-interface InvoiceActionOffer {
-  key: string;
-  action: InvoiceActionId;
-  max_cents?: number;
-  uid_settlement?: string;
-  lines?: CreditableLine[];
-  money_frozen?: boolean;
-  frozen_classes?: readonly InvoiceFieldClass[];
-}
-```
-
-### `InvoiceActionRefusal`
-
-_(class — see source)_
-
-### `InvoiceActionRequest`
-
-What an operator route asks to do to an invoice.
-
-```ts
-type InvoiceActionRequest = typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral;
-```
-
-### `InvoiceOfferContext`
-
-What {@link invoiceActionsFor} needs that the invoice alone does not carry.
-
-```ts
-interface InvoiceOfferContext {
-  settlements?: readonly OfferSettlement[];
-  creditNotes?: readonly CappedNote[];
-  xero_sync_status?: InvoiceXeroSyncStatus;
-  xero_held_settlements?: boolean;
-}
-```
-
-### `OfferAllocationTarget`
-
-An invoice a credit note might be allocated to.
-
-```ts
-interface OfferAllocationTarget {
-  status: InvoiceStatusType;
-  totals: typeLiteral;
-  organization: typeLiteral;
-}
-```
-
-### `OfferCreditNote`
-
-A credit note as the ruleset reads it.
-
-```ts
-type OfferCreditNote = Pick<CreditNote, "status" | "remaining_credit_cents"> & typeLiteral;
-```
-
-### `OfferInvoice`
-
-An invoice as the ruleset reads it.
-
-```ts
-interface OfferInvoice {
-  uid: string;
-  status: InvoiceStatusType;
-  totals: InvoiceSettledTotals & typeLiteral;
-  items?: readonly InvoiceDocItemType[];
-  xero_id?: string | null;
-}
-```
-
-### `OfferOrder`
-
-An order as the ruleset reads it.
-
-```ts
-type OfferOrder = Pick<Order, "uid" | "number" | "status" | "items" | "destinations">;
-```
-
-### `OfferSettlement`
-
-A settlement row as `reverse_settlement` reads it.
-
-```ts
-type OfferSettlement = Pick<Settlement, "uid" | "type" | "reverses" | "xero_payment_id">;
-```
-
-### `OrderInvoiceActionRequest`
-
-What an operator route asks to do from an order.
-
-```ts
-interface OrderInvoiceActionRequest {
-  action: "create_invoice" | "create_remaining_invoice" | "create_replacement_invoice" | "create_service_charge_invoice" | "credit_overbilling";
-}
-```
-
-### `OrderInvoiceOfferContext`
-
-What {@link orderInvoiceActionsFor} needs that the order alone does not carry.
-
-```ts
-interface OrderInvoiceOfferContext {
-  invoices?: readonly AccountedInvoice[];
-  creditNotes?: readonly AccountedCreditNote[];
-  accounting?: AccountingContext;
-  replacement_units?: number;
-  on_request_units?: number;
-}
-```
-
-### `TimeAmount`
-
-An exact, non-negative-denominator rational — a quantity of a formula's periods.
-
-```ts
-interface TimeAmount {
-  num: number;
-  den: number;
-}
-```
-
-### `assertCreditNoteAction(note: OfferCreditNote, ctx: CreditNoteOfferContext, request: CreditNoteActionRequest): void`
-
-Refuse a credit-note action the ruleset does not offer. Operator routes only.
-
-### `assertInvoiceAction(invoice: OfferInvoice, ctx: InvoiceOfferContext, request: InvoiceActionRequest): void`
-
-Refuse an invoice action the ruleset does not offer, or one that exceeds its
-offer's limits. Operator routes only — see the module doc.
-
-### `assertOrderInvoiceAction(order: OfferOrder, ctx: OrderInvoiceOfferContext, request: OrderInvoiceActionRequest): void`
-
-Refuse an order-invoicing action the ruleset does not offer. Operator routes only.
-
-### `closeRefusal(doc: Pick<OfferInvoice, "status" | "totals">, _: unknown): string | null`
-
-Why a $0 billing document may not be marked paid, or `null` when it may — one
-rule for an invoice and a bill (`noun` is for the message only).
-
-### `countsTime(counts: readonly typeLiteral[] | null | undefined): TimeAmount`
-
-**One unit's billed time**: Σ a line's `counts`, exact. A line with no counts
-(none stored) counts as one period, so the budget is exactly its unit count.
-
-### `creditKitParts(invoice: typeLiteral, path: readonly string[], n: number, priorNotes: readonly CappedNote[]): CreditKitPart[]`
-
-**The rows a credit of `n` units of the invoice line at `path` pre-fills**
-(R5, owner 2026-11-13): the line itself, then — when it is a KIT, ordinary or
-substitute — every line row below it at the INVOICE's own ratio. The AR twin
-of `billLineCreditParts` without its refusals: the operator may remove or
-change any part and the API accepts any subset, because the fold judges root
-vs component from the invoice's anchors, never the credit's.
-
-The ratio range is the root's: a row of `q` units under a root of `Q` takes
-`(⌊cq/Q⌉, ⌊(c + n)q/Q⌉]`, `c` the root's units already credited
-({@link unitsCreditedBefore}), rounded half-up, so credits that sum to the
-root's quantity sum to each row's. A row the ratio gives no unit is left out.
-
-Quantities only: each line's money is `priceCreditNote`'s, and its
-`substituted_for` slice is the API writer's (it needs the orders' rows).
-
-**Returns** — `[]` when no line row sits at `path`
-
-### `creditNoteActionsFor(note: OfferCreditNote, ctx: CreditNoteOfferContext): InvoiceActionOffer[]`
-
-Every action the UI may offer on this credit note.
-
-- `void_credit_note` (D4) — the status is voidable and no allocation or refund is live.
-- `allocate_credit_note` (D5, D6) — credit left, and with an invoice in the
-  context, an invoice that `accepts_payment`, owes something, and sits on the
-  same Xero contact. `max_cents` is the remaining credit, capped by the
-  invoice's amount due when one is given.
-- `record_refund` (api-cloudrun#1207) — note-level only (no invoice in the
-  context), a status that accepts allocation, and credit left; `max_cents` is
-  the remaining credit.
-
-### `creditNoteOverCredit(invoiceNumber: number, invoice: typeLiteral, requested: readonly CappedCreditLine[], priorNotes: readonly CappedNote[]): string | null`
-
-Why crediting `requested` would exceed what the invoice billed, or `null` when
-it would not. **The api's whole credit-note cap**, both arms, with its
-messages unchanged but one (a null-day line now names the days it spends) — arm A (one line may not claim more units than the row
-billed) checked first, then arm B (the cumulative unit-day budget).
-
-`invoiceNumber` is for the message only.
-
-### `creditableLines(invoice: typeLiteral, priorNotes: readonly CappedNote[]): CreditableLine[]`
-
-Credit left on every billed line, net of `priorNotes` (D3). **Arm B of the
-api's credit-note cap, lifted here** (`api-cloudrun/src/lib/creditNoteCap.ts`)
-so the manager offers exactly what the server will accept.
-
-ONE budget, in unit-TIME: quantity × Σ `counts`, exact (ruling 8 — the days
-a line bills are its frozen counts, in its formula's own periods). A prior
-note line credited its own counts: the invoice line's for whole units, the
-credited days stated through the formula for a days credit
-(`priceCreditNote`). A line with no counts counts as one period, which makes
-the budget exactly the unit count.
-
-### `invoiceActionSubject(action: InvoiceActionId): InvoiceActionSubject`
-
-Which offer function lists `action` — read off {@link INVOICE_ACTIONS}.
-
-### `invoiceActionsFor(invoice: OfferInvoice, _: unknown): InvoiceActionOffer[]`
-
-Every action the UI may offer on this invoice.
-
-- `issue` / `void` — `canOperatorTransition`, the column `updateInvoice` gates on.
-  `void` is also refused while `ctx.xero_held_settlements` is `true` (D8).
-- `close` — a live invoice totalling $0, nothing money-settled, no live
-  closure. ⚠️ Offered on a `paid` $0 invoice too: the ones today's derivation
-  copied PAID from Xero (#2197) are closed by exactly this action.
-- `add_payment` (D1) — the status `accepts_payment` and something is due;
-  `max_cents` is the amount due, a hard cap with no overpay override.
-- `reverse_settlement` (D2) — one offer per reversible row.
-- `add_credit_note` (D3) — a status live in Xero, with credit left on a line.
-- `edit_items` (D8) — always; `frozen_classes` says which field classes are
-  frozen, and `money_frozen` whether `line_money` is among them.
-- `edit_organization` / `edit_date` — while their field class is not frozen.
-- `push_to_xero` — `issued` / `part_paid` / `paid`, linked to Xero, and the
-  caller's `xero_sync_status` is `out_of_sync` or `unknown`. `paid` is CFS's
-  status, not Xero's: whether Xero holds the payment is the task's question.
-
-### `orderInvoiceActionsFor(order: OfferOrder, _: unknown): InvoiceActionOffer[]`
-
-Every invoicing action the UI may offer on this order.
-
-- The three CREATE actions (D7) refuse a `canceled` order and nothing else —
-  there is no organization-match rule, because billing a third party is a real
-  pattern (13 imported invoices). A `draft` order is reserved by the create
-  route before it is invoiced.
-- `create_remaining_invoice` — the account finds a line the remainder build
-  would bill (`LineAccount.remaining.bills`). An over-billed line is not one:
-  it is `credit_overbilling`'s (core#120).
-- `create_replacement_invoice` — `replacement_units > 0`.
-- `create_service_charge_invoice` — `on_request_units > 0`: cleaning and
-  maintenance, billed as `service` lines on request (api-cloudrun#1163).
-- `credit_overbilling` — `buildOverbillingCredits` offers at least one note,
-  on any status. The manager's 10-invoice cap stays a display limit.
 
 ## `@cfs/core/utils/invoice-xero-sync`
 
@@ -53255,257 +53445,6 @@ mirror, manager's rate editors) before core#146 moved it here.
 - `changedAt` — an ISO instant; snapped to its Chicago calendar day.
 - `mintUid` — the new row's uid; injectable so a test can pin it.
 
-## `@cfs/core/utils/purchase-actions`
-
-The purchase action ruleset — ONE answer to "what may an operator do to this
-purchase, this line, this bill or this supplier credit?", the supplier side's
-twin of `utils/invoice-actions.ts`.
-
-Three offer functions, each returning only ids from `PURCHASE_ACTION_IDS`:
-
-- {@link purchaseActionsFor} — on a purchase and its lines;
-- {@link purchaseBillActionsFor} — on a bill;
-- {@link purchaseCreditActionsFor} — on a supplier credit.
-
-and an `assert*` per function, throwing `InvoiceActionRefusal`, that the API
-runs on its OPERATOR routes, so a button cannot be offered that the server
-refuses. The same shape as the receivable ruleset (`utils/invoice-actions.ts`),
-which shares its refusal class and its $0 close rule.
-
-⚠️ `assert*` belongs on operator routes only, never on a Xero webhook or sweep:
-an operator's policy is not the ledger's legality.
-
-## Rules every caller keeps
-
-1. **Fail closed.** An action this module does not offer is refused, and a
-   line that cannot be probed is not offered.
-2. An offer is a snapshot of the documents it was handed; the server re-checks.
-
-### `CreditableBillLine`
-
-One bill line a supplier credit may name (one-document-model 6d, owner rulings
-21 and 23) — the payable twin of AR's `CreditableLine`, keyed by PATH, the row
-identity (a line's uid is its product's, W4K).
-
-Flat lines only: a time line is credited by counts from the purchase, so it is
-never offered here.
-
-```ts
-interface CreditableBillLine {
-  path: string[];
-  uid: string;
-  billed: number;
-  units: number;
-  stands_in_for?: string[];
-}
-```
-
-### `PurchaseActionItem`
-
-A purchase line as the ruleset reads it.
-
-```ts
-type PurchaseActionItem = Pick<PurchaseSaleItem, LineKeys | "type"> | Pick<PurchaseRentalItem, LineKeys | "type"> | Pick<PurchaseServiceItem, LineKeys | "type"> | Pick<PurchaseReplacementItem, LineKeys | "type">;
-```
-
-### `PurchaseActionOffer`
-
-One action the UI may offer. `key` is what a menu de-duplicates on.
-
-```ts
-interface PurchaseActionOffer {
-  key: string;
-  action: PurchaseActionId;
-  path_purchase_item?: string[];
-  max_quantity?: number;
-  max_cents?: number;
-  lines?: CreditableBillLine[];
-  outcome?: "cancel" | "close";
-}
-```
-
-### `PurchaseActionRequest`
-
-What an operator route asks to do to a purchase. Over-billing is a difference, never a refusal, so `bill_item` is not capped here.
-
-```ts
-type PurchaseActionRequest = typeLiteral | typeLiteral;
-```
-
-### `PurchaseBillActionBill`
-
-The bill an operator asks to void, or asks what it may do to: one of
-{@link PurchaseBilledDocuments}' bills, and who authored it.
-
-```ts
-type PurchaseBillActionBill = indexedAccess & Pick<PurchaseBill, "origin">;
-```
-
-### `PurchaseBillActionRequest`
-
-What an operator route asks to do to a bill. Only a void is decided on the
-purchase's other documents, so only a void carries them: a caller allocating
-credit or pushing a bill does not read a whole purchase to ask.
-
-```ts
-type PurchaseBillActionRequest = typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral;
-```
-
-### `PurchaseBillContext`
-
-What a bill's void is decided on: the bill's purchase and EVERY bill and credit
-of that purchase. ⚠️ **Required**, as {@link PurchaseOfferContext}'s are: an
-absent answer would offer Void on an unknown one, so a caller without these
-documents cannot compile.
-
-```ts
-interface PurchaseBillContext {
-  per_purchase: parenthesized[];
-  xero_sync_status?: PurchaseBillXeroSyncStatus;
-}
-```
-
-### `PurchaseOfferContext`
-
-What {@link purchaseActionsFor} needs that the purchase alone does not carry.
-
-```ts
-interface PurchaseOfferContext {
-  custody: ReadonlyMap<string, PurchaseLineCustody>;
-  now: string;
-  bills: indexedAccess;
-  credits: indexedAccess;
-}
-```
-
-### `assertPurchaseAction(purchase: indexedAccess, ctx: PurchaseOfferContext, request: PurchaseActionRequest): void`
-
-Refuse a purchase action the ruleset does not offer. Operator routes only.
-
-### `assertPurchaseBillAction(bill: PurchaseBillActionBill & Pick<PurchaseBill, "xero_document">, request: PurchaseBillActionRequest): void`
-
-Refuse a bill action the ruleset does not offer, or one past its limit. Operator routes only.
-
-### `assertPurchaseCreditAction(credit: Pick<PurchaseCredit, "status" | "totals" | "remaining_credit_cents">, request: typeLiteral): void`
-
-Refuse a supplier-credit action the ruleset does not offer. Operator routes only.
-
-### `creditableBillLines(bill: PurchaseBillActionBill, ctx: PurchaseBillContext): CreditableBillLine[]`
-
-**What each flat line of this bill may still be credited** (one-document-model
-6d, owner rulings 21–23). Arm B of the payable credit cap, as an offer, so the
-manager offers exactly what the server accepts.
-
-A credit takes a line's units FIRST-COME, as units `(c, c + n]`, `c` being
-what live credits naming it already took (`billLineCredited`), and takes them
-from ONE SEGMENT (owner, 2026-11-11). A substitute Y's first units stand in
-for its X's (W5), one segment per `substituted_for` entry in stored order;
-the rest are the row's own, one more segment. So `units` is the rest of the
-current segment, capped by the pool behind it (`purchaseBillingFold`): the
-entry's X for a stand-in segment, the row's own join for the own one.
-
-Why one segment: a credit row's fold splits ITS money over its entries
-(`billedByPath`), so a credit spanning two segments could
-attribute a cent to one line that the bill gave the other. Within one
-segment, successive credits sum exactly to the bill's share (the credit is
-priced first-come, `billLineCreditMoney`, and the shares telescope).
-
-Absent rather than offered, failing closed:
-- a line on a bill not live in Xero, a time line, a kit header, a $0 line;
-- a line under no purchase the context carries (a credit names ONE purchase);
-- a row below a substitute kit's root (its entries are a share of its
-  root's, which a copied row cannot carry alone).
-
-That root is offered for its whole subtree instead (api-cloudrun#1475), a $0
-header included: a credit of it copies every row below it by the bill's own
-ratio (`billLineCreditParts`), so the fold un-bills X and its components
-together. Time and $0 are judged over the subtree.
-
-### `purchaseActionsFor(purchase: Pick<Purchase, "uid" | "status" | "query_by_bills" | "destinations"> & typeLiteral, ctx: PurchaseOfferContext): PurchaseActionOffer[]`
-
-**Everything an operator may do to a purchase and its lines.** Per-line offers
-follow the purchase-level ones, in line order.
-
-`close` is refused whole while any subrent has units out, because the API
-refuses a whole-purchase close on that line even when it has nothing left to
-close.
-
-### `purchaseBillActionsFor(bill: PurchaseBillActionBill & Pick<PurchaseBill, "xero_document">, ctx: PurchaseBillContext): PurchaseActionOffer[]`
-
-Everything an operator may do to a bill: spend credit on it while it is a live
-ACCPAY with money due, void it unless {@link purchaseBillVoidRefusal} says
-otherwise, mark a $0 bill paid and reopen it, push it while
-{@link purchaseBillPushRefusal} allows, and raise a supplier credit from its
-lines ({@link creditableBillLines}) while any has units left.
-
-### `purchaseBillCreditRefusal(bill: PurchaseBillActionBill, ctx: PurchaseBillContext, lines: readonly typeLiteral[]): string | null`
-
-Why crediting these bill lines would exceed what {@link creditableBillLines}
-offers, or `null` when it would not. The server's half of the payable credit
-cap: two credits naming one bill line can no longer each take its whole
-quantity while the pool still has room from another bill.
-
-Requests naming one line sum. A line the offer does not list is refused by
-name, so a time line or a line under another purchase cannot slip through.
-
-### `purchaseBillPushRefusal(bill: PurchaseBillActionBill, status: PurchaseBillXeroSyncStatus): string | null`
-
-Why an operator may not ask for this bill to be pushed to Xero, or `null` when
-they may. The offer and the API's route both ask this.
-
-⚠️ **Unlike the invoice's `push_to_xero`, a bill not yet in Xero may be pushed.**
-The bill task reads before it creates, and this is the only remedy an operator
-has for a create Xero refused.
-
-A settled bill may be pushed, as an invoice may: Xero takes a tracking change on
-it, and the task answers anything else with the
-`purchase_bill_edit_has_settlements` seam.
-
-### `purchaseBillReopenRefusal(bill: Pick<PurchaseBill, "number" | "totals">): string | null`
-
-Why a closed $0 bill may not be reopened, or `null` when it may.
-
-### `purchaseBillVoidRefusal(bill: PurchaseBillActionBill, ctx: PurchaseBillContext): string | null`
-
-Why an operator may not void this bill, or `null` when they may. The offer and
-the API's route both ask this, so a button cannot offer what the server
-refuses. A void from Xero is never refused and never reads this: Xero has
-already voided the bill, and the count floors at 0.
-
-⚠️ `amount_paid_cents` and `amount_credited_cents` are the journal folded, so
-an unsynced allocation refuses too. Xero would refuse any payment or
-allocation it holds.
-
-Only FLAT lines are read for the negative: a time line's billing is its
-metered time, which a void cannot strand a credit under.
-
-### `purchaseCreditActionsFor(credit: Pick<PurchaseCredit, "status" | "totals" | "remaining_credit_cents">): PurchaseActionOffer[]`
-
-Everything an operator may do to a supplier credit: void it while nothing has drawn on it.
-
-### `purchaseItemClosable(item: PurchaseActionItem, custody: PurchaseLineCustody, pair: Pick<PurchaseDestination, "dates"> | undefined, now: string, fold: Pick<BilledByPath, "byPath">): boolean`
-
-**Would a close change this line?** Units still to arrive are dropped; a flat
-service or replacement drops its unbilled quantity, and a TIME line ends its
-pair's charge window, so it is closable while that window is open at `now`
-(ruling 63). A rental with units still out is NOT closable: the close zeroes
-its supply, so the API refuses it until they have gone back. `fold` is
-{@link purchaseBillingFold} over the purchase's documents.
-
-### `purchaseItemTouched(item: PurchaseActionItem, fold: Pick<BilledByPath, "byPath">, custody: PurchaseLineCustody): boolean`
-
-**Has anything happened to this line that makes it history as well as an
-order?** A touched line cannot be removed or moved across bases. Billed is
-the billing fold NAMING the line (`billingNamesLine`, ruling 102): a live bill
-row, a substitute standing in for it, or a live credit that took something
-back; received units touch a custody line too.
-
-**Parameters**
-
-- `item` — The purchase line
-- `fold` — {@link purchaseBillingFold} over the purchase's bills and credits
-- `custody` — The row's custody (`custodyBySourceItem`)
-
 ## `@cfs/core/utils/purchase-bill-xero-sync`
 
 **Is this pushed bill's Xero twin up to date?** Answered from the bill and its
@@ -53567,7 +53506,7 @@ See {@link PurchaseBillXeroSyncStatus}. `state` is the watermark, or `null` when
 
 ⚠️ **A settled bill still compares.** Out of sync is a true statement about Xero
 whether or not CFS can do anything about it; a settled bill only loses the push
-(`purchaseBillPushRefusal`, `@cfs/core/utils/purchase-actions`).
+(`pushRefusal`, `@cfs/core/utils/document-actions`).
 
 ## `@cfs/core/utils/purchase-documents`
 

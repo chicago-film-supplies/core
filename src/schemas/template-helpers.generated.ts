@@ -118,6 +118,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   "destinations": [
 
   ],
+  "document-actions": [
+
+  ],
   "documentDiff": [
 
   ],
@@ -150,9 +153,6 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   "icons": [
     { name: "has", expr: "it.icons.has(name)", desc: "Whether `name` is a known icon (following aliases).", returns: "boolean" },
     { name: "svg", expr: "it.icons.svg(name, arg2)", desc: "Inline SVG markup for a lucide icon. Emit raw: `<%~ it.icons.svg(\"truck\") %>`.", returns: "string" },
-  ],
-  "invoice-actions": [
-    { name: "closeRefusal", expr: "it.invoice-actions.closeRefusal(doc, arg2)", desc: "Why a $0 billing document may not be marked paid, or `null` when it may — one rule for an invoice and a bill (`noun` is for the message only).", returns: "string | null" },
   ],
   "invoice-xero-sync": [
     { name: "invoiceStatusTracksXeroEdits", expr: "it.invoice-xero-sync.invoiceStatusTracksXeroEdits(status)", desc: "**May an invoice in this status track CFS edits in Xero?** The status half of {@link invoiceXeroSyncStatus}, for a caller that has not read the watermark — the Eventarc enqueue gate, the edit task's liveness check, `push_to_xero`'s offer. `true` for `paid`, whose hash is then the question: ask `invoiceXeroSyncStatus` with the real watermark, never with `null` standing in for \"status only\".", returns: "boolean" },
@@ -304,12 +304,6 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "productCountsStock", expr: "it.products.productCountsStock(type, stockMethod)", desc: "True iff a product with this `type` + `stock_method` holds a COUNTED stock — a ledger whose `quantity_held` is a number. `stock_method: \"none\"` has a ledger with a `null` count (supply unbounded), so nothing can be moved against it.", returns: "stockMethod is CountedStockMethod" },
     { name: "productHasLedger", expr: "it.products.productHasLedger(type)", desc: "True iff a product of this `type` has an inventory ledger (and so a `stock/{P}` projection and a `stock-locks/{P}` token), counted or not.", returns: "boolean" },
     { name: "removeComponentEntries", expr: "it.products.removeComponentEntries(components, path)", desc: "Remove a component and all its descendants from a flat components array. An entry is removed if its `path` starts with the given path prefix — this covers the component itself and every entry nested beneath it.", returns: "T[]" },
-  ],
-  "purchase-actions": [
-    { name: "assertPurchaseAction", expr: "it.purchase-actions.assertPurchaseAction(purchase, ctx, request)", desc: "Refuse a purchase action the ruleset does not offer. Operator routes only.", returns: "void" },
-    { name: "assertPurchaseBillAction", expr: "it.purchase-actions.assertPurchaseBillAction(bill, request)", desc: "Refuse a bill action the ruleset does not offer, or one past its limit. Operator routes only.", returns: "void" },
-    { name: "assertPurchaseCreditAction", expr: "it.purchase-actions.assertPurchaseCreditAction(credit, request)", desc: "Refuse a supplier-credit action the ruleset does not offer. Operator routes only.", returns: "void" },
-    { name: "purchaseBillReopenRefusal", expr: "it.purchase-actions.purchaseBillReopenRefusal(bill)", desc: "Why a closed $0 bill may not be reopened, or `null` when it may.", returns: "string | null" },
   ],
   "purchase-bill-xero-sync": [
 
