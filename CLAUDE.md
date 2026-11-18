@@ -518,6 +518,15 @@ total_cents: z.int().meta({ column: true, label: "Total" }),
   Timestamp encoding; annotating both mints two columns with one heading. The
   pairing is declared by `.meta({ serverSortVia })`, which the Typesense
   derivation inverts.
+- **Annotate the field, never also its parent key.** `collectDisplayColumns`
+  walks past an emitted object, so `column: true` on a parent AND on its leaf
+  mints two columns under one heading. A `UidNameRef`'s column is `<key>.name`
+  (`name` already carries `column: true`); the parent key carries only `label` —
+  a `label` with no `column` is the correct state of an intermediate key, not an
+  oversight. Measured 2026-08-31 via `getFirestoreColumns("transactions")`:
+  `supplier` beside `supplier.name`. To show it, add `"<key>.name"` to
+  `displayDefaults.columns`. ⚠️ `ActorRef` (`created_by`) is annotated on the
+  object instead — its `name` is a plain `NameField` — so the site differs by shape.
 - **A rate names its unit** (`unit: "usd" | "percent"`), never mere rate-ness — a
   marker carrying no unit is what shipped every money mirror 100× (root
   `CLAUDE.md`).
