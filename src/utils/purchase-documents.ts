@@ -747,7 +747,6 @@ export function projectPurchaseLineToBillLine(
     discount: part.discount,
     taxes: item.price.taxes,
     taxes_base: item.price.taxes_base,
-    counts: true,
   });
   return {
     type: item.type,

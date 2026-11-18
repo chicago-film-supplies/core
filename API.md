@@ -52513,6 +52513,18 @@ interface CreditSourceLine {
 }
 ```
 
+### `FLAT_METER_COUNTS`
+
+**A flat line's counts: the flat meter's one tier at `1/1`** (`meterUnits`'
+`unit: "none"` arm, ruling 108). Keyed `"flat"`, the basis name and the key of
+prod's one flat formula, which every stored AR flat line carries. A payable
+flat line states no `rates`, so its tier's key prices nothing; the shape is
+what the schemas read (`isFlatMeterCounts`, `schemas/purchase.ts`).
+
+```ts
+const FLAT_METER_COUNTS: readonly TierCount[];
+```
+
 ### `FlatPayablePrice`
 
 What {@link flatPayablePrice} returns: a flat payable line price, money stated.
@@ -52523,6 +52535,7 @@ interface FlatPayablePrice {
   rates: never[];
   discount: DiscountType | null;
   stated_cents: number;
+  counts: TierCount[];
   taxes: PriceModifierType[];
   taxes_base?: TaxRefType[];
   subtotal_cents: number;
@@ -52795,11 +52808,11 @@ a 400, the audit script reports every row.
 differ from its window is legacy CRMS divergence the 2026-09-16 census left
 alone on purpose, carried into `counts` by the ruling-8 backfill.
 
-### `flatPayablePrice(args: typeLiteral): FlatPayablePrice & parenthesized`
+### `flatPayablePrice(args: typeLiteral): FlatPayablePrice`
 
 **The one builder of a FLAT payable line's price** — the declared half
 (`price_formula`, `rates: []`, the discount record, the tax modifiers, and
-`counts: []` on a bill or credit line) plus the stated-total money
+`counts`) plus the stated-total money
 ({@link withStatedTotalMoney}). Every payable line builder calls it: the
 purchase-line writer, the bill-line projector, a bill's charge line, a credit
 line. A hand-spelled declared literal per builder is how a key gets dropped
@@ -52811,6 +52824,12 @@ writes to the line's `amount_cents`.
 A FLAT line only (`rates: []`); a time line's price is built by
 `projectTimeLine` (`@cfs/core/utils/purchase-documents`) and priced by the
 document pricer.
+
+**Its `counts` are the meter's one flat tier on every payable document**
+({@link FLAT_METER_COUNTS}, one-document-model ruling 108), the shape every AR
+flat line stores. The one exception is a credit line naming a billing row,
+which states only the time it takes back: `[]`, whole units of that row
+(ruling 106), `counts: "row_units"`.
 
 ### `formulaUidsOf(items: readonly typeLiteral[]): string[]`
 

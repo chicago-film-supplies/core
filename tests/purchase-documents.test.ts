@@ -204,7 +204,7 @@ Deno.test("projector: a FLAT line bills its cumulative share — three bills of 
   for (let k = 0; k < 3; k++) {
     const line = project(item, 10 + k, 1, k);
     amounts.push(line.amount_cents);
-    assertEquals(line.price?.counts, []);
+    assertEquals(line.price?.counts, [{ rate_key: "flat", num: 1, den: 1 }], "the flat meter's one tier (ruling 108)");
   }
   assertEquals(amounts.reduce((a, b) => a + b, 0), 140985);
   assertEquals(amounts, [46995, 46995, 46995]);
@@ -1966,13 +1966,24 @@ Deno.test("purchaseLineMoneyIssues: a TIME line on a purchase states no total; o
 });
 
 Deno.test("flatPayablePrice: it stores the stated gross, and the net is the gross less the discount cents", () => {
-  const args = { uid: lid(2), quantity: 3, price_formula: FIXED_REF, discount: { ...PERCENT_THIRD, amount_cents: 33_334 }, counts: true } as const;
+  const args = { uid: lid(2), quantity: 3, price_formula: FIXED_REF, discount: { ...PERCENT_THIRD, amount_cents: 33_334 } } as const;
   const stated = flatPayablePrice({ ...args, stated_cents: 100_001 });
   assertEquals(stated.stated_cents, 100_001);
   assertEquals(stated.subtotal_cents, 100_001);
   assertEquals(stated.subtotal_discounted_cents, 66_667);
   assertEquals(stated.discount?.amount_cents, 33_334, "the caller's cents, kept");
 });
+Deno.test("flatPayablePrice: a flat line states the meter's one tier; a credit of a billing row's units states [] (ruling 108, 106)", () => {
+  const args = { uid: lid(2), quantity: 3, stated_cents: 9_000, price_formula: FIXED_REF, discount: null };
+  assertEquals(flatPayablePrice(args).counts, [{ rate_key: "flat", num: 1, den: 1 }]);
+  assertEquals(flatPayablePrice({ ...args, counts: "flat" }).counts, [{ rate_key: "flat", num: 1, den: 1 }]);
+  assertEquals(flatPayablePrice({ ...args, counts: "row_units" }).counts, []);
+  // The constant is never handed out by reference.
+  const a = flatPayablePrice(args);
+  a.counts[0].num = 2;
+  assertEquals(flatPayablePrice(args).counts[0].num, 1);
+});
+
 // ── D7: the merge rule applied to a PART ─────────────────────────────
 
 Deno.test("syncPurchaseToBills (D7): an untouched PART follows a purchase discount edit as its slice; an overridden part stays", () => {

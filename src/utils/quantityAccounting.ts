@@ -1021,7 +1021,10 @@ function placeCredits<B, C>(
         continue;
       }
       if (path[0] !== scopeUid) continue;
-      reverse(own, creditUid, path, creditUid, line, (line.price?.counts?.length ?? 0) > 0);
+      // A time credit is a TIME-basis line stating the time it moves. Keyed on
+      // the basis, not on `counts` alone: a flat line states the meter's one tier
+      // (ruling 108), so "counts present" no longer means time.
+      reverse(own, creditUid, path, creditUid, line, line.price?.price_formula?.basis === "time" && (line.price?.counts?.length ?? 0) > 0);
     }
     if (own.size > 0) contexts.push({ documentUid: creditUid, items, destinations, base: 0, billing: false, reversals: own });
   }
@@ -1724,7 +1727,11 @@ export function accountInitiator(
             path_billing_item: [...(row.item.path ?? [])],
             order_path: [...path],
             quantity: take,
-            preview_cents: subtotalCents({ ...row.item, quantity: take } as LineItem),
+            // The side's part door, the function the credit itself is priced
+            // through (ruling 88, F14 item 6): AR's rate pricer reads `rates ×
+            // counts`, so a FLAT payable row (no rates) previewed $0 under it and
+            // throws once it states its flat tier (ruling 108).
+            preview_cents: BILLING_ROW_PART[side](row.item as unknown as BillingRowMoneyLike, 0, take).net_cents,
           });
         }
         if (left > 0) refused.push(`${left} unit(s) over-billed beyond any attributable invoice row`);

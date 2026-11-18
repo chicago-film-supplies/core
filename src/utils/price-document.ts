@@ -789,7 +789,7 @@ export function withStatedTotalMoney<P extends StatedTotalLine["price"]>(
 /**
  * **The one builder of a FLAT payable line's price** — the declared half
  * (`price_formula`, `rates: []`, the discount record, the tax modifiers, and
- * `counts: []` on a bill or credit line) plus the stated-total money
+ * `counts`) plus the stated-total money
  * ({@link withStatedTotalMoney}). Every payable line builder calls it: the
  * purchase-line writer, the bill-line projector, a bill's charge line, a credit
  * line. A hand-spelled declared literal per builder is how a key gets dropped
@@ -801,8 +801,14 @@ export function withStatedTotalMoney<P extends StatedTotalLine["price"]>(
  * A FLAT line only (`rates: []`); a time line's price is built by
  * `projectTimeLine` (`@cfs/core/utils/purchase-documents`) and priced by the
  * document pricer.
+ *
+ * **Its `counts` are the meter's one flat tier on every payable document**
+ * ({@link FLAT_METER_COUNTS}, one-document-model ruling 108), the shape every AR
+ * flat line stores. The one exception is a credit line naming a billing row,
+ * which states only the time it takes back: `[]`, whole units of that row
+ * (ruling 106), `counts: "row_units"`.
  */
-export function flatPayablePrice<C extends boolean>(args: {
+export function flatPayablePrice(args: {
   uid: string;
   quantity: number;
   /**
@@ -816,22 +822,31 @@ export function flatPayablePrice<C extends boolean>(args: {
   taxes?: readonly PriceModifierType[];
   /** The class's pre-exemption rates, carried as the source line states them. */
   taxes_base?: readonly TaxRefType[];
-  /** `true` on a bill or credit line, which carries `counts: []`; a purchase line has no `counts` key. */
-  counts: C;
-}): FlatPayablePrice & (C extends true ? { counts: never[] } : unknown) {
+  /** `"row_units"` on a credit line naming a billing row (`[]`); otherwise the flat tier. */
+  counts?: "flat" | "row_units";
+}): FlatPayablePrice {
   const declared = {
     price_formula: { ...args.price_formula },
     rates: [] as never[],
     discount: args.discount === null ? null : { ...args.discount },
     taxes: (args.taxes ?? []).map((t) => ({ ...t })),
     ...(args.taxes_base !== undefined ? { taxes_base: args.taxes_base.map((t) => ({ ...t })) } : {}),
-    ...(args.counts ? { counts: [] as never[] } : {}),
+    counts: args.counts === "row_units" ? [] : FLAT_METER_COUNTS.map((t) => ({ ...t })),
     stated_cents: args.stated_cents,
   };
-  return withStatedTotalMoney(declared, { uid: args.uid, quantity: args.quantity, amount_cents: null }) as
-    & FlatPayablePrice
-    & (C extends true ? { counts: never[] } : unknown);
+  return withStatedTotalMoney(declared, { uid: args.uid, quantity: args.quantity, amount_cents: null }) as FlatPayablePrice;
 }
+
+/**
+ * **A flat line's counts: the flat meter's one tier at `1/1`** (`meterUnits`'
+ * `unit: "none"` arm, ruling 108). Keyed `"flat"`, the basis name and the key of
+ * prod's one flat formula, which every stored AR flat line carries. A payable
+ * flat line states no `rates`, so its tier's key prices nothing; the shape is
+ * what the schemas read (`isFlatMeterCounts`, `schemas/purchase.ts`).
+ */
+export const FLAT_METER_COUNTS: readonly TierCount[] = Object.freeze([
+  Object.freeze({ rate_key: "flat", num: 1, den: 1 }),
+]);
 
 /** What {@link flatPayablePrice} returns: a flat payable line price, money stated. */
 export interface FlatPayablePrice {
@@ -840,6 +855,8 @@ export interface FlatPayablePrice {
   discount: DiscountType | null;
   /** The stated gross. */
   stated_cents: number;
+  /** {@link FLAT_METER_COUNTS}, or `[]` on a credit of a billing row's units. */
+  counts: TierCount[];
   taxes: PriceModifierType[];
   taxes_base?: TaxRefType[];
   subtotal_cents: number;

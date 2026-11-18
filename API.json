@@ -25204,9 +25204,15 @@
           "doc": "The invoice-line surface a credit is priced from (api-cloudrun#997 D4)."
         },
         {
+          "kind": "variable",
+          "name": "FLAT_METER_COUNTS",
+          "declaration": "const FLAT_METER_COUNTS: readonly TierCount[];",
+          "doc": "**A flat line's counts: the flat meter's one tier at `1/1`** (`meterUnits`'\n`unit: \"none\"` arm, ruling 108). Keyed `\"flat\"`, the basis name and the key of\nprod's one flat formula, which every stored AR flat line carries. A payable\nflat line states no `rates`, so its tier's key prices nothing; the shape is\nwhat the schemas read (`isFlatMeterCounts`, `schemas/purchase.ts`)."
+        },
+        {
           "kind": "interface",
           "name": "FlatPayablePrice",
-          "declaration": "interface FlatPayablePrice {\n  price_formula: PriceFormulaRef;\n  rates: never[];\n  discount: DiscountType | null;\n  stated_cents: number;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  total_cents: number;\n}",
+          "declaration": "interface FlatPayablePrice {\n  price_formula: PriceFormulaRef;\n  rates: never[];\n  discount: DiscountType | null;\n  stated_cents: number;\n  counts: TierCount[];\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  total_cents: number;\n}",
           "doc": "What {@link flatPayablePrice} returns: a flat payable line price, money stated."
         },
         {
@@ -25340,8 +25346,8 @@
         {
           "kind": "function",
           "name": "flatPayablePrice",
-          "signature": "flatPayablePrice(args: typeLiteral): FlatPayablePrice & parenthesized",
-          "doc": "**The one builder of a FLAT payable line's price** — the declared half\n(`price_formula`, `rates: []`, the discount record, the tax modifiers, and\n`counts: []` on a bill or credit line) plus the stated-total money\n({@link withStatedTotalMoney}). Every payable line builder calls it: the\npurchase-line writer, the bill-line projector, a bill's charge line, a credit\nline. A hand-spelled declared literal per builder is how a key gets dropped\nfrom one of them (`ORDER_DECLARED_PRICE_KEYS`' docblock, api-cloudrun#984).\n\nThe line's net is the returned `subtotal_discounted_cents`, which the caller\nwrites to the line's `amount_cents`.\n\nA FLAT line only (`rates: []`); a time line's price is built by\n`projectTimeLine` (`@cfs/core/utils/purchase-documents`) and priced by the\ndocument pricer.",
+          "signature": "flatPayablePrice(args: typeLiteral): FlatPayablePrice",
+          "doc": "**The one builder of a FLAT payable line's price** — the declared half\n(`price_formula`, `rates: []`, the discount record, the tax modifiers, and\n`counts`) plus the stated-total money\n({@link withStatedTotalMoney}). Every payable line builder calls it: the\npurchase-line writer, the bill-line projector, a bill's charge line, a credit\nline. A hand-spelled declared literal per builder is how a key gets dropped\nfrom one of them (`ORDER_DECLARED_PRICE_KEYS`' docblock, api-cloudrun#984).\n\nThe line's net is the returned `subtotal_discounted_cents`, which the caller\nwrites to the line's `amount_cents`.\n\nA FLAT line only (`rates: []`); a time line's price is built by\n`projectTimeLine` (`@cfs/core/utils/purchase-documents`) and priced by the\ndocument pricer.\n\n**Its `counts` are the meter's one flat tier on every payable document**\n({@link FLAT_METER_COUNTS}, one-document-model ruling 108), the shape every AR\nflat line stores. The one exception is a credit line naming a billing row,\nwhich states only the time it takes back: `[]`, whole units of that row\n(ruling 106), `counts: \"row_units\"`.",
           "paramTags": [],
           "returnsTag": null
         },
