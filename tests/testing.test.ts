@@ -109,18 +109,14 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
     query_by_path: ["AAAAAAAAAAAAAAAAAAAA"],
   },
   // ⚠️ **Fourth entry, added when a settlement could name a credit note instead
-  // of an invoice** (api-cloudrun#1207). `uid_invoice` became nullable and the
-  // refine ties it to the TYPE — an invoice-settling type must name one — so the
-  // walker's `null` for a nullable field is a payment with no invoice. Same
-  // class as the three above: a cross-field rule, not a structural one.
-  // `uid_organization` joined it when the PAYABLE side landed (api-cloudrun#1210):
-  // it became nullable — null exactly on a payable row — and a receivable type
-  // must name its customer, the same tie one key over. Still one entry: the
-  // party keys of the payable side stay at the walker's `null`, which is what a
-  // receivable row states.
+  // of an invoice** (api-cloudrun#1207), and re-keyed when the targets became
+  // role refs (one-document-model ruling 131). `billing` is nullable — null on a
+  // refund — and the refine ties it to the TYPE, so the walker's `null` is a
+  // payment with no billing document. Same class as the three above: a
+  // cross-field rule, not a structural one. The walker's `credit: null` is what
+  // a payment states, and its first enum member (`invoices`) makes it receivable.
   settlement: {
-    uid_invoice: "AAAAAAAAAAAAAAAAAAAA",
-    uid_organization: "AAAAAAAAAAAAAAAAAAAA",
+    billing: { collection: "invoices", uid: "AAAAAAAAAAAAAAAAAAAA" },
   },
   // ⚠️ **Fifth entry, added when the flat delivery id was refined to mirror its
   // ref** (core#103). The walker seeds `destinations.delivery: null` beside a

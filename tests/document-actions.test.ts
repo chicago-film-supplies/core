@@ -39,9 +39,10 @@ Deno.test("a gap is refused by its reason, naming the action, on the assert (rul
     uid: "b", number: 9, status: "issued" as const, origin: "pushed" as const, xero_document: "invoice" as const, xero_id: "x", items: [],
     totals: { total_cents: 100, amount_paid_cents: 0, amount_credited_cents: 0, amount_void_cents: 0, amount_due_cents: 100 },
   };
-  const e = assertThrows(() => cat.assertBillingAction("payable", bill, { action: "add_payment", amount_cents: 1 }), cat.DocumentActionRefusal, "recorded in Xero");
-  assertEquals(e.action, "add_payment");
-  assertThrows(() => cat.assertBillingAction("payable", bill, { action: "edit_counterparty" }), cat.DocumentActionRefusal, "no `supplier`");
+  const e = assertThrows(() => cat.assertBillingAction("payable", bill, { action: "edit_counterparty" }), cat.DocumentActionRefusal, "no `supplier`");
+  assertEquals(e.action, "edit_counterparty");
+  // 6e-0b3 removed the payment and refund gaps: a bill payment is the operator's to record now.
+  cat.assertBillingAction("payable", bill, { action: "add_payment", amount_cents: 1 });
 });
 
 // ── void: the pointer arm (the live payable defect found at F15 conformance) ──

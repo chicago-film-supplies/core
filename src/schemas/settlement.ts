@@ -1,9 +1,9 @@
 /**
  * Settlement document schema — Firestore collection: `settlements`
  *
- * One settlement event against an invoice — or, for a `refund`, against a credit
- * note (api-cloudrun#1207; the contract's `settles` axis) — or, on the PAYABLE
- * side, against a supplier bill or supplier credit (api-cloudrun#1210).
+ * One settlement event against a billing document — an invoice or a supplier
+ * bill — or, for a `refund`, against a credit document (api-cloudrun#1207,
+ * #1210; the contract's `settles` axis names the role).
  * **The money-side twin of the `transactions` movement journal**: append-only, dated, reversible, and
  * type-blind by design — a cash payment and a credit-note allocation differ
  * only in `type` and `reason`.
@@ -19,22 +19,26 @@
  * reason `Movement` has none: a status flag *and* a reverser link is two sources
  * of truth. The one permitted mutation in the whole design is
  * `linkSettlementToXero` (api-cloudrun `api-cloudrun/src/lib/settlements.ts`) writing
- * `xero_payment_id` null → value once — late-binding external linkage is not
+ * `xero_id` null → value once — late-binding external linkage is not
  * part of the money fact.
  *
  * ## One journal, two sides, no stored side
  *
- * A receivable row names `uid_organization` and an `uid_invoice` or
- * `uid_credit_note`; a payable row names `uid_supplier` and a `uid_purchase_bill`
- * or `uid_purchase_credit`. Every target key is `null` on the other side, and the
- * refine ties each to the type's `settles`, so **every existing equality query
- * (`uid_invoice` / `uid_organization` / `uid_credit_note`) is blind to payable rows
- * by construction**, and {@link isInvoiceSettlement} excludes them for free. Only
- * a reader that SCANS the collection holds both sides, and it must narrow with
- * {@link isReceivableSettlement} / {@link isPayableSettlement}. There is no
- * `side` field: it would be a second source of truth for the key that is present.
+ * A row names its targets by ROLE (one-document-model ruling 131): `billing`,
+ * an invoice or a supplier bill, and `credit`, a customer credit note or a
+ * supplier credit — each a `{ collection, uid }` ref, the narrowed `DocSource`
+ * twin `bookings-inbound.source` uses. **The side is the ref's collection**, read
+ * through `SIDE_OF_COLLECTION` (`schemas/side.ts`), and never stored: a `side`
+ * field would be a second source of truth for it. The party is
+ * `uid_counterparty`: the customer on a receivable row, the supplier on a
+ * payable one.
  *
- * The invoice's `totals.{amount_paid, amount_credited, amount_due}` are a
+ * A target query (`billing.uid ==`, `credit.uid ==`) is one-sided by
+ * construction, since an invoice and a bill never share an auto-id. Only a
+ * reader that SCANS the collection holds both sides, and it narrows with
+ * {@link settlementSide} / {@link isSideSettlement}.
+ *
+ * A billing document's `totals.{amount_paid, amount_credited, amount_due}` are a
  * **co-written projection** of this log, produced only by
  * `recomputeSettlementTotals` and rebuildable from it. That is CFS v2's shape —
  * an event log plus a client-ready projection for snapshot listeners — arriving
@@ -43,7 +47,7 @@
  * @module
  */
 import { z } from "zod";
-import { FirestoreId } from "./_uid.ts";
+import { FirestoreId, XeroId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import {
   ActorRef,
@@ -51,48 +55,92 @@ import {
   FirestoreTimestamp,
   type FirestoreTimestampType,
   SETTLEMENT_CONTRACTS,
-  SETTLEMENT_TARGET_SIDE,
   SettlementReasonEnum,
   type SettlementReasonType,
   SettlementTypeEnum,
   type SettlementTypeType,
   TimestampFields,
 } from "./common.ts";
+import {
+  type BillingCollection,
+  type CreditCollection,
+  type Side,
+  SIDE_CONTRACTS,
+  SIDE_OF_COLLECTION,
+} from "./side.ts";
 
 /**
- * One settlement event against an invoice, a customer credit note, a supplier
- * bill or a supplier credit — the contract's `settles` says which.
+ * The billing document a row settles: an invoice or a supplier bill. The
+ * narrowed `DocSource` twin (`bookings-inbound.source`), so it is assignable
+ * wherever a `DocSourceType` is read.
+ */
+export interface SettlementBillingRef<S extends Side = Side> {
+  collection: BillingCollection<S>;
+  uid: string;
+}
+
+/**
+ * The credit document a row draws on (an allocation) or settles (a refund): a
+ * customer credit note or a supplier credit.
+ */
+export interface SettlementCreditRef<S extends Side = Side> {
+  collection: CreditCollection<S>;
+  uid: string;
+  /**
+   * The credit's display number, denormalized: `"CN-1014"` (Xero-numbered) or
+   * the CFS number. `DocSource`'s own display key, so no new name. `null` where
+   * the writer had none to state.
+   */
+  label: string | null;
+}
+
+const billingRefObject = z.strictObject({
+  collection: z.enum(["invoices", "purchase-bills"]).meta({ column: true, label: "Collection" }),
+  uid: FirestoreId,
+});
+
+/** Zod schema for {@link SettlementBillingRef}. */
+export const SettlementBillingRefSchema: z.ZodType<SettlementBillingRef> = billingRefObject;
+
+/** Zod schema for {@link SettlementCreditRef}. */
+export const SettlementCreditRefSchema: z.ZodType<SettlementCreditRef> = z.strictObject({
+  collection: z.enum(["credit-notes", "purchase-credits"]).meta({ column: true, label: "Collection" }),
+  uid: FirestoreId,
+  label: z.string().max(200).nullable().meta({ column: true, label: "Number" }),
+});
+
+/**
+ * One settlement event against a billing document or a credit document — the
+ * contract's `settles` says which role, the ref's collection which side.
  *
  * @see {@link SETTLEMENT_CONTRACTS} for which combinations are legal.
  */
 export interface Settlement {
   uid: string;
   /**
-   * The invoice this row settles, or `null` on a row that settles anything else
-   * (a `refund`'s credit note, or any payable row). The refine makes this and
-   * `SETTLEMENT_CONTRACTS[type].settles === "invoice"` agree, so a reader
-   * filtering by `uid_invoice` can never receive a refund or a payable, and
-   * neither can ever be folded into an invoice.
+   * The billing document this row settles, or `null` on a `refund` pair (which
+   * settles its credit). On a `credit` allocation it is the document the credit
+   * is allocated TO.
    */
-  uid_invoice: string | null;
+  billing: SettlementBillingRef | null;
   /**
-   * The customer, denormalized so per-customer settlement reporting needs no
-   * join. `null` exactly on a payable row, which names `uid_supplier` instead.
+   * The credit document this row draws on: the credit an allocation spends, or
+   * the one a refund pays back. `null` on every row that does not draw credit.
+   * Same side as `billing` whenever both are set.
    */
-  uid_organization: string | null;
-  /** The bill a payable row settles; `null` on every other row. */
-  uid_purchase_bill: string | null;
+  credit: SettlementCreditRef | null;
   /**
-   * The supplier credit a payable row draws on (`bill_credit`) or settles
-   * (`supplier_refund`); `null` on every other row. The payable twin of
-   * `uid_credit_note`.
+   * The counterparty, denormalized so per-party reporting needs no join: the
+   * customer (`organizations`) on a receivable row, the supplier (`suppliers`)
+   * on a payable one — the side says which collection. ⚠️ Not core's
+   * `ActionSide.counterparty`, which names a Xero contact id or a supplier uid
+   * for the action catalog: a homonym.
    */
-  uid_purchase_credit: string | null;
-  /** The supplier, on a payable row; `null` exactly on a receivable row. */
-  uid_supplier: string | null;
+  uid_counterparty: string;
 
   // ── what happened ─────────────────────────────────────────────────
   type: SettlementTypeType;
+  /** Legal per side: `SIDE_CONTRACTS[side].settlement_reasons[type]` labels it. */
   reason: SettlementReasonType;
   /**
    * **Integer minor units, ALWAYS POSITIVE.** Direction comes from `type` via
@@ -100,18 +148,18 @@ export interface Settlement {
    */
   amount_cents: number;
   /**
-   * The instant the money moved. For a credit this is the **allocation** date,
-   * not the credit note's: Xero must post journals on both a cash and an accrual
-   * basis when an allocation is made, so the allocation carries its own date and
-   * it is `max(credit_note.date, invoice.date)` — the only date on which both
-   * facts are true (verified 6/6 on prod).
+   * The instant the money moved. For a credit allocation this is the
+   * **allocation** date, not the credit's: Xero posts journals on both a cash
+   * and an accrual basis when an allocation is made, so it is
+   * `max(credit.date, billing.date)` — the only date on which both facts are
+   * true (verified 6/6 on prod).
    */
   date: string;
   date_fs: FirestoreTimestampType;
   reference: string | null;
 
   // ── grouping, correction ──────────────────────────────────────────
-  /** One per operator action — groups a batch payment or a multi-invoice allocation. */
+  /** One per operator action — groups a batch payment or a multi-document allocation. */
   uuid_session: string;
   /**
    * The settlement this one retracts. **Provenance only, never arithmetic** —
@@ -120,23 +168,22 @@ export interface Settlement {
    */
   reverses: string | null;
 
-  // ── the value instrument ──────────────────────────────────────────
-  uid_credit_note: string | null;
-  /** Denormalized display number: `"CN-1014"` (Xero) / `"CN-0007"` (CFS). */
-  number_credit_note: string | null;
-
   // ── external linkage ──────────────────────────────────────────────
-  xero_payment_id: string | null;
-  xero_credit_note_id: string | null;
+  /**
+   * The id of the ONE Xero object that settles this row (ruling 129), or `null`:
+   * recorded in CFS, not yet linked by Xero. What it names is derived, never
+   * stored — `SETTLEMENT_CONTRACTS[type].xero_object` (a Payment, or a credit's
+   * CreditNoteID), and for a `payment` on a `bank_transaction` bill the SPEND's
+   * BankTransactionID, which is both the bill and its payment.
+   */
+  xero_id: string | null;
   /** Set once by `linkSettlementToXero`, never by a money edit. */
   synced_at: FirestoreTimestampType | null;
   /**
    * The pre-migration `invoice.payments[].uid` this row came from.
    *
-   * @deprecated Forensics only. It was the per-payment idempotency key during
-   * the migration — `xero_payment_id` could not serve, because a client-added
-   * payment has none — and it stays as the answer to "which row did this
-   * settlement come from" during any post-migration investigation.
+   * @deprecated Forensics only, on receivable history: the answer to "which row
+   * did this settlement come from" during any post-migration investigation.
    */
   legacy_payment_uid: string | null;
 
@@ -145,12 +192,9 @@ export interface Settlement {
    * Scaffolding for consistency with `Movement` and the generic doc tooling.
    *
    * **NOT the concurrency token — do not build on it.** It can only ever be 0:
-   * the document is written once and a reversal appends a sibling rather than
-   * mutating it. The live optimistic-concurrency token for every settlement
-   * operation is the **INVOICE's** `version`, because the invoice is the
-   * document that actually changes — its totals are the co-written projection.
-   * A client that if-matched on a settlement's version would be guarding a
-   * document nothing ever writes twice.
+   * the document is written once and a reversal appends a sibling. The live
+   * token for every settlement operation is the TARGET document's `version`,
+   * because that is the document whose totals change.
    */
   version: number;
   created_by: ActorRefType;
@@ -160,68 +204,54 @@ export interface Settlement {
 }
 
 /**
- * A RECEIVABLE settlement — one that settles an invoice or a customer credit
- * note, and so names its customer. The refine makes `uid_organization !== null`
- * and `SETTLEMENT_TARGET_SIDE[settles] === "receivable"` the same fact.
+ * A settlement of side `S`: its refs name only that side's collections. A
+ * reader holding a document of one side reads rows by its ref and holds these;
+ * a collection scan narrows with {@link isSideSettlement}.
  */
-export type ReceivableSettlement = Settlement & {
-  uid_organization: string;
-  uid_supplier: null;
-  uid_purchase_bill: null;
-  uid_purchase_credit: null;
+export type SideSettlement<S extends Side> = Omit<Settlement, "billing" | "credit"> & {
+  billing: SettlementBillingRef<S> | null;
+  credit: SettlementCreditRef<S> | null;
 };
 
 /**
- * A settlement that settles an INVOICE — every receivable type but `refund` and
- * `refund_reversal` (api-cloudrun#1207). The refine makes `uid_invoice !== null`
- * and `SETTLEMENT_CONTRACTS[type].settles === "invoice"` the same fact, so this
- * is the type a reader holds once it has filtered.
+ * A settlement that settles a BILLING document of side `S` — every type but the
+ * `refund` pair. What a fold over one invoice's or one bill's rows holds.
  */
-export type InvoiceSettlement = ReceivableSettlement & { uid_invoice: string };
+export type BillingSettlement<S extends Side = Side> = SideSettlement<S> & { billing: SettlementBillingRef<S> };
 
 /**
- * A PAYABLE settlement — one that settles a supplier bill or supplier credit
- * (api-cloudrun#1210), and so names its supplier.
+ * **The side of a settlement row**, read off its target ref's collection
+ * (ruling 131). Every row names at least one ref (the contract requires it), so
+ * this is total over parsed rows; it throws on a row that names none, which
+ * only an unparsed one can.
  */
-export type PayableSettlement = Settlement & {
-  uid_supplier: string;
-  uid_organization: null;
-  uid_invoice: null;
-  uid_credit_note: null;
-  number_credit_note: null;
-};
+export function settlementSide(s: { billing: { collection: string } | null; credit: { collection: string } | null }): Side {
+  const collection = s.billing?.collection ?? s.credit?.collection;
+  const side = collection === undefined
+    ? undefined
+    : (SIDE_OF_COLLECTION as Readonly<Record<string, Side | undefined>>)[collection];
+  if (side === undefined) throw new Error(`settlement names no billing or credit document`);
+  return side;
+}
 
-/** A payable settlement that settles a supplier BILL — every payable type but the `supplier_refund` pair. */
-export type PurchaseBillSettlement = PayableSettlement & { uid_purchase_bill: string };
-
-/**
- * Narrow a settlement to {@link InvoiceSettlement}. A reader that queried by
- * `uid_invoice` already holds only these; a reader that scans the collection,
- * or reads by `uid_credit_note`, holds refunds too and MUST filter — a refund
- * folded into an invoice is money from nowhere. A payable row has a `null`
- * `uid_invoice`, so this excludes the whole payable side as well.
- */
-export function isInvoiceSettlement(s: Settlement): s is InvoiceSettlement {
-  return s.uid_invoice !== null;
+/** Narrow a settlement to side `side` — what a collection scan holding both sides does first. */
+export function isSideSettlement<S extends Side>(side: S, s: Settlement): s is Settlement & SideSettlement<S> {
+  return settlementSide(s) === side;
 }
 
 /**
- * Narrow a settlement to {@link ReceivableSettlement}. A reader that scans the
- * collection (an audit, a per-customer statement built from a full read) holds
- * payable rows too and MUST filter before treating `uid_organization` as set.
+ * Narrow a settlement to one that settles a billing document of side `side`.
+ * A reader that queried by `billing.uid` already holds only these; one that read
+ * by `credit.uid` holds refunds too and must filter — a refund folded into a
+ * billing document is money from nowhere.
  */
-export function isReceivableSettlement(s: Settlement): s is ReceivableSettlement {
-  return s.uid_organization !== null;
+export function isBillingSettlement<S extends Side>(side: S, s: Settlement): s is Settlement & BillingSettlement<S> {
+  return s.billing !== null && settlementSide(s) === side;
 }
 
-/** Narrow a settlement to {@link PayableSettlement}. */
-export function isPayableSettlement(s: Settlement): s is PayableSettlement {
-  return s.uid_supplier !== null;
-}
-
-/** Narrow a settlement to {@link PurchaseBillSettlement}. */
-export function isPurchaseBillSettlement(s: Settlement): s is PurchaseBillSettlement {
-  return s.uid_purchase_bill !== null;
+/** Is `reason` legal on a `type` row of `side`? One entry answers legality and label (ruling 130). */
+export function settlementReasonLegal(side: Side, type: SettlementTypeType, reason: SettlementReasonType): boolean {
+  return SIDE_CONTRACTS[side].settlement_reasons[type][reason] !== undefined;
 }
 
 /**
@@ -232,15 +262,6 @@ export function isPurchaseBillSettlement(s: Settlement): s is PurchaseBillSettle
 function checkSettlementContract(s: Settlement, ctx: z.RefinementCtx): void {
   const contract = SETTLEMENT_CONTRACTS[s.type];
   if (!contract) return;
-
-  if (!contract.reasons.includes(s.reason)) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["reason"],
-      message: `"${s.reason}" is not a legal reason for a "${s.type}" settlement ` +
-        `(expected one of: ${contract.reasons.join(", ")})`,
-    });
-  }
 
   if (contract.reverses === "required" && s.reverses === null) {
     ctx.addIssue({
@@ -257,24 +278,18 @@ function checkSettlementContract(s: Settlement, ctx: z.RefinementCtx): void {
     });
   }
 
-  // A type may carry only the external id its contract names. Without this a
-  // credit could claim a `xero_payment_id`, and the sync's pass-1 index would
-  // then match a Xero payment against a credit-note allocation.
-  for (const field of ["xero_payment_id", "xero_credit_note_id"] as const) {
-    if (s[field] !== null && contract.xero_id_field !== field) {
-      ctx.addIssue({
-        code: "custom",
-        path: [field],
-        message: contract.xero_id_field === null
-          ? `a "${s.type}" is a CFS event with no Xero counterpart; ${field} must be null`
-          : `a "${s.type}" carries ${contract.xero_id_field}, not ${field}`,
-      });
-    }
+  // Only a type with a Xero counterpart may carry its id.
+  if (contract.xero_object === null && s.xero_id !== null) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["xero_id"],
+      message: `a "${s.type}" is a CFS event with no Xero counterpart; xero_id must be null`,
+    });
   }
 
   // A COUNT type moves no money (api-cloudrun#1169). Any amount on one would be
   // money that no cents bucket folds — the projection would silently disagree
-  // with the journal, and nothing in the invoice identity could see it.
+  // with the journal, and nothing in the identity could see it.
   if (contract.counts_into !== null && s.amount_cents !== 0) {
     ctx.addIssue({
       code: "custom",
@@ -283,135 +298,73 @@ function checkSettlementContract(s: Settlement, ctx: z.RefinementCtx): void {
     });
   }
 
-  // Which document the row settles (api-cloudrun#1207, #1210). Each target has
-  // its own key, set exactly when the type settles that target — so a reader
-  // filtering by `uid_invoice` can never receive a refund or a payable row, and
-  // a reader filtering by `uid_purchase_bill` can never receive a receivable.
-  // `uid_credit_note` and `uid_purchase_credit` are also the DRAWN instrument on
-  // a `credit` / `bill_credit` row, so their "must be null" half is the
-  // `draws_*` checks below rather than this one.
-  const settles = contract.settles;
-  if ((settles === "invoice") !== (s.uid_invoice !== null)) {
+  // Which documents the row names, by role. A billing type names its billing
+  // document; a credit type (`refund`) names none. Only a credit-drawing type
+  // names a credit, and every one must.
+  const settlesBilling = contract.settles === "billing";
+  if (settlesBilling !== (s.billing !== null)) {
     ctx.addIssue({
       code: "custom",
-      path: ["uid_invoice"],
-      message: settles === "invoice"
-        ? `a "${s.type}" settles an invoice and must name it in uid_invoice`
-        : `a "${s.type}" settles a ${settles.replace("_", " ")}, not an invoice; uid_invoice must be null`,
+      path: ["billing"],
+      message: settlesBilling
+        ? `a "${s.type}" settles a billing document and must name it in billing`
+        : `a "${s.type}" settles its credit, not a billing document; billing must be null`,
     });
   }
-  if ((settles === "purchase_bill") !== (s.uid_purchase_bill !== null)) {
+  if (contract.draws_credit !== (s.credit !== null)) {
     ctx.addIssue({
       code: "custom",
-      path: ["uid_purchase_bill"],
-      message: settles === "purchase_bill"
-        ? `a "${s.type}" settles a supplier bill and must name it in uid_purchase_bill`
-        : `a "${s.type}" does not settle a supplier bill; uid_purchase_bill must be null`,
-    });
-  }
-  if (settles === "credit_note" && s.uid_credit_note === null) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["uid_credit_note"],
-      message: `a "${s.type}" settles a credit note and must name it in uid_credit_note`,
-    });
-  }
-  // A `"purchase_credit"` row's key is required by the `draws_purchase_credit`
-  // check below — every type settling a supplier credit also draws on it.
-
-  // Which party the row names. A receivable names its customer and no supplier;
-  // a payable the reverse. Both directions are checked, so a row can never carry
-  // both — which is what keeps the per-customer and per-supplier queries disjoint.
-  const payable = SETTLEMENT_TARGET_SIDE[settles] === "payable";
-  if (payable !== (s.uid_supplier !== null)) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["uid_supplier"],
-      message: payable
-        ? `a "${s.type}" is a payable and must name its supplier in uid_supplier`
-        : `a "${s.type}" is a receivable; uid_supplier must be null`,
-    });
-  }
-  if (payable === (s.uid_organization !== null)) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["uid_organization"],
-      message: payable
-        ? `a "${s.type}" is a payable; uid_organization must be null`
-        : `a "${s.type}" is a receivable and must name its customer in uid_organization`,
+      path: ["credit"],
+      message: contract.draws_credit
+        ? `a "${s.type}" draws on a credit and must name it in credit`
+        : `a "${s.type}" does not draw on a credit and cannot name one`,
     });
   }
 
-  // Only a row that draws on a note's credit may name a credit note.
-  //
-  // ⚠️ This read `contract.sums_into !== "amount_credited_cents"` until the
-  // refund pair, and before that `=== "amount_paid_cents"`. The positive form was
-  // correct while `sums_into` had two members and became silently permissive the
-  // moment it gained a third: a `void` row would have been exempted from the
-  // check and could have carried a `uid_credit_note`. The bucket form then
-  // refused a refund, whose `sums_into` is `null`. `draws_credit` is the fact
-  // the rule was always about — the credit bucket was a proxy for it — and it is
-  // `false` by declaration on every type that is not a credit or refund, so a
-  // new type still defaults to being CHECKED.
-  const drawsNote = contract.draws_credit && !payable;
-  const drawsSupplierCredit = contract.draws_credit && payable;
-  if (!drawsNote) {
-    for (const field of ["uid_credit_note", "number_credit_note"] as const) {
-      if (s[field] !== null) {
-        ctx.addIssue({
-          code: "custom",
-          path: [field],
-          message: `a "${s.type}" does not draw on a credit note and cannot reference one`,
-        });
-      }
-    }
-  }
-  // The payable twin. A `bill_credit` names the supplier credit it draws, and a
-  // `supplier_refund` the one it settles; nothing else may name one.
-  if (!drawsSupplierCredit && s.uid_purchase_credit !== null) {
+  // One side per row: an allocation's credit and billing document are both
+  // receivable or both payable. The side then decides which reasons are legal.
+  const billingSide = s.billing ? SIDE_OF_COLLECTION[s.billing.collection] : null;
+  const creditSide = s.credit ? SIDE_OF_COLLECTION[s.credit.collection] : null;
+  if (billingSide !== null && creditSide !== null && billingSide !== creditSide) {
     ctx.addIssue({
       code: "custom",
-      path: ["uid_purchase_credit"],
-      message: `a "${s.type}" does not draw on a supplier credit and cannot reference one`,
+      path: ["credit", "collection"],
+      message: `a settlement's credit (${s.credit!.collection}) and billing document ` +
+        `(${s.billing!.collection}) must be on the same side`,
     });
+    return;
   }
-  if (drawsSupplierCredit && s.uid_purchase_credit === null) {
+  const side = billingSide ?? creditSide;
+  if (side !== null && !settlementReasonLegal(side, s.type, s.reason)) {
+    const legal = Object.keys(SIDE_CONTRACTS[side].settlement_reasons[s.type]);
     ctx.addIssue({
       code: "custom",
-      path: ["uid_purchase_credit"],
-      message: `a "${s.type}" draws on a supplier credit and must name it in uid_purchase_credit`,
+      path: ["reason"],
+      message: `"${s.reason}" is not a legal reason for a ${side} "${s.type}" settlement ` +
+        `(expected one of: ${legal.join(", ")})`,
     });
   }
 }
 
 /** Zod schema for a Settlement. */
 export const SettlementSchema: z.ZodType<Settlement> = z.strictObject({
-  // A document id now, so `FirestoreId` — not the `z.uuid()` the embedded
-  // `payments[].uid` used. The repo rule: every doc carries a `uid` property and
-  // its ID is a Firestore auto-ID.
+  // A document id, so `FirestoreId`. Payable and session-keyed ids are derived
+  // but still 20-char ids (`src/lib/settlementIds.ts` in api-cloudrun).
   uid: FirestoreId,
-  uid_invoice: FirestoreId.nullable(),
-  uid_organization: FirestoreId.nullable(),
-  uid_purchase_bill: FirestoreId.nullable(),
-  uid_purchase_credit: FirestoreId.nullable(),
-  uid_supplier: FirestoreId.nullable(),
+  billing: SettlementBillingRefSchema.nullable().meta({ label: "Billing" }),
+  credit: SettlementCreditRefSchema.nullable().meta({ label: "Credit" }),
+  uid_counterparty: FirestoreId,
   type: SettlementTypeEnum.meta({ column: true, label: "Type" }),
   reason: SettlementReasonEnum.meta({ column: true, label: "Reason" }),
   amount_cents: z.int().nonnegative().meta({ column: true, label: "Amount" }),
   // `chicagoInstant()`, NOT `chicagoStartOfDay()`. A settlement is an event, and
-  // the workspace table puts "true instants — moments when something happened"
-  // under `chicagoInstant()` with `transaction.date` as its example. Truncating
-  // to midnight would also collapse a busy day's settlements into a tie on the
-  // one axis bitemporal reporting needs ordered.
+  // the workspace table puts "true instants" under `chicagoInstant()`.
   date: chicagoInstant().meta({ serverSortVia: "date_fs", column: true, label: "Date" }),
   date_fs: FirestoreTimestamp,
   reference: z.string().nullable().meta({ column: true, label: "Reference" }),
   uuid_session: z.uuid(),
   reverses: FirestoreId.nullable(),
-  uid_credit_note: FirestoreId.nullable(),
-  number_credit_note: z.string().nullable(),
-  xero_payment_id: z.string().nullable(),
-  xero_credit_note_id: z.string().nullable(),
+  xero_id: XeroId.nullable(),
   synced_at: FirestoreTimestamp.nullable(),
   legacy_payment_uid: z.string().nullable(),
   version: z.int().min(0).default(0),
@@ -431,4 +384,177 @@ export const SettlementSchema: z.ZodType<Settlement> = z.strictObject({
       { field: "reason", label: "Reason", kind: "enum" },
     ],
   },
+});
+
+// ── Inputs (one route for both sides, rulings 132, 133, 137) ────────
+
+/**
+ * A billing document named by an input: the stored ref's STRIPPING twin
+ * (`.strip()` keeps the node's checks), so a client echoing a stored ref with
+ * extra keys is not refused (`tests/input-strictness.test.ts`).
+ */
+export const SettlementBillingRefInput: z.ZodType<SettlementBillingRef> = billingRefObject.strip();
+
+/** A credit document named by an input: no `label`, which the writer reads off the credit. */
+export interface SettlementCreditRefInputType {
+  collection: CreditCollection;
+  uid: string;
+}
+
+/** Zod schema for {@link SettlementCreditRefInputType}. */
+export const SettlementCreditRefInput: z.ZodType<SettlementCreditRefInputType> = z.object({
+  collection: z.enum(["credit-notes", "purchase-credits"]),
+  uid: FirestoreId,
+});
+
+/** One allocation of a credit, to one billing document of its side. */
+export interface SettlementAllocationInputType {
+  billing: SettlementBillingRef;
+  amount_cents: number;
+}
+
+/**
+ * **`POST /settlements`, both sides** (ruling 132): one route records a payment,
+ * a closure, a cash refund or a credit allocation against a document of either
+ * side, the side read off the ref's collection. It replaced
+ * `POST /credit-notes/{uid}/allocations`, `POST /purchase-bills/{uid}/close` and
+ * `/reopen`, and `POST /purchase-credits/{uid}/allocations`.
+ *
+ * - **`uuid_session` keys every write** (ruling 137): a replay of the same
+ *   session returns the row it wrote; a second press under a new session is a
+ *   new attempt the action catalog refuses.
+ * - **`version` is the TARGET's**: the billing document's for a payment or a
+ *   closure, the credit's for a refund or an allocation.
+ * - **`reason` is legal per side** (`settlementReasonLegal`), checked here so a
+ *   wrong one is a 400. An allocation carries no reason: it takes its credit's.
+ */
+export type CreateSettlementInputType =
+  | {
+    type: "payment";
+    billing: SettlementBillingRef;
+    reason: SettlementReasonType;
+    amount_cents: number;
+    date: string;
+    reference?: string | null;
+    uuid_session: string;
+    version: number;
+  }
+  | {
+    type: "closure";
+    billing: SettlementBillingRef;
+    reason: SettlementReasonType;
+    amount_cents: 0;
+    date: string;
+    reference?: string | null;
+    uuid_session: string;
+    version: number;
+  }
+  | {
+    type: "refund";
+    credit: SettlementCreditRefInputType;
+    reason: SettlementReasonType;
+    amount_cents: number;
+    date: string;
+    reference?: string | null;
+    uuid_session: string;
+    version: number;
+  }
+  | {
+    type: "credit";
+    credit: SettlementCreditRefInputType;
+    allocations: SettlementAllocationInputType[];
+    uuid_session: string;
+    version: number;
+  };
+
+const inputCommon = {
+  date: chicagoInstant(),
+  reference: z.string().nullable().optional(),
+  uuid_session: z.uuid(),
+  version: z.int().min(0),
+};
+
+/** Zod schema for {@link CreateSettlementInputType}. */
+export const CreateSettlementInput: z.ZodType<CreateSettlementInputType> = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("payment"),
+    billing: SettlementBillingRefInput,
+    reason: SettlementReasonEnum,
+    amount_cents: z.int().positive(),
+    ...inputCommon,
+  }),
+  z.object({
+    type: z.literal("closure"),
+    billing: SettlementBillingRefInput,
+    reason: SettlementReasonEnum,
+    // A closure moves no money; the contract refuses any other amount, so the
+    // wire states it rather than defaulting it.
+    amount_cents: z.literal(0),
+    ...inputCommon,
+  }),
+  z.object({
+    type: z.literal("refund"),
+    credit: SettlementCreditRefInput,
+    reason: SettlementReasonEnum,
+    amount_cents: z.int().positive(),
+    ...inputCommon,
+  }),
+  z.object({
+    type: z.literal("credit"),
+    credit: SettlementCreditRefInput,
+    allocations: z.array(z.object({
+      billing: SettlementBillingRefInput,
+      amount_cents: z.int().positive(),
+    })).min(1),
+    uuid_session: z.uuid(),
+    version: z.int().min(0),
+  }),
+]).superRefine((input, ctx) => {
+  if (input.type === "credit") {
+    const side = SIDE_OF_COLLECTION[input.credit.collection];
+    input.allocations.forEach((a, i) => {
+      if (SIDE_OF_COLLECTION[a.billing.collection] !== side) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["allocations", i, "billing", "collection"],
+          message: `a ${side} credit cannot be allocated to ${a.billing.collection}`,
+        });
+      }
+    });
+    return;
+  }
+  const side = input.type === "refund"
+    ? SIDE_OF_COLLECTION[input.credit.collection]
+    : SIDE_OF_COLLECTION[input.billing.collection];
+  if (!settlementReasonLegal(side, input.type, input.reason)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["reason"],
+      message: `"${input.reason}" is not a legal reason for a ${side} "${input.type}"`,
+    });
+  }
+}) as z.ZodType<CreateSettlementInputType>;
+
+/**
+ * **`POST /settlements/{uid}/reverse`, both sides.** `version` is the version of
+ * the document the reversed row settles (the billing document, or the credit for
+ * a refund); `uuid_session` keys the reversal (ruling 137). It replaced
+ * `POST /purchase-credits/{uid}/allocations/{settlement}/reverse` and
+ * `POST /purchase-bills/{uid}/reopen` (reopening is reversing the closure row).
+ */
+export interface ReverseSettlementInputType {
+  reason: SettlementReasonType;
+  date?: string;
+  uuid_session: string;
+  version: number;
+}
+
+/** Zod schema for {@link ReverseSettlementInputType}. */
+export const ReverseSettlementInput: z.ZodType<ReverseSettlementInputType> = z.object({
+  // `source_retracted` / `correction` for every type and side — including a
+  // `closure`, whose reversal REOPENS a closed $0 document.
+  reason: z.enum(["source_retracted", "correction"]),
+  date: chicagoInstant().optional(),
+  uuid_session: z.uuid(),
+  version: z.int().min(0),
 });

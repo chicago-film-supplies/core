@@ -70,9 +70,9 @@
  *
  * @module
  */
-import type { SharedLineType } from "./side.ts";
+import { type SharedLineType, SIDE_CONTRACTS } from "./side.ts";
 import { z } from "zod";
-import { FirestoreId, ItemUid, ThreadId } from "./_uid.ts";
+import { FirestoreId, ItemUid, ThreadId, XeroId } from "./_uid.ts";
 import { chicagoStartOfDay } from "./_datetime.ts";
 import { COACode, type COACodeType } from "./chart-of-accounts.ts";
 import {
@@ -495,7 +495,7 @@ const docItemShape = {
   amount_cents: z.int().min(0).meta({ column: true, label: "Amount", xero: true }),
   price: PurchaseDocumentLinePriceSchema,
   // A linked document's Xero `LineItemID` (docblock above). Not shared.
-  xero_line_id: z.uuid().optional(),
+  xero_line_id: XeroId.optional(),
   // A credit line's pointer at the bill row it credits (the docblock above): the
   // one pointer name on both sides (ruling 34). `seed: false`: `[]` fails `.min(1)`.
   uid_billing: FirestoreId.optional().meta({ seed: false }),
@@ -675,7 +675,7 @@ export interface PurchaseBillTotals {
   amount_void_cents: number;
   amount_due_cents: number;
   /**
-   * How many live `bill_closure` rows close this bill: 1 on a $0 bill an operator
+   * How many live `closure` rows close this bill: 1 on a $0 bill an operator
    * marked paid. Stated only where it says something, as on the invoice.
    */
   closure_count?: number;
@@ -898,7 +898,7 @@ export const PurchaseBillSchema: z.ZodType<PurchaseBill> = z.strictObject({
   supplier: UidNameRef.meta({ label: "Supplier" }),
   origin: PurchaseDocumentOriginEnum.meta({ column: true, label: "Origin" }),
   xero_document: PurchaseBillXeroDocumentEnum.meta({ column: true, label: "Xero Document" }),
-  xero_id: z.uuid().nullable(),
+  xero_id: XeroId.nullable(),
   date: chicagoStartOfDay().meta({ serverSortVia: "date_fs", column: true, label: "Date", xero: true }),
   date_fs: FirestoreTimestamp,
   due_date: chicagoStartOfDay().nullable().meta({ column: true, label: "Due Date", serverSortVia: "due_date_fs", xero: true }),
@@ -938,32 +938,18 @@ export const PurchaseBillSchema: z.ZodType<PurchaseBill> = z.strictObject({
 // ── Supplier credit ──────────────────────────────────────────────
 
 /**
- * Why a supplier credited CFS. Closed, like `SETTLEMENT_REASONS`, and for the
- * same reason: it becomes a ledger code.
- *
- * **A subset of `SETTLEMENT_REASONS`, equal to `SETTLEMENT_CONTRACTS.bill_credit.reasons`**
- * — a `bill_credit` allocation row carries its credit's reason, as an AR `credit`
- * row does (`CREDIT_NOTE_REASONS`). Kept as its own `as const` tuple rather than
- * derived from the contract so `PurchaseCredit.reason` stays a narrow `z.enum`;
- * the subset is a compile-time check below and the equality is asserted by
- * `tests/settlements.test.ts`.
+ * Why a supplier credited CFS — the payable `credit` arm of
+ * `SIDE_CONTRACTS.payable.settlement_reasons` (`schemas/side.ts`, ruling 130),
+ * derived rather than re-listed, so a supplier credit and the allocation rows it
+ * spawns can never offer different reasons (the `CREDIT_NOTE_REASONS` twin).
  */
-export const PURCHASE_CREDIT_REASONS = [
-  /** The supplier corrected a price or quantity after billing. */
-  "supplier_adjustment",
-  /** An operator fixing their own record. */
-  "correction",
-] as const;
-/** One {@link PURCHASE_CREDIT_REASONS} member. */
-export type PurchaseCreditReasonType = typeof PURCHASE_CREDIT_REASONS[number];
-// A reason here that the settlements journal cannot carry would be a credit
-// whose allocation row cannot be written — a compile error, not a 400.
-type _PurchaseCreditReasonsAreSettlementReasons = PurchaseCreditReasonType extends SettlementReasonType ? true
-  : never;
-const _purchaseCreditReasonParity: _PurchaseCreditReasonsAreSettlementReasons = true;
-void _purchaseCreditReasonParity;
-/** Zod schema for PurchaseCreditReasonType. */
-export const PurchaseCreditReasonEnum: z.ZodType<PurchaseCreditReasonType> = z.enum(PURCHASE_CREDIT_REASONS);
+export const PURCHASE_CREDIT_REASONS: readonly SettlementReasonType[] = Object.keys(
+  SIDE_CONTRACTS.payable.settlement_reasons.credit,
+) as SettlementReasonType[];
+/** Zod schema for a supplier credit's reason: one of {@link PURCHASE_CREDIT_REASONS}. */
+export const PurchaseCreditReasonEnum: z.ZodType<SettlementReasonType> = z.enum(
+  PURCHASE_CREDIT_REASONS as unknown as [SettlementReasonType, ...SettlementReasonType[]],
+);
 
 // The status vocabulary lives in `schemas/common.ts` so `purchase.ts` can mirror it
 // (`purchase.credits[]`) without importing this file (6e-0a, api-cloudrun#1455).
@@ -985,7 +971,7 @@ export interface PurchaseCredit {
   query_by_sources: string[];
   supplier: UidNameRefType;
   origin: PurchaseDocumentOriginType;
-  reason: PurchaseCreditReasonType;
+  reason: SettlementReasonType;
   status: PurchaseCreditStatusType;
   /** Xero's `CreditNoteID`; `null` only on a pushed credit not yet pushed. */
   xero_id: string | null;
@@ -1007,8 +993,8 @@ export interface PurchaseCredit {
   /**
    * Credit not yet consumed: a **co-written projection** of the journal,
    * `creditRemainingFromJournal("payable", totals.total_cents, rows)` — the total minus
-   * every signed `bill_credit` allocation and `supplier_refund`. A supplier's
-   * cash refund is a `supplier_refund` row, so unlike the AR note before
+   * every signed `credit` allocation and `refund` drawing on it. A supplier's
+   * cash refund is a `refund` row, so unlike the AR note before
    * api-cloudrun#1207 this is rebuildable from the first document.
    */
   remaining_credit_cents: number;
@@ -1113,7 +1099,7 @@ export const PurchaseCreditSchema: z.ZodType<PurchaseCredit> = z.strictObject({
   origin: PurchaseDocumentOriginEnum.meta({ column: true, label: "Origin" }),
   reason: PurchaseCreditReasonEnum.meta({ column: true, label: "Reason" }),
   status: PurchaseCreditStatusEnum.meta({ column: true, label: "Status" }),
-  xero_id: z.uuid().nullable(),
+  xero_id: XeroId.nullable(),
   date: chicagoStartOfDay().meta({ serverSortVia: "date_fs", column: true, label: "Date" }),
   date_fs: FirestoreTimestamp,
   reference: z.string().max(255).nullable().meta({ column: true, label: "Reference" }),
@@ -1371,7 +1357,7 @@ const pushBillInput = z.object({
 const linkBillInput = z.object({
   mode: z.literal("link"),
   xero_document: PurchaseBillXeroDocumentEnum,
-  xero_id: z.uuid(),
+  xero_id: XeroId,
   items: z.array(PurchaseDocumentItemInput).min(1),
   uuid_session: z.uuid(),
   version: z.int().min(0),
@@ -1402,7 +1388,7 @@ export const CreatePurchaseBillInput: z.ZodType<CreatePurchaseBillInputType> = z
 export type CreatePurchaseCreditInputType =
   | {
     mode: "push";
-    reason: PurchaseCreditReasonType;
+    reason: SettlementReasonType;
     date: string;
     reference?: string | null;
     items: PurchaseCreditItemInputType[];
@@ -1412,7 +1398,7 @@ export type CreatePurchaseCreditInputType =
   }
   | {
     mode: "link";
-    reason: PurchaseCreditReasonType;
+    reason: SettlementReasonType;
     xero_id: string;
     items: PurchaseCreditItemInputType[];
     uuid_session: string;
@@ -1433,7 +1419,7 @@ const pushCreditInput = z.object({
 const linkCreditInput = z.object({
   mode: z.literal("link"),
   reason: PurchaseCreditReasonEnum,
-  xero_id: z.uuid(),
+  xero_id: XeroId,
   items: z.array(PurchaseCreditItemInput),
   uuid_session: z.uuid(),
   version: z.int().min(0),
@@ -1638,41 +1624,6 @@ export const UpdatePurchaseBillInput: z.ZodType<UpdatePurchaseBillInputType> = z
 }) as z.ZodType<UpdatePurchaseBillInputType>;
 
 /**
- * Input for allocating some of a supplier credit to one bill of the same
- * supplier. `version` is the CREDIT's — the document whose balance the
- * allocation spends.
- */
-export interface AllocatePurchaseCreditInputType {
-  uid_purchase_bill: string;
-  amount_cents: number;
-  uuid_session: string;
-  version: number;
-}
-
-/** Zod schema for AllocatePurchaseCreditInputType. */
-export const AllocatePurchaseCreditInput: z.ZodType<AllocatePurchaseCreditInputType> = z.object({
-  uid_purchase_bill: FirestoreId,
-  amount_cents: z.int().min(1),
-  uuid_session: z.uuid(),
-  version: z.int().min(0),
-});
-
-/**
- * Input for reversing an allocation CFS has not yet pushed to Xero. `version` is
- * the CREDIT's, as an allocation's is. `uuid_session` keys the reversal.
- */
-export interface ReversePurchaseCreditAllocationInputType {
-  uuid_session: string;
-  version: number;
-}
-
-/** Zod schema for ReversePurchaseCreditAllocationInputType. */
-export const ReversePurchaseCreditAllocationInput: z.ZodType<ReversePurchaseCreditAllocationInputType> = z.object({
-  uuid_session: z.uuid(),
-  version: z.int().min(0),
-});
-
-/**
  * Input for voiding a supplier credit from CFS. `version` is the credit's.
  * Refused while anything draws on the credit — remove its allocations and
  * refunds in Xero first, as Xero itself requires.
@@ -1700,15 +1651,3 @@ export const VoidPurchaseBillInput: z.ZodType<VoidPurchaseBillInputType> = z.obj
   version: z.int().min(0),
 });
 
-/**
- * Input for marking a $0 bill paid, or undoing that. `version` is the bill's.
- * The refusals are `closeRefusal` and `purchaseBillReopenRefusal`.
- */
-export interface PurchaseBillClosureInputType {
-  version: number;
-}
-
-/** Zod schema for PurchaseBillClosureInputType. */
-export const PurchaseBillClosureInput: z.ZodType<PurchaseBillClosureInputType> = z.object({
-  version: z.int().min(0),
-});

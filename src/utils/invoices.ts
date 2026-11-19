@@ -86,7 +86,7 @@ import {
 } from "./substitutions.ts";
 import { closestAncestor, mapPathsAcrossRebuild, pairItemsAcrossRebuild } from "./item-pairing.ts";
 import { interleaveStoredOnlyRows } from "./stored-only-rows.ts";
-import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDatesType, OrderDocDestinationItemType, SettlementReasonType, SettlementTargetType, SettlementTypeType, SubstitutedForEntryType, PurchaseCreditStatusType } from "../schemas/mod.ts";
+import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDatesType, OrderDocDestinationItemType, SettlementReasonType, SettlementTypeType, SubstitutedForEntryType, PurchaseCreditStatusType } from "../schemas/mod.ts";
 import { fitOutOfServiceEntries } from "./replacements.ts";
 import type { InitiatorAccount } from "./quantityAccounting.ts";
 import {
@@ -102,8 +102,8 @@ import {
   isLineItemType,
   OrderSchema,
   SETTLEMENT_CONTRACTS,
-  SETTLEMENT_TARGET_SIDE,
   type Side,
+  SIDE_OF_COLLECTION,
   withRowSourcePath,
 } from "../schemas/mod.ts";
 import { fromCentsBig, roundDivHalfAwayFromZero } from "./money.ts";
@@ -229,17 +229,13 @@ export function rederiveInvoiceTotalsForAudit(
   // is `paid + credited + voided + due === total`, which `0 + 0 + 0 + total`
   // satisfies exactly. Pass `[]` explicitly when a document genuinely has no
   // settlements; never let the default decide.
-  settlements: readonly {
-    type: SettlementTypeType;
-    reason: SettlementReasonType;
-    amount_cents: number;
-  }[],
+  settlements: readonly SettlementFoldRow[],
 ): InvoiceTotals {
   const core = rederiveDocumentTotalsForAudit(flattenForXero(items), taxes);
 
   // Settlement accounting — the projection of the journal onto this document.
   const { amount_paid_cents, amount_credited_cents, amount_void_cents, amount_due_cents, closure_count } =
-    recomputeSettlementTotals(core.total_cents, settlements);
+    recomputeSettlementTotals("receivable", core.total_cents, settlements);
 
   return {
     ...core,
@@ -391,97 +387,29 @@ export function liveSettlements<T extends { uid: string; reverses: string | null
  * turns the next bucket into a loud failure at the one site that must know
  * about it, instead of a quiet mis-route at every site that reads the result.
  *
- * @param totalCents - Invoice total, in integer cents, from `items[]`
- * @param settlements - Every settlement against the invoice, reversals included
+ * **One fold for both sides** (ruling 44): `side` names whose billing document
+ * is being folded, and a row naming the other side's document — or no billing
+ * document at all (a `refund`, which settles its credit) — is REFUSED rather
+ * than skipped. One reaching here means a caller read settlements by something
+ * other than the document's `billing.uid`, and skipping would hide that. An
+ * invoice's and a bill's `totals` share these storage keys, which is what lets
+ * one fold serve both.
+ *
  * **`closure_count` folds the MULTIPLIER, not the amount** (api-cloudrun#1169):
  * a closure carries `amount_cents: 0`, so it is dispatched on
  * `SettlementContract.counts_into` and reaches the cents switch only through its
  * `null` arm.
  *
+ * @param side - The side of the billing document being folded
+ * @param totalCents - The document total, in integer cents, from `items[]`
+ * @param settlements - Every settlement against the document, reversals included
  * @returns The four projected totals, the closure count, and a per-reason cents breakdown
  */
 export function recomputeSettlementTotals(
+  side: Side,
   totalCents: number,
-  settlements: readonly {
-    type: SettlementTypeType;
-    reason: SettlementReasonType;
-    amount_cents: number;
-  }[],
-): {
-  amount_paid_cents: number;
-  amount_credited_cents: number;
-  amount_void_cents: number;
-  amount_due_cents: number;
-  closure_count: number;
-  breakdown: Partial<Record<SettlementReasonType, number>>;
-} {
-  return foldSettlements("invoice", totalCents, settlements);
-}
-
-/**
- * A supplier bill's settlement projection (api-cloudrun#1210) — the payable twin
- * of {@link recomputeSettlementTotals}, and the same fold: a straight signed sum
- * over every row, three cents buckets dispatched on `sums_into`, negatives
- * preserved. `PurchaseBill.totals` uses the invoice's storage keys exactly, which
- * is what lets one fold serve both.
- *
- * ⚠️ **Refuses any row that does not settle a `purchase_bill`** — a receivable
- * row, or a `supplier_refund` — rather than skipping it, for the reason the
- * invoice fold refuses a refund: such a row reaching here means the caller read
- * settlements by something other than `uid_purchase_bill`. `bill_closure` feeds
- * `closure_count`, exactly as an invoice's `closure` does.
- *
- * @param totalCents - The bill's `totals.total_cents`
- * @param settlements - Every settlement naming the bill, reversals included
- */
-export function recomputePurchaseBillTotals(
-  totalCents: number,
-  settlements: readonly {
-    type: SettlementTypeType;
-    reason: SettlementReasonType;
-    amount_cents: number;
-  }[],
-): {
-  amount_paid_cents: number;
-  amount_credited_cents: number;
-  amount_void_cents: number;
-  amount_due_cents: number;
-  closure_count: number;
-  breakdown: Partial<Record<SettlementReasonType, number>>;
-} {
-  return foldSettlements("purchase_bill", totalCents, settlements);
-}
-
-/** A target as prose, for the fold's refusal message. */
-const TARGET_LABEL: Readonly<Record<SettlementTargetType, string>> = {
-  invoice: "an invoice",
-  credit_note: "a credit note",
-  purchase_bill: "a purchase bill",
-  purchase_credit: "a supplier credit",
-};
-
-/**
- * The one settlement fold, for whichever document `target` names. Not exported:
- * each caller is a named projection ({@link recomputeSettlementTotals},
- * {@link recomputePurchaseBillTotals}) so a reader can never fold the wrong side
- * by passing the wrong string.
- */
-function foldSettlements(
-  target: "invoice" | "purchase_bill",
-  totalCents: number,
-  settlements: readonly {
-    type: SettlementTypeType;
-    reason: SettlementReasonType;
-    amount_cents: number;
-  }[],
-): {
-  amount_paid_cents: number;
-  amount_credited_cents: number;
-  amount_void_cents: number;
-  amount_due_cents: number;
-  closure_count: number;
-  breakdown: Partial<Record<SettlementReasonType, number>>;
-} {
+  settlements: readonly SettlementFoldRow[],
+): SettlementTotals {
   let paidCents = 0;
   let creditedCents = 0;
   let voidedCents = 0;
@@ -491,15 +419,12 @@ function foldSettlements(
   for (const s of settlements) {
     const multiplier = getSettlementMultiplier(s.type);
     const contract = SETTLEMENT_CONTRACTS[s.type];
-    // A row for another target (a `refund`'s credit note, a payable row in an
-    // invoice fold, a receivable in a bill fold) feeds none of these totals,
-    // and one reaching here means the caller read settlements by something
-    // other than the target's key. Its buckets would mis-route or skip it
-    // silently below, so refuse here instead (api-cloudrun#1207, #1210).
-    if (contract.settles !== target) {
+    const rowSide = s.billing === null ? null : SIDE_OF_COLLECTION[s.billing.collection as keyof typeof SIDE_OF_COLLECTION];
+    if (contract.settles !== "billing" || rowSide !== side) {
       throw new Error(
-        `a "${s.type}" settles ${TARGET_LABEL[contract.settles]} and cannot be folded ` +
-          `into ${TARGET_LABEL[target]}'s totals`,
+        rowSide === null || rowSide === undefined
+          ? `a "${s.type}" names no billing document and cannot be folded into a ${side} billing document's totals`
+          : `a ${rowSide} "${s.type}" cannot be folded into a ${side} billing document's totals`,
       );
     }
     // A COUNT row folds its multiplier, never its (zero) amount — see
@@ -536,10 +461,7 @@ function foldSettlements(
     amount_paid_cents: paidCents,
     amount_credited_cents: creditedCents,
     amount_void_cents: voidedCents,
-    // Integer subtraction over four exact cent counts. This line used to be the
-    // one currency.js call in the module, because a dollar-denominated `total`
-    // met two converted figures here; with every operand in the same unit there
-    // is nothing left for a decimal type to reconcile.
+    // Integer subtraction over four exact cent counts.
     amount_due_cents: totalCents - paidCents - creditedCents - voidedCents,
     closure_count: closureCount,
     breakdown: breakdownCents,
@@ -547,24 +469,44 @@ function foldSettlements(
 }
 
 /**
+ * A settlement row as the folds read it: what moved, and the refs that say
+ * which document of which side it names. The refs are what an unprefixed type
+ * no longer carries (ruling 44), so a synthetic row states them too.
+ */
+export interface SettlementFoldRow {
+  type: SettlementTypeType;
+  reason: SettlementReasonType;
+  amount_cents: number;
+  billing: { collection: string } | null;
+  credit: { collection: string } | null;
+}
+
+/** What {@link recomputeSettlementTotals} returns. */
+export interface SettlementTotals {
+  amount_paid_cents: number;
+  amount_credited_cents: number;
+  amount_void_cents: number;
+  amount_due_cents: number;
+  closure_count: number;
+  breakdown: Partial<Record<SettlementReasonType, number>>;
+}
+
+/**
  * **A credit document's unconsumed credit, folded from the journal** — for a
  * customer credit note and a supplier credit alike: `total − Σ signed draws`
- * over every row of that side with `SettlementContract.draws_credit`
- * (`credit`, `refund`, `bill_credit`, `supplier_refund` and their reversals).
+ * over every row with `SettlementContract.draws_credit` (`credit`, `refund` and
+ * their reversals) whose `credit` ref is on `side`.
  *
  * This is what `remaining_credit_cents` is a projection of. It could not be on
- * the receivable side until refunds were rows: a cash refund consumed a note
- * without appending anything, so CN-1013 and CN-1016 sat `applied` with zero
- * rows naming them and a fold handed both their full credit back
- * (api-cloudrun#469).
+ * the receivable side until refunds were rows (api-cloudrun#469).
  *
  * **A voided document folds to whatever its rows say, which is `total`** — it
  * voids only with no live allocation and no live refund, so its draws net to 0.
- * Voiding strands the balance rather than consuming it.
  *
  * Rows that do not draw this side's credit are skipped, not refused: a caller
- * reading by the document's key sees only drawing rows anyway, and skipping lets
- * a caller pass a mixed list. **Negative results are preserved, never clamped**.
+ * reading by the document's `credit.uid` sees only drawing rows anyway, and
+ * skipping lets a caller pass a mixed list. **Negative results are preserved,
+ * never clamped**.
  *
  * @param side - Which side's credit: `receivable` (a note) or `payable`
  * @param totalCents - The document's total
@@ -573,13 +515,14 @@ function foldSettlements(
 export function creditRemainingFromJournal(
   side: Side,
   totalCents: number,
-  settlements: readonly { type: SettlementTypeType; amount_cents: number }[],
+  settlements: readonly Pick<SettlementFoldRow, "type" | "amount_cents" | "credit">[],
 ): number {
   let drawnCents = 0;
   for (const s of settlements) {
     const contract = SETTLEMENT_CONTRACTS[s.type];
     if (!contract) throw new Error(`unknown settlement type: ${s.type}`);
-    if (!contract.draws_credit || SETTLEMENT_TARGET_SIDE[contract.settles] !== side) continue;
+    if (!contract.draws_credit || s.credit === null) continue;
+    if (SIDE_OF_COLLECTION[s.credit.collection as keyof typeof SIDE_OF_COLLECTION] !== side) continue;
     drawnCents += s.amount_cents * getSettlementMultiplier(s.type);
   }
   return totalCents - drawnCents;

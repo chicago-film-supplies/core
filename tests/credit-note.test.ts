@@ -19,7 +19,7 @@ import {
   deriveCreditNoteSources,
   getInitialValues,
   deriveCreditPostingAccount,
-  SETTLEMENT_CONTRACTS,
+  SIDE_CONTRACTS,
 } from "../src/schemas/mod.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
@@ -95,15 +95,15 @@ Deno.test("CreditNoteSchema accepts CN-1009's shape", () => {
   assertEquals(CreditNoteSchema.safeParse(makeCreditNote()).success, true);
 });
 
-Deno.test("the reasons are DERIVED from the settlement contract, not re-listed", () => {
+Deno.test("the reasons are DERIVED from the side table, not re-listed", () => {
   // One credit note allocated across three invoices has ONE reason. Authoring
   // the list twice is what would let the document and its settlements offer
   // different answers.
-  assertEquals(CREDIT_NOTE_REASONS, SETTLEMENT_CONTRACTS.credit.reasons);
+  assertEquals([...CREDIT_NOTE_REASONS], Object.keys(SIDE_CONTRACTS.receivable.settlement_reasons.credit));
   assertEquals(CREDIT_NOTE_REASONS.includes("bad_debt"), true);
   assertEquals(CREDIT_NOTE_REASONS.includes("early_return"), true);
   // A payment reason is not a credit reason.
-  assertEquals(CREDIT_NOTE_REASONS.includes("payment_received"), false);
+  assertEquals(CREDIT_NOTE_REASONS.includes("paid"), false);
   // Nor is a reversal reason — a credit note is never itself a retraction.
   assertEquals(CREDIT_NOTE_REASONS.includes("source_retracted"), false);
 });

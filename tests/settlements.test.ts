@@ -10,26 +10,31 @@
  */
 import { assertEquals, assertThrows } from "@std/assert";
 import {
+  CREDIT_NOTE_REASONS,
+  CreateSettlementInput,
   getSettlementMultiplier,
-  isInvoiceSettlement,
-  isPayableSettlement,
-  isPurchaseBillSettlement,
-  isReceivableSettlement,
+  isBillingSettlement,
+  isSideSettlement,
   PURCHASE_CREDIT_REASONS,
+  ReverseSettlementInput,
   type Settlement,
   SETTLEMENT_CONTRACTS,
-  SETTLEMENT_TARGET_SIDE,
-  SETTLEMENT_TARGETS,
   settlementContract,
-  SettlementSchema,
   type SettlementReasonType,
+  SettlementReasonEnum,
+  settlementReasonLegal,
+  SettlementSchema,
+  settlementSide,
   type SettlementTypeType,
+  type Side,
+  SIDE_COLLECTIONS,
+  SIDE_CONTRACTS,
+  SIDES,
 } from "../src/schemas/mod.ts";
 import {
   creditRemainingFromJournal,
   deriveInvoiceStatus,
   invoiceIsFrozen,
-  recomputePurchaseBillTotals,
   recomputeSettlementTotals,
 } from "../src/utils/invoices.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
@@ -51,37 +56,61 @@ const ORG = "testorg1000000000000";
 const INV = "testinv1000000000000";
 const SETTLEMENT = "teststl1000000000000";
 
-/** A settlement row reduced to what the totals fold reads. */
-const S = (
-  o: Partial<{ type: SettlementTypeType; reason: SettlementReasonType; amount_cents: number }> = {},
-) => ({
-  type: "payment" as SettlementTypeType,
-  reason: "payment_received" as SettlementReasonType,
-  amount_cents: 0,
-  ...o,
-});
+const SUPPLIER = "testsup1000000000000";
+const BILL = "testpbl1000000000000";
+const NOTE = "testcrn1000000000000";
+const PCREDIT = "testpcr1000000000000";
 
-/** A complete, valid settlement document. */
-function makeSettlement(overrides: Record<string, unknown> = {}) {
+/** The refs a row of `type` on `side` names, read off its contract. */
+function refsFor(side: Side, type: SettlementTypeType) {
+  const c = SETTLEMENT_CONTRACTS[type];
+  const cols = SIDE_COLLECTIONS[side];
+  return {
+    billing: c.settles === "billing" ? { collection: cols.billing, uid: side === "receivable" ? INV : BILL } : null,
+    credit: c.draws_credit
+      ? { collection: cols.credit, uid: side === "receivable" ? NOTE : PCREDIT, label: side === "receivable" ? "CN-1030" : null }
+      : null,
+  };
+}
+
+/** A settlement row reduced to what the totals fold reads, receivable unless `side` says otherwise. */
+const S = (
+  o: Partial<{ type: SettlementTypeType; reason: SettlementReasonType; amount_cents: number; side: Side }> = {},
+) => {
+  const type = o.type ?? "payment";
+  return {
+    type,
+    reason: o.reason ?? ("paid" as SettlementReasonType),
+    amount_cents: o.amount_cents ?? 0,
+    ...refsFor(o.side ?? "receivable", type),
+  };
+};
+
+/** The first reason `side` labels on `type` — a legal one by construction. */
+const firstReason = (side: Side, type: SettlementTypeType) =>
+  Object.keys(SIDE_CONTRACTS[side].settlement_reasons[type])[0] as SettlementReasonType;
+
+/**
+ * A row that parses for ANY type on EITHER side, built from the contract and
+ * the side table alone — the refs the type's role demands, a legal reason, the
+ * reversal link its contract requires. Every refusal starts here and changes ONE
+ * thing.
+ */
+function rowFor(side: Side, type: SettlementTypeType, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  const c = SETTLEMENT_CONTRACTS[type];
   return {
     uid: SETTLEMENT,
-    uid_invoice: INV,
-    uid_organization: ORG,
-    uid_purchase_bill: null,
-    uid_purchase_credit: null,
-    uid_supplier: null,
-    type: "payment",
-    reason: "payment_received",
-    amount_cents: 50_000,
+    ...refsFor(side, type),
+    uid_counterparty: side === "receivable" ? ORG : SUPPLIER,
+    type,
+    reason: firstReason(side, type),
+    amount_cents: c.counts_into !== null ? 0 : 100,
     date: "2026-08-01T14:32:07.881-05:00",
     date_fs: mockTimestamp,
     reference: null,
     uuid_session: "0195f3a1-0000-7000-8000-000000000001",
-    reverses: null,
-    uid_credit_note: null,
-    number_credit_note: null,
-    xero_payment_id: null,
-    xero_credit_note_id: null,
+    reverses: c.reverses === "required" ? SETTLEMENT : null,
+    xero_id: null,
     synced_at: null,
     legacy_payment_uid: null,
     version: 0,
@@ -92,6 +121,13 @@ function makeSettlement(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+/** A complete, valid receivable payment document. */
+const makeSettlement = (overrides: Record<string, unknown> = {}) =>
+  rowFor("receivable", (overrides.type as SettlementTypeType | undefined) ?? "payment", { amount_cents: 50_000, ...overrides });
+
+/** A well-formed Xero id. */
+const XERO = "edf5d932-0000-4000-8000-000000000001";
 
 // ── The contract table ───────────────────────────────────────────
 
@@ -108,10 +144,30 @@ Deno.test("getSettlementMultiplier is DERIVED from the contract, never declared"
   assertEquals(getSettlementMultiplier("credit_reversal"), -1);
 });
 
-Deno.test("every settlement type routes to exactly one invoice total", () => {
-  // `sums_into` is load-bearing, not documentation: `recomputeSettlementTotals`
-  // (which every invoice total goes through) takes its settlement argument structurally, so without a declared target a
-  // credit row would be silently summed into `amount_paid`.
+Deno.test("ten types, five pairs, no side in the name (ruling 44)", () => {
+  const types = Object.keys(SETTLEMENT_CONTRACTS).sort();
+  assertEquals(types, [
+    "closure",
+    "closure_reversal",
+    "credit",
+    "credit_reversal",
+    "payment",
+    "payment_reversal",
+    "refund",
+    "refund_reversal",
+    "void",
+    "void_reversal",
+  ]);
+  // Every application has its reversal, and only reversals end in `_reversal`.
+  for (const t of types) {
+    if (t.endsWith("_reversal")) assertEquals(types.includes(t.slice(0, -"_reversal".length)), true, t);
+    assertEquals(SETTLEMENT_CONTRACTS[t as SettlementTypeType].reverses === "required", t.endsWith("_reversal"), t);
+  }
+});
+
+Deno.test("every settlement type routes to exactly one billing total", () => {
+  // `sums_into` is load-bearing: without a declared target a credit row would
+  // be silently summed into `amount_paid`.
   assertEquals(SETTLEMENT_CONTRACTS.payment.sums_into, "amount_paid_cents");
   assertEquals(SETTLEMENT_CONTRACTS.payment_reversal.sums_into, "amount_paid_cents");
   assertEquals(SETTLEMENT_CONTRACTS.credit.sums_into, "amount_credited_cents");
@@ -121,68 +177,44 @@ Deno.test("every settlement type routes to exactly one invoice total", () => {
 });
 
 Deno.test("the void pair matches the shape of the other two — do/undo, no external id", () => {
-  // A void carries no Xero id even though Xero is usually where it originates:
-  // Xero annuls the INVOICE, not a settlement, so there is no Xero payment or
-  // credit-note object for the row to name. The invoice's own `xero_id` is the
-  // linkage and it is already stored.
-  assertEquals(SETTLEMENT_CONTRACTS.void.xero_id_field, null);
-  assertEquals(SETTLEMENT_CONTRACTS.void_reversal.xero_id_field, null);
+  // Xero annuls the DOCUMENT, not a settlement, so there is no Xero object for
+  // the row to name; the document's own `xero_id` is the linkage.
+  assertEquals(SETTLEMENT_CONTRACTS.void.xero_object, null);
+  assertEquals(SETTLEMENT_CONTRACTS.void_reversal.xero_object, null);
   assertEquals(SETTLEMENT_CONTRACTS.void.reverses, "forbidden");
   assertEquals(SETTLEMENT_CONTRACTS.void_reversal.reverses, "required");
   assertEquals(getSettlementMultiplier("void"), 1);
   assertEquals(getSettlementMultiplier("void_reversal"), -1);
 });
 
-Deno.test("a void's reason is `invoice_voided`, NOT `source_retracted`", () => {
+Deno.test("a void's reason is `voided`, NOT `source_retracted`", () => {
   // `source_retracted` means "the originating system no longer reports it" — the
-  // reap. A void is the opposite kind of fact: the invoice IS reported, and
-  // reported as annulled. Re-meaning an existing member after history carries it
-  // is the one change this enum calls expensive.
-  assertEquals(SETTLEMENT_CONTRACTS.void.reasons.includes("invoice_voided"), true);
-  assertEquals(SETTLEMENT_CONTRACTS.void.reasons.includes("source_retracted"), false);
-  assertEquals(
-    SettlementSchema.safeParse(
-      makeSettlement({ type: "void", reason: "source_retracted", reverses: null }),
-    ).success,
-    false,
-  );
-  assertEquals(
-    SettlementSchema.safeParse(
-      makeSettlement({ type: "void", reason: "invoice_voided", reverses: null }),
-    ).success,
-    true,
-  );
-});
-
-Deno.test("a void cannot reference a credit note — the guard names the CREDIT bucket, not the cash one", () => {
-  // The credit-note guard used to read `sums_into === "amount_paid_cents"`,
-  // which was correct while there were two buckets and silently permissive the
-  // moment a third arrived: a `void` row would have been exempted entirely. It
-  // now reads `!== "amount_credited_cents"`, so a fourth bucket defaults to
-  // being CHECKED rather than to being skipped.
-  assertEquals(
-    SettlementSchema.safeParse(makeSettlement({
-      type: "void",
-      reason: "invoice_voided",
-      uid_credit_note: "testcrn1000000000000",
-      number_credit_note: "CN-1014",
-    })).success,
-    false,
-  );
+  // reap. A void is the opposite kind of fact: the document IS reported, annulled.
+  for (const side of SIDES) {
+    assertEquals(settlementReasonLegal(side, "void", "voided"), true, side);
+    assertEquals(settlementReasonLegal(side, "void", "source_retracted"), false, side);
+    assertEquals(SettlementSchema.safeParse(rowFor(side, "void", { reason: "source_retracted" })).success, false, side);
+    assertEquals(SettlementSchema.safeParse(rowFor(side, "void", { reason: "voided" })).success, true, side);
+  }
 });
 
 Deno.test("settlementContract tolerates an unknown type rather than throwing", () => {
   assertEquals(settlementContract("payment")?.sums_into, "amount_paid_cents");
-  assertEquals(settlementContract("refund")?.settles, "credit_note");
+  assertEquals(settlementContract("refund")?.settles, "credit");
+  assertEquals(settlementContract("bill_payment"), undefined, "the prefixed types are gone");
   assertEquals(settlementContract("not_a_type"), undefined);
   assertEquals(settlementContract(""), undefined);
 });
 
 Deno.test("a reversal carries NO external id — it is a CFS event", () => {
-  // The reap appends a reverser because Xero stopped reporting a payment. The
-  // reverser has no Xero counterpart; the id it retracts is on the row it names.
-  assertEquals(SETTLEMENT_CONTRACTS.payment_reversal.xero_id_field, null);
-  assertEquals(SETTLEMENT_CONTRACTS.credit_reversal.xero_id_field, null);
+  for (const type of Object.keys(SETTLEMENT_CONTRACTS) as SettlementTypeType[]) {
+    if (SETTLEMENT_CONTRACTS[type].reverses === "required") assertEquals(SETTLEMENT_CONTRACTS[type].xero_object, null, type);
+  }
+  // …and the applications that carry one say what it names.
+  assertEquals(SETTLEMENT_CONTRACTS.payment.xero_object, "payment");
+  assertEquals(SETTLEMENT_CONTRACTS.credit.xero_object, "credit_note");
+  assertEquals(SETTLEMENT_CONTRACTS.refund.xero_object, "payment");
+  assertEquals(SETTLEMENT_CONTRACTS.closure.xero_object, null);
 });
 
 // ── Schema enforcement ───────────────────────────────────────────
@@ -196,34 +228,28 @@ Deno.test("an illegal (type, reason) pair is rejected", () => {
   const bad = SettlementSchema.safeParse(makeSettlement({ reason: "bad_debt" }));
   assertEquals(bad.success, false);
   assertEquals(bad.error?.issues[0].path, ["reason"]);
-
-  // ...and `payment_received` is not a credit reason.
-  assertEquals(
-    SettlementSchema.safeParse(makeSettlement({
-      type: "credit",
-      reason: "payment_received",
-      xero_credit_note_id: null,
-    })).success,
-    false,
-  );
+  // ...and `paid` is not a credit reason.
+  assertEquals(SettlementSchema.safeParse(rowFor("receivable", "credit", { reason: "paid" })).success, false);
 });
 
-Deno.test("a credit carrying xero_payment_id is rejected", () => {
-  const bad = SettlementSchema.safeParse(makeSettlement({
-    type: "credit",
-    reason: "bad_debt",
-    xero_payment_id: "1234",
-  }));
-  assertEquals(bad.success, false);
-  assertEquals(bad.error?.issues[0].path, ["xero_payment_id"]);
+Deno.test("only a type with a Xero counterpart may carry a xero_id", () => {
+  for (const side of SIDES) {
+    for (const type of Object.keys(SETTLEMENT_CONTRACTS) as SettlementTypeType[]) {
+      const r = SettlementSchema.safeParse(rowFor(side, type, { xero_id: XERO }));
+      assertEquals(r.success, SETTLEMENT_CONTRACTS[type].xero_object !== null, `${side} ${type}`);
+      if (!r.success) assertEquals(r.error.issues.map((i) => i.path.join(".")), ["xero_id"], `${side} ${type}`);
+    }
+  }
+});
+
+Deno.test("xero_id is a Xero id: a UUID, never a free string (ruling 129)", () => {
+  const r = SettlementSchema.safeParse(makeSettlement({ xero_id: "1234" }));
+  assertEquals(r.success, false);
+  assertEquals(r.error?.issues[0].path, ["xero_id"]);
 });
 
 Deno.test("reverses is required on a reversal and forbidden on an application", () => {
-  const missing = SettlementSchema.safeParse(makeSettlement({
-    type: "payment_reversal",
-    reason: "source_retracted",
-    reverses: null,
-  }));
+  const missing = SettlementSchema.safeParse(rowFor("receivable", "payment_reversal", { reverses: null }));
   assertEquals(missing.success, false);
   assertEquals(missing.error?.issues[0].path, ["reverses"]);
 
@@ -231,21 +257,7 @@ Deno.test("reverses is required on a reversal and forbidden on an application", 
   assertEquals(stray.success, false);
   assertEquals(stray.error?.issues[0].path, ["reverses"]);
 
-  assertEquals(
-    SettlementSchema.safeParse(makeSettlement({
-      type: "payment_reversal",
-      reason: "source_retracted",
-      reverses: SETTLEMENT,
-    })).success,
-    true,
-  );
-});
-
-Deno.test("a cash settlement cannot reference a credit note", () => {
-  // Derived from `sums_into` rather than declared as a fifth contract axis.
-  const bad = SettlementSchema.safeParse(makeSettlement({ uid_credit_note: INV }));
-  assertEquals(bad.success, false);
-  assertEquals(bad.error?.issues[0].path, ["uid_credit_note"]);
+  assertEquals(SettlementSchema.safeParse(rowFor("receivable", "payment_reversal")).success, true);
 });
 
 Deno.test("amount_cents is a non-negative integer — the sign lives in the type", () => {
@@ -259,17 +271,15 @@ Deno.test("date is a Chicago INSTANT, not a start-of-day", () => {
   // settlements into a tie on the one axis bitemporal reporting needs ordered.
   const parsed = SettlementSchema.safeParse(makeSettlement());
   assertEquals(parsed.success, true);
-  assertEquals(
-    (parsed.data as { date: string }).date,
-    "2026-08-01T14:32:07.881-05:00",
-    "the time of day was truncated",
-  );
+  assertEquals((parsed.data as { date: string }).date, "2026-08-01T14:32:07.881-05:00", "the time of day was truncated");
 });
 
 // ── The signed fold ──────────────────────────────────────────────
 
+const fold = (total: number, rows: ReturnType<typeof S>[]) => recomputeSettlementTotals("receivable", total, rows);
+
 Deno.test("a do/undo pair nets to zero ARITHMETICALLY, not by filtering", () => {
-  const r = recomputeSettlementTotals(100_000, [
+  const r = fold(100_000, [
     S({ amount_cents: 500_00 }),
     S({ type: "payment_reversal", reason: "source_retracted", amount_cents: 500_00 }),
   ]);
@@ -278,18 +288,16 @@ Deno.test("a do/undo pair nets to zero ARITHMETICALLY, not by filtering", () => 
 });
 
 Deno.test("R2 → R1 → S1: the chain that vanished money under a liveness derivation", () => {
-  // The old trichotomy went wrong on a reversal-of-a-reversal and silently
-  // dropped the $500. Under the fold it is +500 −500 +500, correct at EVERY
-  // prefix — which is the property, not just the endpoint.
+  // Under the fold it is +500 −500 +500, correct at EVERY prefix.
   const rows = [
     S({ amount_cents: 500_00 }),
     S({ type: "payment_reversal", reason: "correction", amount_cents: 500_00 }),
     S({ reason: "correction", amount_cents: 500_00 }),
   ];
-  assertEquals(recomputeSettlementTotals(100_000, rows.slice(0, 1)).amount_paid_cents, 50_000);
-  assertEquals(recomputeSettlementTotals(100_000, rows.slice(0, 2)).amount_paid_cents, 0);
-  assertEquals(recomputeSettlementTotals(100_000, rows).amount_paid_cents, 50_000);
-  assertEquals(recomputeSettlementTotals(100_000, rows).amount_due_cents, 50_000);
+  assertEquals(fold(100_000, rows.slice(0, 1)).amount_paid_cents, 50_000);
+  assertEquals(fold(100_000, rows.slice(0, 2)).amount_paid_cents, 0);
+  assertEquals(fold(100_000, rows).amount_paid_cents, 50_000);
+  assertEquals(fold(100_000, rows).amount_due_cents, 50_000);
 });
 
 Deno.test("the fold is order-independent — no second pass, no sequencing", () => {
@@ -299,8 +307,8 @@ Deno.test("the fold is order-independent — no second pass, no sequencing", () 
     S({ type: "credit", reason: "bad_debt", amount_cents: 250_00 }),
     S({ amount_cents: 700_00 }),
   ];
-  const forward = recomputeSettlementTotals(100_000, rows);
-  const reversed = recomputeSettlementTotals(100_000, [...rows].reverse());
+  const forward = fold(100_000, rows);
+  const reversed = fold(100_000, [...rows].reverse());
   assertEquals(forward.amount_paid_cents, reversed.amount_paid_cents);
   assertEquals(forward.amount_credited_cents, reversed.amount_credited_cents);
   assertEquals(forward.amount_due_cents, reversed.amount_due_cents);
@@ -308,7 +316,7 @@ Deno.test("the fold is order-independent — no second pass, no sequencing", () 
 
 Deno.test("credits route to amount_credited and never reduce total", () => {
   // #1301's shape: billed 18,196 / collected 16,000 / wrote off 2,196.
-  const r = recomputeSettlementTotals(1_819_600, [
+  const r = fold(1_819_600, [
     S({ amount_cents: 16_000_00 }),
     S({ type: "credit", reason: "bad_debt", amount_cents: 2_196_00 }),
   ]);
@@ -318,12 +326,7 @@ Deno.test("credits route to amount_credited and never reduce total", () => {
 });
 
 Deno.test("#1322: fully credited with ZERO cash collected", () => {
-  // CFS recorded $4,495.62 as cash that was never collected. Both systems agreed
-  // the invoice was settled and nothing was due — the one thing they disagreed
-  // about was *how*, and that was the one thing CFS had no field for.
-  const r = recomputeSettlementTotals(449_562, [
-    S({ type: "credit", reason: "unspecified", amount_cents: 449_562 }),
-  ]);
+  const r = fold(449_562, [S({ type: "credit", reason: "unspecified", amount_cents: 449_562 })]);
   assertEquals(r.amount_paid_cents, 0);
   assertEquals(r.amount_credited_cents, 449_562);
   assertEquals(r.amount_due_cents, 0);
@@ -331,9 +334,7 @@ Deno.test("#1322: fully credited with ZERO cash collected", () => {
 });
 
 Deno.test("an over-credited invoice stays NEGATIVE — clamping hides the defect", () => {
-  const r = recomputeSettlementTotals(10_000, [
-    S({ type: "credit", reason: "goodwill", amount_cents: 150_00 }),
-  ]);
+  const r = fold(10_000, [S({ type: "credit", reason: "goodwill", amount_cents: 150_00 })]);
   assertEquals(r.amount_credited_cents, 15_000);
   assertEquals(r.amount_due_cents, -5_000);
 });
@@ -341,13 +342,7 @@ Deno.test("an over-credited invoice stays NEGATIVE — clamping hides the defect
 // ── The void bucket (api-cloudrun#436) ───────────────────────────
 
 Deno.test("a void folds to due = 0, and it is DERIVED rather than assigned", () => {
-  // The whole of #436. A void used to force `amount_due_cents = 0` while the
-  // journal still folded to `total`, which is why the identity refine had to
-  // exempt void invoices — and that exemption is what made a void that never
-  // released its balance indistinguishable from one that did.
-  const r = recomputeSettlementTotals(247_000, [
-    S({ type: "void", reason: "invoice_voided", amount_cents: 247_000 }),
-  ]);
+  const r = fold(247_000, [S({ type: "void", reason: "voided", amount_cents: 247_000 })]);
   assertEquals(r.amount_void_cents, 247_000);
   assertEquals(r.amount_paid_cents, 0);
   assertEquals(r.amount_credited_cents, 0);
@@ -355,32 +350,23 @@ Deno.test("a void folds to due = 0, and it is DERIVED rather than assigned", () 
 });
 
 Deno.test("void_reversal restores due = total — un-voiding is an APPEND, not an edit", () => {
-  // Without the paired arm `amount_void_cents` would be a latch: the only way
-  // back would be to edit or delete the `void` row, and the journal is
-  // append-only. The pair is what keeps it a fold.
   const rows = [
-    S({ type: "void", reason: "invoice_voided", amount_cents: 247_000 }),
+    S({ type: "void", reason: "voided", amount_cents: 247_000 }),
     S({ type: "void_reversal", reason: "correction", amount_cents: 247_000 }),
   ];
-  const r = recomputeSettlementTotals(247_000, rows);
+  const r = fold(247_000, rows);
   assertEquals(r.amount_void_cents, 0);
   assertEquals(r.amount_due_cents, 247_000);
-
-  // …and the pair is order-independent, like every other do/undo here.
-  const reversed = recomputeSettlementTotals(247_000, [...rows].reverse());
+  const reversed = fold(247_000, [...rows].reverse());
   assertEquals(reversed.amount_void_cents, r.amount_void_cents);
   assertEquals(reversed.amount_due_cents, r.amount_due_cents);
 });
 
 Deno.test("voiding a PART-PAID invoice: the payment is reaped, the void takes the whole total", () => {
-  // The shape `applyInvoiceVoid` produces. Every live settlement is retracted
-  // first, so the void row annuls the full billed amount rather than the
-  // residual — which is also what Xero does, since it refuses to void an
-  // invoice that still has payments applied.
-  const r = recomputeSettlementTotals(100_000, [
+  const r = fold(100_000, [
     S({ amount_cents: 40_000 }),
     S({ type: "payment_reversal", reason: "source_retracted", amount_cents: 40_000 }),
-    S({ type: "void", reason: "invoice_voided", amount_cents: 100_000 }),
+    S({ type: "void", reason: "voided", amount_cents: 100_000 }),
   ]);
   assertEquals(r.amount_paid_cents, 0);
   assertEquals(r.amount_void_cents, 100_000);
@@ -388,32 +374,16 @@ Deno.test("voiding a PART-PAID invoice: the payment is reaped, the void takes th
 });
 
 Deno.test("a void row does NOT land in the credited bucket — the two-way `else` is gone", () => {
-  // The fold was `if (… === "amount_paid_cents") paid += …; else credited += …`.
-  // Under that `else` a void summed into `amount_credited_cents`, the identity
-  // still balanced, and every consumer would have reported a voided invoice as
-  // fully CREDITED — a bad debt written off. Nothing would have failed to
-  // compile and nothing would have failed the identity; this assertion is the
-  // only thing that separates the two answers.
-  const r = recomputeSettlementTotals(247_000, [
-    S({ type: "void", reason: "invoice_voided", amount_cents: 247_000 }),
-  ]);
+  const r = fold(247_000, [S({ type: "void", reason: "voided", amount_cents: 247_000 })]);
   assertEquals(r.amount_credited_cents, 0, "a void is not a write-off");
-  assertEquals(r.breakdown.invoice_voided, 247_000);
+  assertEquals(r.breakdown.voided, 247_000);
 });
 
 Deno.test("deriveInvoiceStatus leaves `void` alone — status is an explicit move", () => {
-  // The fold says nothing is due; the status word is still the writer's to set,
-  // in both directions. Un-voiding therefore takes TWO acts: append the
-  // `void_reversal`, then move `status` off `void`.
-  const voided = recomputeSettlementTotals(247_000, [
-    S({ type: "void", reason: "invoice_voided", amount_cents: 247_000 }),
-  ]);
-  assertEquals(
-    derive("void", voided.amount_paid_cents, voided.amount_due_cents, voided.amount_credited_cents),
-    "void",
-  );
-  const unvoided = recomputeSettlementTotals(247_000, [
-    S({ type: "void", reason: "invoice_voided", amount_cents: 247_000 }),
+  const voided = fold(247_000, [S({ type: "void", reason: "voided", amount_cents: 247_000 })]);
+  assertEquals(derive("void", voided.amount_paid_cents, voided.amount_due_cents, voided.amount_credited_cents), "void");
+  const unvoided = fold(247_000, [
+    S({ type: "void", reason: "voided", amount_cents: 247_000 }),
     S({ type: "void_reversal", reason: "correction", amount_cents: 247_000 }),
   ]);
   assertEquals(
@@ -421,43 +391,35 @@ Deno.test("deriveInvoiceStatus leaves `void` alone — status is an explicit mov
     "void",
     "the reversal alone does not un-void; the status move is separate and deliberate",
   );
-  assertEquals(
-    derive("issued", unvoided.amount_paid_cents, unvoided.amount_due_cents),
-    "issued",
-  );
+  assertEquals(derive("issued", unvoided.amount_paid_cents, unvoided.amount_due_cents), "issued");
 });
 
 Deno.test("integer cents are exact where a float fold would drift", () => {
-  // 300 rows of $0.07. In dollars-as-float this accumulates visible error;
-  // summing integers has nothing to round.
   const rows = Array.from({ length: 300 }, () => S({ amount_cents: 7 }));
-  const r = recomputeSettlementTotals(2_100, rows);
+  const r = fold(2_100, rows);
   assertEquals(r.amount_paid_cents, 2_100);
   assertEquals(r.amount_due_cents, 0);
 });
 
 Deno.test("the per-reason breakdown is free and answers the reporting question", () => {
-  // Mirrors availability's `out_of_service_breakdown[o.reason] += o.quantity`.
-  // "How much did we credit for early returns last quarter" becomes client-side
-  // arithmetic over settlements manager already subscribes to — no query, no index.
-  const r = recomputeSettlementTotals(100_000, [
+  const r = fold(100_000, [
     S({ amount_cents: 400_00 }),
     S({ type: "credit", reason: "early_return", amount_cents: 100_00 }),
     S({ type: "credit", reason: "early_return", amount_cents: 50_00 }),
     S({ type: "credit", reason: "goodwill", amount_cents: 25_00 }),
   ]);
-  assertEquals(r.breakdown.payment_received, 40_000);
+  assertEquals(r.breakdown.paid, 40_000);
   assertEquals(r.breakdown.early_return, 15_000);
   assertEquals(r.breakdown.goodwill, 2_500);
   assertEquals(r.breakdown.bad_debt, undefined);
 });
 
 Deno.test("a reversal subtracts from its reason's breakdown too", () => {
-  const r = recomputeSettlementTotals(100_000, [
+  const r = fold(100_000, [
     S({ amount_cents: 500_00 }),
     S({ type: "payment_reversal", reason: "source_retracted", amount_cents: 500_00 }),
   ]);
-  assertEquals(r.breakdown.payment_received, 50_000);
+  assertEquals(r.breakdown.paid, 50_000);
   assertEquals(r.breakdown.source_retracted, -50_000);
 });
 
@@ -482,77 +444,55 @@ Deno.test("an untouched issued invoice stays issued", () => {
 
 // ── closure (api-cloudrun#1169) ──────────────────────────────────
 
-Deno.test("every INVOICE- or BILL-settling type feeds exactly one of a cents bucket and a count; a CREDIT one neither", () => {
-  // Built from the vocabulary, not the table: a type with both, or neither,
-  // would be folded twice or not at all.
+Deno.test("every BILLING-settling type feeds exactly one of a cents bucket and a count; a CREDIT one neither", () => {
   const types = Object.keys(SETTLEMENT_CONTRACTS) as SettlementTypeType[];
   for (const type of types) {
     const c = SETTLEMENT_CONTRACTS[type];
     switch (c.settles) {
-      case "invoice":
+      case "billing":
         assertEquals((c.sums_into === null) !== (c.counts_into === null), true, type);
         break;
-      case "purchase_bill":
-        assertEquals((c.sums_into === null) !== (c.counts_into === null), true, type);
-        break;
-      case "credit_note":
-      case "purchase_credit":
+      case "credit":
         assertEquals([c.sums_into, c.counts_into], [null, null], type);
         break;
       default: {
         const _exhaustive: never = c.settles;
-        throw new Error(`unhandled target ${_exhaustive}`);
+        throw new Error(`unhandled role ${_exhaustive}`);
       }
     }
   }
-  const settling = (target: string) => types.filter((t) => SETTLEMENT_CONTRACTS[t].settles === target).sort();
-  assertEquals(settling("credit_note"), ["refund", "refund_reversal"]);
-  assertEquals(settling("purchase_credit"), ["supplier_refund", "supplier_refund_reversal"]);
-  assertEquals(settling("purchase_bill"), [
-    "bill_closure",
-    "bill_closure_reversal",
-    "bill_credit",
-    "bill_credit_reversal",
-    "bill_payment",
-    "bill_payment_reversal",
-    "bill_void",
-    "bill_void_reversal",
-  ]);
+  assertEquals(types.filter((t) => SETTLEMENT_CONTRACTS[t].settles === "credit").sort(), ["refund", "refund_reversal"]);
   // Non-vacuity: every arm is populated.
-  assertEquals(types.filter((t) => SETTLEMENT_CONTRACTS[t].counts_into !== null).sort(), ["bill_closure", "bill_closure_reversal", "closure", "closure_reversal"]);
-  assertEquals(types.filter((t) => SETTLEMENT_CONTRACTS[t].sums_into !== null).length, 12);
+  assertEquals(types.filter((t) => SETTLEMENT_CONTRACTS[t].counts_into !== null).sort(), ["closure", "closure_reversal"]);
+  assertEquals(types.filter((t) => SETTLEMENT_CONTRACTS[t].sums_into !== null).length, 6);
 });
 
 Deno.test("close → reopen → close folds to 1, 0, 1 at every prefix", () => {
   // R2: closing and reopening are journal rows, folded like every other
-  // settlement — so the count is right after EVERY append, not just at the end.
-  const rows = [
-    S({ type: "closure", reason: "zero_total" }),
-    S({ type: "closure_reversal", reason: "correction" }),
-    S({ type: "closure", reason: "zero_total" }),
-  ];
-  const expected = [1, 0, 1];
-  const statuses = ["paid", "issued", "paid"];
-  for (let n = 1; n <= rows.length; n++) {
-    const r = recomputeSettlementTotals(0, rows.slice(0, n));
-    assertEquals(r.closure_count, expected[n - 1], `prefix ${n}`);
-    // A closure moves no money: every cents bucket stays 0 and no reason is broken down.
-    assertEquals([r.amount_paid_cents, r.amount_credited_cents, r.amount_void_cents, r.amount_due_cents], [0, 0, 0, 0]);
-    assertEquals(r.breakdown, {});
-    const invoice = {
-      status: "issued" as InvoiceStatusType,
-      totals: { total_cents: 0, ...r },
-    };
-    assertEquals(deriveInvoiceStatus(invoice), statuses[n - 1], `prefix ${n}`);
-    // R1: closed ⟺ frozen, with nothing cached — reopening unfreezes.
-    assertEquals(invoiceIsFrozen({ status: statuses[n - 1] as InvoiceStatusType, totals: r }), expected[n - 1] > 0);
+  // settlement — so the count is right after EVERY append, on either side.
+  for (const side of SIDES) {
+    const rows = [
+      S({ type: "closure", reason: "zero_total", side }),
+      S({ type: "closure_reversal", reason: "correction", side }),
+      S({ type: "closure", reason: "zero_total", side }),
+    ];
+    const expected = [1, 0, 1];
+    const statuses = ["paid", "issued", "paid"];
+    for (let n = 1; n <= rows.length; n++) {
+      const r = recomputeSettlementTotals(side, 0, rows.slice(0, n));
+      assertEquals(r.closure_count, expected[n - 1], `${side} prefix ${n}`);
+      assertEquals([r.amount_paid_cents, r.amount_credited_cents, r.amount_void_cents, r.amount_due_cents], [0, 0, 0, 0]);
+      assertEquals(r.breakdown, {});
+      const doc = { status: "issued" as InvoiceStatusType, totals: { total_cents: 0, ...r } };
+      assertEquals(deriveInvoiceStatus(doc), statuses[n - 1], `${side} prefix ${n}`);
+      // R1: closed ⟺ frozen, with nothing cached — reopening unfreezes.
+      assertEquals(invoiceIsFrozen({ status: statuses[n - 1] as InvoiceStatusType, totals: r }), expected[n - 1] > 0);
+    }
   }
 });
 
 Deno.test("a closure row's amount is ignored by the cents fold — the count reads the multiplier", () => {
-  // The schema refuses a non-zero closure, but the fold must not depend on that:
-  // even a malformed row cannot leak money through the count arm.
-  const r = recomputeSettlementTotals(0, [S({ type: "closure", reason: "zero_total", amount_cents: 500 })]);
+  const r = fold(0, [S({ type: "closure", reason: "zero_total", amount_cents: 500 })]);
   assertEquals(r.closure_count, 1);
   assertEquals(r.amount_due_cents, 0);
 });
@@ -567,12 +507,10 @@ Deno.test("deriveInvoiceStatus: a $0 invoice is paid ONLY when closed — never 
   assertEquals(deriveInvoiceStatus(zero(1)), "paid");
   assertEquals(deriveInvoiceStatus(zero(1, "draft")), "draft");
   assertEquals(deriveInvoiceStatus(zero(0, "void")), "void");
-  // Money on a $0 invoice is still money: an overpayment reads paid, no closure needed.
   assertEquals(
     deriveInvoiceStatus({ status: "issued", totals: { total_cents: 0, amount_paid_cents: 100, amount_due_cents: -100 } }),
     "paid",
   );
-  // A non-zero invoice ignores the count entirely (the invoice refine forbids it anyway).
   assertEquals(
     deriveInvoiceStatus({ status: "issued", totals: { total_cents: 500, amount_paid_cents: 0, amount_due_cents: 500, closure_count: 1 } }),
     "issued",
@@ -587,22 +525,21 @@ Deno.test("deriveInvoiceStatus derives due from the buckets, not from a stale am
 });
 
 Deno.test("SettlementSchema enforces the closure contract", async (t) => {
-  const closure = { type: "closure", reason: "zero_total", amount_cents: 0 };
-  await t.step("a zero-cent closure is accepted", () => {
-    assertEquals(SettlementSchema.safeParse(makeSettlement(closure)).success, true);
+  await t.step("a zero-cent closure is accepted on both sides", () => {
+    for (const side of SIDES) assertEquals(SettlementSchema.safeParse(rowFor(side, "closure")).success, true, side);
   });
-  const refusals: Array<[string, Record<string, unknown>, string]> = [
-    ["a closure moving money", { ...closure, amount_cents: 1 }, "amount_cents"],
-    ["a closure naming a credit note", { ...closure, uid_credit_note: "testcn10000000000000" }, "uid_credit_note"],
-    ["a closure carrying a Xero payment id", { ...closure, xero_payment_id: "x" }, "xero_payment_id"],
-    ["a closure that reverses something", { ...closure, reverses: SETTLEMENT }, "reverses"],
-    ["a closure_reversal naming nothing", { type: "closure_reversal", reason: "correction", amount_cents: 0 }, "reverses"],
-    ["a payment claiming zero_total", { type: "payment", reason: "zero_total" }, "reason"],
-    ["a closure with no reason it may carry", { ...closure, reason: "unspecified" }, "reason"],
+  const refusals: Array<[string, SettlementTypeType, Record<string, unknown>, string]> = [
+    ["a closure moving money", "closure", { amount_cents: 1 }, "amount_cents"],
+    ["a closure naming a credit", "closure", { credit: { collection: "credit-notes", uid: NOTE, label: null } }, "credit"],
+    ["a closure carrying a Xero id", "closure", { xero_id: XERO }, "xero_id"],
+    ["a closure that reverses something", "closure", { reverses: SETTLEMENT }, "reverses"],
+    ["a closure_reversal naming nothing", "closure_reversal", { reverses: null }, "reverses"],
+    ["a payment claiming zero_total", "payment", { reason: "zero_total" }, "reason"],
+    ["a closure with no reason it may carry", "closure", { reason: "unspecified" }, "reason"],
   ];
-  for (const [label, overrides, path] of refusals) {
+  for (const [label, type, overrides, path] of refusals) {
     await t.step(label, () => {
-      const r = SettlementSchema.safeParse(makeSettlement(overrides));
+      const r = SettlementSchema.safeParse(rowFor("receivable", type, overrides));
       assertEquals(r.success, false);
       assertEquals(r.error!.issues.map((i) => i.path.join(".")), [path]);
     });
@@ -611,79 +548,69 @@ Deno.test("SettlementSchema enforces the closure contract", async (t) => {
 
 // ── refund (api-cloudrun#1207) ───────────────────────────────────
 
-const NOTE = "testcrn1000000000000";
-
-/** A valid refund row: names the note, no invoice. */
-const refundRow = (overrides: Record<string, unknown> = {}) =>
-  makeSettlement({
-    type: "refund",
-    reason: "credit_refunded",
-    uid_invoice: null,
-    uid_credit_note: NOTE,
-    number_credit_note: "CN-1030",
-    xero_payment_id: "edf5d932-0000-4000-8000-000000000001",
-    ...overrides,
-  });
-
 Deno.test("SettlementSchema enforces the refund contract", async (t) => {
-  await t.step("a well-formed refund parses, linked or not", () => {
-    assertEquals(SettlementSchema.safeParse(refundRow()).success, true);
-    assertEquals(SettlementSchema.safeParse(refundRow({ xero_payment_id: null })).success, true);
+  await t.step("a well-formed refund parses on both sides, linked or not", () => {
+    for (const side of SIDES) {
+      assertEquals(SettlementSchema.safeParse(rowFor(side, "refund")).success, true, side);
+      assertEquals(SettlementSchema.safeParse(rowFor(side, "refund", { xero_id: XERO })).success, true, side);
+    }
   });
-  await t.step("a refund naming an invoice is refused — it settles the note", () => {
-    assertEquals(SettlementSchema.safeParse(refundRow({ uid_invoice: INV })).success, false);
+  await t.step("a refund naming a billing document is refused — it settles the credit", () => {
+    const r = SettlementSchema.safeParse(rowFor("receivable", "refund", { billing: { collection: "invoices", uid: INV } }));
+    assertEquals(r.error?.issues.map((i) => i.path.join(".")), ["billing"]);
   });
-  await t.step("a refund naming no note is refused", () => {
-    assertEquals(SettlementSchema.safeParse(refundRow({ uid_credit_note: null })).success, false);
+  await t.step("a refund naming no credit is refused", () => {
+    const r = SettlementSchema.safeParse(rowFor("receivable", "refund", { credit: null }));
+    assertEquals(r.error?.issues.map((i) => i.path.join(".")), ["credit"]);
   });
-  await t.step("a refund carries the PaymentID, never xero_credit_note_id", () => {
-    assertEquals(SettlementSchema.safeParse(refundRow({ xero_credit_note_id: "cn-xero" })).success, false);
-  });
-  await t.step("an invoice type with no invoice is refused", () => {
-    assertEquals(SettlementSchema.safeParse(makeSettlement({ uid_invoice: null })).success, false);
+  await t.step("a billing type naming no billing document is refused", () => {
+    const r = SettlementSchema.safeParse(makeSettlement({ billing: null }));
+    assertEquals(r.error?.issues.map((i) => i.path.join(".")), ["billing"]);
   });
   await t.step("a refund_reversal names its target and carries no Xero id", () => {
-    const reversal = refundRow({ type: "refund_reversal", reason: "source_retracted", reverses: SETTLEMENT, xero_payment_id: null });
+    const reversal = rowFor("receivable", "refund_reversal");
     assertEquals(SettlementSchema.safeParse(reversal).success, true);
     assertEquals(SettlementSchema.safeParse({ ...reversal, reverses: null }).success, false);
   });
-  await t.step("only credit-drawing types may name a note — the guard is draws_credit, not a bucket", () => {
-    // Built from `validRowFor`, which parses for every type (asserted below), so
-    // each refusal here is the note and nothing else — a receivable-shaped row
-    // would have refused every PAYABLE type for its party keys and passed
-    // vacuously.
-    const named = { uid_credit_note: NOTE, number_credit_note: "CN-1030" };
-    for (const type of Object.keys(SETTLEMENT_CONTRACTS) as SettlementTypeType[]) {
-      if (SETTLEMENT_CONTRACTS[type].draws_credit) continue;
-      const r = SettlementSchema.safeParse({ ...validRowFor(type), ...named });
-      assertEquals(r.success, false, type);
-      assertEquals(
-        [...new Set(r.error!.issues.map((i) => i.path.join(".")))].sort(),
-        ["number_credit_note", "uid_credit_note"],
-        type,
-      );
+  await t.step("only credit-drawing types may name a credit — the guard is draws_credit, not a bucket", () => {
+    // Built from `rowFor`, which parses for every type on both sides (asserted
+    // below), so each refusal here is the credit and nothing else.
+    for (const side of SIDES) {
+      const credit = { collection: SIDE_COLLECTIONS[side].credit, uid: NOTE, label: null };
+      for (const type of Object.keys(SETTLEMENT_CONTRACTS) as SettlementTypeType[]) {
+        if (SETTLEMENT_CONTRACTS[type].draws_credit) continue;
+        const r = SettlementSchema.safeParse(rowFor(side, type, { credit }));
+        assertEquals(r.success, false, `${side} ${type}`);
+        assertEquals(r.error!.issues.map((i) => i.path.join(".")), ["credit"], `${side} ${type}`);
+      }
     }
   });
 });
 
-Deno.test("a receivable row's draws_credit is exactly credit, refund and their reversals", () => {
+Deno.test("draws_credit is exactly credit, refund and their reversals", () => {
   const types = Object.keys(SETTLEMENT_CONTRACTS) as SettlementTypeType[];
   assertEquals(
-    types.filter((t) => SETTLEMENT_CONTRACTS[t].draws_credit && SETTLEMENT_TARGET_SIDE[SETTLEMENT_CONTRACTS[t].settles] === "receivable").sort(),
+    types.filter((t) => SETTLEMENT_CONTRACTS[t].draws_credit).sort(),
     ["credit", "credit_reversal", "refund", "refund_reversal"],
   );
 });
 
-Deno.test("an invoice fold REFUSES a refund row rather than skipping it", () => {
+Deno.test("a billing fold REFUSES a refund row rather than skipping it", () => {
   assertThrows(
-    () => recomputeSettlementTotals(10_000, [S({ type: "refund", reason: "credit_refunded", amount_cents: 500 })]),
+    () => fold(10_000, [S({ type: "refund", reason: "refunded", amount_cents: 500 })]),
     Error,
-    "settles a credit note and cannot be folded into an invoice",
+    "names no billing document",
   );
 });
 
-Deno.test("creditNoteRemainingFromJournal: total − signed draws, over credits AND refunds", () => {
-  const R = (type: SettlementTypeType, amount_cents: number) => ({ type, amount_cents });
+/** A row drawing on a credit, as `creditRemainingFromJournal` reads it. */
+const R = (type: SettlementTypeType, amount_cents: number, side: Side = "receivable") => ({
+  type,
+  amount_cents,
+  credit: refsFor(side, type).credit,
+});
+
+Deno.test("creditRemainingFromJournal: total − signed draws, over credits AND refunds", () => {
   assertEquals(creditRemainingFromJournal("receivable", 2_400, []), 2_400, "untouched");
   assertEquals(creditRemainingFromJournal("receivable", 2_400, [R("refund", 2_400)]), 0, "fully refunded (CN-1030)");
   assertEquals(creditRemainingFromJournal("receivable", 48_506, [R("refund", 48_506)]), 0, "CN-1013 once backfilled");
@@ -703,183 +630,219 @@ Deno.test("creditNoteRemainingFromJournal: total − signed draws, over credits 
 });
 
 Deno.test("a voided note folds to its total — it voids only with nothing live", () => {
-  const rows = [
-    { type: "credit" as SettlementTypeType, amount_cents: 700 },
-    { type: "credit_reversal" as SettlementTypeType, amount_cents: 700 },
-  ];
-  assertEquals(creditRemainingFromJournal("receivable", 700, rows), 700);
+  assertEquals(creditRemainingFromJournal("receivable", 700, [R("credit", 700), R("credit_reversal", 700)]), 700);
 });
 
-// ── payable (api-cloudrun#1210) ──────────────────────────────────
+// ── both sides (rulings 44, 129–131) ─────────────────────────────
 
-const SUPPLIER = "testsup1000000000000";
-const BILL = "testpbl1000000000000";
-const PCREDIT = "testpcr1000000000000";
-
-/**
- * A row that parses for ANY settlement type, built from the contract alone —
- * the party and target keys each type's `settles` demands, the instrument its
- * `draws_*` demands, a legal reason, and the reversal link its contract
- * requires. Every refusal test below starts from this and changes ONE thing.
- */
-function validRowFor(type: SettlementTypeType): Record<string, unknown> {
-  const c = SETTLEMENT_CONTRACTS[type];
-  const payable = SETTLEMENT_TARGET_SIDE[c.settles] === "payable";
-  return makeSettlement({
-    type,
-    reason: c.reasons[0],
-    amount_cents: c.counts_into !== null ? 0 : 100,
-    reverses: c.reverses === "required" ? SETTLEMENT : null,
-    uid_invoice: c.settles === "invoice" ? INV : null,
-    uid_organization: payable ? null : ORG,
-    uid_supplier: payable ? SUPPLIER : null,
-    uid_purchase_bill: c.settles === "purchase_bill" ? BILL : null,
-    uid_credit_note: c.draws_credit && SETTLEMENT_TARGET_SIDE[c.settles] === "receivable" ? NOTE : null,
-    uid_purchase_credit: c.draws_credit && SETTLEMENT_TARGET_SIDE[c.settles] === "payable" ? PCREDIT : null,
-  });
-}
-
-Deno.test("validRowFor parses for every settlement type — the fixture the refusals rest on", () => {
-  for (const type of Object.keys(SETTLEMENT_CONTRACTS) as SettlementTypeType[]) {
-    const r = SettlementSchema.safeParse(validRowFor(type));
-    assertEquals(r.success, true, `${type}: ${JSON.stringify(r.error?.issues)}`);
+Deno.test("rowFor parses for every settlement type on both sides — the fixture the refusals rest on", () => {
+  for (const side of SIDES) {
+    for (const type of Object.keys(SETTLEMENT_CONTRACTS) as SettlementTypeType[]) {
+      const r = SettlementSchema.safeParse(rowFor(side, type));
+      assertEquals(r.success, true, `${side} ${type}: ${JSON.stringify(r.error?.issues)}`);
+    }
   }
 });
 
-Deno.test("every target has a side, and both sides are populated by types", () => {
-  assertEquals([...SETTLEMENT_TARGETS].sort(), Object.keys(SETTLEMENT_TARGET_SIDE).sort());
-  const sides = new Set(Object.values(SETTLEMENT_CONTRACTS).map((c) => SETTLEMENT_TARGET_SIDE[c.settles]));
-  assertEquals([...sides].sort(), ["payable", "receivable"]);
-  // Every target is settled by at least one type — a member nothing settles is
-  // a key the refine demands that no row can ever carry.
-  const targets = new Set(Object.values(SETTLEMENT_CONTRACTS).map((c) => c.settles));
-  assertEquals([...targets].sort(), [...SETTLEMENT_TARGETS].sort());
+Deno.test("every reason is legal on at least one side, and labelled wherever it is legal (ruling 130)", () => {
+  const legal = new Set<string>();
+  for (const side of SIDES) {
+    for (const [type, reasons] of Object.entries(SIDE_CONTRACTS[side].settlement_reasons)) {
+      for (const [reason, label] of Object.entries(reasons)) {
+        legal.add(reason);
+        assertEquals(typeof label === "string" && label.length > 0, true, `${side} ${type} ${reason}`);
+      }
+    }
+  }
+  // Against the ENUM's own members, not the table: a member no side labels is a
+  // reason no row can ever carry.
+  const members = (SettlementReasonEnum as unknown as { options: string[] }).options;
+  assertEquals(members.length >= 12, true, "the enum is readable");
+  assertEquals([...legal].sort(), [...members].sort());
 });
 
-Deno.test("a payable row's draws_credit is exactly bill_credit, supplier_refund and their reversals", () => {
-  const types = Object.keys(SETTLEMENT_CONTRACTS) as SettlementTypeType[];
-  assertEquals(
-    types.filter((t) => SETTLEMENT_CONTRACTS[t].draws_credit && SETTLEMENT_TARGET_SIDE[SETTLEMENT_CONTRACTS[t].settles] === "payable").sort(),
-    ["bill_credit", "bill_credit_reversal", "supplier_refund", "supplier_refund_reversal"],
-  );
-});
-Deno.test("no payable type shares a reason list with `unspecified` — there is no payable history to backfill blind", () => {
-  for (const [t, c] of Object.entries(SETTLEMENT_CONTRACTS)) {
-    if (SETTLEMENT_TARGET_SIDE[c.settles] === "payable") assertEquals(c.reasons.includes("unspecified"), false, t);
+Deno.test("the side decides the reason: the direction-only pairs are one stored reason with two labels", () => {
+  for (const [type, reason] of [["payment", "paid"], ["void", "voided"], ["refund", "refunded"]] as const) {
+    const labels = SIDES.map((side) => SIDE_CONTRACTS[side].settlement_reasons[type][reason]);
+    assertEquals(labels.every((l) => l !== undefined), true, type);
+    assertEquals(new Set(labels).size, 2, `${type}: the two sides word it differently`);
+  }
+  // The side-specific reasons stay on their own side.
+  assertEquals(settlementReasonLegal("payable", "credit", "bad_debt"), false);
+  assertEquals(settlementReasonLegal("receivable", "credit", "supplier_adjustment"), false);
+  // No payable history to backfill blind.
+  for (const reasons of Object.values(SIDE_CONTRACTS.payable.settlement_reasons)) {
+    assertEquals("unspecified" in reasons, false);
   }
 });
 
-Deno.test("PURCHASE_CREDIT_REASONS equals bill_credit's reasons — the allocation carries its credit's reason", () => {
-  assertEquals([...PURCHASE_CREDIT_REASONS].sort(), [...SETTLEMENT_CONTRACTS.bill_credit.reasons].sort());
+Deno.test("each credit document's reasons are its side's `credit` entry", () => {
+  assertEquals([...CREDIT_NOTE_REASONS].sort(), Object.keys(SIDE_CONTRACTS.receivable.settlement_reasons.credit).sort());
+  assertEquals([...PURCHASE_CREDIT_REASONS].sort(), Object.keys(SIDE_CONTRACTS.payable.settlement_reasons.credit).sort());
 });
 
 Deno.test("SettlementSchema keeps the two sides disjoint", async (t) => {
   // Each refusal changes ONE key on an otherwise-valid row and must name exactly
   // that key, so a refusal for some other reason cannot pass for this one.
-  const refusals: Array<[string, SettlementTypeType, Record<string, unknown>, string]> = [
-    ["a bill payment naming a customer", "bill_payment", { uid_organization: ORG }, "uid_organization"],
-    ["a bill payment naming no supplier", "bill_payment", { uid_supplier: null }, "uid_supplier"],
-    ["a bill payment naming no bill", "bill_payment", { uid_purchase_bill: null }, "uid_purchase_bill"],
-    ["a bill payment naming an invoice", "bill_payment", { uid_invoice: INV }, "uid_invoice"],
-    ["a bill payment naming a supplier credit", "bill_payment", { uid_purchase_credit: PCREDIT }, "uid_purchase_credit"],
-    ["a bill payment naming a customer credit note", "bill_payment", { uid_credit_note: NOTE }, "uid_credit_note"],
-    ["a bill credit naming no supplier credit", "bill_credit", { uid_purchase_credit: null }, "uid_purchase_credit"],
-    ["a bill credit carrying a PaymentID", "bill_credit", { xero_payment_id: "x" }, "xero_payment_id"],
-    ["a bill credit with an AR reason", "bill_credit", { reason: "goodwill" }, "reason"],
-    ["a bill void with the INVOICE's reason", "bill_void", { reason: "invoice_voided" }, "reason"],
-    ["a bill_payment_reversal naming nothing", "bill_payment_reversal", { reverses: null }, "reverses"],
-    ["a supplier refund naming a bill", "supplier_refund", { uid_purchase_bill: BILL }, "uid_purchase_bill"],
-    ["a supplier refund naming no credit", "supplier_refund", { uid_purchase_credit: null }, "uid_purchase_credit"],
-    ["a supplier refund with the CUSTOMER refund reason", "supplier_refund", { reason: "credit_refunded" }, "reason"],
-    ["a customer payment naming a supplier", "payment", { uid_supplier: SUPPLIER }, "uid_supplier"],
-    ["a customer payment naming a bill", "payment", { uid_purchase_bill: BILL }, "uid_purchase_bill"],
-    ["a customer payment naming no customer", "payment", { uid_organization: null }, "uid_organization"],
-    ["a customer refund naming a supplier credit", "refund", { uid_purchase_credit: PCREDIT }, "uid_purchase_credit"],
+  const refusals: Array<[string, Side, SettlementTypeType, Record<string, unknown>, string]> = [
+    [
+      "an allocation of a customer credit note to a bill",
+      "payable",
+      "credit",
+      { credit: { collection: "credit-notes", uid: NOTE, label: null } },
+      "credit.collection",
+    ],
+    [
+      "an allocation of a supplier credit to an invoice",
+      "receivable",
+      "credit",
+      { credit: { collection: "purchase-credits", uid: PCREDIT, label: null } },
+      "credit.collection",
+    ],
+    ["a supplier credit with an AR reason", "payable", "credit", { reason: "goodwill" }, "reason"],
+    ["a bill payment with the backfill-only reason", "payable", "payment", { reason: "unspecified" }, "reason"],
+    ["a customer credit with the supplier's reason", "receivable", "credit", { reason: "supplier_adjustment" }, "reason"],
+    ["a billing ref naming another collection", "receivable", "payment", { billing: { collection: "orders", uid: INV } }, "billing.collection"],
+    ["a payable payment naming no counterparty", "payable", "payment", { uid_counterparty: null }, "uid_counterparty"],
   ];
-  for (const [label, type, overrides, path] of refusals) {
+  for (const [label, side, type, overrides, path] of refusals) {
     await t.step(label, () => {
-      const r = SettlementSchema.safeParse({ ...validRowFor(type), ...overrides });
+      const r = SettlementSchema.safeParse(rowFor(side, type, overrides));
       assertEquals(r.success, false);
       assertEquals(r.error!.issues.map((i) => i.path.join(".")), [path]);
     });
   }
-  await t.step("a card purchase born paid: one bill_payment with no PaymentID parses", () => {
-    assertEquals(SettlementSchema.safeParse({ ...validRowFor("bill_payment"), xero_payment_id: null }).success, true);
+  await t.step("a card purchase born paid: one payment carrying the SPEND's id parses (ruling 129)", () => {
+    assertEquals(SettlementSchema.safeParse(rowFor("payable", "payment", { xero_id: XERO })).success, true);
   });
 });
 
-Deno.test("the narrowing guards partition the journal by side and target", () => {
-  const parsed = (Object.keys(SETTLEMENT_CONTRACTS) as SettlementTypeType[]).map((type) =>
-    SettlementSchema.parse(validRowFor(type)) as Settlement
-  );
-  for (const s of parsed) {
-    const c = SETTLEMENT_CONTRACTS[s.type];
-    const payable = SETTLEMENT_TARGET_SIDE[c.settles] === "payable";
-    assertEquals(isPayableSettlement(s), payable, s.type);
-    assertEquals(isReceivableSettlement(s), !payable, s.type);
-    assertEquals(isInvoiceSettlement(s), c.settles === "invoice", s.type);
-    assertEquals(isPurchaseBillSettlement(s), c.settles === "purchase_bill", s.type);
+Deno.test("the narrowing guards partition the journal by side and role", () => {
+  for (const side of SIDES) {
+    for (const type of Object.keys(SETTLEMENT_CONTRACTS) as SettlementTypeType[]) {
+      const s = SettlementSchema.parse(rowFor(side, type)) as Settlement;
+      assertEquals(settlementSide(s), side, `${side} ${type}`);
+      for (const other of SIDES) assertEquals(isSideSettlement(other, s), other === side, `${side} ${type}`);
+      assertEquals(isBillingSettlement(side, s), SETTLEMENT_CONTRACTS[type].settles === "billing", `${side} ${type}`);
+    }
   }
 });
 
-Deno.test("recomputePurchaseBillTotals: the invoice fold, over bill rows", () => {
+Deno.test("the payable fold: the same fold, over bill rows", () => {
+  const P = (type: SettlementTypeType, reason: SettlementReasonType, amount_cents: number) => S({ type, reason, amount_cents, side: "payable" });
   const rows = [
-    S({ type: "bill_payment", reason: "payment_sent", amount_cents: 60_000 }),
-    S({ type: "bill_credit", reason: "supplier_adjustment", amount_cents: 10_000 }),
-    S({ type: "bill_payment", reason: "payment_sent", amount_cents: 5_000 }),
-    S({ type: "bill_payment_reversal", reason: "source_retracted", amount_cents: 5_000 }),
+    P("payment", "paid", 60_000),
+    P("credit", "supplier_adjustment", 10_000),
+    P("payment", "paid", 5_000),
+    P("payment_reversal", "source_retracted", 5_000),
   ];
-  assertEquals(recomputePurchaseBillTotals(140_985, rows), {
+  assertEquals(recomputeSettlementTotals("payable", 140_985, rows), {
     amount_paid_cents: 60_000,
     amount_credited_cents: 10_000,
     amount_void_cents: 0,
     amount_due_cents: 70_985,
     closure_count: 0,
-    breakdown: { payment_sent: 65_000, supplier_adjustment: 10_000, source_retracted: -5_000 },
+    breakdown: { paid: 65_000, supplier_adjustment: 10_000, source_retracted: -5_000 },
   });
   // A card purchase born paid: one row for the whole total, due 0.
-  assertEquals(
-    recomputePurchaseBillTotals(16_354, [S({ type: "bill_payment", reason: "payment_sent", amount_cents: 16_354 })])
-      .amount_due_cents,
-    0,
-  );
+  assertEquals(recomputeSettlementTotals("payable", 16_354, [P("payment", "paid", 16_354)]).amount_due_cents, 0);
   // A voided bill folds to due 0, and un-voiding restores it.
-  const voided = [S({ type: "bill_void", reason: "bill_voided", amount_cents: 140_985 })];
-  assertEquals(recomputePurchaseBillTotals(140_985, voided).amount_due_cents, 0);
+  const voided = [P("void", "voided", 140_985)];
+  assertEquals(recomputeSettlementTotals("payable", 140_985, voided).amount_due_cents, 0);
   assertEquals(
-    recomputePurchaseBillTotals(140_985, [
-      ...voided,
-      S({ type: "bill_void_reversal", reason: "correction", amount_cents: 140_985 }),
-    ]).amount_due_cents,
+    recomputeSettlementTotals("payable", 140_985, [...voided, P("void_reversal", "correction", 140_985)]).amount_due_cents,
     140_985,
   );
 });
 
 Deno.test("each fold REFUSES the other side's rows rather than skipping them", async (t) => {
-  // Every type, against both folds — so a new type lands in exactly one.
-  for (const type of Object.keys(SETTLEMENT_CONTRACTS) as SettlementTypeType[]) {
-    const c = SETTLEMENT_CONTRACTS[type];
-    const row = [S({ type, reason: c.reasons[0], amount_cents: 0 })];
-    await t.step(type, () => {
-      if (c.settles === "invoice") recomputeSettlementTotals(0, row);
-      else assertThrows(() => recomputeSettlementTotals(0, row), Error, "cannot be folded into an invoice");
-      if (c.settles === "purchase_bill") recomputePurchaseBillTotals(0, row);
-      else assertThrows(() => recomputePurchaseBillTotals(0, row), Error, "cannot be folded into a purchase bill");
-    });
+  // Every type, on every side, against both folds — so a row lands in exactly one.
+  for (const rowSide of SIDES) {
+    for (const type of Object.keys(SETTLEMENT_CONTRACTS) as SettlementTypeType[]) {
+      const c = SETTLEMENT_CONTRACTS[type];
+      const row = [S({ type, reason: firstReason(rowSide, type), amount_cents: 0, side: rowSide })];
+      await t.step(`${rowSide} ${type}`, () => {
+        for (const foldSide of SIDES) {
+          if (c.settles === "billing" && foldSide === rowSide) recomputeSettlementTotals(foldSide, 0, row);
+          else assertThrows(() => recomputeSettlementTotals(foldSide, 0, row), Error, "cannot be folded");
+        }
+      });
+    }
   }
 });
 
-Deno.test("purchaseCreditRemainingFromJournal: total − signed draws, over allocations AND supplier refunds", () => {
-  const R = (type: SettlementTypeType, amount_cents: number) => ({ type, amount_cents });
+Deno.test("the payable credit fold: total − signed draws, over allocations AND supplier refunds", () => {
   assertEquals(creditRemainingFromJournal("payable", 5_000, []), 5_000, "untouched");
-  assertEquals(creditRemainingFromJournal("payable", 5_000, [R("bill_credit", 3_000), R("supplier_refund", 2_000)]), 0, "mixed");
+  assertEquals(creditRemainingFromJournal("payable", 5_000, [R("credit", 3_000, "payable"), R("refund", 2_000, "payable")]), 0, "mixed");
   assertEquals(
-    creditRemainingFromJournal("payable", 5_000, [R("bill_credit", 5_000), R("bill_credit_reversal", 5_000)]),
+    creditRemainingFromJournal("payable", 5_000, [R("credit", 5_000, "payable"), R("credit_reversal", 5_000, "payable")]),
     5_000,
     "a reaped allocation gives the credit back",
   );
-  assertEquals(creditRemainingFromJournal("payable", 1_000, [R("bill_credit", 1_500)]), -500, "negative is preserved");
+  assertEquals(creditRemainingFromJournal("payable", 1_000, [R("credit", 1_500, "payable")]), -500, "negative is preserved");
   // The two sides' credit folds are disjoint: neither reads the other's draws.
   assertEquals(creditRemainingFromJournal("payable", 1_000, [R("credit", 1_000), R("refund", 1_000)]), 1_000);
-  assertEquals(creditRemainingFromJournal("receivable", 1_000, [R("bill_credit", 1_000), R("supplier_refund", 1_000)]), 1_000);
+  assertEquals(creditRemainingFromJournal("receivable", 1_000, [R("credit", 1_000, "payable"), R("refund", 1_000, "payable")]), 1_000);
+});
+
+// ── inputs (rulings 132, 137) ────────────────────────────────────
+
+Deno.test("CreateSettlementInput: one route for both sides", async (t) => {
+  const common = { date: "2026-11-18T10:00:00.000-06:00", uuid_session: "0195f3a1-0000-7000-8000-000000000002", version: 3 };
+  const ok = (v: unknown) => assertEquals(CreateSettlementInput.safeParse(v).success, true, JSON.stringify(v));
+  const refused = (v: unknown, path: string) => {
+    const r = CreateSettlementInput.safeParse(v);
+    assertEquals(r.success, false, JSON.stringify(v));
+    assertEquals(r.error!.issues.map((i) => i.path.join(".")), [path]);
+  };
+  await t.step("a payment against an invoice and against a bill", () => {
+    ok({ type: "payment", billing: { collection: "invoices", uid: INV }, reason: "paid", amount_cents: 100, ...common });
+    ok({ type: "payment", billing: { collection: "purchase-bills", uid: BILL }, reason: "paid", amount_cents: 100, ...common });
+  });
+  await t.step("a stored billing ref with extra keys is stripped, not refused", () => {
+    const r = CreateSettlementInput.safeParse({
+      type: "payment",
+      billing: { collection: "invoices", uid: INV, extra: 1 },
+      reason: "paid",
+      amount_cents: 100,
+      ...common,
+    });
+    assertEquals(r.success, true);
+    assertEquals((r.data as { billing: unknown }).billing, { collection: "invoices", uid: INV });
+  });
+  await t.step("a reason illegal on the target's side is a 400", () => {
+    refused({ type: "payment", billing: { collection: "purchase-bills", uid: BILL }, reason: "unspecified", amount_cents: 1, ...common }, "reason");
+    refused({ type: "refund", credit: { collection: "purchase-credits", uid: PCREDIT }, reason: "bad_debt", amount_cents: 1, ...common }, "reason");
+  });
+  await t.step("a closure states amount 0", () => {
+    ok({ type: "closure", billing: { collection: "purchase-bills", uid: BILL }, reason: "zero_total", amount_cents: 0, ...common });
+    refused({ type: "closure", billing: { collection: "invoices", uid: INV }, reason: "zero_total", amount_cents: 1, ...common }, "amount_cents");
+  });
+  await t.step("an allocation stays on its credit's side", () => {
+    ok({
+      type: "credit",
+      credit: { collection: "purchase-credits", uid: PCREDIT },
+      allocations: [{ billing: { collection: "purchase-bills", uid: BILL }, amount_cents: 100 }],
+      uuid_session: common.uuid_session,
+      version: 1,
+    });
+    refused({
+      type: "credit",
+      credit: { collection: "credit-notes", uid: NOTE },
+      allocations: [{ billing: { collection: "purchase-bills", uid: BILL }, amount_cents: 100 }],
+      uuid_session: common.uuid_session,
+      version: 1,
+    }, "allocations.0.billing.collection");
+  });
+  await t.step("every write is session-keyed and states its target's version", () => {
+    refused({ type: "payment", billing: { collection: "invoices", uid: INV }, reason: "paid", amount_cents: 1, date: common.date, version: 1 }, "uuid_session");
+    refused({ type: "payment", billing: { collection: "invoices", uid: INV }, reason: "paid", amount_cents: 1, date: common.date, uuid_session: common.uuid_session }, "version");
+  });
+});
+
+Deno.test("ReverseSettlementInput: session-keyed, versioned, retraction reasons only", () => {
+  const base = { uuid_session: "0195f3a1-0000-7000-8000-000000000003", version: 2 };
+  assertEquals(ReverseSettlementInput.safeParse({ reason: "correction", ...base }).success, true);
+  assertEquals(ReverseSettlementInput.safeParse({ reason: "paid", ...base }).success, false);
+  assertEquals(ReverseSettlementInput.safeParse({ reason: "correction", version: 2 }).success, false);
 });

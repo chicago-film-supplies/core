@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertNotEquals, assertThrows } from "@std/assert";
+import { assertEquals, assertNotEquals, assertThrows } from "@std/assert";
 import { z } from "zod";
 import {
   collectLeafPaths,
@@ -18,7 +18,7 @@ import {
   billingXeroProjectionHash,
   billingXeroSyncStatus,
   collectXeroProjection,
-  invoiceSettlementsHeldByXero,
+  settlementsHeldByXero,
   shouldPushBillingToXero,
   XERO_META_KEY,
   xeroProjection,
@@ -437,21 +437,26 @@ Deno.test("xeroQuoteProjectionHash: the tagged order leaves move it", () => {
 
 // ── settlements Xero holds ───────────────────────────────────────────
 
-const settlement = (uid: string, type: string, over: Record<string, unknown> = {}) =>
-  ({ uid, type, reverses: null, xero_payment_id: null, xero_credit_note_id: null, ...over }) as unknown as Settlement;
+const settlement = (uid: string, type: string, over: Record<string, unknown> = {}, collection = "invoices") =>
+  ({ uid, type, reverses: null, xero_id: null, billing: { collection, uid: "billing" }, ...over }) as unknown as Settlement;
 
-Deno.test("invoiceSettlementsHeldByXero: only live rows carrying their contract's Xero id", () => {
-  assertEquals(invoiceSettlementsHeldByXero([settlement("p", "payment")]), [], "a CFS-only payment");
-  const linked = settlement("p", "payment", { xero_payment_id: "xp-1" });
-  assertEquals(invoiceSettlementsHeldByXero([linked]), [linked], "a linked payment");
+Deno.test("settlementsHeldByXero: only live rows of the side carrying their Xero id", () => {
+  assertEquals(settlementsHeldByXero("receivable", [settlement("p", "payment")]), [], "a CFS-only payment");
+  const linked = settlement("p", "payment", { xero_id: "xp-1" });
+  assertEquals(settlementsHeldByXero("receivable", [linked]), [linked], "a linked payment");
   assertEquals(
-    invoiceSettlementsHeldByXero([linked, settlement("r", "payment_reversal", { reverses: "p" })]),
+    settlementsHeldByXero("receivable", [linked, settlement("r", "payment_reversal", { reverses: "p" })]),
     [],
     "a linked payment that has been reversed",
   );
-  const credit = settlement("c", "credit", { xero_credit_note_id: "xcn-1" });
-  assertEquals(invoiceSettlementsHeldByXero([credit]), [credit], "a linked credit");
-  assertEquals(invoiceSettlementsHeldByXero([settlement("c", "credit")]), [], "an unlinked credit");
-  assertEquals(invoiceSettlementsHeldByXero([settlement("v", "void"), settlement("z", "closure")]), [], "no Xero id by contract");
-  assert(true);
+  const credit = settlement("c", "credit", { xero_id: "xcn-1" });
+  assertEquals(settlementsHeldByXero("receivable", [credit]), [credit], "a linked credit");
+  assertEquals(settlementsHeldByXero("receivable", [settlement("c", "credit")]), [], "an unlinked credit");
+  assertEquals(settlementsHeldByXero("receivable", [settlement("v", "void"), settlement("z", "closure")]), [], "no Xero id by contract");
+  // The side is not in the type any more (ruling 44), so the reader takes it:
+  // a linked BILL payment is not a linked invoice payment, and vice versa.
+  const billPayment = settlement("b", "payment", { xero_id: "xp-2" }, "purchase-bills");
+  assertEquals(settlementsHeldByXero("receivable", [billPayment]), [], "a bill's payment on the invoice side");
+  assertEquals(settlementsHeldByXero("payable", [billPayment]), [billPayment], "a bill's payment on its own side");
+  assertEquals(settlementsHeldByXero("payable", [linked]), [], "an invoice's payment on the bill side");
 });

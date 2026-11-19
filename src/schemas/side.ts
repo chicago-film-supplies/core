@@ -32,11 +32,73 @@
  * @module
  */
 import type { BookingLadderType } from "./transaction.ts";
+import type { SettlementReasonType, SettlementTypeType } from "./common.ts";
 
-/** The two sides. The spelling `SETTLEMENT_TARGET_SIDE` (`schemas/common.ts`) already uses. */
+/** The two sides. */
 export const SIDES: readonly ["receivable", "payable"] = ["receivable", "payable"];
 /** One {@link SIDES} member. */
 export type Side = typeof SIDES[number];
+
+/** The four document roles, one collection per side each (the table above). */
+export type DocumentRole = "initiator" | "custody" | "billing" | "credit";
+
+/**
+ * Each side's collection per role — the table in this module's docblock, as
+ * data. A reader that holds a role and a side names its collection from here.
+ */
+export interface SideCollections {
+  receivable: { initiator: "orders"; custody: "fulfillments"; billing: "invoices"; credit: "credit-notes" };
+  payable: { initiator: "purchases"; custody: "purchase-receipts"; billing: "purchase-bills"; credit: "purchase-credits" };
+}
+
+/** The `billing` collection on side `S`. */
+export type BillingCollection<S extends Side = Side> = SideCollections[S]["billing"];
+/** The `credit` collection on side `S`. */
+export type CreditCollection<S extends Side = Side> = SideCollections[S]["credit"];
+/** Any collection {@link SIDE_OF_COLLECTION} names. */
+export type SidedCollection = SideCollections[Side][DocumentRole];
+
+/** {@link SideCollections} as a value. */
+export const SIDE_COLLECTIONS: SideCollections = {
+  receivable: { initiator: "orders", custody: "fulfillments", billing: "invoices", credit: "credit-notes" },
+  payable: { initiator: "purchases", custody: "purchase-receipts", billing: "purchase-bills", credit: "purchase-credits" },
+};
+
+/**
+ * **Which side a document is on, read off its collection** — the one place the
+ * side is derived (one-document-model ruling 131). A settlement row names its
+ * targets as `{ collection, uid }` refs, and the schema refine, a collection
+ * scan and the fold all hold only the row, so they read the side here.
+ *
+ * A literal table rather than an inversion of {@link SIDE_COLLECTIONS}: JSR's
+ * declaration emitter drops a computed member, and a side test pins that the
+ * two agree.
+ */
+export const SIDE_OF_COLLECTION: Readonly<Record<SidedCollection, Side>> = {
+  orders: "receivable",
+  fulfillments: "receivable",
+  invoices: "receivable",
+  "credit-notes": "receivable",
+  purchases: "payable",
+  "purchase-receipts": "payable",
+  "purchase-bills": "payable",
+  "purchase-credits": "payable",
+};
+
+/**
+ * One side's settlement reasons: for each type, the reasons legal on it and
+ * each one's label on this side (ruling 130, the `line_labels` pattern). A
+ * reason is legal on a type EXACTLY when this side labels it, so one entry
+ * answers both questions.
+ *
+ * ⚠️ **Not total over reasons**, unlike `line_labels`: `bad_debt` has no payable
+ * meaning and `supplier_adjustment` no receivable one. The compiler forces a
+ * decision per TYPE; `tests/side.test.ts` asserts every reason is legal on at
+ * least one side.
+ */
+export type SettlementReasons = Readonly<
+  Record<SettlementTypeType, Readonly<Partial<Record<SettlementReasonType, string>>>>
+>;
 
 /**
  * The line types BOTH sides carry (owner, 2026-11-07). The receivable side has
@@ -125,6 +187,10 @@ export interface SideContract {
    * table; a movement learns its ladder from its own contract (`booking_ladder`).
    */
   custody_ladder: BookingLadderType;
+  /** The operator-facing name of each settlement type on this side. */
+  settlement_type_labels: Readonly<Record<SettlementTypeType, string>>;
+  /** Which reasons each settlement type takes on this side, and their labels. */
+  settlement_reasons: SettlementReasons;
 }
 
 /**
@@ -144,6 +210,39 @@ export const SIDE_CONTRACTS: Readonly<Record<Side, SideContract>> = {
     tax: "resolved",
     xero_line_money: { billing: "unit_amount", credit: "exact_split" },
     custody_ladder: "outbound",
+    settlement_type_labels: {
+      payment: "Payment",
+      payment_reversal: "Payment reversed",
+      credit: "Credit",
+      credit_reversal: "Credit reversed",
+      void: "Voided",
+      void_reversal: "Void reversed",
+      closure: "Closed",
+      closure_reversal: "Closure reversed",
+      refund: "Refunded",
+      refund_reversal: "Refund reversed",
+    },
+    // `unspecified` is legal only where receivable history carries it (the
+    // 2026 backfill of payments, credits and voids); nothing new writes it.
+    settlement_reasons: {
+      payment: { paid: "Payment received", correction: "Correction", unspecified: "Unspecified" },
+      payment_reversal: { source_retracted: "Source retracted", correction: "Correction", unspecified: "Unspecified" },
+      credit: {
+        bad_debt: "Bad debt",
+        early_return: "Early return",
+        order_adjustment: "Order adjustment",
+        goodwill: "Goodwill",
+        correction: "Correction",
+        unspecified: "Unspecified",
+      },
+      credit_reversal: { source_retracted: "Source retracted", correction: "Correction", unspecified: "Unspecified" },
+      void: { voided: "Invoice voided", correction: "Correction", unspecified: "Unspecified" },
+      void_reversal: { source_retracted: "Source retracted", correction: "Correction", unspecified: "Unspecified" },
+      closure: { zero_total: "Zero total", correction: "Correction" },
+      closure_reversal: { source_retracted: "Source retracted", correction: "Correction" },
+      refund: { refunded: "Refunded to customer", correction: "Correction" },
+      refund_reversal: { source_retracted: "Source retracted", correction: "Correction" },
+    },
   },
   payable: {
     line_labels: { sale: "Buy", rental: "Subrent", service: "Charge", replacement: "Replacement" },
@@ -156,5 +255,31 @@ export const SIDE_CONTRACTS: Readonly<Record<Side, SideContract>> = {
     tax: "exempt",
     xero_line_money: { billing: "exact_split", credit: "exact_split" },
     custody_ladder: "inbound",
+    settlement_type_labels: {
+      payment: "Payment",
+      payment_reversal: "Payment reversed",
+      credit: "Supplier credit",
+      credit_reversal: "Supplier credit reversed",
+      void: "Voided",
+      void_reversal: "Void reversed",
+      closure: "Closed",
+      closure_reversal: "Closure reversed",
+      refund: "Supplier refund",
+      refund_reversal: "Supplier refund reversed",
+    },
+    // No `unspecified`: every payable row has a known reason (the `refund`
+    // ruling, api-cloudrun#1210).
+    settlement_reasons: {
+      payment: { paid: "Payment sent", correction: "Correction" },
+      payment_reversal: { source_retracted: "Source retracted", correction: "Correction" },
+      credit: { supplier_adjustment: "Supplier adjustment", correction: "Correction" },
+      credit_reversal: { source_retracted: "Source retracted", correction: "Correction" },
+      void: { voided: "Bill voided", correction: "Correction" },
+      void_reversal: { source_retracted: "Source retracted", correction: "Correction" },
+      closure: { zero_total: "Zero total", correction: "Correction" },
+      closure_reversal: { source_retracted: "Source retracted", correction: "Correction" },
+      refund: { refunded: "Refunded by supplier", correction: "Correction" },
+      refund_reversal: { source_retracted: "Source retracted", correction: "Correction" },
+    },
   },
 };

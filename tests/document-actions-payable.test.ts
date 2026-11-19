@@ -114,7 +114,7 @@ const initiatorsOf = (c: OldBillContext): cat.OfferInitiatorDocuments<"payable">
 const creditsOf = (c: OldBillContext) => c.per_purchase.flatMap((p) => p.credits);
 const asBill = (b: PurchaseBill) => ({ ...b, xero_id: b.xero_id ?? null }) as unknown as cat.BillingOfferDocuments["payable"];
 /** A live closure row on a closed $0 bill: what `reverse_settlement` reverses (ruling 115). */
-const closureRows = (b: PurchaseBill) => (b.totals.closure_count ?? 0) > 0 ? [{ uid: "closure", type: "bill_closure" as const, reverses: null, xero_payment_id: null }] : [];
+const closureRows = (b: PurchaseBill) => (b.totals.closure_count ?? 0) > 0 ? [{ uid: "closure", type: "closure" as const, reverses: null, xero_id: null }] : [];
 const purchaseBillActionsFor = (b: PurchaseBill, c: OldBillContext) =>
   cat.billingActionsFor("payable", asBill(b), {
     settlements: closureRows(b), credits: creditsOf(c), initiators: initiatorsOf(c), xero_sync_status: c.xero_sync_status ?? "not_applicable",
@@ -149,10 +149,10 @@ function assertPurchaseBillAction(b: PurchaseBill, r: OldBillRequest): void {
 }
 
 Deno.test("the catalog's payable gaps and side-only entries: each names why, and the gap table only SHRINKS (ruling 116)", () => {
-  // The baseline at F15. A row may be DELETED as its slice lands; adding one fails here.
+  // The baseline at 6e-0b3, which deleted `add_payment` and `record_refund`. A row may be DELETED as its slice lands; adding one fails here.
   const BASELINE: Record<string, string[]> = {
     receivable: ["close_remaining", "close_item"],
-    payable: ["add_payment", "record_refund", "edit_counterparty", "create_replacement_billing", "credit_overbilling"],
+    payable: ["edit_counterparty", "create_replacement_billing", "credit_overbilling"],
   };
   for (const side of ["receivable", "payable"] as const) {
     for (const [id, gap] of Object.entries(cat.ACTION_GAPS[side])) {
@@ -376,16 +376,21 @@ Deno.test("supplier credit: void only while nothing has drawn on it, read off it
     ({ uid: "pc", status, remaining_credit_cents: remaining, supplier: { uid: "sup", name: "S" } }) as unknown as cat.CreditOfferDocuments["payable"];
   const keysOf = (c: cat.CreditOfferDocuments["payable"], allocations: cat.OfferCreditRow[]) =>
     cat.creditActionsFor("payable", c, { allocations, target: null }).map((o) => o.key);
-  // The payable twin of AR's rule: no live allocation, no live refund. `record_refund` is a payable gap.
-  assertEquals(keysOf(credit("issued", 1000), []), ["void_credit", "allocate_credit"]);
-  assertEquals(keysOf(credit("issued", 999), [{ uid: "a", type: "bill_credit", reverses: null }]), ["allocate_credit"]);
-  assertEquals(keysOf(credit("issued", 1000), [{ uid: "a", type: "bill_credit", reverses: null }, { uid: "r", type: "bill_credit_reversal", reverses: "a" }]), ["void_credit", "allocate_credit"]);
-  assertEquals(keysOf(credit("issued", 999), [{ uid: "a", type: "supplier_refund", reverses: null }]), ["allocate_credit"]);
+  // The payable twin of AR's rule: no live allocation, no live refund; an
+  // operator records a supplier's cash refund as on AR (ruling 134).
+  assertEquals(keysOf(credit("issued", 1000), []), ["void_credit", "allocate_credit", "record_refund"]);
+  assertEquals(keysOf(credit("issued", 999), [{ uid: "a", type: "credit", reverses: null }]), ["allocate_credit", "record_refund"]);
+  assertEquals(
+    keysOf(credit("issued", 1000), [{ uid: "a", type: "credit", reverses: null }, { uid: "r", type: "credit_reversal", reverses: "a" }]),
+    ["void_credit", "allocate_credit", "record_refund"],
+  );
+  assertEquals(keysOf(credit("issued", 999), [{ uid: "a", type: "refund", reverses: null }]), ["allocate_credit", "record_refund"]);
   assertEquals(keysOf(credit("void", 1000), []), []);
+  cat.assertCreditAction("payable", credit("issued", 1000), { action: "record_refund", amount_cents: 1000 });
   assertThrows(
-    () => cat.assertCreditAction("payable", credit("issued", 1000), { action: "record_refund", amount_cents: 1 }),
+    () => cat.assertCreditAction("payable", credit("issued", 1000), { action: "record_refund", amount_cents: 1001 }),
     DocumentActionRefusal,
-    "recorded in Xero",
+    "exceeds",
   );
 });
 
@@ -458,19 +463,24 @@ Deno.test("a $0 bill offers Mark Paid until it is closed, then the closure's rev
   assert(!has(voidBill("a", []), "close"), "only a bill totalling $0 closes");
   assertPurchaseBillAction(zero(), { action: "close" });
   assertThrows(() => assertPurchaseBillAction(voidBill("a", []), { action: "close" }), InvoiceActionRefusal, "totalling $0");
-  // Until 6e-0b3 a payment row is not the operator's to reverse here (ruling 116), linked or not.
-  const paymentRows = [{ uid: "p", type: "bill_payment" as const, reverses: null, xero_payment_id: null }];
+  // A payment row is reversed here exactly as an invoice's is (6e-0b3): an
+  // operator's unlinked record is reversible, a Xero-linked one is not — and a
+  // card bill's born-paid row carries the SPEND's id (ruling 129), so it reads
+  // linked and is refused rather than offered.
+  const unlinked = [{ uid: "p", type: "payment" as const, reverses: null, xero_id: null }];
+  cat.assertBillingAction("payable", asBill(zero(1)), { action: "reverse_settlement", uid_settlement: "p", settlements: unlinked });
+  const bornPaid = [{ uid: "p", type: "payment" as const, reverses: null, xero_id: "d2f3c1a0-0000-4000-8000-000000000001" }];
   assertThrows(
-    () => cat.assertBillingAction("payable", asBill(zero(1)), { action: "reverse_settlement", uid_settlement: "p", settlements: paymentRows }),
+    () => cat.assertBillingAction("payable", asBill(zero(1)), { action: "reverse_settlement", uid_settlement: "p", settlements: bornPaid }),
     DocumentActionRefusal,
-    "only a closure is",
+    "Xero payment",
   );
-  for (const type of ["bill_payment", "bill_credit", "supplier_refund"] as const) {
-    const offers = cat.billingActionsFor("payable", asBill(voidBill("a", [])), {
-      settlements: [{ uid: "r", type, reverses: null, xero_payment_id: null }], credits: [], initiators: [], xero_sync_status: "in_sync",
-    });
-    assertEquals(offers.some((o) => o.action === "reverse_settlement"), false, type);
-  }
+  const offersFor = (row: cat.OfferSettlement) =>
+    cat.billingActionsFor("payable", asBill(voidBill("a", [])), { settlements: [row], credits: [], initiators: [], xero_sync_status: "in_sync" })
+      .some((o) => o.action === "reverse_settlement");
+  assertEquals(offersFor({ uid: "r", type: "payment", reverses: null, xero_id: null }), true, "an unlinked payment");
+  assertEquals(offersFor({ uid: "r", type: "payment", reverses: null, xero_id: "x" }), false, "a linked payment");
+  assertEquals(offersFor({ uid: "r", type: "credit", reverses: null, xero_id: null }), true, "an allocation");
 });
 
 Deno.test("assertPurchaseBillAction: allocate caps at what is due; void reads the shared refusal", () => {
@@ -490,7 +500,7 @@ Deno.test("the credit and initiator asserts refuse what is not offered, and allo
   };
   const pc = { uid: "pc", ...credit, supplier: { uid: "sup", name: "S" } } as unknown as cat.CreditOfferDocuments["payable"];
   cat.assertCreditAction("payable", pc, { action: "void_credit", allocations: [] });
-  assertThrows(() => cat.assertCreditAction("payable", pc, { action: "void_credit", allocations: [{ uid: "a", type: "bill_credit", reverses: null }] }), InvoiceActionRefusal, "live allocation");
+  assertThrows(() => cat.assertCreditAction("payable", pc, { action: "void_credit", allocations: [{ uid: "a", type: "credit", reverses: null }] }), InvoiceActionRefusal, "live allocation");
   assertThrows(() => cat.assertCreditAction("payable", { ...pc, status: "void" }, { action: "void_credit", allocations: [] }), InvoiceActionRefusal, "void");
   assertPurchaseAction(po([timeCharge()]), ctx(), { action: "remove_item", path: ["c"] });
   assertThrows(

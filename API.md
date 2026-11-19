@@ -548,29 +548,6 @@ Zod schema for {@link AgingTotals}.
 const AgingTotalsSchema: z.ZodType<AgingTotals>;
 ```
 
-### `AllocatePurchaseCreditInput`
-
-Zod schema for AllocatePurchaseCreditInputType.
-
-```ts
-const AllocatePurchaseCreditInput: z.ZodType<AllocatePurchaseCreditInputType>;
-```
-
-### `AllocatePurchaseCreditInputType`
-
-Input for allocating some of a supplier credit to one bill of the same
-supplier. `version` is the CREDIT's — the document whose balance the
-allocation spends.
-
-```ts
-interface AllocatePurchaseCreditInputType {
-  uid_purchase_bill: string;
-  amount_cents: number;
-  uuid_session: string;
-  version: number;
-}
-```
-
 ### `AnyUid`
 
 Any known CFS document-id shape — atomic Firestore id, divider/custom item
@@ -791,6 +768,14 @@ A contract before its `undoes`, `booking_ladder` and `source_item` are filled in
 type BaseMovementContract = Omit<MovementContract, "undoes" | "booking_ladder" | "source_item">;
 ```
 
+### `BillingCollection`
+
+The `billing` collection on side `S`.
+
+```ts
+type BillingCollection = indexedAccess;
+```
+
 ### `BillingSettings`
 
 The billing settings singleton (`settings/billing`).
@@ -813,6 +798,15 @@ Zod schema for BillingSettings.
 
 ```ts
 const BillingSettingsSchema: z.ZodType<BillingSettings>;
+```
+
+### `BillingSettlement`
+
+A settlement that settles a BILLING document of side `S` — every type but the
+`refund` pair. What a fold over one invoice's or one bill's rows holds.
+
+```ts
+type BillingSettlement = SideSettlement<S> & typeLiteral;
 ```
 
 ### `BlobRef`
@@ -1566,7 +1560,8 @@ const CREATE_ORDER_STATUSES: "draft" | "quoted" | "reserved"[];
 
 ### `CREDIT_NOTE_REASONS`
 
-Why this credit was issued — the `credit` arm of {@link SETTLEMENT_CONTRACTS},
+Why this credit was issued — the receivable `credit` arm of
+`SIDE_CONTRACTS.receivable.settlement_reasons` (`schemas/side.ts`, ruling 130),
 **derived rather than re-listed**, so the document and the settlements it
 spawns can never offer different reasons.
 
@@ -2631,6 +2626,7 @@ interface CollectionRule {
   invariant?: string;
   enforced_by?: EnforcementRef[];
   transaction?: TransactionId;
+  side?: Side;
   trigger?: string;
   fields: FieldMapping[];
 }
@@ -3431,6 +3427,34 @@ interface CreateRecurrenceInputType {
 }
 ```
 
+### `CreateSettlementInput`
+
+Zod schema for {@link CreateSettlementInputType}.
+
+```ts
+const CreateSettlementInput: z.ZodType<CreateSettlementInputType>;
+```
+
+### `CreateSettlementInputType`
+
+**`POST /settlements`, both sides** (ruling 132): one route records a payment,
+a closure, a cash refund or a credit allocation against a document of either
+side, the side read off the ref's collection. It replaced
+`POST /credit-notes/{uid}/allocations`, `POST /purchase-bills/{uid}/close` and
+`/reopen`, and `POST /purchase-credits/{uid}/allocations`.
+
+- **`uuid_session` keys every write** (ruling 137): a replay of the same
+  session returns the row it wrote; a second press under a new session is a
+  new attempt the action catalog refuses.
+- **`version` is the TARGET's**: the billing document's for a payment or a
+  closure, the credit's for a refund or an allocation.
+- **`reason` is legal per side** (`settlementReasonLegal`), checked here so a
+  wrong one is a 400. An allocation carries no reason: it takes its credit's.
+
+```ts
+type CreateSettlementInputType = typeLiteral | typeLiteral | typeLiteral | typeLiteral;
+```
+
 ### `CreateStoreInput`
 
 Input schema for creating a store.
@@ -3718,6 +3742,14 @@ interface CreateVariableHolidayInputType {
   day: number;
   week: HolidayWeekInputType;
 }
+```
+
+### `CreditCollection`
+
+The `credit` collection on side `S`.
+
+```ts
+type CreditCollection = indexedAccess;
 ```
 
 ### `CreditDocBillingItem`
@@ -4780,6 +4812,14 @@ interface DocumentOrganizationSnapshotType {
   xero_id: string | null;
   billing_address?: AddressType | null;
 }
+```
+
+### `DocumentRole`
+
+The four document roles, one collection per side each (the table above).
+
+```ts
+type DocumentRole = "initiator" | "custody" | "billing" | "credit";
 ```
 
 ### `EXCHANGE_DISPOSITIONS`
@@ -6914,17 +6954,6 @@ Zod schema for an Invoice document.
 
 ```ts
 const InvoiceSchema: z.ZodType<Invoice>;
-```
-
-### `InvoiceSettlement`
-
-A settlement that settles an INVOICE — every receivable type but `refund` and
-`refund_reversal` (api-cloudrun#1207). The refine makes `uid_invoice !== null`
-and `SETTLEMENT_CONTRACTS[type].settles === "invoice"` the same fact, so this
-is the type a reader holds once it has filtered.
-
-```ts
-type InvoiceSettlement = ReceivableSettlement & typeLiteral;
 ```
 
 ### `InvoiceStatusContract`
@@ -9839,18 +9868,13 @@ const PURCHASE_BILL_XERO_DOCUMENTS: "invoice" | "bank_transaction"[];
 
 ### `PURCHASE_CREDIT_REASONS`
 
-Why a supplier credited CFS. Closed, like `SETTLEMENT_REASONS`, and for the
-same reason: it becomes a ledger code.
-
-**A subset of `SETTLEMENT_REASONS`, equal to `SETTLEMENT_CONTRACTS.bill_credit.reasons`**
-— a `bill_credit` allocation row carries its credit's reason, as an AR `credit`
-row does (`CREDIT_NOTE_REASONS`). Kept as its own `as const` tuple rather than
-derived from the contract so `PurchaseCredit.reason` stays a narrow `z.enum`;
-the subset is a compile-time check below and the equality is asserted by
-`tests/settlements.test.ts`.
+Why a supplier credited CFS — the payable `credit` arm of
+`SIDE_CONTRACTS.payable.settlement_reasons` (`schemas/side.ts`, ruling 130),
+derived rather than re-listed, so a supplier credit and the allocation rows it
+spawns can never offer different reasons (the `CREDIT_NOTE_REASONS` twin).
 
 ```ts
-const PURCHASE_CREDIT_REASONS: "supplier_adjustment" | "correction"[];
+const PURCHASE_CREDIT_REASONS: readonly SettlementReasonType[];
 ```
 
 ### `PURCHASE_CREDIT_STATUSES`
@@ -10043,15 +10067,6 @@ interface PayableLineUidFields {
   type: string;
   uid: string;
 }
-```
-
-### `PayableSettlement`
-
-A PAYABLE settlement — one that settles a supplier bill or supplier credit
-(api-cloudrun#1210), and so names its supplier.
-
-```ts
-type PayableSettlement = Settlement & typeLiteral;
 ```
 
 ### `Permission`
@@ -11256,25 +11271,6 @@ interface PurchaseBill {
 }
 ```
 
-### `PurchaseBillClosureInput`
-
-Zod schema for PurchaseBillClosureInputType.
-
-```ts
-const PurchaseBillClosureInput: z.ZodType<PurchaseBillClosureInputType>;
-```
-
-### `PurchaseBillClosureInputType`
-
-Input for marking a $0 bill paid, or undoing that. `version` is the bill's.
-The refusals are `closeRefusal` and `purchaseBillReopenRefusal`.
-
-```ts
-interface PurchaseBillClosureInputType {
-  version: number;
-}
-```
-
 ### `PurchaseBillDestinationInput`
 
 Zod schema for {@link PurchaseBillDestinationInputType}.
@@ -11373,14 +11369,6 @@ Zod schema for PurchaseBill.
 const PurchaseBillSchema: z.ZodType<PurchaseBill>;
 ```
 
-### `PurchaseBillSettlement`
-
-A payable settlement that settles a supplier BILL — every payable type but the `supplier_refund` pair.
-
-```ts
-type PurchaseBillSettlement = PayableSettlement & typeLiteral;
-```
-
 ### `PurchaseBillTotals`
 
 A bill's totals — the invoice's keys (ruling 105, one shape per role): the
@@ -11439,7 +11427,7 @@ interface PurchaseCredit {
   query_by_sources: string[];
   supplier: UidNameRefType;
   origin: PurchaseDocumentOriginType;
-  reason: PurchaseCreditReasonType;
+  reason: SettlementReasonType;
   status: PurchaseCreditStatusType;
   xero_id: string | null;
   date: string;
@@ -11501,18 +11489,10 @@ interface PurchaseCreditItemInputType {
 
 ### `PurchaseCreditReasonEnum`
 
-Zod schema for PurchaseCreditReasonType.
+Zod schema for a supplier credit's reason: one of {@link PURCHASE_CREDIT_REASONS}.
 
 ```ts
-const PurchaseCreditReasonEnum: z.ZodType<PurchaseCreditReasonType>;
-```
-
-### `PurchaseCreditReasonType`
-
-One {@link PURCHASE_CREDIT_REASONS} member.
-
-```ts
-type PurchaseCreditReasonType = indexedAccess;
+const PurchaseCreditReasonEnum: z.ZodType<SettlementReasonType>;
 ```
 
 ### `PurchaseCreditSchema`
@@ -12690,16 +12670,6 @@ Allowed reaction actions.
 type ReactionActionType = indexedAccess;
 ```
 
-### `ReceivableSettlement`
-
-A RECEIVABLE settlement — one that settles an invoice or a customer credit
-note, and so names its customer. The refine makes `uid_organization !== null`
-and `SETTLEMENT_TARGET_SIDE[settles] === "receivable"` the same fact.
-
-```ts
-type ReceivableSettlement = Settlement & typeLiteral;
-```
-
 ### `Recurrence`
 
 Recurrence Firestore document shape.
@@ -12989,21 +12959,26 @@ interface RestoreQuoteInputType {
 }
 ```
 
-### `ReversePurchaseCreditAllocationInput`
+### `ReverseSettlementInput`
 
-Zod schema for ReversePurchaseCreditAllocationInputType.
+Zod schema for {@link ReverseSettlementInputType}.
 
 ```ts
-const ReversePurchaseCreditAllocationInput: z.ZodType<ReversePurchaseCreditAllocationInputType>;
+const ReverseSettlementInput: z.ZodType<ReverseSettlementInputType>;
 ```
 
-### `ReversePurchaseCreditAllocationInputType`
+### `ReverseSettlementInputType`
 
-Input for reversing an allocation CFS has not yet pushed to Xero. `version` is
-the CREDIT's, as an allocation's is. `uuid_session` keys the reversal.
+**`POST /settlements/{uid}/reverse`, both sides.** `version` is the version of
+the document the reversed row settles (the billing document, or the credit for
+a refund); `uuid_session` keys the reversal (ruling 137). It replaced
+`POST /purchase-credits/{uid}/allocations/{settlement}/reverse` and
+`POST /purchase-bills/{uid}/reopen` (reopening is reversing the closure row).
 
 ```ts
-interface ReversePurchaseCreditAllocationInputType {
+interface ReverseSettlementInputType {
+  reason: SettlementReasonType;
+  date?: string;
   uuid_session: string;
   version: number;
 }
@@ -13158,7 +13133,7 @@ deliberately shorter than the transaction name (`create-org:*` under
 `create-organization`). Read the prefix as a namespace, never as a join key.
 
 ```ts
-type RuleId = "create-order:org-to-order" | "create-order:products-to-order-items" | "create-order:order-self-derive" | "create-order:order-to-bookings" | "create-order:ledger-to-bookings" | "create-order:fulfillment-to-cards" | "create-order:order-to-fulfillment" | "update-order:org-to-order" | "update-order:order-self-derive" | "update-order:order-to-bookings" | "update-order:grain-carry-to-bookings" | "update-order:bookings-to-order" | "custody-transfer:bookings-to-transactions" | "update-order:grain-carry-to-transactions" | "update-order:ledger-to-bookings" | "update-order:fulfillment-to-cards" | "update-order:order-to-fulfillment" | "update-booking:booking-to-self" | "update-booking:booking-to-out-of-service" | "update-booking:booking-to-transactions" | "update-booking:transactions-to-ledger" | "update-booking:transactions-to-locations" | "update-booking:booking-to-order" | "update-booking:booking-to-cards" | "extend-rental:rebook-to-bookings" | "extend-rental:bookings-to-transactions" | "undo-extend-rental:rebook-to-bookings" | "undo-extend-rental:bookings-to-transactions" | "extend-subrent:rebook-to-inbound-bookings" | "extend-subrent:inbound-bookings-to-transactions" | "undo-extend-subrent:rebook-to-inbound-bookings" | "undo-extend-subrent:inbound-bookings-to-transactions" | "update-purchase:purchase-to-bills" | "update-purchase:purchase-to-movement-paths" | "create-purchase-bill:bill-to-purchase" | "create-purchase-bill:bill-to-settlements" | "settle-purchase-bill:xero-to-settlements" | "settle-purchase-bill:settlements-to-bill" | "void-purchase-bill:void-to-settlements" | "void-purchase-bill:settlements-to-bill" | "void-purchase-bill-from-xero:void-to-settlements" | "void-purchase-bill-from-xero:settlements-to-bill" | "close-purchase-bill:closure-to-bill" | "reopen-purchase-bill:reversal-to-bill" | "settle-purchase-bill:settlements-to-credit" | "void-purchase-bill-from-xero:settlements-to-credit" | "update-purchase-bill:status-to-purchases" | "update-purchase-credit:status-to-purchases" | "allocate-purchase-credit:credit-to-settlements" | "allocate-purchase-credit:settlements-to-bill" | "allocate-purchase-credit:settlements-to-credit" | "reverse-purchase-credit-allocation:reverser-to-settlements" | "reverse-purchase-credit-allocation:settlements-to-bill" | "reverse-purchase-credit-allocation:settlements-to-credit" | "close-purchase:purchase-to-bills" | "settle-purchase-credit:xero-to-settlements" | "settle-purchase-credit:settlements-to-credit" | "void-purchase-credit-from-xero:void-to-settlements" | "void-purchase-credit-from-xero:settlements-to-bill" | "void-purchase-credit-from-xero:settlements-to-credit" | "purchase-card:purchases-to-card" | "purchase-custody:purchase-to-receipt" | "purchase-custody:receipt-to-inbound-bookings" | "purchase-custody:inbound-bookings-to-purchase" | "update-inbound-booking:booking-to-transactions" | "update-inbound-booking:booking-to-out-of-service" | "create-receipt-exchange:leg-self" | "update-out-of-service-record:record-to-inbound-booking" | "create-out-of-service-record:sources-to-record" | "create-out-of-service-record:products-to-record" | "create-out-of-service-record:record-to-transactions" | "create-out-of-service-record:transactions-to-ledger" | "update-out-of-service-record:record-to-transactions" | "update-out-of-service-record:record-to-record" | "update-out-of-service-record:transactions-to-ledger" | "reclassify-out-of-service-record:record-to-booking" | "reclassify-out-of-service-record:record-to-record" | "create-transaction:transaction-to-ledger" | "create-transaction:transaction-to-locations" | "reverse-transaction:transaction-to-ledger" | "reverse-transaction:transaction-to-locations" | "reclass-stock:transaction-to-ledger" | "reclass-stock:transaction-to-locations" | "reverse-stock-reclass:transaction-to-ledger" | "reverse-stock-reclass:transaction-to-locations" | "create-store-transfer:transaction-to-ledger" | "create-store-transfer:transaction-to-locations" | "create-store-transfer:transaction-to-out-of-service" | "create-store-transfer:transaction-to-bookings" | "create-product:product-to-tags" | "create-product:product-to-tracking-categories" | "create-product:product-to-components" | "create-product:product-to-ledger" | "create-product:product-to-webshop" | "update-product:catalog-to-components" | "update-product:components-to-components" | "update-product:component-entry-to-parents" | "update-product:name-to-locations" | "update-product:name-to-tags" | "update-product:name-to-tracking-categories" | "update-product:name-to-out-of-service" | "update-product:to-webshop" | "update-product:to-linked-twin" | "update-product:linked-twin-to-webshop" | "update-product:linked-twin-to-tracking-categories" | "update-product:tags-to-tags" | "update-product:tracking-category-change" | "update-product:tracking-category-to-components" | "update-product:stock-method-change" | "update-product:stock-method-to-count-movement" | "update-product:type-change" | "update-product:price-to-components" | "update-product:price-to-webshop-components" | "update-product:product-to-draft-orders" | "create-org:org-to-contacts" | "create-org:node-to-tree" | "create-org:mint-derived-project" | "merge-org:loser-to-orders" | "merge-org:loser-to-invoices" | "merge-org:loser-to-credit-notes" | "merge-org:loser-to-settlements" | "merge-org:loser-to-bookings" | "merge-org:loser-to-fulfillments" | "merge-org:loser-to-cards" | "merge-org:loser-to-out-of-service" | "merge-org:loser-to-contacts" | "merge-org:activity-to-survivor" | "merge-org:merged-from-to-survivor" | "merge-org:delete-loser" | "merge-org:tombstone-loser" | "merge-org:merged-to-to-tombstones" | "merge-org:tombstone-parent" | "merge-org:thread-comments-to-survivor" | "update-department-type:name-to-departments" | "update-org:name-to-orders" | "update-org:billing-to-orders" | "update-org:name-to-invoices" | "update-org:name-to-bookings" | "update-org:name-to-fulfillments" | "update-org:name-to-cards" | "update-org:billing-to-invoices" | "update-org:tax-axes-to-orders" | "update-org:contacts-change" | "update-org:name-to-descendants" | "reparent-destination:tree-to-node" | "reparent-destination:place-name-to-units" | "reparent-org:tree-to-descendants" | "reparent-org:activity-to-new-ancestors" | "stamp-org-activity:orders-to-organizations" | "stamp-org-activity:invoices-to-organizations" | "create-contact:contact-to-orgs" | "create-contact:link-to-user" | "update-contact:name-to-orgs" | "update-contact:name-to-orders" | "update-contact:phones-to-orders" | "update-contact:name-to-fulfillments" | "update-contact:phones-to-fulfillments" | "update-contact:name-to-invoices" | "update-contact:phones-to-invoices" | "update-contact:orgs-change" | "update-contact:name-to-user" | "create-user:link-to-contact" | "update-user:name-to-contact" | "update-user:name-to-actor-refs" | "delete-user:unlink-contact" | "create-invoice:invoice-to-orders" | "update-invoice:status-to-orders" | "update-order:items-to-invoices" | "update-order:status-to-invoices" | "create-settlement:settlement-to-invoice" | "reverse-settlement:reverser-to-invoice" | "reverse-settlement:release-to-credit-note" | "close-invoice:closure-to-invoice" | "sync-xero-settlement:xero-to-settlements" | "sync-xero-settlement:settlements-to-invoice" | "void-invoice:reap-settlements" | "void-invoice:append-void-settlement" | "void-invoice-from-xero:reap-settlements" | "void-invoice-from-xero:append-void-settlement" | "void-invoice-from-cancel:reap-settlements" | "void-invoice-from-cancel:append-void-settlement" | "create-credit-note:number-from-counter" | "create-credit-note:posting-account" | "update-credit-note:note-to-orders" | "allocate-credit-note:note-to-settlements" | "allocate-credit-note:settlements-to-invoices" | "allocate-credit-note:remaining-credit" | "void-credit-note:status" | "record-credit-note-refund:refund-to-settlements" | "record-credit-note-refund:settlements-to-credit-note" | "sync-xero-credit-note-refunds:xero-to-settlements" | "sync-xero-credit-note-refunds:settlements-to-credit-note" | "reverse-credit-note-refund:reverser-to-settlements" | "reverse-credit-note-refund:settlements-to-credit-note" | "update-fulfillment-items:items-self" | "update-fulfillment-items:fulfillment-to-cards" | "update-fulfillment-destinations:pairs-self" | "update-fulfillment-destinations:fulfillment-to-cards" | "create-fulfillment-exchange:leg-self" | "create-fulfillment-exchange:fulfillment-to-cards" | "reset-fulfillment:rebuild-from-order" | "reset-fulfillment:fulfillment-to-cards" | "reconcile-fulfillment-cards:fulfillment-to-cards" | "reconcile-order-from-invoices:invoices-to-fulfillments" | "reconcile-order-from-invoices:fulfillments-to-bookings" | "create-tax-rate:recompute-live-orders" | "create-tax-rate:recompute-live-invoices" | "update-tax-class:name-to-products" | "update-tax-class:name-to-webshop-products" | "update-tax-class:codes-recompute-live-orders" | "update-tax-class:codes-recompute-live-invoices" | "update-product:tax-class-to-live-orders" | "update-product:tax-class-to-components" | "update-product:tax-class-to-webshop-components" | "update-tag:name-to-products" | "delete-tag:remove-from-products" | "update-tracking-category:name-to-products" | "update-location-type:capacities-to-locations" | "update-location:name-to-inventory-ledgers" | "update-location:placement-to-inventory-ledgers" | "update-location:name-to-bookings" | "update-location:name-to-out-of-service" | "update-location:name-to-transactions" | "update-location:default-name-to-store" | "holiday-definition:materialize-dates" | "holiday-dates:rematerialize-snapshot" | "holiday-change:recompute-draft-orders" | "holiday-change:recompute-draft-invoices" | "create-store:unset-sibling-defaults" | "update-store:unset-sibling-defaults" | "update-store:deactivate-locations" | "create-location:default-location-to-store" | "update-location:set-default-to-store" | "set-location-product-default:clear-sibling-defaults" | "cowrite-thread:orders-to-thread" | "cowrite-thread:thread-to-orders" | "cowrite-thread:invoices-to-thread" | "cowrite-thread:thread-to-invoices" | "cowrite-thread:contacts-to-thread" | "cowrite-thread:thread-to-contacts" | "cowrite-thread:organizations-to-thread" | "cowrite-thread:thread-to-organizations" | "cowrite-thread:products-to-thread" | "cowrite-thread:thread-to-products" | "cowrite-thread:roles-to-thread" | "cowrite-thread:thread-to-roles" | "cowrite-thread:out-of-service-to-thread" | "cowrite-thread:thread-to-out-of-service" | "cowrite-thread:credit-notes-to-thread" | "cowrite-thread:thread-to-credit-notes" | "cowrite-thread:purchases-to-thread" | "cowrite-thread:thread-to-purchases" | "cowrite-thread:purchase-bills-to-thread" | "cowrite-thread:thread-to-purchase-bills" | "cowrite-thread:purchase-credits-to-thread" | "cowrite-thread:thread-to-purchase-credits" | "create-comment:thread-to-comment" | "create-comment:comment-to-thread" | "delete-comment:comment-to-thread" | "cowrite-thread:cards-to-thread" | "cowrite-thread:thread-to-cards" | "delete-card:cascade-thread" | "delete-card:cascade-comments" | "create-template:thread" | "create-template:thread-to-family" | "manage-draft:family-rollup" | "manage-draft:component-family-rollup" | "manage-draft:version-to-thread" | "manage-draft:thread-to-version" | "publish-template:seq" | "publish-template:version-flip" | "publish-template:family-rollup" | "publish-template:component-family-rollup" | "create-recurrence:fan-out-cards" | "materialize-horizon:fan-out-cards" | "update-recurrence:fan-out-prototype" | "update-recurrence:rematerialize-future" | "delete-recurrence:fan-out-cards" | "update-card-scope-following:cascade-future-siblings" | "update-card-scope-all:update-recurrence-prototype" | "update-card-scope-all:cascade-siblings" | "delete-card-scope-this:append-exception-date" | "delete-card-scope-following:cascade-future-siblings" | "delete-card-scope-following:truncate-recurrence" | "delete-card-scope-all:cascade-siblings" | "delete-card-scope-all:delete-recurrence" | "generate-invoice-pdf:upload-to-worklist" | "generate-quote-pdf:upload-to-worklist" | "generate-statement-pdf:upload-to-worklist" | "stock:ledger-to-stock" | "stock:bookings-to-stock" | "stock:oos-to-stock" | "stock:purchases-to-stock" | "stock:seed-ledger-to-stock" | "units:transactions-to-roster" | "units:transactions-to-units" | "units:product-to-roster" | "units:product-to-units" | "units:product-to-bookings" | "units:product-to-out-of-service" | "units:product-to-enroll-movement" | "create-units:product-to-units";
+type RuleId = "create-order:org-to-order" | "create-order:products-to-order-items" | "create-order:order-self-derive" | "create-order:order-to-bookings" | "create-order:ledger-to-bookings" | "create-order:fulfillment-to-cards" | "create-order:order-to-fulfillment" | "update-order:org-to-order" | "update-order:order-self-derive" | "update-order:order-to-bookings" | "update-order:grain-carry-to-bookings" | "update-order:bookings-to-order" | "custody-transfer:bookings-to-transactions" | "update-order:grain-carry-to-transactions" | "update-order:ledger-to-bookings" | "update-order:fulfillment-to-cards" | "update-order:order-to-fulfillment" | "update-booking:booking-to-self" | "update-booking:booking-to-out-of-service" | "update-booking:booking-to-transactions" | "update-booking:transactions-to-ledger" | "update-booking:transactions-to-locations" | "update-booking:booking-to-order" | "update-booking:booking-to-cards" | "extend-rental:rebook-to-bookings" | "extend-rental:bookings-to-transactions" | "undo-extend-rental:rebook-to-bookings" | "undo-extend-rental:bookings-to-transactions" | "extend-subrent:rebook-to-inbound-bookings" | "extend-subrent:inbound-bookings-to-transactions" | "undo-extend-subrent:rebook-to-inbound-bookings" | "undo-extend-subrent:inbound-bookings-to-transactions" | "update-purchase:purchase-to-bills" | "update-purchase:purchase-to-movement-paths" | "create-purchase-bill:bill-to-purchase" | "create-purchase-bill:bill-to-settlements" | "update-purchase-bill:status-to-purchases" | "update-purchase-credit:status-to-purchases" | "close-purchase:purchase-to-bills" | "void-purchase-credit-from-xero:void-to-settlements" | "void-purchase-credit-from-xero:settlements-to-bill" | "void-purchase-credit-from-xero:settlements-to-credit" | "purchase-card:purchases-to-card" | "purchase-custody:purchase-to-receipt" | "purchase-custody:receipt-to-inbound-bookings" | "purchase-custody:inbound-bookings-to-purchase" | "update-inbound-booking:booking-to-transactions" | "update-inbound-booking:booking-to-out-of-service" | "create-receipt-exchange:leg-self" | "update-out-of-service-record:record-to-inbound-booking" | "create-out-of-service-record:sources-to-record" | "create-out-of-service-record:products-to-record" | "create-out-of-service-record:record-to-transactions" | "create-out-of-service-record:transactions-to-ledger" | "update-out-of-service-record:record-to-transactions" | "update-out-of-service-record:record-to-record" | "update-out-of-service-record:transactions-to-ledger" | "reclassify-out-of-service-record:record-to-booking" | "reclassify-out-of-service-record:record-to-record" | "create-transaction:transaction-to-ledger" | "create-transaction:transaction-to-locations" | "reverse-transaction:transaction-to-ledger" | "reverse-transaction:transaction-to-locations" | "reclass-stock:transaction-to-ledger" | "reclass-stock:transaction-to-locations" | "reverse-stock-reclass:transaction-to-ledger" | "reverse-stock-reclass:transaction-to-locations" | "create-store-transfer:transaction-to-ledger" | "create-store-transfer:transaction-to-locations" | "create-store-transfer:transaction-to-out-of-service" | "create-store-transfer:transaction-to-bookings" | "create-product:product-to-tags" | "create-product:product-to-tracking-categories" | "create-product:product-to-components" | "create-product:product-to-ledger" | "create-product:product-to-webshop" | "update-product:catalog-to-components" | "update-product:components-to-components" | "update-product:component-entry-to-parents" | "update-product:name-to-locations" | "update-product:name-to-tags" | "update-product:name-to-tracking-categories" | "update-product:name-to-out-of-service" | "update-product:to-webshop" | "update-product:to-linked-twin" | "update-product:linked-twin-to-webshop" | "update-product:linked-twin-to-tracking-categories" | "update-product:tags-to-tags" | "update-product:tracking-category-change" | "update-product:tracking-category-to-components" | "update-product:stock-method-change" | "update-product:stock-method-to-count-movement" | "update-product:type-change" | "update-product:price-to-components" | "update-product:price-to-webshop-components" | "update-product:product-to-draft-orders" | "create-org:org-to-contacts" | "create-org:node-to-tree" | "create-org:mint-derived-project" | "merge-org:loser-to-orders" | "merge-org:loser-to-invoices" | "merge-org:loser-to-credit-notes" | "merge-org:loser-to-settlements" | "merge-org:loser-to-bookings" | "merge-org:loser-to-fulfillments" | "merge-org:loser-to-cards" | "merge-org:loser-to-out-of-service" | "merge-org:loser-to-contacts" | "merge-org:activity-to-survivor" | "merge-org:merged-from-to-survivor" | "merge-org:delete-loser" | "merge-org:tombstone-loser" | "merge-org:merged-to-to-tombstones" | "merge-org:tombstone-parent" | "merge-org:thread-comments-to-survivor" | "update-department-type:name-to-departments" | "update-org:name-to-orders" | "update-org:billing-to-orders" | "update-org:name-to-invoices" | "update-org:name-to-bookings" | "update-org:name-to-fulfillments" | "update-org:name-to-cards" | "update-org:billing-to-invoices" | "update-org:tax-axes-to-orders" | "update-org:contacts-change" | "update-org:name-to-descendants" | "reparent-destination:tree-to-node" | "reparent-destination:place-name-to-units" | "reparent-org:tree-to-descendants" | "reparent-org:activity-to-new-ancestors" | "stamp-org-activity:orders-to-organizations" | "stamp-org-activity:invoices-to-organizations" | "create-contact:contact-to-orgs" | "create-contact:link-to-user" | "update-contact:name-to-orgs" | "update-contact:name-to-orders" | "update-contact:phones-to-orders" | "update-contact:name-to-fulfillments" | "update-contact:phones-to-fulfillments" | "update-contact:name-to-invoices" | "update-contact:phones-to-invoices" | "update-contact:orgs-change" | "update-contact:name-to-user" | "create-user:link-to-contact" | "update-user:name-to-contact" | "update-user:name-to-actor-refs" | "delete-user:unlink-contact" | "create-invoice:invoice-to-orders" | "update-invoice:status-to-orders" | "update-order:items-to-invoices" | "update-order:status-to-invoices" | "create-settlement:settlement-to-invoice" | "reverse-settlement:reverser-to-invoice" | "reverse-settlement:release-to-credit-note" | "close-invoice:closure-to-invoice" | "sync-xero-settlement:xero-to-settlements" | "sync-xero-settlement:settlements-to-invoice" | "void-invoice:reap-settlements" | "void-invoice:append-void-settlement" | "void-invoice-from-xero:reap-settlements" | "void-invoice-from-xero:append-void-settlement" | "void-invoice-from-cancel:reap-settlements" | "void-invoice-from-cancel:append-void-settlement" | "create-credit-note:number-from-counter" | "create-credit-note:posting-account" | "update-credit-note:note-to-orders" | "allocate-credit-note:note-to-settlements" | "allocate-credit-note:settlements-to-invoices" | "create-settlement:settlement-to-bill" | "reverse-settlement:reverser-to-bill" | "reverse-settlement:release-to-purchase-credit" | "close-invoice:closure-to-bill" | "sync-xero-settlement:xero-to-bill-settlements" | "sync-xero-settlement:settlements-to-bill" | "sync-xero-settlement:settlements-to-purchase-credit" | "void-invoice:reap-bill-settlements" | "void-invoice:append-bill-void-settlement" | "void-invoice-from-xero:reap-bill-settlements" | "void-invoice-from-xero:append-bill-void-settlement" | "void-invoice-from-xero:settlements-to-purchase-credit" | "allocate-credit-note:purchase-credit-to-settlements" | "allocate-credit-note:settlements-to-bill" | "allocate-credit-note:settlements-to-purchase-credit" | "record-credit-note-refund:purchase-credit-refund-to-settlements" | "record-credit-note-refund:settlements-to-purchase-credit" | "sync-xero-credit-note-refunds:purchase-credit-xero-to-settlements" | "sync-xero-credit-note-refunds:settlements-to-purchase-credit" | "reverse-credit-note-refund:purchase-credit-reverser-to-settlements" | "reverse-credit-note-refund:settlements-to-purchase-credit" | "allocate-credit-note:remaining-credit" | "void-credit-note:status" | "record-credit-note-refund:refund-to-settlements" | "record-credit-note-refund:settlements-to-credit-note" | "sync-xero-credit-note-refunds:xero-to-settlements" | "sync-xero-credit-note-refunds:settlements-to-credit-note" | "reverse-credit-note-refund:reverser-to-settlements" | "reverse-credit-note-refund:settlements-to-credit-note" | "update-fulfillment-items:items-self" | "update-fulfillment-items:fulfillment-to-cards" | "update-fulfillment-destinations:pairs-self" | "update-fulfillment-destinations:fulfillment-to-cards" | "create-fulfillment-exchange:leg-self" | "create-fulfillment-exchange:fulfillment-to-cards" | "reset-fulfillment:rebuild-from-order" | "reset-fulfillment:fulfillment-to-cards" | "reconcile-fulfillment-cards:fulfillment-to-cards" | "reconcile-order-from-invoices:invoices-to-fulfillments" | "reconcile-order-from-invoices:fulfillments-to-bookings" | "create-tax-rate:recompute-live-orders" | "create-tax-rate:recompute-live-invoices" | "update-tax-class:name-to-products" | "update-tax-class:name-to-webshop-products" | "update-tax-class:codes-recompute-live-orders" | "update-tax-class:codes-recompute-live-invoices" | "update-product:tax-class-to-live-orders" | "update-product:tax-class-to-components" | "update-product:tax-class-to-webshop-components" | "update-tag:name-to-products" | "delete-tag:remove-from-products" | "update-tracking-category:name-to-products" | "update-location-type:capacities-to-locations" | "update-location:name-to-inventory-ledgers" | "update-location:placement-to-inventory-ledgers" | "update-location:name-to-bookings" | "update-location:name-to-out-of-service" | "update-location:name-to-transactions" | "update-location:default-name-to-store" | "holiday-definition:materialize-dates" | "holiday-dates:rematerialize-snapshot" | "holiday-change:recompute-draft-orders" | "holiday-change:recompute-draft-invoices" | "create-store:unset-sibling-defaults" | "update-store:unset-sibling-defaults" | "update-store:deactivate-locations" | "create-location:default-location-to-store" | "update-location:set-default-to-store" | "set-location-product-default:clear-sibling-defaults" | "cowrite-thread:orders-to-thread" | "cowrite-thread:thread-to-orders" | "cowrite-thread:invoices-to-thread" | "cowrite-thread:thread-to-invoices" | "cowrite-thread:contacts-to-thread" | "cowrite-thread:thread-to-contacts" | "cowrite-thread:organizations-to-thread" | "cowrite-thread:thread-to-organizations" | "cowrite-thread:products-to-thread" | "cowrite-thread:thread-to-products" | "cowrite-thread:roles-to-thread" | "cowrite-thread:thread-to-roles" | "cowrite-thread:out-of-service-to-thread" | "cowrite-thread:thread-to-out-of-service" | "cowrite-thread:credit-notes-to-thread" | "cowrite-thread:thread-to-credit-notes" | "cowrite-thread:purchases-to-thread" | "cowrite-thread:thread-to-purchases" | "cowrite-thread:purchase-bills-to-thread" | "cowrite-thread:thread-to-purchase-bills" | "cowrite-thread:purchase-credits-to-thread" | "cowrite-thread:thread-to-purchase-credits" | "create-comment:thread-to-comment" | "create-comment:comment-to-thread" | "delete-comment:comment-to-thread" | "cowrite-thread:cards-to-thread" | "cowrite-thread:thread-to-cards" | "delete-card:cascade-thread" | "delete-card:cascade-comments" | "create-template:thread" | "create-template:thread-to-family" | "manage-draft:family-rollup" | "manage-draft:component-family-rollup" | "manage-draft:version-to-thread" | "manage-draft:thread-to-version" | "publish-template:seq" | "publish-template:version-flip" | "publish-template:family-rollup" | "publish-template:component-family-rollup" | "create-recurrence:fan-out-cards" | "materialize-horizon:fan-out-cards" | "update-recurrence:fan-out-prototype" | "update-recurrence:rematerialize-future" | "delete-recurrence:fan-out-cards" | "update-card-scope-following:cascade-future-siblings" | "update-card-scope-all:update-recurrence-prototype" | "update-card-scope-all:cascade-siblings" | "delete-card-scope-this:append-exception-date" | "delete-card-scope-following:cascade-future-siblings" | "delete-card-scope-following:truncate-recurrence" | "delete-card-scope-all:cascade-siblings" | "delete-card-scope-all:delete-recurrence" | "generate-invoice-pdf:upload-to-worklist" | "generate-quote-pdf:upload-to-worklist" | "generate-statement-pdf:upload-to-worklist" | "stock:ledger-to-stock" | "stock:bookings-to-stock" | "stock:oos-to-stock" | "stock:purchases-to-stock" | "stock:seed-ledger-to-stock" | "units:transactions-to-roster" | "units:transactions-to-units" | "units:product-to-roster" | "units:product-to-units" | "units:product-to-bookings" | "units:product-to-out-of-service" | "units:product-to-enroll-movement" | "create-units:product-to-units";
 ```
 
 ### `SEEDED_ROLE_NAMES`
@@ -13206,42 +13181,13 @@ const SETTLED_STATUSES: readonly InvoiceStatusType[];
 ### `SETTLEMENT_CONTRACTS`
 
 The per-type settlement contract, one entry per {@link SETTLEMENT_TYPES}
-member — a table the schema reads, so a contradiction is reported by the
-schema instead of restated in every consumer.
-
-`sums_into` is load-bearing rather than documentation: `recomputeSettlementTotals`
-takes its settlement argument structurally, so without a declared target a
-credit row would be silently summed into `amount_paid`. Reading the target
-from the table removes that class entirely.
-
-A reversal carries **no** external id. The reap appends a reverser because
-Xero stopped reporting a payment — the reverser is a CFS event with no Xero
-counterpart, and the id it retracts is still on the row `reverses` names.
+member, the same for both sides — a table the schema reads, so a
+contradiction is reported by the schema instead of restated in every
+consumer. What the sides word differently (the reasons and the labels) is
+`SIDE_CONTRACTS[side]`'s.
 
 ```ts
 const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, SettlementContract>>;
-```
-
-### `SETTLEMENT_TARGETS`
-
-The documents a settlement can settle: two RECEIVABLE (`invoice`,
-`credit_note`) and two PAYABLE (`purchase_bill`, `purchase_credit`). Each names
-its own key on the row — `uid_invoice`, `uid_credit_note`, `uid_purchase_bill`,
-`uid_purchase_credit` — so the side is derivable from the key present and never
-stored. @see {@link SettlementContract.settles}
-
-```ts
-const SETTLEMENT_TARGETS: "invoice" | "credit_note" | "purchase_bill" | "purchase_credit"[];
-```
-
-### `SETTLEMENT_TARGET_SIDE`
-
-Which side of the ledger a target sits on. A receivable row names
-`uid_organization` (the customer); a payable row names `uid_supplier`. The
-settlement refine reads this to decide which party key the row must carry.
-
-```ts
-const SETTLEMENT_TARGET_SIDE: Readonly<Record<SettlementTargetType, "receivable" | "payable">>;
 ```
 
 ### `SHARED_LINE_TYPES`
@@ -13258,10 +13204,18 @@ const SHARED_LINE_TYPES: readonly ["sale", "rental", "service", "replacement"];
 
 ### `SIDES`
 
-The two sides. The spelling `SETTLEMENT_TARGET_SIDE` (`schemas/common.ts`) already uses.
+The two sides.
 
 ```ts
 const SIDES: readonly ["receivable", "payable"];
+```
+
+### `SIDE_COLLECTIONS`
+
+{@link SideCollections} as a value.
+
+```ts
+const SIDE_COLLECTIONS: SideCollections;
 ```
 
 ### `SIDE_CONTRACTS`
@@ -13272,6 +13226,21 @@ until both sides state it.
 
 ```ts
 const SIDE_CONTRACTS: Readonly<Record<Side, SideContract>>;
+```
+
+### `SIDE_OF_COLLECTION`
+
+**Which side a document is on, read off its collection** — the one place the
+side is derived (one-document-model ruling 131). A settlement row names its
+targets as `{ collection, uid }` refs, and the schema refine, a collection
+scan and the fold all hold only the row, so they read the side here.
+
+A literal table rather than an inversion of {@link SIDE_COLLECTIONS}: JSR's
+declaration emitter drops a computed member, and a side test pins that the
+two agree.
+
+```ts
+const SIDE_OF_COLLECTION: Readonly<Record<SidedCollection, Side>>;
 ```
 
 ### `STATEMENT_FORMATS`
@@ -13528,17 +13497,15 @@ const SettingsSchema: z.ZodType<SettingsDocument>;
 
 ### `Settlement`
 
-One settlement event against an invoice, a customer credit note, a supplier
-bill or a supplier credit — the contract's `settles` says which.
+One settlement event against a billing document or a credit document — the
+contract's `settles` says which role, the ref's collection which side.
 
 ```ts
 interface Settlement {
   uid: string;
-  uid_invoice: string | null;
-  uid_organization: string | null;
-  uid_purchase_bill: string | null;
-  uid_purchase_credit: string | null;
-  uid_supplier: string | null;
+  billing: SettlementBillingRef | null;
+  credit: SettlementCreditRef | null;
+  uid_counterparty: string;
   type: SettlementTypeType;
   reason: SettlementReasonType;
   amount_cents: number;
@@ -13547,10 +13514,7 @@ interface Settlement {
   reference: string | null;
   uuid_session: string;
   reverses: string | null;
-  uid_credit_note: string | null;
-  number_credit_note: string | null;
-  xero_payment_id: string | null;
-  xero_credit_note_id: string | null;
+  xero_id: string | null;
   synced_at: FirestoreTimestampType | null;
   legacy_payment_uid: string | null;
   version: number;
@@ -13561,20 +13525,101 @@ interface Settlement {
 }
 ```
 
+### `SettlementAllocationInputType`
+
+One allocation of a credit, to one billing document of its side.
+
+```ts
+interface SettlementAllocationInputType {
+  billing: SettlementBillingRef;
+  amount_cents: number;
+}
+```
+
+### `SettlementBillingRef`
+
+The billing document a row settles: an invoice or a supplier bill. The
+narrowed `DocSource` twin (`bookings-inbound.source`), so it is assignable
+wherever a `DocSourceType` is read.
+
+```ts
+interface SettlementBillingRef {
+  collection: BillingCollection<S>;
+  uid: string;
+}
+```
+
+### `SettlementBillingRefInput`
+
+A billing document named by an input: the stored ref's STRIPPING twin
+(`.strip()` keeps the node's checks), so a client echoing a stored ref with
+extra keys is not refused (`tests/input-strictness.test.ts`).
+
+```ts
+const SettlementBillingRefInput: z.ZodType<SettlementBillingRef>;
+```
+
+### `SettlementBillingRefSchema`
+
+Zod schema for {@link SettlementBillingRef}.
+
+```ts
+const SettlementBillingRefSchema: z.ZodType<SettlementBillingRef>;
+```
+
 ### `SettlementContract`
 
 How one settlement type may be filled. @see {@link SETTLEMENT_CONTRACTS}
 
 ```ts
 interface SettlementContract {
-  reasons: readonly SettlementReasonType[];
-  settles: SettlementTargetType;
+  settles: "billing" | "credit";
   draws_credit: boolean;
-  xero_id_field: "xero_payment_id" | "xero_credit_note_id" | null;
+  xero_object: "payment" | "credit_note" | null;
   sums_into: "amount_paid_cents" | "amount_credited_cents" | "amount_void_cents" | null;
   counts_into: "closure_count" | null;
   reverses: "required" | "forbidden";
 }
+```
+
+### `SettlementCreditRef`
+
+The credit document a row draws on (an allocation) or settles (a refund): a
+customer credit note or a supplier credit.
+
+```ts
+interface SettlementCreditRef {
+  collection: CreditCollection<S>;
+  uid: string;
+  label: string | null;
+}
+```
+
+### `SettlementCreditRefInput`
+
+Zod schema for {@link SettlementCreditRefInputType}.
+
+```ts
+const SettlementCreditRefInput: z.ZodType<SettlementCreditRefInputType>;
+```
+
+### `SettlementCreditRefInputType`
+
+A credit document named by an input: no `label`, which the writer reads off the credit.
+
+```ts
+interface SettlementCreditRefInputType {
+  collection: CreditCollection;
+  uid: string;
+}
+```
+
+### `SettlementCreditRefSchema`
+
+Zod schema for {@link SettlementCreditRef}.
+
+```ts
+const SettlementCreditRefSchema: z.ZodType<SettlementCreditRef>;
 ```
 
 ### `SettlementReasonEnum`
@@ -13587,10 +13632,26 @@ const SettlementReasonEnum: z.ZodType<SettlementReasonType>;
 
 ### `SettlementReasonType`
 
-Why a settlement happened. @see {@link SETTLEMENT_CONTRACTS}
+Why a settlement happened. @see {@link SETTLEMENT_REASONS}
 
 ```ts
 type SettlementReasonType = indexedAccess;
+```
+
+### `SettlementReasons`
+
+One side's settlement reasons: for each type, the reasons legal on it and
+each one's label on this side (ruling 130, the `line_labels` pattern). A
+reason is legal on a type EXACTLY when this side labels it, so one entry
+answers both questions.
+
+⚠️ **Not total over reasons**, unlike `line_labels`: `bad_debt` has no payable
+meaning and `supplier_adjustment` no receivable one. The compiler forces a
+decision per TYPE; `tests/side.test.ts` asserts every reason is legal on at
+least one side.
+
+```ts
+type SettlementReasons = Readonly<Record<SettlementTypeType, Readonly<Partial<Record<SettlementReasonType, string>>>>>;
 ```
 
 ### `SettlementSchema`
@@ -13599,14 +13660,6 @@ Zod schema for a Settlement.
 
 ```ts
 const SettlementSchema: z.ZodType<Settlement>;
-```
-
-### `SettlementTargetType`
-
-One {@link SETTLEMENT_TARGETS} member.
-
-```ts
-type SettlementTargetType = indexedAccess;
 ```
 
 ### `SettlementTypeEnum`
@@ -13667,6 +13720,18 @@ One {@link SIDES} member.
 type Side = indexedAccess;
 ```
 
+### `SideCollections`
+
+Each side's collection per role — the table in this module's docblock, as
+data. A reader that holds a role and a side names its collection from here.
+
+```ts
+interface SideCollections {
+  receivable: typeLiteral;
+  payable: typeLiteral;
+}
+```
+
 ### `SideContract`
 
 One side's entries. Total over {@link SharedLineType}, so a new type is a compile error until both sides state it.
@@ -13679,7 +13744,19 @@ interface SideContract {
   tax: SideTax;
   xero_line_money: Readonly<Record<XeroDocumentRole, XeroLineMoney>>;
   custody_ladder: BookingLadderType;
+  settlement_type_labels: Readonly<Record<SettlementTypeType, string>>;
+  settlement_reasons: SettlementReasons;
 }
+```
+
+### `SideSettlement`
+
+A settlement of side `S`: its refs name only that side's collections. A
+reader holding a document of one side reads rows by its ref and holds these;
+a collection scan narrows with {@link isSideSettlement}.
+
+```ts
+type SideSettlement = Omit<Settlement, "billing" | "credit"> & typeLiteral;
 ```
 
 ### `SideTax`
@@ -13695,6 +13772,14 @@ How a side's lines are taxed:
 
 ```ts
 type SideTax = "resolved" | "exempt";
+```
+
+### `SidedCollection`
+
+Any collection {@link SIDE_OF_COLLECTION} names.
+
+```ts
+type SidedCollection = indexedAccess;
 ```
 
 ### `StatementDocument`
@@ -15405,7 +15490,7 @@ Every `TransactionDefinition.id` in the catalog.
 now, not by the shape of the call that consumes them.
 
 ```ts
-type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "extend-rental" | "undo-extend-rental" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "reverse-stock-reclass" | "create-purchase" | "update-purchase" | "extend-subrent" | "undo-extend-subrent" | "close-purchase" | "update-inbound-booking" | "create-receipt-exchange" | "finalize-purchase" | "create-purchase-bill" | "update-purchase-bill" | "settle-purchase-bill" | "void-purchase-bill" | "void-purchase-bill-from-xero" | "close-purchase-bill" | "reopen-purchase-bill" | "create-purchase-credit" | "allocate-purchase-credit" | "reverse-purchase-credit-allocation" | "settle-purchase-credit" | "void-purchase-credit" | "void-purchase-credit-from-xero" | "create-store-transfer" | "create-units" | "update-unit" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "close-invoice" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "record-credit-note-refund" | "sync-xero-credit-note-refunds" | "reverse-credit-note-refund" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "reconcile-order-from-invoices" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-price-formula" | "update-price-formula" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "set-location-product-default" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
+type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "extend-rental" | "undo-extend-rental" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "reverse-stock-reclass" | "create-purchase" | "update-purchase" | "extend-subrent" | "undo-extend-subrent" | "close-purchase" | "update-inbound-booking" | "create-receipt-exchange" | "finalize-purchase" | "create-purchase-bill" | "update-purchase-bill" | "create-purchase-credit" | "void-purchase-credit" | "void-purchase-credit-from-xero" | "create-store-transfer" | "create-units" | "update-unit" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "close-invoice" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "record-credit-note-refund" | "sync-xero-credit-note-refunds" | "reverse-credit-note-refund" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "reconcile-order-from-invoices" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-price-formula" | "update-price-formula" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "set-location-product-default" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
 ```
 
 ### `TransactionLogRecord`
@@ -17275,6 +17360,24 @@ The billing and credit documents, the two roles that post lines to Xero.
 type XeroDocumentRole = "billing" | "credit";
 ```
 
+### `XeroId`
+
+**An id Xero assigned** — a ContactID, InvoiceID, CreditNoteID, PaymentID,
+BankTransactionID, AccountID or tracking OptionID. Every one is an RFC 9562
+UUID, so this is `z.uuid()` and nothing more (one-document-model ruling 129).
+
+Named so a field states WHOSE id it holds: `xero_id` is a third party's id,
+never a CFS document id, and a `FirestoreId` beside it means something else
+entirely. Census 2026-11-18: every stored settlement Xero id and every bill
+`xero_id` passes it, in prod and `test` alike, 0 refused.
+
+⚠️ **Log schemas keep `z.string()`**, deliberately: a log records what Xero
+SENT, so a malformed id there is evidence to keep, not input to refuse.
+
+```ts
+const XeroId: z.ZodType<string>;
+```
+
 ### `XeroLineMoney`
 
 How a Xero line states its money. `exact_split` is at most two lines that are
@@ -18187,20 +18290,12 @@ Arrays are not traversed.
 reduces it.
 
 **Derived from the contract, never declared**, exactly as
-`getTransactionMultiplier` derives from `places` rather than carrying a ±1
-column: a type that must name what it reverses IS a retraction, and one that
-must not IS an application. Two facts that could disagree become one that
-cannot.
+`getTransactionMultiplier` derives from `places`: a type that must name what
+it reverses IS a retraction, and one that must not IS an application.
 
-**The sign keys on `type`, not on `reason`.** The package answers this the
-same way three times over — `getTransactionMultiplier(type)`, and
-`out_of_service_breakdown[o.reason]` where reason is a *breakdown dimension*
-rather than a direction. It is also forced here: `correction` is genuinely
-bidirectional (an operator may be adding a payment they missed or removing one
-that never happened), so a reason-keyed sign would have to split it into
-`correction_added`/`correction_removed`, and every other bidirectional reason
-after it. Type carries direction, reason carries why, and the contract's
-`reasons` list keeps the pairs legal.
+**The sign keys on `type`, not on `reason`.** `correction` is genuinely
+bidirectional, so a reason-keyed sign would have to split it, and every other
+bidirectional reason after it. Type carries direction, reason carries why.
 
 ### `getTransactionMultiplier(type: MovementTypeType): 1 | -1 | 0`
 
@@ -18272,6 +18367,13 @@ Whether CFS OWNS an inbound booking's units in `key` — the inbound twin of
 ⭐ The movement-cost rule reads this: a receive must carry a cost exactly
 when it moves units into an owned key, so a Buy receive costs and a Subrent
 receive does not.
+
+### `isBillingSettlement(side: S, s: Settlement): s is `
+
+Narrow a settlement to one that settles a billing document of side `side`.
+A reader that queried by `billing.uid` already holds only these; one that read
+by `credit.uid` holds refunds too and must filter — a refund folded into a
+billing document is money from nowhere.
 
 ### `isCollectionLineType(type: unknown): boolean`
 
@@ -18469,14 +18571,6 @@ out by hand this read `!== "destination" && !== "group" && !== "order"` — one
 clause longer than the order guard, which is exactly the kind of difference
 that looks like a bug and is not.
 
-### `isInvoiceSettlement(s: Settlement): s is InvoiceSettlement`
-
-Narrow a settlement to {@link InvoiceSettlement}. A reader that queried by
-`uid_invoice` already holds only these; a reader that scans the collection,
-or reads by `uid_credit_note`, holds refunds too and MUST filter — a refund
-folded into an invoice is money from nowhere. A payable row has a `null`
-`uid_invoice`, so this excludes the whole payable side as well.
-
 ### `isKitHeaderLine(row: object): boolean`
 
 **Is this row a kit header?** A `stock_method: "none"` kit parent on a payable
@@ -18517,10 +18611,6 @@ breakdown the undos leave.
 Read off the table rather than listed, so the P2b rows joined without an edit
 here; the name predates them.
 
-### `isPayableSettlement(s: Settlement): s is PayableSettlement`
-
-Narrow a settlement to {@link PayableSettlement}.
-
 ### `isProductShapedUid(uid: string): boolean`
 
 Whether an `ItemUid`-shaped `path` segment names a PRODUCT (including a
@@ -18531,10 +18621,6 @@ and the two are distinguishable by this one check because a `FirestoreId`
 never contains a `-`. This is `core/src/utils/booking-id.ts`'s
 `componentAncestry` filter, exported from the grammar it reads rather than
 from the booking-specific module that consumes it.
-
-### `isPurchaseBillSettlement(s: Settlement): s is PurchaseBillSettlement`
-
-Narrow a settlement to {@link PurchaseBillSettlement}.
 
 ### `isPurchaseCard(doc: Pick<Card, "purchases">): boolean`
 
@@ -18552,11 +18638,9 @@ Narrows a receipt row to a line (excludes the two dividers).
 ⚠️ Not a key-presence test: the decision is the row's TYPE, as
 `isFulfillmentLineItem`'s is.
 
-### `isReceivableSettlement(s: Settlement): s is ReceivableSettlement`
+### `isSideSettlement(side: S, s: Settlement): s is `
 
-Narrow a settlement to {@link ReceivableSettlement}. A reader that scans the
-collection (an audit, a per-customer statement built from a full read) holds
-payable rows too and MUST filter before treating `uid_organization` as set.
+Narrow a settlement to side `side` — what a collection scan holding both sides does first.
 
 ### `isSubrentMovementType(type: MovementTypeType): type is SubrentMovementTypeType`
 
@@ -18978,6 +19062,17 @@ The contract for a settlement `type`, or `undefined` for a value outside
 {@link SETTLEMENT_TYPES}. Tolerant of a `string` for the same reason
 {@link itemContract} is — callers hold types from loosely-typed sources.
 
+### `settlementReasonLegal(side: Side, type: SettlementTypeType, reason: SettlementReasonType): boolean`
+
+Is `reason` legal on a `type` row of `side`? One entry answers legality and label (ruling 130).
+
+### `settlementSide(s: typeLiteral): Side`
+
+**The side of a settlement row**, read off its target ref's collection
+(ruling 131). Every row names at least one ref (the contract requires it), so
+this is total over parsed rows; it throws on a row that names none, which
+only an unparsed one can.
+
 ### `sumOOSBuckets(b: Partial<OOSBreakdown>, _: unknown): number`
 
 Σ of `keys` (every bucket by default), each read through {@link oosBucketQuantity}.
@@ -19186,6 +19281,7 @@ interface CollectionRule {
   invariant?: string;
   enforced_by?: EnforcementRef[];
   transaction?: TransactionId;
+  side?: Side;
   trigger?: string;
   fields: FieldMapping[];
 }
@@ -19267,7 +19363,7 @@ deliberately shorter than the transaction name (`create-org:*` under
 `create-organization`). Read the prefix as a namespace, never as a join key.
 
 ```ts
-type RuleId = "create-order:org-to-order" | "create-order:products-to-order-items" | "create-order:order-self-derive" | "create-order:order-to-bookings" | "create-order:ledger-to-bookings" | "create-order:fulfillment-to-cards" | "create-order:order-to-fulfillment" | "update-order:org-to-order" | "update-order:order-self-derive" | "update-order:order-to-bookings" | "update-order:grain-carry-to-bookings" | "update-order:bookings-to-order" | "custody-transfer:bookings-to-transactions" | "update-order:grain-carry-to-transactions" | "update-order:ledger-to-bookings" | "update-order:fulfillment-to-cards" | "update-order:order-to-fulfillment" | "update-booking:booking-to-self" | "update-booking:booking-to-out-of-service" | "update-booking:booking-to-transactions" | "update-booking:transactions-to-ledger" | "update-booking:transactions-to-locations" | "update-booking:booking-to-order" | "update-booking:booking-to-cards" | "extend-rental:rebook-to-bookings" | "extend-rental:bookings-to-transactions" | "undo-extend-rental:rebook-to-bookings" | "undo-extend-rental:bookings-to-transactions" | "extend-subrent:rebook-to-inbound-bookings" | "extend-subrent:inbound-bookings-to-transactions" | "undo-extend-subrent:rebook-to-inbound-bookings" | "undo-extend-subrent:inbound-bookings-to-transactions" | "update-purchase:purchase-to-bills" | "update-purchase:purchase-to-movement-paths" | "create-purchase-bill:bill-to-purchase" | "create-purchase-bill:bill-to-settlements" | "settle-purchase-bill:xero-to-settlements" | "settle-purchase-bill:settlements-to-bill" | "void-purchase-bill:void-to-settlements" | "void-purchase-bill:settlements-to-bill" | "void-purchase-bill-from-xero:void-to-settlements" | "void-purchase-bill-from-xero:settlements-to-bill" | "close-purchase-bill:closure-to-bill" | "reopen-purchase-bill:reversal-to-bill" | "settle-purchase-bill:settlements-to-credit" | "void-purchase-bill-from-xero:settlements-to-credit" | "update-purchase-bill:status-to-purchases" | "update-purchase-credit:status-to-purchases" | "allocate-purchase-credit:credit-to-settlements" | "allocate-purchase-credit:settlements-to-bill" | "allocate-purchase-credit:settlements-to-credit" | "reverse-purchase-credit-allocation:reverser-to-settlements" | "reverse-purchase-credit-allocation:settlements-to-bill" | "reverse-purchase-credit-allocation:settlements-to-credit" | "close-purchase:purchase-to-bills" | "settle-purchase-credit:xero-to-settlements" | "settle-purchase-credit:settlements-to-credit" | "void-purchase-credit-from-xero:void-to-settlements" | "void-purchase-credit-from-xero:settlements-to-bill" | "void-purchase-credit-from-xero:settlements-to-credit" | "purchase-card:purchases-to-card" | "purchase-custody:purchase-to-receipt" | "purchase-custody:receipt-to-inbound-bookings" | "purchase-custody:inbound-bookings-to-purchase" | "update-inbound-booking:booking-to-transactions" | "update-inbound-booking:booking-to-out-of-service" | "create-receipt-exchange:leg-self" | "update-out-of-service-record:record-to-inbound-booking" | "create-out-of-service-record:sources-to-record" | "create-out-of-service-record:products-to-record" | "create-out-of-service-record:record-to-transactions" | "create-out-of-service-record:transactions-to-ledger" | "update-out-of-service-record:record-to-transactions" | "update-out-of-service-record:record-to-record" | "update-out-of-service-record:transactions-to-ledger" | "reclassify-out-of-service-record:record-to-booking" | "reclassify-out-of-service-record:record-to-record" | "create-transaction:transaction-to-ledger" | "create-transaction:transaction-to-locations" | "reverse-transaction:transaction-to-ledger" | "reverse-transaction:transaction-to-locations" | "reclass-stock:transaction-to-ledger" | "reclass-stock:transaction-to-locations" | "reverse-stock-reclass:transaction-to-ledger" | "reverse-stock-reclass:transaction-to-locations" | "create-store-transfer:transaction-to-ledger" | "create-store-transfer:transaction-to-locations" | "create-store-transfer:transaction-to-out-of-service" | "create-store-transfer:transaction-to-bookings" | "create-product:product-to-tags" | "create-product:product-to-tracking-categories" | "create-product:product-to-components" | "create-product:product-to-ledger" | "create-product:product-to-webshop" | "update-product:catalog-to-components" | "update-product:components-to-components" | "update-product:component-entry-to-parents" | "update-product:name-to-locations" | "update-product:name-to-tags" | "update-product:name-to-tracking-categories" | "update-product:name-to-out-of-service" | "update-product:to-webshop" | "update-product:to-linked-twin" | "update-product:linked-twin-to-webshop" | "update-product:linked-twin-to-tracking-categories" | "update-product:tags-to-tags" | "update-product:tracking-category-change" | "update-product:tracking-category-to-components" | "update-product:stock-method-change" | "update-product:stock-method-to-count-movement" | "update-product:type-change" | "update-product:price-to-components" | "update-product:price-to-webshop-components" | "update-product:product-to-draft-orders" | "create-org:org-to-contacts" | "create-org:node-to-tree" | "create-org:mint-derived-project" | "merge-org:loser-to-orders" | "merge-org:loser-to-invoices" | "merge-org:loser-to-credit-notes" | "merge-org:loser-to-settlements" | "merge-org:loser-to-bookings" | "merge-org:loser-to-fulfillments" | "merge-org:loser-to-cards" | "merge-org:loser-to-out-of-service" | "merge-org:loser-to-contacts" | "merge-org:activity-to-survivor" | "merge-org:merged-from-to-survivor" | "merge-org:delete-loser" | "merge-org:tombstone-loser" | "merge-org:merged-to-to-tombstones" | "merge-org:tombstone-parent" | "merge-org:thread-comments-to-survivor" | "update-department-type:name-to-departments" | "update-org:name-to-orders" | "update-org:billing-to-orders" | "update-org:name-to-invoices" | "update-org:name-to-bookings" | "update-org:name-to-fulfillments" | "update-org:name-to-cards" | "update-org:billing-to-invoices" | "update-org:tax-axes-to-orders" | "update-org:contacts-change" | "update-org:name-to-descendants" | "reparent-destination:tree-to-node" | "reparent-destination:place-name-to-units" | "reparent-org:tree-to-descendants" | "reparent-org:activity-to-new-ancestors" | "stamp-org-activity:orders-to-organizations" | "stamp-org-activity:invoices-to-organizations" | "create-contact:contact-to-orgs" | "create-contact:link-to-user" | "update-contact:name-to-orgs" | "update-contact:name-to-orders" | "update-contact:phones-to-orders" | "update-contact:name-to-fulfillments" | "update-contact:phones-to-fulfillments" | "update-contact:name-to-invoices" | "update-contact:phones-to-invoices" | "update-contact:orgs-change" | "update-contact:name-to-user" | "create-user:link-to-contact" | "update-user:name-to-contact" | "update-user:name-to-actor-refs" | "delete-user:unlink-contact" | "create-invoice:invoice-to-orders" | "update-invoice:status-to-orders" | "update-order:items-to-invoices" | "update-order:status-to-invoices" | "create-settlement:settlement-to-invoice" | "reverse-settlement:reverser-to-invoice" | "reverse-settlement:release-to-credit-note" | "close-invoice:closure-to-invoice" | "sync-xero-settlement:xero-to-settlements" | "sync-xero-settlement:settlements-to-invoice" | "void-invoice:reap-settlements" | "void-invoice:append-void-settlement" | "void-invoice-from-xero:reap-settlements" | "void-invoice-from-xero:append-void-settlement" | "void-invoice-from-cancel:reap-settlements" | "void-invoice-from-cancel:append-void-settlement" | "create-credit-note:number-from-counter" | "create-credit-note:posting-account" | "update-credit-note:note-to-orders" | "allocate-credit-note:note-to-settlements" | "allocate-credit-note:settlements-to-invoices" | "allocate-credit-note:remaining-credit" | "void-credit-note:status" | "record-credit-note-refund:refund-to-settlements" | "record-credit-note-refund:settlements-to-credit-note" | "sync-xero-credit-note-refunds:xero-to-settlements" | "sync-xero-credit-note-refunds:settlements-to-credit-note" | "reverse-credit-note-refund:reverser-to-settlements" | "reverse-credit-note-refund:settlements-to-credit-note" | "update-fulfillment-items:items-self" | "update-fulfillment-items:fulfillment-to-cards" | "update-fulfillment-destinations:pairs-self" | "update-fulfillment-destinations:fulfillment-to-cards" | "create-fulfillment-exchange:leg-self" | "create-fulfillment-exchange:fulfillment-to-cards" | "reset-fulfillment:rebuild-from-order" | "reset-fulfillment:fulfillment-to-cards" | "reconcile-fulfillment-cards:fulfillment-to-cards" | "reconcile-order-from-invoices:invoices-to-fulfillments" | "reconcile-order-from-invoices:fulfillments-to-bookings" | "create-tax-rate:recompute-live-orders" | "create-tax-rate:recompute-live-invoices" | "update-tax-class:name-to-products" | "update-tax-class:name-to-webshop-products" | "update-tax-class:codes-recompute-live-orders" | "update-tax-class:codes-recompute-live-invoices" | "update-product:tax-class-to-live-orders" | "update-product:tax-class-to-components" | "update-product:tax-class-to-webshop-components" | "update-tag:name-to-products" | "delete-tag:remove-from-products" | "update-tracking-category:name-to-products" | "update-location-type:capacities-to-locations" | "update-location:name-to-inventory-ledgers" | "update-location:placement-to-inventory-ledgers" | "update-location:name-to-bookings" | "update-location:name-to-out-of-service" | "update-location:name-to-transactions" | "update-location:default-name-to-store" | "holiday-definition:materialize-dates" | "holiday-dates:rematerialize-snapshot" | "holiday-change:recompute-draft-orders" | "holiday-change:recompute-draft-invoices" | "create-store:unset-sibling-defaults" | "update-store:unset-sibling-defaults" | "update-store:deactivate-locations" | "create-location:default-location-to-store" | "update-location:set-default-to-store" | "set-location-product-default:clear-sibling-defaults" | "cowrite-thread:orders-to-thread" | "cowrite-thread:thread-to-orders" | "cowrite-thread:invoices-to-thread" | "cowrite-thread:thread-to-invoices" | "cowrite-thread:contacts-to-thread" | "cowrite-thread:thread-to-contacts" | "cowrite-thread:organizations-to-thread" | "cowrite-thread:thread-to-organizations" | "cowrite-thread:products-to-thread" | "cowrite-thread:thread-to-products" | "cowrite-thread:roles-to-thread" | "cowrite-thread:thread-to-roles" | "cowrite-thread:out-of-service-to-thread" | "cowrite-thread:thread-to-out-of-service" | "cowrite-thread:credit-notes-to-thread" | "cowrite-thread:thread-to-credit-notes" | "cowrite-thread:purchases-to-thread" | "cowrite-thread:thread-to-purchases" | "cowrite-thread:purchase-bills-to-thread" | "cowrite-thread:thread-to-purchase-bills" | "cowrite-thread:purchase-credits-to-thread" | "cowrite-thread:thread-to-purchase-credits" | "create-comment:thread-to-comment" | "create-comment:comment-to-thread" | "delete-comment:comment-to-thread" | "cowrite-thread:cards-to-thread" | "cowrite-thread:thread-to-cards" | "delete-card:cascade-thread" | "delete-card:cascade-comments" | "create-template:thread" | "create-template:thread-to-family" | "manage-draft:family-rollup" | "manage-draft:component-family-rollup" | "manage-draft:version-to-thread" | "manage-draft:thread-to-version" | "publish-template:seq" | "publish-template:version-flip" | "publish-template:family-rollup" | "publish-template:component-family-rollup" | "create-recurrence:fan-out-cards" | "materialize-horizon:fan-out-cards" | "update-recurrence:fan-out-prototype" | "update-recurrence:rematerialize-future" | "delete-recurrence:fan-out-cards" | "update-card-scope-following:cascade-future-siblings" | "update-card-scope-all:update-recurrence-prototype" | "update-card-scope-all:cascade-siblings" | "delete-card-scope-this:append-exception-date" | "delete-card-scope-following:cascade-future-siblings" | "delete-card-scope-following:truncate-recurrence" | "delete-card-scope-all:cascade-siblings" | "delete-card-scope-all:delete-recurrence" | "generate-invoice-pdf:upload-to-worklist" | "generate-quote-pdf:upload-to-worklist" | "generate-statement-pdf:upload-to-worklist" | "stock:ledger-to-stock" | "stock:bookings-to-stock" | "stock:oos-to-stock" | "stock:purchases-to-stock" | "stock:seed-ledger-to-stock" | "units:transactions-to-roster" | "units:transactions-to-units" | "units:product-to-roster" | "units:product-to-units" | "units:product-to-bookings" | "units:product-to-out-of-service" | "units:product-to-enroll-movement" | "create-units:product-to-units";
+type RuleId = "create-order:org-to-order" | "create-order:products-to-order-items" | "create-order:order-self-derive" | "create-order:order-to-bookings" | "create-order:ledger-to-bookings" | "create-order:fulfillment-to-cards" | "create-order:order-to-fulfillment" | "update-order:org-to-order" | "update-order:order-self-derive" | "update-order:order-to-bookings" | "update-order:grain-carry-to-bookings" | "update-order:bookings-to-order" | "custody-transfer:bookings-to-transactions" | "update-order:grain-carry-to-transactions" | "update-order:ledger-to-bookings" | "update-order:fulfillment-to-cards" | "update-order:order-to-fulfillment" | "update-booking:booking-to-self" | "update-booking:booking-to-out-of-service" | "update-booking:booking-to-transactions" | "update-booking:transactions-to-ledger" | "update-booking:transactions-to-locations" | "update-booking:booking-to-order" | "update-booking:booking-to-cards" | "extend-rental:rebook-to-bookings" | "extend-rental:bookings-to-transactions" | "undo-extend-rental:rebook-to-bookings" | "undo-extend-rental:bookings-to-transactions" | "extend-subrent:rebook-to-inbound-bookings" | "extend-subrent:inbound-bookings-to-transactions" | "undo-extend-subrent:rebook-to-inbound-bookings" | "undo-extend-subrent:inbound-bookings-to-transactions" | "update-purchase:purchase-to-bills" | "update-purchase:purchase-to-movement-paths" | "create-purchase-bill:bill-to-purchase" | "create-purchase-bill:bill-to-settlements" | "update-purchase-bill:status-to-purchases" | "update-purchase-credit:status-to-purchases" | "close-purchase:purchase-to-bills" | "void-purchase-credit-from-xero:void-to-settlements" | "void-purchase-credit-from-xero:settlements-to-bill" | "void-purchase-credit-from-xero:settlements-to-credit" | "purchase-card:purchases-to-card" | "purchase-custody:purchase-to-receipt" | "purchase-custody:receipt-to-inbound-bookings" | "purchase-custody:inbound-bookings-to-purchase" | "update-inbound-booking:booking-to-transactions" | "update-inbound-booking:booking-to-out-of-service" | "create-receipt-exchange:leg-self" | "update-out-of-service-record:record-to-inbound-booking" | "create-out-of-service-record:sources-to-record" | "create-out-of-service-record:products-to-record" | "create-out-of-service-record:record-to-transactions" | "create-out-of-service-record:transactions-to-ledger" | "update-out-of-service-record:record-to-transactions" | "update-out-of-service-record:record-to-record" | "update-out-of-service-record:transactions-to-ledger" | "reclassify-out-of-service-record:record-to-booking" | "reclassify-out-of-service-record:record-to-record" | "create-transaction:transaction-to-ledger" | "create-transaction:transaction-to-locations" | "reverse-transaction:transaction-to-ledger" | "reverse-transaction:transaction-to-locations" | "reclass-stock:transaction-to-ledger" | "reclass-stock:transaction-to-locations" | "reverse-stock-reclass:transaction-to-ledger" | "reverse-stock-reclass:transaction-to-locations" | "create-store-transfer:transaction-to-ledger" | "create-store-transfer:transaction-to-locations" | "create-store-transfer:transaction-to-out-of-service" | "create-store-transfer:transaction-to-bookings" | "create-product:product-to-tags" | "create-product:product-to-tracking-categories" | "create-product:product-to-components" | "create-product:product-to-ledger" | "create-product:product-to-webshop" | "update-product:catalog-to-components" | "update-product:components-to-components" | "update-product:component-entry-to-parents" | "update-product:name-to-locations" | "update-product:name-to-tags" | "update-product:name-to-tracking-categories" | "update-product:name-to-out-of-service" | "update-product:to-webshop" | "update-product:to-linked-twin" | "update-product:linked-twin-to-webshop" | "update-product:linked-twin-to-tracking-categories" | "update-product:tags-to-tags" | "update-product:tracking-category-change" | "update-product:tracking-category-to-components" | "update-product:stock-method-change" | "update-product:stock-method-to-count-movement" | "update-product:type-change" | "update-product:price-to-components" | "update-product:price-to-webshop-components" | "update-product:product-to-draft-orders" | "create-org:org-to-contacts" | "create-org:node-to-tree" | "create-org:mint-derived-project" | "merge-org:loser-to-orders" | "merge-org:loser-to-invoices" | "merge-org:loser-to-credit-notes" | "merge-org:loser-to-settlements" | "merge-org:loser-to-bookings" | "merge-org:loser-to-fulfillments" | "merge-org:loser-to-cards" | "merge-org:loser-to-out-of-service" | "merge-org:loser-to-contacts" | "merge-org:activity-to-survivor" | "merge-org:merged-from-to-survivor" | "merge-org:delete-loser" | "merge-org:tombstone-loser" | "merge-org:merged-to-to-tombstones" | "merge-org:tombstone-parent" | "merge-org:thread-comments-to-survivor" | "update-department-type:name-to-departments" | "update-org:name-to-orders" | "update-org:billing-to-orders" | "update-org:name-to-invoices" | "update-org:name-to-bookings" | "update-org:name-to-fulfillments" | "update-org:name-to-cards" | "update-org:billing-to-invoices" | "update-org:tax-axes-to-orders" | "update-org:contacts-change" | "update-org:name-to-descendants" | "reparent-destination:tree-to-node" | "reparent-destination:place-name-to-units" | "reparent-org:tree-to-descendants" | "reparent-org:activity-to-new-ancestors" | "stamp-org-activity:orders-to-organizations" | "stamp-org-activity:invoices-to-organizations" | "create-contact:contact-to-orgs" | "create-contact:link-to-user" | "update-contact:name-to-orgs" | "update-contact:name-to-orders" | "update-contact:phones-to-orders" | "update-contact:name-to-fulfillments" | "update-contact:phones-to-fulfillments" | "update-contact:name-to-invoices" | "update-contact:phones-to-invoices" | "update-contact:orgs-change" | "update-contact:name-to-user" | "create-user:link-to-contact" | "update-user:name-to-contact" | "update-user:name-to-actor-refs" | "delete-user:unlink-contact" | "create-invoice:invoice-to-orders" | "update-invoice:status-to-orders" | "update-order:items-to-invoices" | "update-order:status-to-invoices" | "create-settlement:settlement-to-invoice" | "reverse-settlement:reverser-to-invoice" | "reverse-settlement:release-to-credit-note" | "close-invoice:closure-to-invoice" | "sync-xero-settlement:xero-to-settlements" | "sync-xero-settlement:settlements-to-invoice" | "void-invoice:reap-settlements" | "void-invoice:append-void-settlement" | "void-invoice-from-xero:reap-settlements" | "void-invoice-from-xero:append-void-settlement" | "void-invoice-from-cancel:reap-settlements" | "void-invoice-from-cancel:append-void-settlement" | "create-credit-note:number-from-counter" | "create-credit-note:posting-account" | "update-credit-note:note-to-orders" | "allocate-credit-note:note-to-settlements" | "allocate-credit-note:settlements-to-invoices" | "create-settlement:settlement-to-bill" | "reverse-settlement:reverser-to-bill" | "reverse-settlement:release-to-purchase-credit" | "close-invoice:closure-to-bill" | "sync-xero-settlement:xero-to-bill-settlements" | "sync-xero-settlement:settlements-to-bill" | "sync-xero-settlement:settlements-to-purchase-credit" | "void-invoice:reap-bill-settlements" | "void-invoice:append-bill-void-settlement" | "void-invoice-from-xero:reap-bill-settlements" | "void-invoice-from-xero:append-bill-void-settlement" | "void-invoice-from-xero:settlements-to-purchase-credit" | "allocate-credit-note:purchase-credit-to-settlements" | "allocate-credit-note:settlements-to-bill" | "allocate-credit-note:settlements-to-purchase-credit" | "record-credit-note-refund:purchase-credit-refund-to-settlements" | "record-credit-note-refund:settlements-to-purchase-credit" | "sync-xero-credit-note-refunds:purchase-credit-xero-to-settlements" | "sync-xero-credit-note-refunds:settlements-to-purchase-credit" | "reverse-credit-note-refund:purchase-credit-reverser-to-settlements" | "reverse-credit-note-refund:settlements-to-purchase-credit" | "allocate-credit-note:remaining-credit" | "void-credit-note:status" | "record-credit-note-refund:refund-to-settlements" | "record-credit-note-refund:settlements-to-credit-note" | "sync-xero-credit-note-refunds:xero-to-settlements" | "sync-xero-credit-note-refunds:settlements-to-credit-note" | "reverse-credit-note-refund:reverser-to-settlements" | "reverse-credit-note-refund:settlements-to-credit-note" | "update-fulfillment-items:items-self" | "update-fulfillment-items:fulfillment-to-cards" | "update-fulfillment-destinations:pairs-self" | "update-fulfillment-destinations:fulfillment-to-cards" | "create-fulfillment-exchange:leg-self" | "create-fulfillment-exchange:fulfillment-to-cards" | "reset-fulfillment:rebuild-from-order" | "reset-fulfillment:fulfillment-to-cards" | "reconcile-fulfillment-cards:fulfillment-to-cards" | "reconcile-order-from-invoices:invoices-to-fulfillments" | "reconcile-order-from-invoices:fulfillments-to-bookings" | "create-tax-rate:recompute-live-orders" | "create-tax-rate:recompute-live-invoices" | "update-tax-class:name-to-products" | "update-tax-class:name-to-webshop-products" | "update-tax-class:codes-recompute-live-orders" | "update-tax-class:codes-recompute-live-invoices" | "update-product:tax-class-to-live-orders" | "update-product:tax-class-to-components" | "update-product:tax-class-to-webshop-components" | "update-tag:name-to-products" | "delete-tag:remove-from-products" | "update-tracking-category:name-to-products" | "update-location-type:capacities-to-locations" | "update-location:name-to-inventory-ledgers" | "update-location:placement-to-inventory-ledgers" | "update-location:name-to-bookings" | "update-location:name-to-out-of-service" | "update-location:name-to-transactions" | "update-location:default-name-to-store" | "holiday-definition:materialize-dates" | "holiday-dates:rematerialize-snapshot" | "holiday-change:recompute-draft-orders" | "holiday-change:recompute-draft-invoices" | "create-store:unset-sibling-defaults" | "update-store:unset-sibling-defaults" | "update-store:deactivate-locations" | "create-location:default-location-to-store" | "update-location:set-default-to-store" | "set-location-product-default:clear-sibling-defaults" | "cowrite-thread:orders-to-thread" | "cowrite-thread:thread-to-orders" | "cowrite-thread:invoices-to-thread" | "cowrite-thread:thread-to-invoices" | "cowrite-thread:contacts-to-thread" | "cowrite-thread:thread-to-contacts" | "cowrite-thread:organizations-to-thread" | "cowrite-thread:thread-to-organizations" | "cowrite-thread:products-to-thread" | "cowrite-thread:thread-to-products" | "cowrite-thread:roles-to-thread" | "cowrite-thread:thread-to-roles" | "cowrite-thread:out-of-service-to-thread" | "cowrite-thread:thread-to-out-of-service" | "cowrite-thread:credit-notes-to-thread" | "cowrite-thread:thread-to-credit-notes" | "cowrite-thread:purchases-to-thread" | "cowrite-thread:thread-to-purchases" | "cowrite-thread:purchase-bills-to-thread" | "cowrite-thread:thread-to-purchase-bills" | "cowrite-thread:purchase-credits-to-thread" | "cowrite-thread:thread-to-purchase-credits" | "create-comment:thread-to-comment" | "create-comment:comment-to-thread" | "delete-comment:comment-to-thread" | "cowrite-thread:cards-to-thread" | "cowrite-thread:thread-to-cards" | "delete-card:cascade-thread" | "delete-card:cascade-comments" | "create-template:thread" | "create-template:thread-to-family" | "manage-draft:family-rollup" | "manage-draft:component-family-rollup" | "manage-draft:version-to-thread" | "manage-draft:thread-to-version" | "publish-template:seq" | "publish-template:version-flip" | "publish-template:family-rollup" | "publish-template:component-family-rollup" | "create-recurrence:fan-out-cards" | "materialize-horizon:fan-out-cards" | "update-recurrence:fan-out-prototype" | "update-recurrence:rematerialize-future" | "delete-recurrence:fan-out-cards" | "update-card-scope-following:cascade-future-siblings" | "update-card-scope-all:update-recurrence-prototype" | "update-card-scope-all:cascade-siblings" | "delete-card-scope-this:append-exception-date" | "delete-card-scope-following:cascade-future-siblings" | "delete-card-scope-following:truncate-recurrence" | "delete-card-scope-all:cascade-siblings" | "delete-card-scope-all:delete-recurrence" | "generate-invoice-pdf:upload-to-worklist" | "generate-quote-pdf:upload-to-worklist" | "generate-statement-pdf:upload-to-worklist" | "stock:ledger-to-stock" | "stock:bookings-to-stock" | "stock:oos-to-stock" | "stock:purchases-to-stock" | "stock:seed-ledger-to-stock" | "units:transactions-to-roster" | "units:transactions-to-units" | "units:product-to-roster" | "units:product-to-units" | "units:product-to-bookings" | "units:product-to-out-of-service" | "units:product-to-enroll-movement" | "create-units:product-to-units";
 ```
 
 ### `TransactionDefinition`
@@ -19291,7 +19387,7 @@ Every `TransactionDefinition.id` in the catalog.
 now, not by the shape of the call that consumes them.
 
 ```ts
-type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "extend-rental" | "undo-extend-rental" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "reverse-stock-reclass" | "create-purchase" | "update-purchase" | "extend-subrent" | "undo-extend-subrent" | "close-purchase" | "update-inbound-booking" | "create-receipt-exchange" | "finalize-purchase" | "create-purchase-bill" | "update-purchase-bill" | "settle-purchase-bill" | "void-purchase-bill" | "void-purchase-bill-from-xero" | "close-purchase-bill" | "reopen-purchase-bill" | "create-purchase-credit" | "allocate-purchase-credit" | "reverse-purchase-credit-allocation" | "settle-purchase-credit" | "void-purchase-credit" | "void-purchase-credit-from-xero" | "create-store-transfer" | "create-units" | "update-unit" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "close-invoice" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "record-credit-note-refund" | "sync-xero-credit-note-refunds" | "reverse-credit-note-refund" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "reconcile-order-from-invoices" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-price-formula" | "update-price-formula" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "set-location-product-default" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
+type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "extend-rental" | "undo-extend-rental" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "reverse-stock-reclass" | "create-purchase" | "update-purchase" | "extend-subrent" | "undo-extend-subrent" | "close-purchase" | "update-inbound-booking" | "create-receipt-exchange" | "finalize-purchase" | "create-purchase-bill" | "update-purchase-bill" | "create-purchase-credit" | "void-purchase-credit" | "void-purchase-credit-from-xero" | "create-store-transfer" | "create-units" | "update-unit" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "close-invoice" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "record-credit-note-refund" | "sync-xero-credit-note-refunds" | "reverse-credit-note-refund" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "reconcile-order-from-invoices" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-price-formula" | "update-price-formula" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "set-location-product-default" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
 ```
 
 ### `aggregates`
@@ -21078,42 +21174,13 @@ const SEEDED_ROLE_NAMES: "admin" | "authenticated" | "customer" | "template-edit
 ### `SETTLEMENT_CONTRACTS`
 
 The per-type settlement contract, one entry per {@link SETTLEMENT_TYPES}
-member — a table the schema reads, so a contradiction is reported by the
-schema instead of restated in every consumer.
-
-`sums_into` is load-bearing rather than documentation: `recomputeSettlementTotals`
-takes its settlement argument structurally, so without a declared target a
-credit row would be silently summed into `amount_paid`. Reading the target
-from the table removes that class entirely.
-
-A reversal carries **no** external id. The reap appends a reverser because
-Xero stopped reporting a payment — the reverser is a CFS event with no Xero
-counterpart, and the id it retracts is still on the row `reverses` names.
+member, the same for both sides — a table the schema reads, so a
+contradiction is reported by the schema instead of restated in every
+consumer. What the sides word differently (the reasons and the labels) is
+`SIDE_CONTRACTS[side]`'s.
 
 ```ts
 const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, SettlementContract>>;
-```
-
-### `SETTLEMENT_TARGETS`
-
-The documents a settlement can settle: two RECEIVABLE (`invoice`,
-`credit_note`) and two PAYABLE (`purchase_bill`, `purchase_credit`). Each names
-its own key on the row — `uid_invoice`, `uid_credit_note`, `uid_purchase_bill`,
-`uid_purchase_credit` — so the side is derivable from the key present and never
-stored. @see {@link SettlementContract.settles}
-
-```ts
-const SETTLEMENT_TARGETS: "invoice" | "credit_note" | "purchase_bill" | "purchase_credit"[];
-```
-
-### `SETTLEMENT_TARGET_SIDE`
-
-Which side of the ledger a target sits on. A receivable row names
-`uid_organization` (the customer); a payable row names `uid_supplier`. The
-settlement refine reads this to decide which party key the row must carry.
-
-```ts
-const SETTLEMENT_TARGET_SIDE: Readonly<Record<SettlementTargetType, "receivable" | "payable">>;
 ```
 
 ### `SUBSTITUTABLE_ITEM_TYPES`
@@ -21140,10 +21207,9 @@ How one settlement type may be filled. @see {@link SETTLEMENT_CONTRACTS}
 
 ```ts
 interface SettlementContract {
-  reasons: readonly SettlementReasonType[];
-  settles: SettlementTargetType;
+  settles: "billing" | "credit";
   draws_credit: boolean;
-  xero_id_field: "xero_payment_id" | "xero_credit_note_id" | null;
+  xero_object: "payment" | "credit_note" | null;
   sums_into: "amount_paid_cents" | "amount_credited_cents" | "amount_void_cents" | null;
   counts_into: "closure_count" | null;
   reverses: "required" | "forbidden";
@@ -21160,18 +21226,10 @@ const SettlementReasonEnum: z.ZodType<SettlementReasonType>;
 
 ### `SettlementReasonType`
 
-Why a settlement happened. @see {@link SETTLEMENT_CONTRACTS}
+Why a settlement happened. @see {@link SETTLEMENT_REASONS}
 
 ```ts
 type SettlementReasonType = indexedAccess;
-```
-
-### `SettlementTargetType`
-
-One {@link SETTLEMENT_TARGETS} member.
-
-```ts
-type SettlementTargetType = indexedAccess;
 ```
 
 ### `SettlementTypeEnum`
@@ -21457,6 +21515,24 @@ asserts the two agree rather than trusting either.
 const UnitId: z.ZodType<string>;
 ```
 
+### `XeroId`
+
+**An id Xero assigned** — a ContactID, InvoiceID, CreditNoteID, PaymentID,
+BankTransactionID, AccountID or tracking OptionID. Every one is an RFC 9562
+UUID, so this is `z.uuid()` and nothing more (one-document-model ruling 129).
+
+Named so a field states WHOSE id it holds: `xero_id` is a third party's id,
+never a CFS document id, and a `FirestoreId` beside it means something else
+entirely. Census 2026-11-18: every stored settlement Xero id and every bill
+`xero_id` passes it, in prod and `test` alike, 0 refused.
+
+⚠️ **Log schemas keep `z.string()`**, deliberately: a log records what Xero
+SENT, so a malformed id there is evidence to keep, not input to refuse.
+
+```ts
+const XeroId: z.ZodType<string>;
+```
+
 ### `ZeroPricedComponentFinding`
 
 One violation of either array-level invariant.
@@ -21665,20 +21741,12 @@ A row's `exchanged_for` entries, with absent read as none.
 reduces it.
 
 **Derived from the contract, never declared**, exactly as
-`getTransactionMultiplier` derives from `places` rather than carrying a ±1
-column: a type that must name what it reverses IS a retraction, and one that
-must not IS an application. Two facts that could disagree become one that
-cannot.
+`getTransactionMultiplier` derives from `places`: a type that must name what
+it reverses IS a retraction, and one that must not IS an application.
 
-**The sign keys on `type`, not on `reason`.** The package answers this the
-same way three times over — `getTransactionMultiplier(type)`, and
-`out_of_service_breakdown[o.reason]` where reason is a *breakdown dimension*
-rather than a direction. It is also forced here: `correction` is genuinely
-bidirectional (an operator may be adding a payment they missed or removing one
-that never happened), so a reason-keyed sign would have to split it into
-`correction_added`/`correction_removed`, and every other bidirectional reason
-after it. Type carries direction, reason carries why, and the contract's
-`reasons` list keeps the pairs legal.
+**The sign keys on `type`, not on `reason`.** `correction` is genuinely
+bidirectional, so a reason-keyed sign would have to split it, and every other
+bidirectional reason after it. Type carries direction, reason carries why.
 
 ### `isDividerItemType(type: string): type is DividerItemType`
 
@@ -30424,29 +30492,6 @@ exemption, not absence (`PurchaseLinePrice`, `schemas/purchase.ts`).
 status and totals. `updatePurchaseBill` and the purchase → bill sync both read
 it. Supplier credits get no table, matching sales credit notes.
 
-### `AllocatePurchaseCreditInput`
-
-Zod schema for AllocatePurchaseCreditInputType.
-
-```ts
-const AllocatePurchaseCreditInput: z.ZodType<AllocatePurchaseCreditInputType>;
-```
-
-### `AllocatePurchaseCreditInputType`
-
-Input for allocating some of a supplier credit to one bill of the same
-supplier. `version` is the CREDIT's — the document whose balance the
-allocation spends.
-
-```ts
-interface AllocatePurchaseCreditInputType {
-  uid_purchase_bill: string;
-  amount_cents: number;
-  uuid_session: string;
-  version: number;
-}
-```
-
 ### `CreatePurchaseBillInput`
 
 Zod schema for CreatePurchaseBillInputType.
@@ -30510,18 +30555,13 @@ const PURCHASE_BILL_XERO_DOCUMENTS: "invoice" | "bank_transaction"[];
 
 ### `PURCHASE_CREDIT_REASONS`
 
-Why a supplier credited CFS. Closed, like `SETTLEMENT_REASONS`, and for the
-same reason: it becomes a ledger code.
-
-**A subset of `SETTLEMENT_REASONS`, equal to `SETTLEMENT_CONTRACTS.bill_credit.reasons`**
-— a `bill_credit` allocation row carries its credit's reason, as an AR `credit`
-row does (`CREDIT_NOTE_REASONS`). Kept as its own `as const` tuple rather than
-derived from the contract so `PurchaseCredit.reason` stays a narrow `z.enum`;
-the subset is a compile-time check below and the equality is asserted by
-`tests/settlements.test.ts`.
+Why a supplier credited CFS — the payable `credit` arm of
+`SIDE_CONTRACTS.payable.settlement_reasons` (`schemas/side.ts`, ruling 130),
+derived rather than re-listed, so a supplier credit and the allocation rows it
+spawns can never offer different reasons (the `CREDIT_NOTE_REASONS` twin).
 
 ```ts
-const PURCHASE_CREDIT_REASONS: "supplier_adjustment" | "correction"[];
+const PURCHASE_CREDIT_REASONS: readonly SettlementReasonType[];
 ```
 
 ### `PURCHASE_CREDIT_STATUSES`
@@ -30575,25 +30615,6 @@ interface PurchaseBill {
   updated_by: ActorRefType;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
-}
-```
-
-### `PurchaseBillClosureInput`
-
-Zod schema for PurchaseBillClosureInputType.
-
-```ts
-const PurchaseBillClosureInput: z.ZodType<PurchaseBillClosureInputType>;
-```
-
-### `PurchaseBillClosureInputType`
-
-Input for marking a $0 bill paid, or undoing that. `version` is the bill's.
-The refusals are `closeRefusal` and `purchaseBillReopenRefusal`.
-
-```ts
-interface PurchaseBillClosureInputType {
-  version: number;
 }
 ```
 
@@ -30753,7 +30774,7 @@ interface PurchaseCredit {
   query_by_sources: string[];
   supplier: UidNameRefType;
   origin: PurchaseDocumentOriginType;
-  reason: PurchaseCreditReasonType;
+  reason: SettlementReasonType;
   status: PurchaseCreditStatusType;
   xero_id: string | null;
   date: string;
@@ -30815,18 +30836,10 @@ interface PurchaseCreditItemInputType {
 
 ### `PurchaseCreditReasonEnum`
 
-Zod schema for PurchaseCreditReasonType.
+Zod schema for a supplier credit's reason: one of {@link PURCHASE_CREDIT_REASONS}.
 
 ```ts
-const PurchaseCreditReasonEnum: z.ZodType<PurchaseCreditReasonType>;
-```
-
-### `PurchaseCreditReasonType`
-
-One {@link PURCHASE_CREDIT_REASONS} member.
-
-```ts
-type PurchaseCreditReasonType = indexedAccess;
+const PurchaseCreditReasonEnum: z.ZodType<SettlementReasonType>;
 ```
 
 ### `PurchaseCreditSchema`
@@ -31112,26 +31125,6 @@ Zod schema for PurchaseDocumentServiceItem.
 
 ```ts
 const PurchaseDocumentServiceItemSchema: z.ZodType<PurchaseDocumentServiceItem>;
-```
-
-### `ReversePurchaseCreditAllocationInput`
-
-Zod schema for ReversePurchaseCreditAllocationInputType.
-
-```ts
-const ReversePurchaseCreditAllocationInput: z.ZodType<ReversePurchaseCreditAllocationInputType>;
-```
-
-### `ReversePurchaseCreditAllocationInputType`
-
-Input for reversing an allocation CFS has not yet pushed to Xero. `version` is
-the CREDIT's, as an allocation's is. `uuid_session` keys the reversal.
-
-```ts
-interface ReversePurchaseCreditAllocationInputType {
-  uuid_session: string;
-  version: number;
-}
 ```
 
 ### `UpdatePurchaseBillInput`
@@ -31652,7 +31645,8 @@ const COA_BAD_DEBT: 6900;
 
 ### `CREDIT_NOTE_REASONS`
 
-Why this credit was issued — the `credit` arm of {@link SETTLEMENT_CONTRACTS},
+Why this credit was issued — the receivable `credit` arm of
+`SIDE_CONTRACTS.receivable.settlement_reasons` (`schemas/side.ts`, ruling 130),
 **derived rather than re-listed**, so the document and the settlements it
 spawns can never offer different reasons.
 
@@ -32045,9 +32039,9 @@ const SessionSchema: z.ZodType<Session>;
 
 Settlement document schema — Firestore collection: `settlements`
 
-One settlement event against an invoice — or, for a `refund`, against a credit
-note (api-cloudrun#1207; the contract's `settles` axis) — or, on the PAYABLE
-side, against a supplier bill or supplier credit (api-cloudrun#1210).
+One settlement event against a billing document — an invoice or a supplier
+bill — or, for a `refund`, against a credit document (api-cloudrun#1207,
+#1210; the contract's `settles` axis names the role).
 **The money-side twin of the `transactions` movement journal**: append-only, dated, reversible, and
 type-blind by design — a cash payment and a credit-note allocation differ
 only in `type` and `reason`.
@@ -32063,78 +32057,104 @@ carrying `reverses`. There is deliberately no `status` field, for the same
 reason `Movement` has none: a status flag *and* a reverser link is two sources
 of truth. The one permitted mutation in the whole design is
 `linkSettlementToXero` (api-cloudrun `api-cloudrun/src/lib/settlements.ts`) writing
-`xero_payment_id` null → value once — late-binding external linkage is not
+`xero_id` null → value once — late-binding external linkage is not
 part of the money fact.
 
 ## One journal, two sides, no stored side
 
-A receivable row names `uid_organization` and an `uid_invoice` or
-`uid_credit_note`; a payable row names `uid_supplier` and a `uid_purchase_bill`
-or `uid_purchase_credit`. Every target key is `null` on the other side, and the
-refine ties each to the type's `settles`, so **every existing equality query
-(`uid_invoice` / `uid_organization` / `uid_credit_note`) is blind to payable rows
-by construction**, and {@link isInvoiceSettlement} excludes them for free. Only
-a reader that SCANS the collection holds both sides, and it must narrow with
-{@link isReceivableSettlement} / {@link isPayableSettlement}. There is no
-`side` field: it would be a second source of truth for the key that is present.
+A row names its targets by ROLE (one-document-model ruling 131): `billing`,
+an invoice or a supplier bill, and `credit`, a customer credit note or a
+supplier credit — each a `{ collection, uid }` ref, the narrowed `DocSource`
+twin `bookings-inbound.source` uses. **The side is the ref's collection**, read
+through `SIDE_OF_COLLECTION` (`schemas/side.ts`), and never stored: a `side`
+field would be a second source of truth for it. The party is
+`uid_counterparty`: the customer on a receivable row, the supplier on a
+payable one.
 
-The invoice's `totals.{amount_paid, amount_credited, amount_due}` are a
+A target query (`billing.uid ==`, `credit.uid ==`) is one-sided by
+construction, since an invoice and a bill never share an auto-id. Only a
+reader that SCANS the collection holds both sides, and it narrows with
+{@link settlementSide} / {@link isSideSettlement}.
+
+A billing document's `totals.{amount_paid, amount_credited, amount_due}` are a
 **co-written projection** of this log, produced only by
 `recomputeSettlementTotals` and rebuildable from it. That is CFS v2's shape —
 an event log plus a client-ready projection for snapshot listeners — arriving
 early in one domain, and it is `transactions` + `stock` for money.
 
-### `InvoiceSettlement`
+### `BillingSettlement`
 
-A settlement that settles an INVOICE — every receivable type but `refund` and
-`refund_reversal` (api-cloudrun#1207). The refine makes `uid_invoice !== null`
-and `SETTLEMENT_CONTRACTS[type].settles === "invoice"` the same fact, so this
-is the type a reader holds once it has filtered.
+A settlement that settles a BILLING document of side `S` — every type but the
+`refund` pair. What a fold over one invoice's or one bill's rows holds.
 
 ```ts
-type InvoiceSettlement = ReceivableSettlement & typeLiteral;
+type BillingSettlement = SideSettlement<S> & typeLiteral;
 ```
 
-### `PayableSettlement`
+### `CreateSettlementInput`
 
-A PAYABLE settlement — one that settles a supplier bill or supplier credit
-(api-cloudrun#1210), and so names its supplier.
+Zod schema for {@link CreateSettlementInputType}.
 
 ```ts
-type PayableSettlement = Settlement & typeLiteral;
+const CreateSettlementInput: z.ZodType<CreateSettlementInputType>;
 ```
 
-### `PurchaseBillSettlement`
+### `CreateSettlementInputType`
 
-A payable settlement that settles a supplier BILL — every payable type but the `supplier_refund` pair.
+**`POST /settlements`, both sides** (ruling 132): one route records a payment,
+a closure, a cash refund or a credit allocation against a document of either
+side, the side read off the ref's collection. It replaced
+`POST /credit-notes/{uid}/allocations`, `POST /purchase-bills/{uid}/close` and
+`/reopen`, and `POST /purchase-credits/{uid}/allocations`.
+
+- **`uuid_session` keys every write** (ruling 137): a replay of the same
+  session returns the row it wrote; a second press under a new session is a
+  new attempt the action catalog refuses.
+- **`version` is the TARGET's**: the billing document's for a payment or a
+  closure, the credit's for a refund or an allocation.
+- **`reason` is legal per side** (`settlementReasonLegal`), checked here so a
+  wrong one is a 400. An allocation carries no reason: it takes its credit's.
 
 ```ts
-type PurchaseBillSettlement = PayableSettlement & typeLiteral;
+type CreateSettlementInputType = typeLiteral | typeLiteral | typeLiteral | typeLiteral;
 ```
 
-### `ReceivableSettlement`
+### `ReverseSettlementInput`
 
-A RECEIVABLE settlement — one that settles an invoice or a customer credit
-note, and so names its customer. The refine makes `uid_organization !== null`
-and `SETTLEMENT_TARGET_SIDE[settles] === "receivable"` the same fact.
+Zod schema for {@link ReverseSettlementInputType}.
 
 ```ts
-type ReceivableSettlement = Settlement & typeLiteral;
+const ReverseSettlementInput: z.ZodType<ReverseSettlementInputType>;
+```
+
+### `ReverseSettlementInputType`
+
+**`POST /settlements/{uid}/reverse`, both sides.** `version` is the version of
+the document the reversed row settles (the billing document, or the credit for
+a refund); `uuid_session` keys the reversal (ruling 137). It replaced
+`POST /purchase-credits/{uid}/allocations/{settlement}/reverse` and
+`POST /purchase-bills/{uid}/reopen` (reopening is reversing the closure row).
+
+```ts
+interface ReverseSettlementInputType {
+  reason: SettlementReasonType;
+  date?: string;
+  uuid_session: string;
+  version: number;
+}
 ```
 
 ### `Settlement`
 
-One settlement event against an invoice, a customer credit note, a supplier
-bill or a supplier credit — the contract's `settles` says which.
+One settlement event against a billing document or a credit document — the
+contract's `settles` says which role, the ref's collection which side.
 
 ```ts
 interface Settlement {
   uid: string;
-  uid_invoice: string | null;
-  uid_organization: string | null;
-  uid_purchase_bill: string | null;
-  uid_purchase_credit: string | null;
-  uid_supplier: string | null;
+  billing: SettlementBillingRef | null;
+  credit: SettlementCreditRef | null;
+  uid_counterparty: string;
   type: SettlementTypeType;
   reason: SettlementReasonType;
   amount_cents: number;
@@ -32143,10 +32163,7 @@ interface Settlement {
   reference: string | null;
   uuid_session: string;
   reverses: string | null;
-  uid_credit_note: string | null;
-  number_credit_note: string | null;
-  xero_payment_id: string | null;
-  xero_credit_note_id: string | null;
+  xero_id: string | null;
   synced_at: FirestoreTimestampType | null;
   legacy_payment_uid: string | null;
   version: number;
@@ -32157,6 +32174,88 @@ interface Settlement {
 }
 ```
 
+### `SettlementAllocationInputType`
+
+One allocation of a credit, to one billing document of its side.
+
+```ts
+interface SettlementAllocationInputType {
+  billing: SettlementBillingRef;
+  amount_cents: number;
+}
+```
+
+### `SettlementBillingRef`
+
+The billing document a row settles: an invoice or a supplier bill. The
+narrowed `DocSource` twin (`bookings-inbound.source`), so it is assignable
+wherever a `DocSourceType` is read.
+
+```ts
+interface SettlementBillingRef {
+  collection: BillingCollection<S>;
+  uid: string;
+}
+```
+
+### `SettlementBillingRefInput`
+
+A billing document named by an input: the stored ref's STRIPPING twin
+(`.strip()` keeps the node's checks), so a client echoing a stored ref with
+extra keys is not refused (`tests/input-strictness.test.ts`).
+
+```ts
+const SettlementBillingRefInput: z.ZodType<SettlementBillingRef>;
+```
+
+### `SettlementBillingRefSchema`
+
+Zod schema for {@link SettlementBillingRef}.
+
+```ts
+const SettlementBillingRefSchema: z.ZodType<SettlementBillingRef>;
+```
+
+### `SettlementCreditRef`
+
+The credit document a row draws on (an allocation) or settles (a refund): a
+customer credit note or a supplier credit.
+
+```ts
+interface SettlementCreditRef {
+  collection: CreditCollection<S>;
+  uid: string;
+  label: string | null;
+}
+```
+
+### `SettlementCreditRefInput`
+
+Zod schema for {@link SettlementCreditRefInputType}.
+
+```ts
+const SettlementCreditRefInput: z.ZodType<SettlementCreditRefInputType>;
+```
+
+### `SettlementCreditRefInputType`
+
+A credit document named by an input: no `label`, which the writer reads off the credit.
+
+```ts
+interface SettlementCreditRefInputType {
+  collection: CreditCollection;
+  uid: string;
+}
+```
+
+### `SettlementCreditRefSchema`
+
+Zod schema for {@link SettlementCreditRef}.
+
+```ts
+const SettlementCreditRefSchema: z.ZodType<SettlementCreditRef>;
+```
+
 ### `SettlementSchema`
 
 Zod schema for a Settlement.
@@ -32165,27 +32264,37 @@ Zod schema for a Settlement.
 const SettlementSchema: z.ZodType<Settlement>;
 ```
 
-### `isInvoiceSettlement(s: Settlement): s is InvoiceSettlement`
+### `SideSettlement`
 
-Narrow a settlement to {@link InvoiceSettlement}. A reader that queried by
-`uid_invoice` already holds only these; a reader that scans the collection,
-or reads by `uid_credit_note`, holds refunds too and MUST filter — a refund
-folded into an invoice is money from nowhere. A payable row has a `null`
-`uid_invoice`, so this excludes the whole payable side as well.
+A settlement of side `S`: its refs name only that side's collections. A
+reader holding a document of one side reads rows by its ref and holds these;
+a collection scan narrows with {@link isSideSettlement}.
 
-### `isPayableSettlement(s: Settlement): s is PayableSettlement`
+```ts
+type SideSettlement = Omit<Settlement, "billing" | "credit"> & typeLiteral;
+```
 
-Narrow a settlement to {@link PayableSettlement}.
+### `isBillingSettlement(side: S, s: Settlement): s is `
 
-### `isPurchaseBillSettlement(s: Settlement): s is PurchaseBillSettlement`
+Narrow a settlement to one that settles a billing document of side `side`.
+A reader that queried by `billing.uid` already holds only these; one that read
+by `credit.uid` holds refunds too and must filter — a refund folded into a
+billing document is money from nowhere.
 
-Narrow a settlement to {@link PurchaseBillSettlement}.
+### `isSideSettlement(side: S, s: Settlement): s is `
 
-### `isReceivableSettlement(s: Settlement): s is ReceivableSettlement`
+Narrow a settlement to side `side` — what a collection scan holding both sides does first.
 
-Narrow a settlement to {@link ReceivableSettlement}. A reader that scans the
-collection (an audit, a per-customer statement built from a full read) holds
-payable rows too and MUST filter before treating `uid_organization` as set.
+### `settlementReasonLegal(side: Side, type: SettlementTypeType, reason: SettlementReasonType): boolean`
+
+Is `reason` legal on a `type` row of `side`? One entry answers legality and label (ruling 130).
+
+### `settlementSide(s: typeLiteral): Side`
+
+**The side of a settlement row**, read off its target ref's collection
+(ruling 131). Every row names at least one ref (the contract requires it), so
+this is total over parsed rows; it throws on a row that names none, which
+only an unparsed one can.
 
 ## `@cfs/core/schemas/stock`
 
@@ -37936,7 +38045,7 @@ Quota-gate arms (added 2026-07 with the daily-budget gate):
   a dropped write needing a human.
 
 ```ts
-const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_invoice_push_skipped" | "xero_invoice_twin_adopted" | "xero_invoice_twin_refused" | "xero_stock_adjustment_bill" | "xero_bill_pushed" | "xero_bill_push_skipped" | "xero_bill_twin_adopted" | "xero_bill_validation_rejected" | "xero_bill_terminal" | "xero_bill_enqueue_failed" | "purchase_bill_pushed" | "purchase_bill_push_skipped" | "purchase_bill_twin_adopted" | "purchase_bill_push_rejected" | "purchase_bill_enqueue_failed" | "purchase_bill_linked_sync_skipped" | "purchase_bill_void_release_clamped" | "purchase_credit_pushed" | "purchase_credit_push_skipped" | "purchase_credit_twin_adopted" | "purchase_credit_push_rejected" | "purchase_credit_enqueue_failed" | "purchase_credit_allocation_pushed" | "purchase_credit_allocation_failed" | "xero_settlement_synced" | "xero_settlement_reaped" | "xero_settlement_resurrected" | "xero_manual_intervention_required" | "credit_note_counter_raised" | "xero_credit_note_refunds_synced" | "xero_payment_already_synced" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_locked" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_superseded" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_validation_rejected" | "xero_quota_exhausted" | "xero_rate_limit" | "xero_write_deferred" | "xero_defer_escalated" | "xero_tracking_option_create_failed" | "xero_tax_rate_create_failed" | "xero_tracking_option_unresolved" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice" | "xero_untracked_accpay" | "xero_bill_sweep_completed"[];
+const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_invoice_push_skipped" | "xero_invoice_twin_adopted" | "xero_invoice_twin_refused" | "xero_stock_adjustment_bill" | "xero_bill_pushed" | "xero_bill_push_skipped" | "xero_bill_twin_adopted" | "xero_bill_validation_rejected" | "xero_bill_terminal" | "xero_bill_enqueue_failed" | "purchase_bill_pushed" | "purchase_bill_push_skipped" | "purchase_bill_twin_adopted" | "purchase_bill_push_rejected" | "purchase_bill_enqueue_failed" | "purchase_bill_linked_sync_skipped" | "purchase_bill_void_release_clamped" | "purchase_credit_pushed" | "purchase_credit_push_skipped" | "purchase_credit_twin_adopted" | "purchase_credit_push_rejected" | "purchase_credit_enqueue_failed" | "purchase_credit_allocation_pushed" | "xero_settlement_synced" | "xero_settlement_reaped" | "xero_settlement_resurrected" | "xero_manual_intervention_required" | "credit_note_counter_raised" | "xero_credit_note_refunds_synced" | "xero_payment_already_synced" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_locked" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_superseded" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_validation_rejected" | "xero_quota_exhausted" | "xero_rate_limit" | "xero_write_deferred" | "xero_defer_escalated" | "xero_tracking_option_create_failed" | "xero_tax_rate_create_failed" | "xero_tracking_option_unresolved" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice" | "xero_untracked_accpay" | "xero_bill_sweep_completed"[];
 ```
 
 ### `XeroEventLogRecord`
@@ -43112,7 +43221,6 @@ interface ActionSide {
   closeWaitsForReturn: boolean;
   authorship(doc: object): BillingAuthorship;
   takesCredit(doc: object): boolean;
-  reversible(contract: SettlementContract): boolean;
   counterparty(doc: object): string | null;
 }
 ```
@@ -43391,7 +43499,7 @@ interface OfferRow {
 A settlement row as `reverse_settlement` reads it.
 
 ```ts
-type OfferSettlement = Pick<Settlement, "uid" | "type" | "reverses" | "xero_payment_id">;
+type OfferSettlement = Pick<Settlement, "uid" | "type" | "reverses" | "xero_id">;
 ```
 
 ### `RemainingBilling`
@@ -44193,6 +44301,37 @@ interface ScopedSyncSide {
 }
 ```
 
+### `SettlementFoldRow`
+
+A settlement row as the folds read it: what moved, and the refs that say
+which document of which side it names. The refs are what an unprefixed type
+no longer carries (ruling 44), so a synthetic row states them too.
+
+```ts
+interface SettlementFoldRow {
+  type: SettlementTypeType;
+  reason: SettlementReasonType;
+  amount_cents: number;
+  billing: typeLiteral | null;
+  credit: typeLiteral | null;
+}
+```
+
+### `SettlementTotals`
+
+What {@link recomputeSettlementTotals} returns.
+
+```ts
+interface SettlementTotals {
+  amount_paid_cents: number;
+  amount_credited_cents: number;
+  amount_void_cents: number;
+  amount_due_cents: number;
+  closure_count: number;
+  breakdown: Partial<Record<SettlementReasonType, number>>;
+}
+```
+
 ### `StructuralItem`
 
 The item surface the structural/path helpers read: identity, type, and path.
@@ -44669,26 +44808,23 @@ same reason as {@link computeInvoiceItemPaths}: handing these items the
 order hierarchy would treat every `purchase` divider as a line and drop it
 out of every path. Pure; generic in `T`.
 
-### `creditRemainingFromJournal(side: Side, totalCents: number, settlements: readonly typeLiteral[]): number`
+### `creditRemainingFromJournal(side: Side, totalCents: number, settlements: readonly Pick<SettlementFoldRow, "type" | "amount_cents" | "credit">[]): number`
 
 **A credit document's unconsumed credit, folded from the journal** — for a
 customer credit note and a supplier credit alike: `total − Σ signed draws`
-over every row of that side with `SettlementContract.draws_credit`
-(`credit`, `refund`, `bill_credit`, `supplier_refund` and their reversals).
+over every row with `SettlementContract.draws_credit` (`credit`, `refund` and
+their reversals) whose `credit` ref is on `side`.
 
 This is what `remaining_credit_cents` is a projection of. It could not be on
-the receivable side until refunds were rows: a cash refund consumed a note
-without appending anything, so CN-1013 and CN-1016 sat `applied` with zero
-rows naming them and a fold handed both their full credit back
-(api-cloudrun#469).
+the receivable side until refunds were rows (api-cloudrun#469).
 
 **A voided document folds to whatever its rows say, which is `total`** — it
 voids only with no live allocation and no live refund, so its draws net to 0.
-Voiding strands the balance rather than consuming it.
 
 Rows that do not draw this side's credit are skipped, not refused: a caller
-reading by the document's key sees only drawing rows anyway, and skipping lets
-a caller pass a mixed list. **Negative results are preserved, never clamped**.
+reading by the document's `credit.uid` sees only drawing rows anyway, and
+skipping lets a caller pass a mixed list. **Negative results are preserved,
+never clamped**.
 
 **Parameters**
 
@@ -45291,26 +45427,7 @@ billed" reader. Declared here rather than in `utils/purchase-documents.ts`
 fold (`billedByPath`, `utils/quantityAccounting.ts`) reads both, and
 `utils/purchase-documents.ts` (which re-exports it) imports that module.
 
-### `recomputePurchaseBillTotals(totalCents: number, settlements: readonly typeLiteral[]): typeLiteral`
-
-A supplier bill's settlement projection (api-cloudrun#1210) — the payable twin
-of {@link recomputeSettlementTotals}, and the same fold: a straight signed sum
-over every row, three cents buckets dispatched on `sums_into`, negatives
-preserved. `PurchaseBill.totals` uses the invoice's storage keys exactly, which
-is what lets one fold serve both.
-
-⚠️ **Refuses any row that does not settle a `purchase_bill`** — a receivable
-row, or a `supplier_refund` — rather than skipping it, for the reason the
-invoice fold refuses a refund: such a row reaching here means the caller read
-settlements by something other than `uid_purchase_bill`. `bill_closure` feeds
-`closure_count`, exactly as an invoice's `closure` does.
-
-**Parameters**
-
-- `totalCents` — The bill's `totals.total_cents`
-- `settlements` — Every settlement naming the bill, reversals included
-
-### `recomputeSettlementTotals(totalCents: number, settlements: readonly typeLiteral[]): typeLiteral`
+### `recomputeSettlementTotals(side: Side, totalCents: number, settlements: readonly SettlementFoldRow[]): SettlementTotals`
 
 Turn the settlements journal into the invoice's stored totals.
 
@@ -45354,18 +45471,28 @@ voided invoice as fully credited. A `switch` with a `default` that throws
 turns the next bucket into a loud failure at the one site that must know
 about it, instead of a quiet mis-route at every site that reads the result.
 
-**Parameters**
+**One fold for both sides** (ruling 44): `side` names whose billing document
+is being folded, and a row naming the other side's document — or no billing
+document at all (a `refund`, which settles its credit) — is REFUSED rather
+than skipped. One reaching here means a caller read settlements by something
+other than the document's `billing.uid`, and skipping would hide that. An
+invoice's and a bill's `totals` share these storage keys, which is what lets
+one fold serve both.
 
-- `totalCents` — Invoice total, in integer cents, from `items[]`
-- `settlements` — Every settlement against the invoice, reversals included
 **`closure_count` folds the MULTIPLIER, not the amount** (api-cloudrun#1169):
 a closure carries `amount_cents: 0`, so it is dispatched on
 `SettlementContract.counts_into` and reaches the cents switch only through its
 `null` arm.
 
+**Parameters**
+
+- `side` — The side of the billing document being folded
+- `totalCents` — The document total, in integer cents, from `items[]`
+- `settlements` — Every settlement against the document, reversals included
+
 **Returns** — The four projected totals, the closure count, and a per-reason cents breakdown
 
-### `rederiveInvoiceTotalsForAudit(items: InvoiceItem[], taxes: Tax[], settlements: readonly typeLiteral[]): InvoiceTotals`
+### `rederiveInvoiceTotalsForAudit(items: InvoiceItem[], taxes: Tax[], settlements: readonly SettlementFoldRow[]): InvoiceTotals`
 
 **The invoice AUDIT oracle**: totals RE-DERIVED from line inputs, plus the
 settlement projection. It is what api-cloudrun's #575 totals-drift sweep
@@ -54409,25 +54536,6 @@ exact as well, since the target at a count does not depend on the path.
 An empty `landed_costs` reduces this to the goods' share, the pre-#1227
 formula.
 
-### `recomputePurchaseBillTotals(totalCents: number, settlements: readonly typeLiteral[]): typeLiteral`
-
-A supplier bill's settlement projection (api-cloudrun#1210) — the payable twin
-of {@link recomputeSettlementTotals}, and the same fold: a straight signed sum
-over every row, three cents buckets dispatched on `sums_into`, negatives
-preserved. `PurchaseBill.totals` uses the invoice's storage keys exactly, which
-is what lets one fold serve both.
-
-⚠️ **Refuses any row that does not settle a `purchase_bill`** — a receivable
-row, or a `supplier_refund` — rather than skipping it, for the reason the
-invoice fold refuses a refund: such a row reaching here means the caller read
-settlements by something other than `uid_purchase_bill`. `bill_closure` feeds
-`closure_count`, exactly as an invoice's `closure` does.
-
-**Parameters**
-
-- `totalCents` — The bill's `totals.total_cents`
-- `settlements` — Every settlement naming the bill, reversals included
-
 ### `remainingToBill(item: typeLiteral, billedUnits: number): number`
 
 **Units of a line still to bill** (ruling 42's one remaining-to-bill engine):
@@ -59319,15 +59427,17 @@ only loses the push (`pushRefusal`).
 Walk `doc` against `schema`, keeping every leaf tagged {@link XERO_META_KEY}.
 Fails closed: a node it cannot interpret lands in `unhandled`.
 
-### `invoiceSettlementsHeldByXero(settlements: readonly T[]): T[]`
+### `settlementsHeldByXero(side: Side, settlements: readonly T[]): T[]`
 
-The live invoice-settling rows that **Xero holds** — a payment or credit
-allocation Xero has an id for (`SETTLEMENT_CONTRACTS[type].xero_id_field` set
-on the row). Xero refuses an edit to an invoice carrying one, so the edit push
-stops at a manual seam when this is non-empty.
+The live rows settling a `side` billing document that **Xero holds** — a
+payment or credit allocation carrying its Xero id (`xero_id` set, on a type
+whose contract names a `xero_object`). Xero refuses an edit to an invoice
+carrying one, so the edit push stops at a manual seam when this is non-empty.
 
-⚠️ **Receivable-only and unkeyed** (`settles === "invoice"`), until ruling 44's
-one settlement model: the bill push reads Xero's own status instead.
+⚠️ **Takes the side** (ruling 44): with unprefixed types a payable `payment`
+is a `payment`, so a reader that did not name the side would match a bill's
+rows silently. A row of the other side, or one naming no billing document (a
+refund), is skipped — the caller read by `billing.uid`, so it holds none.
 
 ⚠️ **Not CFS's `status` or `amount_paid_cents`.** A payment an operator records
 in CFS has no Xero id until Xero reports it, and Xero accepts an edit until

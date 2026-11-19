@@ -64,8 +64,10 @@ const S = (
   o: Partial<{ type: SettlementTypeType; reason: SettlementReasonType; amount_cents: number }> = {},
 ) => ({
   type: "payment" as SettlementTypeType,
-  reason: "payment_received" as SettlementReasonType,
+  reason: "paid" as SettlementReasonType,
   amount_cents: 0,
+  billing: { collection: "invoices" },
+  credit: null,
   ...o,
 });
 
@@ -1135,7 +1137,7 @@ Deno.test("deriveInvoiceStatus returns issued when nothing paid", () => {
 // of each is visible.
 
 Deno.test("recomputeSettlementTotals nets a reversal pair to zero", () => {
-  const result = recomputeSettlementTotals(100_000, [
+  const result = recomputeSettlementTotals("receivable", 100_000, [
     S({ amount_cents: 400_00 }),
     S({ amount_cents: 100_00 }),
     S({ type: "payment_reversal", reason: "source_retracted", amount_cents: 100_00 }),
@@ -1146,14 +1148,14 @@ Deno.test("recomputeSettlementTotals nets a reversal pair to zero", () => {
 });
 
 Deno.test("recomputeSettlementTotals with no settlements", () => {
-  const result = recomputeSettlementTotals(50_000, []);
+  const result = recomputeSettlementTotals("receivable", 50_000, []);
   assertEquals(result.amount_paid_cents, 0);
   assertEquals(result.amount_credited_cents, 0);
   assertEquals(result.amount_due_cents, 50000);
 });
 
 Deno.test("recomputeSettlementTotals with zero total goes negative, not clamped", () => {
-  const result = recomputeSettlementTotals(0, [S({ amount_cents: 50_00 })]);
+  const result = recomputeSettlementTotals("receivable", 0, [S({ amount_cents: 50_00 })]);
   assertEquals(result.amount_paid_cents, 5000);
   assertEquals(result.amount_due_cents, -5000);
 });

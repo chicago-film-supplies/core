@@ -31,7 +31,6 @@ import { apportionCents } from "./money.ts";
 import { lineMoneyAtCents, payableStoredMoney, sliceStoredMoney, statedLine } from "../schemas/_line-money.ts";
 import { componentQuantities, type ComponentRowForWalk } from "./order-lines.ts";
 import { productCountsStock } from "./products.ts";
-import { recomputePurchaseBillTotals } from "./invoices.ts";
 import {
   custodyBySourceItem,
   derivePurchaseStatus,
@@ -40,11 +39,11 @@ import {
   type PurchaseLineCustody,
 } from "./bookings-inbound.ts";
 
-// The payable settlement folds live beside their receivable twins in
-// `utils/invoices.ts`, which owns the one fold, and the custody-only status
-// beside its order twin in `utils/bookings-inbound.ts`; re-exported here so a
-// purchase writer finds them in its own namespace.
-export { derivePurchaseStatus, recomputePurchaseBillTotals };
+// The custody-only status lives beside its order twin in
+// `utils/bookings-inbound.ts`; re-exported here so a purchase writer finds it in
+// its own namespace. The settlement fold is one function for both sides,
+// `recomputeSettlementTotals("payable", …)` in `utils/invoices.ts` (ruling 44).
+export { derivePurchaseStatus };
 // A line's received and returned counts are custody now (C8), folded beside the inbound ladder.
 export { custodyBySourceItem, lineCustodyAt, NO_LINE_CUSTODY, type PurchaseLineCustody };
 // The mirror authors and the per-arm rules live beside the refine that checks them.

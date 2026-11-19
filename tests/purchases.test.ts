@@ -44,7 +44,7 @@ import {
 } from "../src/schemas/mod.ts";
 import { buildFirestoreColumns } from "../src/schemas/display-columns.ts";
 import { classifySharedFields } from "../src/utils/shared-fields.ts";
-import { deriveInvoiceStatus, invoiceFieldIsFrozen, invoiceIsFrozen, recomputePurchaseBillTotals } from "../src/utils/invoices.ts";
+import { deriveInvoiceStatus, invoiceFieldIsFrozen, invoiceIsFrozen, recomputeSettlementTotals } from "../src/utils/invoices.ts";
 import { XERO_ASSET_ACCOUNTS } from "../src/utils/movements.ts";
 import {
   allocateLandedCostCents,
@@ -1295,9 +1295,10 @@ function credit(over: Record<string, unknown> = {}) {
 }
 
 Deno.test("a $0 bill closes and reopens as a count", () => {
-  const close = { type: "bill_closure" as const, reason: "zero_total" as const, amount_cents: 0 };
-  const reopen = { type: "bill_closure_reversal" as const, reason: "source_retracted" as const, amount_cents: 0 };
-  const count = (rows: (typeof close | typeof reopen)[]) => recomputePurchaseBillTotals(0, rows).closure_count;
+  const billing = { collection: "purchase-bills" };
+  const close = { type: "closure" as const, reason: "zero_total" as const, amount_cents: 0, billing, credit: null };
+  const reopen = { type: "closure_reversal" as const, reason: "source_retracted" as const, amount_cents: 0, billing, credit: null };
+  const count = (rows: (typeof close | typeof reopen)[]) => recomputeSettlementTotals("payable", 0, rows).closure_count;
   assertEquals([count([close]), count([close, reopen]), count([close, reopen, close])], [1, 0, 1]);
   const zero = (closure_count: number, status: "issued" | "paid") =>
     bill({

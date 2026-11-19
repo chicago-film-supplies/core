@@ -31,7 +31,8 @@
  * @module
  */
 import { z } from "zod";
-import { FirestoreId, ItemUid, ThreadId } from "./_uid.ts";
+import { SIDE_CONTRACTS } from "./side.ts";
+import { FirestoreId, ItemUid, ThreadId, XeroId } from "./_uid.ts";
 import { chicagoStartOfDay } from "./_datetime.ts";
 import {
   ActorRef,
@@ -50,7 +51,6 @@ import {
   type ExchangedForEntryType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
-  SETTLEMENT_CONTRACTS,
   type SettlementReasonType,
   type SubstitutedForEntryType,
   SubstitutedForList,
@@ -177,7 +177,8 @@ export const CREDIT_NOTE_STATUS_CONTRACTS: Readonly<
 };
 
 /**
- * Why this credit was issued — the `credit` arm of {@link SETTLEMENT_CONTRACTS},
+ * Why this credit was issued — the receivable `credit` arm of
+ * `SIDE_CONTRACTS.receivable.settlement_reasons` (`schemas/side.ts`, ruling 130),
  * **derived rather than re-listed**, so the document and the settlements it
  * spawns can never offer different reasons.
  *
@@ -185,8 +186,9 @@ export const CREDIT_NOTE_STATUS_CONTRACTS: Readonly<
  * one credit note allocated across three invoices has one reason, and authoring
  * it three times invites three answers.
  */
-export const CREDIT_NOTE_REASONS: readonly SettlementReasonType[] =
-  SETTLEMENT_CONTRACTS.credit.reasons;
+export const CREDIT_NOTE_REASONS: readonly SettlementReasonType[] = Object.keys(
+  SIDE_CONTRACTS.receivable.settlement_reasons.credit,
+) as SettlementReasonType[];
 
 // ── Item price ───────────────────────────────────────────────────
 
@@ -405,7 +407,7 @@ const CreditNoteDocLineItemInner = z.strictObject({
   ledger_account: COACode,
   source_ledger_account: COARevenueEnum.nullable(),
   uid_tracking_category: FirestoreId.nullable(),
-  xero_id: z.uuid().nullable(),
+  xero_id: XeroId.nullable(),
   // The payable pair's spelling (`purchase-bill.ts`), paired-presence refined below.
   // `seed: false`: `[]` fails `.min(1)`, so the form seed must omit the key.
   uid_billing: FirestoreId.optional().meta({ seed: false }),
@@ -795,7 +797,7 @@ export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
   // writes a literal `sources: []`).
   sources: z.array(DocSource),
   query_by_sources: z.array(z.string()),
-  xero_id: z.uuid().nullable(),
+  xero_id: XeroId.nullable(),
   uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),

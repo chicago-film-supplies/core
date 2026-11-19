@@ -172,7 +172,7 @@ const row = (uid: string, type: SettlementTypeType, o: Partial<OfferSettlement> 
   uid,
   type,
   reverses: null,
-  xero_payment_id: null,
+  xero_id: null,
   ...o,
 });
 
@@ -297,7 +297,7 @@ Deno.test("D1 add_payment: accepts_payment and something due, capped at the amou
 Deno.test("D2 reverse_settlement: one offer per reversible row", () => {
   const rows = [
     row("pay", "payment"),
-    row("xpay", "payment", { xero_payment_id: "x-1" }),
+    row("xpay", "payment", { xero_id: "x-1" }),
     row("cred", "credit"),
     row("clo", "closure"),
     row("vd", "void"),

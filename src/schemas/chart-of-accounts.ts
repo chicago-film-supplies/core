@@ -28,7 +28,7 @@
  * `default_sorting_field`.
  */
 import { z } from "zod";
-import { FirestoreId } from "./_uid.ts";
+import { FirestoreId, XeroId } from "./_uid.ts";
 import { ActorRef, type ActorRefType, type FirestoreTimestampType, TimestampFields } from "./common.ts";
 
 /**
@@ -119,7 +119,7 @@ export const ChartOfAccountsSchema: z.ZodType<ChartOfAccounts> = z.strictObject(
   type: COAType.meta({ column: true, label: "Type" }),
   class: COAClass.meta({ column: true, label: "Class" }),
   status: COAStatus.meta({ column: true, label: "Status" }),
-  xero_id: z.uuid().nullable(),
+  xero_id: XeroId.nullable(),
   description: z.string().optional(),
   // `default_tax_profile` was removed here (api-cloudrun#435). It had one
   // writer (`scripts/reconcile-chart-of-accounts.ts`) and **zero readers**, was

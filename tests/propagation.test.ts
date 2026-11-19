@@ -490,3 +490,60 @@ Deno.test("every enforced_by ref into core/ resolves", async () => {
   assertEquals(broken, [], "core-targeting enforced_by refs that do not resolve:\n" + broken.join("\n"));
   assertEquals(ours.length > 10, true, `only ${ours.length} core-targeting refs found — expected >10 (20 at the time of writing); this guard has stopped asking its question`);
 });
+
+// ── Both sides (one-document-model rulings 44, 49) ───────────────────
+
+import { type Side, SIDE_OF_COLLECTION } from "../src/schemas/mod.ts";
+
+Deno.test("a rule's stated side agrees with the sided collections it names", () => {
+  const wrong = rules
+    .filter((r) => r.side !== undefined)
+    .filter((r) => {
+      const of = SIDE_OF_COLLECTION as Readonly<Record<string, Side | undefined>>;
+      return [r.source, r.target].some((c) => of[c] !== undefined && of[c] !== r.side);
+    })
+    .map((r) => r.id);
+  assertEquals(wrong, []);
+});
+
+Deno.test("every step of a transaction run on both sides states its side", () => {
+  const byId = new Map(rules.map((r) => [r.id, r]));
+  const missing: string[] = [];
+  let twoSided = 0;
+  for (const tx of transactions) {
+    const steps = tx.steps.map((id) => byId.get(id)!);
+    // Two-sided by what its steps STATE: endpoints alone over-report, since a
+    // one-sided run may READ the other side (`create-order` folds purchases
+    // into stock) without ever being run for it.
+    const sides = new Set(steps.map((r) => r.side).filter((s) => s !== undefined));
+    if (sides.size < 2) continue;
+    twoSided++;
+    for (const r of steps) if (r.side === undefined) missing.push(`${tx.id} → ${r.id}`);
+  }
+  assertEquals(missing, []);
+  // Non-vacuity: the settlement transactions collapsed in 6e-0b3 span both.
+  assertEquals(twoSided >= 7, true, `only ${twoSided} two-sided transactions`);
+});
+
+/**
+ * Ruling 49: rule ids collapse as the services do, so a transaction that still
+ * names the PAYABLE side in its id says why it has no receivable twin yet. A new
+ * one is a red test until it states a reason here; a collapsed one is a red test
+ * until its entry is deleted.
+ */
+const PAYABLE_TRANSACTION_REASONS: Readonly<Record<string, string>> = {
+  "create-purchase": "the purchase create is its own writer until the initiator writers merge (6e-0c)",
+  "update-purchase": "the purchase update is its own writer until the initiator writers merge (6e-0c)",
+  "close-purchase": "an order has no close route (ruling 113), so there is no receivable twin to collapse into",
+  "finalize-purchase": "the inbound-ladder finalize; the outbound `finalize-order` reads a different ladder (C11)",
+  "create-purchase-bill": "the bill create (push or link) is its own writer until the billing writers merge (6e-0d)",
+  "update-purchase-bill": "the bill edit is its own writer until the billing writers merge (6e-0d)",
+  "create-purchase-credit": "the supplier-credit create is its own writer until the credit writers merge (6e-0d)",
+  "void-purchase-credit": "the operator void of a supplier credit; collapses into `void-credit-note` with the credit writers (6e-0d)",
+  "void-purchase-credit-from-xero": "the receivable side has no from-Xero credit-note void transaction to collapse into",
+};
+
+Deno.test("every payable-named transaction states why it has no receivable twin (ruling 49)", () => {
+  const named = transactions.map((t) => t.id as string).filter((id) => /purchase/.test(id)).sort();
+  assertEquals(named, Object.keys(PAYABLE_TRANSACTION_REASONS).sort());
+});

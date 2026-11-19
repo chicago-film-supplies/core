@@ -379,8 +379,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // deleted — a dead string nothing could see, because this file names its
     // targets as text. `tests/template-helpers.test.ts` now asserts every
     // entry resolves to a real export, so a rename breaks the build instead.
-    "recomputeSettlementTotals", // settlement projection — a template reads STORED totals
-    "recomputePurchaseBillTotals", // its payable twin (api-cloudrun#1210), same reason
+    "recomputeSettlementTotals", // settlement projection, both sides — a template reads STORED totals
     "creditRemainingFromJournal", // supplier-credit projection — a template reads the stored balance
     // ⚠️ **EDITABILITY predicates, not document facts.** `invoiceIsFrozen`
     // answers *"may an operator still change this invoice's organization or its
@@ -622,7 +621,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "billingXeroProjectionHash",
     "billingXeroSyncStatus",
     "collectXeroProjection",
-    "invoiceSettlementsHeldByXero",
+    "settlementsHeldByXero",
     "shouldPushBillingToXero",
     "xeroProjection",
     "xeroProjectionHash",

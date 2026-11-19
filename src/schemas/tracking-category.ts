@@ -2,7 +2,7 @@
  * TrackingCategory document schema — Firestore collection: tracking-categories
  */
 import { z } from "zod";
-import { FirestoreId } from "./_uid.ts";
+import { FirestoreId, XeroId } from "./_uid.ts";
 import { ActorRef, type ActorRefType, type FirestoreTimestampType, TimestampFields, UidNameRef, type UidNameRefType } from "./common.ts";
 
 /** A tracking category document in Firestore. */
@@ -80,7 +80,7 @@ export const TrackingCategorySchema: z.ZodType<TrackingCategory> = z.strictObjec
   crms_service_group_id: z.int().optional(),
   crms_product_group_name: z.string(),
   products: z.record(z.string(), UidNameRef).meta({ label: "Products" }),
-  xero_tracking_option_id: z.uuid().nullable(),
+  xero_tracking_option_id: XeroId.nullable(),
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),

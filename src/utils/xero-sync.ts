@@ -52,6 +52,7 @@ import {
   OrderSchema,
   PurchaseBillSchema,
   SETTLEMENT_CONTRACTS,
+  SIDE_OF_COLLECTION,
 } from "../schemas/mod.ts";
 import type {
   Invoice,
@@ -383,25 +384,28 @@ export function xeroQuoteProjectionHash(
 // ── settlements Xero holds ───────────────────────────────────────────
 
 /**
- * The live invoice-settling rows that **Xero holds** — a payment or credit
- * allocation Xero has an id for (`SETTLEMENT_CONTRACTS[type].xero_id_field` set
- * on the row). Xero refuses an edit to an invoice carrying one, so the edit push
- * stops at a manual seam when this is non-empty.
+ * The live rows settling a `side` billing document that **Xero holds** — a
+ * payment or credit allocation carrying its Xero id (`xero_id` set, on a type
+ * whose contract names a `xero_object`). Xero refuses an edit to an invoice
+ * carrying one, so the edit push stops at a manual seam when this is non-empty.
  *
- * ⚠️ **Receivable-only and unkeyed** (`settles === "invoice"`), until ruling 44's
- * one settlement model: the bill push reads Xero's own status instead.
+ * ⚠️ **Takes the side** (ruling 44): with unprefixed types a payable `payment`
+ * is a `payment`, so a reader that did not name the side would match a bill's
+ * rows silently. A row of the other side, or one naming no billing document (a
+ * refund), is skipped — the caller read by `billing.uid`, so it holds none.
  *
  * ⚠️ **Not CFS's `status` or `amount_paid_cents`.** A payment an operator records
  * in CFS has no Xero id until Xero reports it, and Xero accepts an edit until
  * then. When CFS lags Xero, this reads empty and Xero's own ValidationException
  * is the seam. Reversed rows are skipped; reversers carry no Xero id by contract.
  */
-export function invoiceSettlementsHeldByXero<
-  T extends Pick<Settlement, "uid" | "type" | "reverses" | "xero_payment_id" | "xero_credit_note_id">,
->(settlements: readonly T[]): T[] {
+export function settlementsHeldByXero<
+  T extends Pick<Settlement, "uid" | "type" | "reverses" | "xero_id" | "billing">,
+>(side: Side, settlements: readonly T[]): T[] {
   return liveSettlements(settlements).filter((s) => {
     const contract = SETTLEMENT_CONTRACTS[s.type];
-    if (contract?.settles !== "invoice" || contract.xero_id_field === null) return false;
-    return s[contract.xero_id_field] != null;
+    if (contract?.settles !== "billing" || contract.xero_object === null) return false;
+    if (s.billing === null || SIDE_OF_COLLECTION[s.billing.collection] !== side) return false;
+    return s.xero_id !== null;
   });
 }

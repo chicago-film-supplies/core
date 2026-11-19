@@ -50,7 +50,7 @@
  * @module
  */
 import { z } from "zod";
-import { BookingId, FirestoreId, ItemUid, MovementId, OutOfServiceId, UnitId } from "./_uid.ts";
+import { BookingId, FirestoreId, ItemUid, MovementId, OutOfServiceId, UnitId, XeroId } from "./_uid.ts";
 import { SerialNumber, UnitNumber, UnitSet } from "./unit.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import { getNodeMeta } from "./zod-walk.ts";
@@ -2430,7 +2430,7 @@ const MovementObject = z.strictObject({
   query_by_unit_number: z.array(UnitNumber),
   // Optional, never required-nullable: 0 of 1,153 prod / 0 of 1,405 dev
   // movements carry the key (2026-08-30). See the interface docblock.
-  xero_id: z.uuid().nullable().optional().meta({ journal: "annotation" }),
+  xero_id: XeroId.nullable().optional().meta({ journal: "annotation" }),
   // Optional for the same reason as `xero_id` above: 1,159 prod / 1,414 dev
   // movements predate it (2026-08-30). ⚠️ The `.meta({ label })` is REQUIRED,
   // not decoration — `UidNameRef.name` is annotated `column: true` with no label

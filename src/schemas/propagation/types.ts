@@ -8,6 +8,7 @@
 
 import type { RuleId, TransactionId } from "./ids.ts";
 import type { CollectionName } from "../mod.ts";
+import type { Side } from "../side.ts";
 
 /**
  * Where a propagation edge starts or ends.
@@ -189,6 +190,20 @@ export interface CollectionRule {
   enforced_by?: EnforcementRef[];
   /** TransactionDefinition ID — groups co-writes and embeds into atomic operations */
   transaction?: TransactionId;
+  /**
+   * Which side's documents this rule writes, when its transaction runs on BOTH
+   * sides (one-document-model ruling 49: a payable settlement writer collapsed
+   * into its receivable twin, so one transaction id now names, say, the
+   * invoice's fold AND the bill's). A run touches one side, so the api counts
+   * `rules_expected` over the steps of the side it touched plus the side-free
+   * ones; without this every one-sided run would read as drift.
+   *
+   * Required on every step of a transaction whose steps span both sides, and
+   * when stated it must agree with the side of the collections the rule names
+   * (`SIDE_OF_COLLECTION`) — both asserted by `tests/propagation.test.ts`.
+   * Absent everywhere else: a one-sided transaction's count needs no filter.
+   */
+  side?: Side;
   /** What triggers this rule (for fan-out), e.g. "onUpdate:products" */
   trigger?: string;
   /** Field-level mappings — what data actually moves */

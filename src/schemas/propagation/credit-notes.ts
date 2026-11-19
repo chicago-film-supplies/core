@@ -20,7 +20,7 @@
  *
  * 1. **An allocation IS a settlement document.** There is no `allocations[]`
  *    mirror on the note, so the edge from note to invoice runs *through* the
- *    journal. `where("uid_credit_note","==",uid)` is an ordinary query.
+ *    journal. `where("credit.uid","==",uid)` is an ordinary query.
  * 2. **`remaining_credit_cents` is a projection, not a ledger.** It is co-written from
  *    the same settlements that move the invoices — and, for a cash refund, from a
  *    `refund` row that moves no invoice (api-cloudrun#1207) — so it is the signed
@@ -215,6 +215,7 @@ const updateCreditNoteOrderRules: CollectionRule[] = [
     source: "credit-notes",
     target: "orders",
     mode: "co-write",
+    side: "receivable",
     invariant:
       "Every order a credit note names (`orders:<uid>` in its `query_by_sources`, written by `deriveCreditNoteSources`) carries the note in `credit_notes[]` and `query_by_credit_notes`, and the entry's number and status CONVERGE on the note. CONVERGENT, not co-written: the order write is a compare-and-set AFTER the note's own commit, because two settlements on one order deadlocked inside one transaction (api-cloudrun#1293) and the order is the hot document. Every writer that moves the note's status converges unconditionally (gated on disagreement, never on the status having changed), and the `credit-notes` eventarc backstop repairs a write the writer missed or a script made raw. A void note STAYS in the mirror at `void`, as a void invoice stays in `invoices[]`.",
     enforced_by: [DOC_REF_MERGE, DOC_REF_AUDIT],
@@ -245,19 +246,20 @@ const allocateCreditNoteRules: CollectionRule[] = [
     source: "credit-notes",
     target: "settlements",
     mode: "co-write",
+    side: "receivable",
     invariant:
       "Applying a credit note to an invoice appends one `type: credit` settlement per invoice, carrying the note's reason denormalized — one note across three invoices has ONE reason, and authoring it three times invites three answers",
     enforced_by: [SETTLEMENT_TOTALS_FOLD],
     transaction: "allocate-credit-note",
     fields: [
-      { source: ["uid"], target: ["uid_credit_note"] },
-      { source: ["number"], target: ["number_credit_note"] },
+      { source: ["uid"], target: ["credit", "uid"] },
+      { source: ["number"], target: ["credit", "label"], transform: "the note's display number" },
       {
         source: ["reason"],
         target: ["reason"],
         transform: "denormalized from the note",
       },
-      { source: ["xero_id"], target: ["xero_credit_note_id"] },
+      { source: ["xero_id"], target: ["xero_id"], transform: "the note's CreditNoteID once Xero reports the allocation; null until then" },
       {
         source: [],
         target: ["date"],
@@ -277,6 +279,7 @@ const allocateCreditNoteRules: CollectionRule[] = [
     source: "settlements",
     target: "invoices",
     mode: "co-write",
+    side: "receivable",
     invariant:
       "Each credited invoice's totals are the signed fold over its settlements — `amount_credited` rises and `amount_due` falls by the allocated amount, while `total` is untouched because it derives from items[] and a credit changes what is OWED, not what was BILLED",
     enforced_by: [SETTLEMENT_TOTALS_FOLD],
@@ -286,13 +289,13 @@ const allocateCreditNoteRules: CollectionRule[] = [
         source: ["amount_cents"],
         target: ["totals", "amount_credited_cents"],
         transform:
-          "applied as a DELTA against the invoice read by CAS, never an absolute — two writers that each recomputed an absolute from their own read would clobber each other, and the invoice document is the transaction's only conflict point",
+          "the invoice's journal folded, in the allocation's commit, conditioned on the invoice's version",
       },
       {
         source: ["amount_cents"],
         target: ["totals", "amount_due_cents"],
         transform:
-          "recomputeSettlementTotals(total, rows) — total − paid − credited",
+          "recomputeSettlementTotals('receivable', total, rows) — total − paid − credited − void",
       },
       {
         source: [],
@@ -307,8 +310,9 @@ const allocateCreditNoteRules: CollectionRule[] = [
     source: "settlements",
     target: "credit-notes",
     mode: "co-write",
+    side: "receivable",
     invariant:
-      "The note's `remaining_credit_cents` tracks its UNREVERSED allocations, and it does so through two writers rather than one: `allocate-credit-note` subtracts what a request consumed, and `reverse-settlement` adds back what a retraction released. Both are DELTAS applied under compare-and-set, outside the per-invoice transactions, so concurrent writers compose instead of clobbering (api-cloudrun#545). ⚠️ The reversal leg is the half that is easy to omit — without it a retracted allocation restores the invoice and strands the note's credit forever, and a note driven to zero then refuses every future allocation. Since api-cloudrun#1207 it IS also a fold over the journal — a cash refund is a `refund` row, so `creditRemainingFromJournal` rebuilds it and `audit-credit-note-remaining.ts` checks it — but the writers still apply deltas, because the fold needs every row and the CAS needs only this request's. `applied` means remaining_credit_cents === 0 HOWEVER it got there, by allocation or by cash refund.",
+      "The note's `remaining_credit_cents` is its journal folded by `creditRemainingFromJournal` — every live allocation and cash refund drawing on it — written in the SAME commit as the allocation rows and each invoice's fold, conditioned on every document's version (ruling 128). The reversal leg is `reverse-settlement:release-to-credit-note`, and it is the half that is easy to omit: without it a retracted allocation restores the invoice and strands the note's credit forever. `applied` means remaining_credit_cents === 0 HOWEVER it got there, by allocation or by cash refund.",
     enforced_by: [CREDIT_NOTE_STATUS_REFINE],
     transaction: "allocate-credit-note",
     fields: [
@@ -316,7 +320,7 @@ const allocateCreditNoteRules: CollectionRule[] = [
         source: ["amount_cents"],
         target: ["remaining_credit_cents"],
         transform:
-          "allocation subtracts this request's consumption; retraction adds the released amount back. Each is re-read and re-applied under a lastUpdateTime precondition. A NEGATIVE result is written, not clamped — by then the settlements are durable on their invoices, so it is the true projection of an over-allocation and the operator's signal. A restore that would exceed `totals.total_cents` IS capped, because the schema refine rejects that document outright; the cap is reported rather than silent.",
+          "total − Σ signed draws, by fold. A NEGATIVE result is written, not clamped — it is the true projection of an over-allocation and the operator's signal.",
       },
       {
         source: [],
@@ -331,13 +335,18 @@ const allocateCreditNoteRules: CollectionRule[] = [
 const allocateCreditNoteTransaction: TransactionDefinition = {
   id: "allocate-credit-note",
   description:
-    "Applies a credit note to one or more invoices: appends a credit settlement per invoice, moves each invoice's projected totals and status, and co-writes the note's remaining credit. Fans out across N invoices and their orders.",
+    "Applies a credit to one or more billing documents of its side — a customer credit note to invoices, a supplier credit to bills of its supplier: appends a session-keyed `credit` settlement per document, folds each document's totals and status and the credit's remaining balance in ONE commit conditioned on every version (ruling 128), then converges the orders or purchases. Each side keeps its own Xero allocation push, after the commit (ruling 132). One route for both, `POST /settlements` with `type: \"credit\"`.",
   steps: [
     "allocate-credit-note:note-to-settlements",
     "allocate-credit-note:settlements-to-invoices",
     "allocate-credit-note:remaining-credit",
     "update-invoice:status-to-orders",
     "update-credit-note:note-to-orders",
+    "allocate-credit-note:purchase-credit-to-settlements",
+    "allocate-credit-note:settlements-to-bill",
+    "allocate-credit-note:settlements-to-purchase-credit",
+    "update-purchase-bill:status-to-purchases",
+    "update-purchase-credit:status-to-purchases",
   ],
 };
 
@@ -346,7 +355,7 @@ const allocateCreditNoteTransaction: TransactionDefinition = {
 // A cash refund pays a note's credit back to the customer without touching any
 // invoice. Xero records it as a Payment of type `ARCREDITPAYMENT` on the note,
 // and CFS records it as a `refund` settlement — the one settlement type that
-// names a credit note and no invoice (`SETTLEMENT_CONTRACTS.refund.settles`).
+// names a credit and no billing document (`SETTLEMENT_CONTRACTS.refund.settles`).
 // Two ORIGINS, so two transactions: an operator recording one, and the Xero
 // CREDITNOTE webhook reconciling the note's `Payments[]`. Neither pushes
 // anything to Xero — the money moved in Xero or at the bank, and Xero is the
@@ -359,16 +368,17 @@ const recordCreditNoteRefundRules: CollectionRule[] = [
     source: "credit-notes",
     target: "settlements",
     mode: "co-write",
+    side: "receivable",
     invariant:
-      "An operator recording a cash refund appends ONE `type: refund` settlement naming the note and no invoice, with `xero_payment_id: null` — the CREDITNOTE webhook links it to Xero's `ARCREDITPAYMENT` later by amount, and an unlinked refund is never reaped. Legal only while the note accepts allocation and the amount is within its remaining credit — the `record_refund` action in `@cfs/core/utils/document-actions`.",
+      "An operator recording a cash refund appends ONE `type: refund` settlement naming the note and no invoice, with `xero_id: null` — the CREDITNOTE webhook links it to Xero's `ARCREDITPAYMENT` later by amount, and an unlinked refund is never reaped. Legal only while the note accepts allocation and the amount is within its remaining credit — the `record_refund` action in `@cfs/core/utils/document-actions`.",
     enforced_by: [CREDIT_NOTE_REMAINING_FOLD],
     transaction: "record-credit-note-refund",
     fields: [
-      { source: ["uid"], target: ["uid_credit_note"] },
-      { source: ["number"], target: ["number_credit_note"] },
-      { source: ["organization", "uid"], target: ["uid_organization"] },
-      { source: [], target: ["uid_invoice"], transform: "null — a refund settles the note, not an invoice" },
-      { source: [], target: ["reason"], transform: '"credit_refunded"' },
+      { source: ["uid"], target: ["credit", "uid"] },
+      { source: ["number"], target: ["credit", "label"], transform: "the note's display number" },
+      { source: ["organization", "uid"], target: ["uid_counterparty"] },
+      { source: [], target: ["billing"], transform: "null — a refund settles the note, not an invoice" },
+      { source: [], target: ["reason"], transform: '"refunded"' },
     ],
   },
   {
@@ -376,12 +386,13 @@ const recordCreditNoteRefundRules: CollectionRule[] = [
     source: "settlements",
     target: "credit-notes",
     mode: "co-write",
+    side: "receivable",
     invariant:
-      "The note's `remaining_credit_cents` falls by the refunded amount, as a DELTA under compare-and-set after the row is claimed — the same claim+CAS shape as `allocate-credit-note`, and for the same reason: the note is a hot document. A pre-read hit on the derived row id is repaired by re-folding the note from the journal; a lost claim writes nothing, because the sibling that won is about to apply its own delta.",
+      "The note's `remaining_credit_cents` is its journal folded, committed WITH the session-keyed refund row in one batch conditioned on the note's version (ruling 128): a replay of the session finds its row and moves nothing.",
     enforced_by: [CREDIT_NOTE_REMAINING_FOLD, CREDIT_NOTE_STATUS_REFINE],
     transaction: "record-credit-note-refund",
     fields: [
-      { source: ["amount_cents"], target: ["remaining_credit_cents"], transform: "− amount, under a lastUpdateTime precondition" },
+      { source: ["amount_cents"], target: ["remaining_credit_cents"], transform: "total − Σ signed draws, by fold" },
       { source: [], target: ["status"], transform: "issued → applied when it reaches 0" },
       { source: [], target: ["version"], transform: "+1, only when money moved" },
     ],
@@ -391,11 +402,14 @@ const recordCreditNoteRefundRules: CollectionRule[] = [
 const recordCreditNoteRefundTransaction: TransactionDefinition = {
   id: "record-credit-note-refund",
   description:
-    "An operator records that a credit note's credit was refunded in cash: appends a `refund` settlement naming the note and no invoice, and moves the note's remaining credit and status. Touches no invoice and no order. Pushes nothing to Xero — the CREDITNOTE webhook links the row to Xero's payment when it arrives.",
+    "An operator records that a credit's balance was refunded in cash — a customer credit note paid back to the customer, or a supplier credit paid back by the supplier (ruling 134): appends a session-keyed `refund` settlement naming the credit and no billing document, and folds the credit's remaining balance and status in one commit. Touches no billing document. Pushes nothing to Xero — the CREDITNOTE webhook links the row to Xero's payment when it arrives.",
   steps: [
     "record-credit-note-refund:refund-to-settlements",
     "record-credit-note-refund:settlements-to-credit-note",
     "update-credit-note:note-to-orders",
+    "record-credit-note-refund:purchase-credit-refund-to-settlements",
+    "record-credit-note-refund:settlements-to-purchase-credit",
+    "update-purchase-credit:status-to-purchases",
   ],
 };
 
@@ -405,12 +419,13 @@ const syncXeroCreditNoteRefundsRules: CollectionRule[] = [
     source: "credit-notes",
     target: "settlements",
     mode: "co-write",
+    side: "receivable",
     invariant:
-      "Xero is the authority on payments, so the note's `Payments[]` is reconciled INTO the journal in three passes, the shape of `sync-xero-settlement`: a PaymentID already on a row moves nothing; an operator-recorded refund (`xero_payment_id: null`) matching by amount is LINKED, moving no money because it already moved; an unseen payment is appended as a `refund`. A Xero-LINKED refund Xero no longer reports is reaped by appending a `refund_reversal` (`source_retracted`) — only when the `Payments` key is PRESENT on the response, because an absent key is not evidence of absence.",
+      "Xero is the authority on payments, so the note's `Payments[]` is reconciled INTO the journal in three passes, the shape of `sync-xero-settlement`: a PaymentID already on a row moves nothing; an operator-recorded refund (`xero_id: null`) matching by amount is LINKED, moving no money because it already moved; an unseen payment is appended as a `refund`. A Xero-LINKED refund Xero no longer reports is reaped by appending a `refund_reversal` (`source_retracted`) — only when the `Payments` key is PRESENT on the response, because an absent key is not evidence of absence.",
     enforced_by: [CREDIT_NOTE_REMAINING_FOLD],
     transaction: "sync-xero-credit-note-refunds",
     fields: [
-      { source: [], target: ["xero_payment_id"], transform: "the match key — a redelivery matches instead of duplicating" },
+      { source: [], target: ["xero_id"], transform: "the match key, Xero's PaymentID — a redelivery matches instead of duplicating" },
       { source: [], target: ["reverses"], transform: "reap: the refund row Xero stopped reporting" },
     ],
   },
@@ -419,12 +434,13 @@ const syncXeroCreditNoteRefundsRules: CollectionRule[] = [
     source: "settlements",
     target: "credit-notes",
     mode: "co-write",
+    side: "receivable",
     invariant:
-      "The note's remaining credit follows the reconciled journal, and a redelivered webhook moves NOTHING: an appended refund subtracts, a reap adds back, a link moves nothing, and each is a DELTA under compare-and-set gated on this call having claimed the row.",
+      "The note's remaining credit is the reconciled journal folded, committed WITH the rows in one batch conditioned on the note's version, so a redelivered webhook — which appends nothing — writes nothing.",
     enforced_by: [CREDIT_NOTE_REMAINING_FOLD, CREDIT_NOTE_STATUS_REFINE],
     transaction: "sync-xero-credit-note-refunds",
     fields: [
-      { source: ["amount_cents"], target: ["remaining_credit_cents"], transform: "− appended refunds, + reaped ones" },
+      { source: ["amount_cents"], target: ["remaining_credit_cents"], transform: "total − Σ signed draws, by fold" },
       { source: [], target: ["status"], transform: "issued ⇄ applied with the balance; a void note keeps `void`" },
       { source: [], target: ["version"], transform: "+1, only when money moved" },
     ],
@@ -434,11 +450,14 @@ const syncXeroCreditNoteRefundsRules: CollectionRule[] = [
 const syncXeroCreditNoteRefundsTransaction: TransactionDefinition = {
   id: "sync-xero-credit-note-refunds",
   description:
-    "Reconciles a Xero CREDITNOTE webhook's `Payments[]` (cash refunds, `ARCREDITPAYMENT`) into the settlements journal as `refund` rows, and moves the note's remaining credit and status. Idempotent under redelivery: matching is on Xero's PaymentID, and the delta counts only rows this call claimed.",
+    "Reconciles a Xero CREDITNOTE webhook's `Payments[]` — cash refunds on a customer credit note (`ARCREDITPAYMENT`) or a tracked supplier credit (`APCREDITPAYMENT`) — into the settlements journal as `refund` rows, and folds the credit's remaining balance and status in the same commit. Idempotent under redelivery: matching is on Xero's PaymentID, and a sync that appends nothing writes nothing.",
   steps: [
     "sync-xero-credit-note-refunds:xero-to-settlements",
     "sync-xero-credit-note-refunds:settlements-to-credit-note",
     "update-credit-note:note-to-orders",
+    "sync-xero-credit-note-refunds:purchase-credit-xero-to-settlements",
+    "sync-xero-credit-note-refunds:settlements-to-purchase-credit",
+    "update-purchase-credit:status-to-purchases",
   ],
 };
 
@@ -448,13 +467,14 @@ const reverseCreditNoteRefundRules: CollectionRule[] = [
     source: "settlements",
     target: "settlements",
     mode: "co-write",
+    side: "receivable",
     invariant:
-      "An operator retracts a refund THEY recorded that Xero has not linked (`xero_payment_id: null`) by appending a `refund_reversal` naming it — the journal is append-only, so a mistaken record is undone, never edited. A Xero-LINKED refund is refused: it is removed in Xero, and the CREDITNOTE webhook's reap appends the reverser. One retraction per row, by the reverser's derived id.",
+      "An operator retracts a refund THEY recorded that Xero has not linked (`xero_id: null`) by appending a `refund_reversal` naming it — the journal is append-only, so a mistaken record is undone, never edited. A Xero-LINKED refund is refused: it is removed in Xero, and the CREDITNOTE webhook's reap appends the reverser. One retraction per row, by the reverser's derived id.",
     enforced_by: [CREDIT_NOTE_REMAINING_FOLD],
     transaction: "reverse-credit-note-refund",
     fields: [
       { source: ["uid"], target: ["reverses"] },
-      { source: ["uid_credit_note"], target: ["uid_credit_note"] },
+      { source: ["credit", "uid"], target: ["credit", "uid"], transform: "the reverser draws back on the same credit" },
     ],
   },
   {
@@ -462,12 +482,13 @@ const reverseCreditNoteRefundRules: CollectionRule[] = [
     source: "settlements",
     target: "credit-notes",
     mode: "co-write",
+    side: "receivable",
     invariant:
-      "The retracted refund's credit goes back to the note, as a DELTA under compare-and-set after the reverser is claimed — capped at `totals.total_cents`, and the cap reported, exactly as a retracted allocation's release is.",
+      "The retracted refund's credit goes back to the note: its journal folded, in the reverser's commit, conditioned on the note's version.",
     enforced_by: [CREDIT_NOTE_REMAINING_FOLD, CREDIT_NOTE_STATUS_REFINE],
     transaction: "reverse-credit-note-refund",
     fields: [
-      { source: ["amount_cents"], target: ["remaining_credit_cents"], transform: "+ amount" },
+      { source: ["amount_cents"], target: ["remaining_credit_cents"], transform: "total − Σ signed draws, by fold" },
       { source: [], target: ["status"], transform: "applied → issued once credit is back; a void note keeps `void`" },
       { source: [], target: ["version"], transform: "+1, only when money moved" },
     ],
@@ -477,11 +498,14 @@ const reverseCreditNoteRefundRules: CollectionRule[] = [
 const reverseCreditNoteRefundTransaction: TransactionDefinition = {
   id: "reverse-credit-note-refund",
   description:
-    "An operator retracts an unlinked cash refund they recorded by mistake: appends a `refund_reversal` and gives the credit back to the note. Refused for a refund Xero has linked — that one is removed in Xero and reaped by the webhook. Touches no invoice and pushes nothing to Xero.",
+    "An operator retracts an unlinked cash refund they recorded by mistake, on either side: appends a `refund_reversal` and gives the credit back to the credit document. Refused for a refund Xero has linked — that one is removed in Xero and reaped by the webhook. Touches no billing document and pushes nothing to Xero.",
   steps: [
     "reverse-credit-note-refund:reverser-to-settlements",
     "reverse-credit-note-refund:settlements-to-credit-note",
     "update-credit-note:note-to-orders",
+    "reverse-credit-note-refund:purchase-credit-reverser-to-settlements",
+    "reverse-credit-note-refund:settlements-to-purchase-credit",
+    "update-purchase-credit:status-to-purchases",
   ],
 };
 
@@ -535,6 +559,171 @@ const voidCreditNoteTransaction: TransactionDefinition = {
   ],
 };
 
+// ── The payable twins (one-document-model rulings 44, 49, 132, 134) ──
+//
+// A supplier credit settles through the same writers as a customer credit note:
+// an allocation, an operator cash refund, Xero's refund sync and the operator's
+// reversal of an unlinked refund. The payable transactions that used to sit in
+// `propagation/purchases.ts` (`allocate-purchase-credit`,
+// `reverse-purchase-credit-allocation`, `settle-purchase-credit`) collapsed into
+// these with the services (ruling 49); a supplier's cash refund gained an
+// operator record (ruling 134), linked by the CREDITNOTE webhook as AR's is.
+
+/** An operator allocation of a supplier credit, asserted on both folds and a replay. */
+const PURCHASE_CREDIT_ALLOCATED: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/purchases/purchaseCredits.test.ts::allocate — a credit allocated to a bill folds both, and a replay moves nothing",
+  clause:
+    "an allocation appends one credit row naming the bill and the supplier credit, keyed on the request session; the bill's amount_credited_cents and the credit's remaining_credit_cents are both their journals folded, in the same commit; an allocation past the credit's remaining or the bill's due is refused; a replay writes nothing",
+  gates: true,
+};
+
+/** A supplier's cash refund of a credit, reported by Xero, asserted with its reap. */
+const SUPPLIER_REFUND_FOLDED: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/purchases/purchaseCreditSettlements.test.ts::refund — a supplier refund Xero reports appends one supplier_refund row and refolds the credit, and a reap reverses it",
+  clause:
+    "a payment Xero lists on a tracked ACCPAYCREDIT that CFS holds no live row for is appended as one refund row naming the credit (keyed on the credit, the PaymentID and a generation), and the credit's remaining_credit_cents is its journal folded in the same commit; a redelivery writes nothing; a linked row Xero stops listing is reversed (source_retracted) and the credit refolded",
+  gates: true,
+};
+
+const allocatePurchaseCreditRules: CollectionRule[] = [
+  {
+    id: "allocate-credit-note:purchase-credit-to-settlements",
+    source: "purchase-credits",
+    target: "settlements",
+    mode: "co-write",
+    side: "payable",
+    invariant:
+      "An operator allocating a supplier credit to a bill of the same supplier appends ONE `credit` row naming both (`billing` + `credit`), carrying the credit's reason, keyed on the request session so a replay converges. It is written UNLINKED (`xero_id: null`, `synced_at: null`): the Xero allocation is the credit's own post-commit push, and until Xero reports it the INVOICE webhook links rather than reaps it.",
+    enforced_by: [PURCHASE_CREDIT_ALLOCATED],
+    transaction: "allocate-credit-note",
+    fields: [
+      { source: ["uid"], target: ["credit", "uid"], transform: "the row draws on the supplier credit" },
+      { source: ["reason"], target: ["reason"], transform: "the allocation carries its credit's reason" },
+    ],
+  },
+  {
+    id: "allocate-credit-note:settlements-to-bill",
+    source: "settlements",
+    target: "purchase-bills",
+    mode: "co-write",
+    side: "payable",
+    invariant:
+      "The bill's `totals` are its journal folded in the allocation's commit, so `amount_credited_cents` moves by the allocation and `amount_due_cents` falls by it. Its `version` is bumped, as every writer of a bill's rows must.",
+    enforced_by: [PURCHASE_CREDIT_ALLOCATED],
+    transaction: "allocate-credit-note",
+    fields: [{ source: ["amount_cents"], target: ["totals", "amount_credited_cents"], transform: "Σ live credit − credit_reversal, by fold" }],
+  },
+  {
+    id: "allocate-credit-note:settlements-to-purchase-credit",
+    source: "settlements",
+    target: "purchase-credits",
+    mode: "co-write",
+    side: "payable",
+    invariant:
+      "The supplier credit's `remaining_credit_cents` is its journal folded by `creditRemainingFromJournal`, written in the allocation's commit, and its status re-derives (`applied` at 0). Its `version` is bumped.",
+    enforced_by: [PURCHASE_CREDIT_ALLOCATED],
+    transaction: "allocate-credit-note",
+    fields: [{ source: ["amount_cents"], target: ["remaining_credit_cents"], transform: "total − Σ signed draws, by fold" }],
+  },
+];
+
+const purchaseCreditRefundRules: CollectionRule[] = [
+  {
+    id: "record-credit-note-refund:purchase-credit-refund-to-settlements",
+    source: "purchase-credits",
+    target: "settlements",
+    mode: "co-write",
+    side: "payable",
+    invariant:
+      "An operator records that a supplier paid a credit back in cash (ruling 134): ONE `refund` row naming the supplier credit and no bill, `xero_id: null`, session-keyed. Recorded in CFS only and never pushed; the CREDITNOTE webhook links it to Xero's `APCREDITPAYMENT` by amount, and an unlinked refund is never reaped.",
+    enforced_by: [SUPPLIER_REFUND_FOLDED],
+    transaction: "record-credit-note-refund",
+    fields: [
+      { source: ["uid"], target: ["credit", "uid"] },
+      { source: ["supplier", "uid"], target: ["uid_counterparty"] },
+      { source: [], target: ["billing"], transform: "null — a refund settles the credit, not a bill" },
+      { source: [], target: ["reason"], transform: '"refunded"' },
+    ],
+  },
+  {
+    id: "record-credit-note-refund:settlements-to-purchase-credit",
+    source: "settlements",
+    target: "purchase-credits",
+    mode: "co-write",
+    side: "payable",
+    invariant:
+      "The supplier credit's `remaining_credit_cents` is its journal folded, committed WITH the refund row in one batch conditioned on the credit's version.",
+    enforced_by: [SUPPLIER_REFUND_FOLDED],
+    transaction: "record-credit-note-refund",
+    fields: [
+      { source: ["amount_cents"], target: ["remaining_credit_cents"], transform: "total − Σ signed draws, by fold" },
+      { source: [], target: ["status"], transform: "issued → applied when it reaches 0" },
+      { source: [], target: ["version"], transform: "+1, only when money moved" },
+    ],
+  },
+  {
+    id: "sync-xero-credit-note-refunds:purchase-credit-xero-to-settlements",
+    source: "purchase-credits",
+    target: "settlements",
+    mode: "co-write",
+    side: "payable",
+    invariant:
+      "Each payment Xero lists on a tracked ACCPAYCREDIT (`APCREDITPAYMENT` — the supplier paying the credit back in cash) is reconciled INTO the journal, the receivable passes on the payable side: an operator-recorded refund (`xero_id: null`) matching by amount is LINKED; an unseen one is appended as ONE `refund` row naming the credit, keyed on the credit, the PaymentID and a generation, so a payment re-reported after its reap appends rather than overwriting; a linked row whose PaymentID Xero no longer lists is reversed (`source_retracted`) — only when the `Payments` key is present. ⚠️ A refund that would take the fold below zero is not written: CFS still holds an allocation Xero removed, so the bills those rows name are re-read and the delivery retries after them.",
+    enforced_by: [SUPPLIER_REFUND_FOLDED],
+    transaction: "sync-xero-credit-note-refunds",
+    fields: [
+      { source: ["uid"], target: ["credit", "uid"], transform: "the row draws on the supplier credit" },
+      { source: [], target: ["xero_id"], transform: "Xero's PaymentID" },
+    ],
+  },
+  {
+    id: "sync-xero-credit-note-refunds:settlements-to-purchase-credit",
+    source: "settlements",
+    target: "purchase-credits",
+    mode: "co-write",
+    side: "payable",
+    invariant:
+      "The supplier credit's `remaining_credit_cents` is its journal folded in the commit that wrote the rows, its status re-derives (`applied` at 0) and its `version` is bumped. The journal is read outside and the commit refuses when the credit's version moved, so every writer of a credit's rows bumps its version.",
+    enforced_by: [SUPPLIER_REFUND_FOLDED],
+    transaction: "sync-xero-credit-note-refunds",
+    fields: [{ source: ["amount_cents"], target: ["remaining_credit_cents"], transform: "total − Σ signed draws, by fold" }],
+  },
+  {
+    id: "reverse-credit-note-refund:purchase-credit-reverser-to-settlements",
+    source: "settlements",
+    target: "settlements",
+    mode: "co-write",
+    side: "payable",
+    invariant:
+      "An operator retracts a supplier refund THEY recorded that Xero has not linked by appending a `refund_reversal` naming it, the receivable rule. A Xero-LINKED refund is refused: it is removed in Xero, and the CREDITNOTE webhook's reap appends the reverser.",
+    enforced_by: [SUPPLIER_REFUND_FOLDED],
+    transaction: "reverse-credit-note-refund",
+    fields: [
+      { source: ["uid"], target: ["reverses"] },
+      { source: ["credit", "uid"], target: ["credit", "uid"], transform: "the reverser draws back on the same credit" },
+    ],
+  },
+  {
+    id: "reverse-credit-note-refund:settlements-to-purchase-credit",
+    source: "settlements",
+    target: "purchase-credits",
+    mode: "co-write",
+    side: "payable",
+    invariant: "The retracted refund's credit goes back to the supplier credit: its journal folded, in the reverser's commit, conditioned on the credit's version.",
+    enforced_by: [SUPPLIER_REFUND_FOLDED],
+    transaction: "reverse-credit-note-refund",
+    fields: [
+      { source: ["amount_cents"], target: ["remaining_credit_cents"], transform: "total − Σ signed draws, by fold" },
+      { source: [], target: ["status"], transform: "applied → issued once credit is back; a void credit keeps `void`" },
+      { source: [], target: ["version"], transform: "+1, only when money moved" },
+    ],
+  },
+];
+
 // ── Module ──────────────────────────────────────────────────────────
 /** Everything `propagation/credit-notes.ts` contributes to the propagation catalog. */
 export const creditNotes: PropagationModule = {
@@ -546,6 +735,8 @@ export const creditNotes: PropagationModule = {
     ...recordCreditNoteRefundRules,
     ...syncXeroCreditNoteRefundsRules,
     ...reverseCreditNoteRefundRules,
+    ...allocatePurchaseCreditRules,
+    ...purchaseCreditRefundRules,
   ],
   transactions: [
     createCreditNoteTransaction,

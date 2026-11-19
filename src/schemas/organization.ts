@@ -2,7 +2,7 @@
  * Organization document schema — Firestore collection: organizations
  */
 import { z } from "zod";
-import { FirestoreId, ThreadId } from "./_uid.ts";
+import { FirestoreId, ThreadId, XeroId } from "./_uid.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -561,7 +561,7 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   merged_from: z.array(FirestoreId).optional(),
   merged_to: FirestoreId.optional(),
   crms_id: z.int().nullable(),
-  xero_id: z.uuid().nullable(),
+  xero_id: XeroId.nullable(),
   // ⚠️ The "Required (no `.default(\"tax_applied\")`) … TAX_PROFILES[0]" note
   // that stood here described `tax_profile` and outlived it, sitting above a
   // field it does not describe. `TAX_PROFILES` is gone too.

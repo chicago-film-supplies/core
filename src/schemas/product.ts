@@ -3,7 +3,7 @@
  */
 import { z } from "zod";
 import { extendChecked } from "./_extend.ts";
-import { FirestoreId, ThreadId } from "./_uid.ts";
+import { FirestoreId, ThreadId, XeroId } from "./_uid.ts";
 import { uploadcareRef } from "./uploadcare/ref.ts";
 import { checkDatedRates, type DatedRate, DatedRateInput, DatedRateSchema, datedRatesIssues } from "./price-formula.ts";
 import {
@@ -971,11 +971,11 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
   // 0 of 568 prod products carry the KEY (2026-08-23) — one step deader-looking
   // than `images` above, and dead for the same non-reason. Read that note.
   query_by_images: z.array(uploadcareRef(z.string())).optional(),
-  xero_id: z.uuid().nullable(),
+  xero_id: XeroId.nullable(),
   // Optional (not `.nullable()`-required) so the ~531 existing product docs
   // validate unchanged before the backfill lands.
   xero_code: z.string().min(1).nullable().optional(),
-  xero_tracking_option_id: z.uuid().nullable(),
+  xero_tracking_option_id: XeroId.nullable(),
   uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),

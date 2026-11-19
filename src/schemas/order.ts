@@ -2,7 +2,7 @@
  * Order schemas — Firestore collection: orders
  */
 import { z } from "zod";
-import { FirestoreId, isProductShapedUid, ItemUid, ThreadId } from "./_uid.ts";
+import { FirestoreId, isProductShapedUid, ItemUid, ThreadId, XeroId } from "./_uid.ts";
 import { chicagoInstant, toChicagoYmd as toChicagoYmdForSchema } from "./_datetime.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import { LineItemCore, LinePostingCore, LineTaxCore } from "./_items.ts";
@@ -3118,7 +3118,7 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   // ever assigns a string-or-null), so nothing produced the absence the
   // declaration allowed.
   reference: z.string().max(255).nullable().meta({ column: true, label: "Reference", linkTo: "orderDetail", propagate: true, xero: true }),
-  xero_id: z.uuid().nullable().meta({ propagate: false }),
+  xero_id: XeroId.nullable().meta({ propagate: false }),
   uid_thread: ThreadId.meta({ propagate: false }),
   version: z.int().min(0).default(0).meta({ propagate: false }),
   // Both actor fields — see the interface for why each is optional rather than

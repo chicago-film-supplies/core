@@ -81,7 +81,7 @@
  *   reverse is a query.
  */
 import { z } from "zod";
-import { FirestoreId } from "./_uid.ts";
+import { FirestoreId, XeroId } from "./_uid.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -143,7 +143,7 @@ export const SupplierSchema: z.ZodType<Supplier> = z.strictObject({
   // than a 400, which is the right failure.
   name: z.string().min(1).max(100).meta({ column: true, label: "Name" }),
   active: z.boolean().meta({ column: true, label: "Active" }),
-  xero_id: z.uuid().nullable(),
+  xero_id: XeroId.nullable(),
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),

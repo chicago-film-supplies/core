@@ -162,14 +162,6 @@ export interface ActionSide {
    */
   pushCreates: boolean;
   /**
-   * Which settlement rows an operator may reverse here, beyond the contract
-   * rules (ruling 116's gap): 369 of 401 prod `bill_payment` rows carry no Xero
-   * id (card bills born paid, written by the link writer), so the contract rule
-   * alone would offer their reversal. Until 6e-0b3 builds payable operator
-   * payments, the payable side reverses its closure row only.
-   */
-  reversible(contract: SettlementContract): boolean;
-  /**
    * Credit offer arm: cap a billing row's units by what the initiator's fold
    * still bills there (the payable pool). The receivable side has never capped
    * by the order fold, and carrying it there would drop offers on
@@ -202,7 +194,6 @@ export const ACTION_SIDES: Readonly<Record<Side, ActionSide>> = {
     authorship: () => "cfs",
     takesCredit: () => true,
     pushCreates: false,
-    reversible: () => true,
     creditCapsByPool: false,
     creditNeedsScope: false,
     counterparty: (doc) => (doc as { organization?: { xero_id: string | null } }).organization?.xero_id ?? null,
@@ -213,7 +204,6 @@ export const ACTION_SIDES: Readonly<Record<Side, ActionSide>> = {
     authorship: (doc) => (doc as { origin?: string }).origin === "linked" ? "linked" : "pushed",
     takesCredit: (doc) => (doc as { xero_document?: string }).xero_document === "invoice",
     pushCreates: true,
-    reversible: (contract) => contract.counts_into === "closure_count",
     creditCapsByPool: true,
     creditNeedsScope: true,
     counterparty: (doc) => (doc as { supplier?: { uid: string } }).supplier?.uid ?? null,
@@ -247,8 +237,6 @@ export const ACTION_GAPS: Readonly<Record<Side, Readonly<Partial<Record<Document
     },
   },
   payable: {
-    add_payment: { reason: "a bill payment is recorded in Xero", removed_by: "6e-0b3 (ruling 44)" },
-    record_refund: { reason: "a supplier's cash refund is recorded in Xero", removed_by: "6e-0b3 (ruling 44)" },
     edit_counterparty: {
       reason: "a bill's supplier cannot be changed: `UpdatePurchaseBillInput` has no `supplier`",
       removed_by: "Phase 8 (ruling 50)",
@@ -428,7 +416,7 @@ export interface BillingOfferDocuments {
 }
 
 /** A settlement row as `reverse_settlement` reads it. */
-export type OfferSettlement = Pick<Settlement, "uid" | "type" | "reverses" | "xero_payment_id">;
+export type OfferSettlement = Pick<Settlement, "uid" | "type" | "reverses" | "xero_id">;
 
 /**
  * One initiator a billing document bills, with EVERY billing and credit document
@@ -458,7 +446,7 @@ export interface BillingOfferContext<S extends Side> {
  * off the row's CONTRACT, never its type literal, so a payable row is refused
  * exactly as its receivable twin is (F15 item 4).
  */
-function reversalRefusal(side: Side, row: OfferSettlement, rows: readonly OfferSettlement[]): string | null {
+function reversalRefusal(row: OfferSettlement, rows: readonly OfferSettlement[]): string | null {
   const contract = (SETTLEMENT_CONTRACTS as Record<string, SettlementContract | undefined>)[row.type];
   if (!contract) return `settlement ${row.uid} has an unknown type "${row.type}"`;
   if (contract.reverses === "required") return `settlement ${row.uid} is itself a reversal`;
@@ -467,14 +455,15 @@ function reversalRefusal(side: Side, row: OfferSettlement, rows: readonly OfferS
   // reversal, so reversing a linked one here would leave the two disagreeing. A
   // Xero-linked CREDIT allocation is different: its reversal pushes the
   // allocation DELETE, step one of voiding a credit.
-  if (contract.xero_id_field === "xero_payment_id" && row.xero_payment_id !== null) {
+  //
+  // A born-paid card bill's payment is refused here too: its `xero_id` is the
+  // SPEND's BankTransactionID (ruling 129), so it reads as linked, and it is
+  // undone by voiding the bill (its SPEND deleted in Xero), never alone.
+  if (contract.xero_object === "payment" && row.xero_id !== null) {
     return `settlement ${row.uid} is a Xero payment; it is reversed in Xero, not here`;
   }
   // Un-voiding is a recovery with two acts, never one row's reversal.
   if (contract.sums_into === "amount_void_cents") return `settlement ${row.uid} is a void; it is undone by recovery, not by reversal`;
-  if (!ACTION_SIDES[side].reversible(contract)) {
-    return `settlement ${row.uid} is not reversible here until operator payments exist (6e-0b3); only a closure is`;
-  }
   return null;
 }
 
@@ -867,7 +856,7 @@ export function billingActionsFor<S extends Side>(
   if (room > 0) offer("allocate_credit", { max_cents: room });
   if (sideOffers(side, "billing", "reverse_settlement")) {
     for (const row of ctx.settlements) {
-      if (reversalRefusal(side, row, ctx.settlements) !== null) continue;
+      if (reversalRefusal(row, ctx.settlements) !== null) continue;
       offers.push({ key: `reverse_settlement:${row.uid}`, action: "reverse_settlement", uid_settlement: row.uid });
     }
   }
@@ -937,7 +926,7 @@ export function assertBillingAction<S extends Side>(
     case "reverse_settlement": {
       const row = request.settlements.find((r) => r.uid === request.uid_settlement) ??
         refuse(`settlement ${request.uid_settlement} is not on this ${noun}`);
-      return why(reversalRefusal(side, row, request.settlements));
+      return why(reversalRefusal(row, request.settlements));
     }
     case "void":
       return why(voidRefusal(side, doc, request.credits, request.initiators));
@@ -982,7 +971,7 @@ function liveDraws(rows: readonly OfferCreditRow[]): { allocations: number; refu
   for (const row of liveSettlements(rows)) {
     const contract = (SETTLEMENT_CONTRACTS as Record<string, SettlementContract | undefined>)[row.type];
     if (!contract?.draws_credit || contract.reverses === "required") continue;
-    if (contract.settles === "credit_note" || contract.settles === "purchase_credit") refunds++;
+    if (contract.settles === "credit") refunds++;
     else allocations++;
   }
   return { allocations, refunds };

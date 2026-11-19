@@ -481,6 +481,21 @@ export const ListId: z.ZodType<string> = z.union([
 ]);
 
 /**
+ * **An id Xero assigned** — a ContactID, InvoiceID, CreditNoteID, PaymentID,
+ * BankTransactionID, AccountID or tracking OptionID. Every one is an RFC 9562
+ * UUID, so this is `z.uuid()` and nothing more (one-document-model ruling 129).
+ *
+ * Named so a field states WHOSE id it holds: `xero_id` is a third party's id,
+ * never a CFS document id, and a `FirestoreId` beside it means something else
+ * entirely. Census 2026-11-18: every stored settlement Xero id and every bill
+ * `xero_id` passes it, in prod and `test` alike, 0 refused.
+ *
+ * ⚠️ **Log schemas keep `z.string()`**, deliberately: a log records what Xero
+ * SENT, so a malformed id there is evidence to keep, not input to refuse.
+ */
+export const XeroId: z.ZodType<string> = z.uuid();
+
+/**
  * Any known CFS document-id shape — atomic Firestore id, divider/custom item
  * id, a composite (booking / event-card), or a lowercase-kebab slug (slug-keyed
  * collections such as `roles` and seeded `lists`). Use for polymorphic

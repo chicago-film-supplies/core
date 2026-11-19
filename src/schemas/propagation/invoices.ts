@@ -171,6 +171,7 @@ const updateInvoiceOrderRules: CollectionRule[] = [
     source: "invoices",
     target: "orders",
     mode: "co-write",
+    side: "receivable",
     invariant:
       "Every order's `invoices[]` entry CONVERGES on the invoice document — each writer rewrites the entry whenever it disagrees, not merely when the invoice's own status moved, and an eventarc reconciler repairs whatever was written outside a CFS service. This is a convergence guarantee, NOT an atomic one: `createSettlement` splits its invoice CAS from its order fan-out across two commits by design, so there is a real window in which the two disagree. Stating it as atomic (as this rule did until api-cloudrun#453) asserts an impossibility and hides the seam the backstop exists to close.",
     enforced_by: [

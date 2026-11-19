@@ -2,7 +2,7 @@
  * Invoice document schema — Firestore collection: invoices
  */
 import { z } from "zod";
-import { FirestoreId, ItemUid, OutOfServiceId, ThreadId } from "./_uid.ts";
+import { FirestoreId, ItemUid, OutOfServiceId, ThreadId, XeroId } from "./_uid.ts";
 import { chicagoStartOfDay } from "./_datetime.ts";
 import { DestinationSectionDividerArm, GroupDividerArm, OrderDividerArm } from "./_dividers.ts";
 import { LineItemCore, LinePostingCore, LineTaxCore } from "./_items.ts";
@@ -749,7 +749,7 @@ const InvoiceDocLineItemInner = z.strictObject({
   // same declarations.
   ...LinePostingCore,
   ...LineTaxCore,
-  xero_id: z.uuid().nullable().optional(),
+  xero_id: XeroId.nullable().optional(),
   crms_opportunity_id: z.int().nullable().optional(),
   crms_id: z.union([z.int(), z.string()]).nullable().optional(),
   // Plain `.optional()`, matching `FulfillmentLineItem.substituted_for`
@@ -1372,7 +1372,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   items: z.array(InvoiceDocItem).meta({ label: "Item" })
     .superRefine(checkZeroPricedComponents),
   totals: InvoiceDocTotals,
-  xero_id: z.uuid().nullable(),
+  xero_id: XeroId.nullable(),
   // REQUIRED as of the documents-menu campaign (api-cloudrun#651), and the
   // writer is what licenses it: `createInvoice` has always written
   // `pdf_versions: []` on create (`services/invoices.ts`), so the 143 prod

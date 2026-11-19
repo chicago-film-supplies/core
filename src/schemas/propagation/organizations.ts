@@ -857,10 +857,10 @@ const mergeOrganizationRules: CollectionRule[] = [
     target: "settlements",
     mode: "fan-out",
     invariant: MERGE_INVARIANT +
-      " A settlement references its organization by uid alone. It is repointed through the settlements writer, never by a second writer beside it.",
+      " A receivable settlement references its customer by uid alone, as `uid_counterparty` (ruling 136). It is repointed through the settlements writer, never by a second writer beside it, and only on rows whose refs are receivable: a supplier's uid is a different collection's.",
     enforced_by: MERGE_ENFORCEMENT,
     transaction: "merge-organization",
-    fields: [{ source: ["uid"], target: ["uid_organization"] }],
+    fields: [{ source: ["uid"], target: ["uid_counterparty"], transform: "receivable rows only" }],
   },
   chainRepointRule("merge-org:loser-to-bookings", "bookings"),
   chainRepointRule("merge-org:loser-to-fulfillments", "fulfillments"),
