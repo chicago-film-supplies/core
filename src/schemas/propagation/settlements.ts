@@ -130,6 +130,16 @@ const XERO_CREDIT_FOLDED: EnforcementRef = {
   gates: true,
 };
 
+/** A credit allocation the Xero INVOICE sync moves refolds its customer note (ruling 139). */
+const XERO_NOTE_FOLDED: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/webhooks/xeroPayment.test.ts::INVOICE webhook — a credit allocated in Xero from a note CFS holds refolds that note's remaining credit",
+  clause:
+    "an allocation Xero reports from a CFS credit note appends a credit row naming the note, and the note's `remaining_credit_cents` falls by it in the same commit; the reap of that allocation gives it back; a redelivery writes nothing",
+  gates: true,
+};
+
 /** The $0 bill closure folds as a count, reversibly. */
 const BILL_CLOSURE_FOLD: EnforcementRef = {
   kind: "test",
@@ -490,6 +500,18 @@ const syncXeroSettlementRules: CollectionRule[] = [
     transaction: "sync-xero-settlement",
     fields: [{ source: ["amount_cents"], target: ["remaining_credit_cents"], transform: "total − Σ signed draws, by fold" }],
   },
+  {
+    id: "sync-xero-settlement:settlements-to-credit-note",
+    source: "settlements",
+    target: "credit-notes",
+    mode: "co-write",
+    side: "receivable",
+    invariant:
+      "Every customer credit note whose `credit` rows this commit appends, reverses or links is refolded in the SAME commit (ruling 139): `remaining_credit_cents` is its journal folded by `creditRemainingFromJournal`, its status re-derives and its `version` is bumped — so an allocation made, edited or removed in Xero's UI moves the note's balance with it, as the payable side's twin does.",
+    enforced_by: [XERO_NOTE_FOLDED],
+    transaction: "sync-xero-settlement",
+    fields: [{ source: ["amount_cents"], target: ["remaining_credit_cents"], transform: "total − Σ signed draws, by fold" }],
+  },
 ];
 
 const syncXeroSettlementTransaction: TransactionDefinition = {
@@ -500,6 +522,8 @@ const syncXeroSettlementTransaction: TransactionDefinition = {
     "sync-xero-settlement:xero-to-settlements",
     "sync-xero-settlement:settlements-to-invoice",
     "update-invoice:status-to-orders",
+    "sync-xero-settlement:settlements-to-credit-note",
+    "update-credit-note:note-to-orders",
     "sync-xero-settlement:xero-to-bill-settlements",
     "sync-xero-settlement:settlements-to-bill",
     "sync-xero-settlement:settlements-to-purchase-credit",

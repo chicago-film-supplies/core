@@ -384,6 +384,7 @@ export type RuleId =
   | "sync-xero-settlement:xero-to-bill-settlements"
   | "sync-xero-settlement:settlements-to-bill"
   | "sync-xero-settlement:settlements-to-purchase-credit"
+  | "sync-xero-settlement:settlements-to-credit-note"
   | "void-invoice:reap-bill-settlements"
   | "void-invoice:append-bill-void-settlement"
   | "void-invoice-from-xero:reap-bill-settlements"
