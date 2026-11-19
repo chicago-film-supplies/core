@@ -7737,8 +7737,8 @@
         {
           "kind": "interface",
           "name": "XeroSyncState",
-          "declaration": "interface XeroSyncState {\n  uid: \"state\";\n  pushed_hash: string;\n  pushed_body_hash?: string | null;\n  pushed_projection_hash?: string;\n  pushed_at: FirestoreTimestampType;\n}",
-          "doc": "The per-order Xero-quote sync watermark (`orders/{uid}/xero-sync/state`)."
+          "declaration": "interface XeroSyncState {\n  uid: \"state\";\n  pushed_hash: string;\n  pushed_body_hash?: string | null;\n  pushed_at: FirestoreTimestampType;\n}",
+          "doc": "The Xero sync watermark of an order, invoice or bill (`{orders,invoices,purchase-bills}/{uid}/xero-sync/state`)."
         },
         {
           "kind": "variable",

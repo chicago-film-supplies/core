@@ -36,7 +36,7 @@
 import { z } from "zod";
 import { FirestoreTimestamp, type FirestoreTimestampType } from "./common.ts";
 
-/** The per-order Xero-quote sync watermark (`orders/{uid}/xero-sync/state`). */
+/** The Xero sync watermark of an order, invoice or bill (`{orders,invoices,purchase-bills}/{uid}/xero-sync/state`). */
 export interface XeroSyncState {
   uid: "state";
   /**
@@ -76,14 +76,6 @@ export interface XeroSyncState {
    * body" is a real state that must be distinguishable from any hash value.
    */
   pushed_body_hash?: string | null;
-  /**
-   * 🔴 **RETIRED — no reader in core, and no writer once api-cloudrun stops
-   * writing it** (one-document-model F16, H1). A bill's `pushed_hash` used to hash
-   * the API-built body, so the bill's projection hash lived here; `pushed_hash` is
-   * the projection hash on every parent now. Kept declared (optional) so stored
-   * bill sidecars still parse until H2 purges them and deletes the field.
-   */
-  pushed_projection_hash?: string;
   pushed_at: FirestoreTimestampType;
 }
 
@@ -92,7 +84,6 @@ export const XeroSyncStateSchema: z.ZodType<XeroSyncState> = z.strictObject({
   uid: z.literal("state"),
   pushed_hash: z.string().min(1).meta({ column: true, label: "Pushed Hash" }),
   pushed_body_hash: z.string().min(1).nullable().optional().meta({ column: true, label: "Pushed Body Hash" }),
-  pushed_projection_hash: z.string().min(1).optional().meta({ column: true, label: "Pushed Projection Hash" }),
   pushed_at: FirestoreTimestamp.meta({ column: true, label: "Pushed" }),
 }).meta({
   title: "Xero Sync State",

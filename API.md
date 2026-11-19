@@ -17306,14 +17306,13 @@ type XeroResetsAtSource = "retry_after" | "inferred_rollover";
 
 ### `XeroSyncState`
 
-The per-order Xero-quote sync watermark (`orders/{uid}/xero-sync/state`).
+The Xero sync watermark of an order, invoice or bill (`{orders,invoices,purchase-bills}/{uid}/xero-sync/state`).
 
 ```ts
 interface XeroSyncState {
   uid: "state";
   pushed_hash: string;
   pushed_body_hash?: string | null;
-  pushed_projection_hash?: string;
   pushed_at: FirestoreTimestampType;
 }
 ```
