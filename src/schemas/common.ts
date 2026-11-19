@@ -3134,7 +3134,8 @@ export const DocumentOrganizationSnapshot: z.ZodType<DocumentOrganizationSnapsho
       label: "Jurisdiction Claim",
     }),
     tax_exempt: z.boolean().optional().meta({ column: true, label: "Tax Exempt" }),
-    xero_id: z.uuid().nullable(),
+    // `xero: true`: the quote and invoice bodies' `Contact` (F16).
+    xero_id: z.uuid().nullable().meta({ xero: true }),
     billing_address: Address.optional(),
   })
   .superRefine(checkDocumentOrganizationSnapshot)

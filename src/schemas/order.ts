@@ -2451,10 +2451,12 @@ export const OrderDocItemPrice: z.ZodType<OrderDocItemPriceType> = z.strictObjec
   // line has no replacement value", which is not the fact `0` states, and
   // `checkItemContract`'s `forbidden` arm reads the difference.
   replacement_cents: z.int().nullable().optional().meta({ column: true, label: "Replacement" }),
-  subtotal_cents: z.int().meta({ column: true, label: "Subtotal", derived: true }),
+  // `xero: true` on the three keys the quote body prices a line from (F16), the
+  // blocks tagged at the KEY as on the invoice line.
+  subtotal_cents: z.int().meta({ column: true, label: "Subtotal", derived: true, xero: true }),
   subtotal_discounted_cents: z.int().meta({ column: true, label: "Discounted Subtotal", derived: true }),
-  discount: Discount.nullable().meta({ label: "Discount" }),
-  taxes: z.array(PriceModifier).meta({ label: "Tax", derived: true }),
+  discount: Discount.nullable().meta({ label: "Discount", xero: true }),
+  taxes: z.array(PriceModifier).meta({ label: "Tax", derived: true, xero: true }),
   // Labelled although nothing here is a column in its own right: `TaxRef`'s
   // `name` and `rate` ARE columns (the product catalog offers them), so every
   // key holding a `TaxRef` inherits two columns and needs to name them. Without
@@ -2617,7 +2619,8 @@ const OrderDocLineItemInner = z.strictObject({
   uid_order: FirestoreId.optional().meta({ propagate: true }),
   inclusion_type: z.enum(INCLUSION_TYPES_NULLABLE).nullable().optional().meta({ column: true, label: "Inclusion" }),
   // `propagate: false` — the CRMS line id is a different record on each document.
-  crms_id: z.int().nullable().optional().meta({ propagate: false }),
+  // `xero: true`: the quote body looks the line's product up by it (F16).
+  crms_id: z.int().nullable().optional().meta({ propagate: false, xero: true }),
   // The account + the tracking category — one declaration shared with the
   // invoice line (`_items.ts`), both `propagate: true`. That reverses
   // manager#309's `propagate: false`: the invoice follows its order line on both
@@ -3022,7 +3025,7 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   // rather than comparing it. A tag on either schema counts; these live on the
   // order because the order is the source of every sync.
   uid: FirestoreId.meta({ propagate: false }),
-  number: z.int().meta({ column: true, label: "#", linkTo: "orderDetail", propagate: false }),
+  number: z.int().meta({ column: true, label: "#", linkTo: "orderDetail", propagate: false, xero: true }),
   status: OrderStatus.meta({ column: true, label: "Status", propagate: false }),
   organization: OrderDocOrganization.meta({ label: "Organization", propagate: true }),
   destinations: z.array(DocDestination).min(1).superRefine(checkExchangePairs),
@@ -3108,13 +3111,13 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   //
   // Bare `z.string()` — the dropped `.default("")` is core#97 increment 3; the
   // interface above carries the census and the reason.
-  subject: z.string().meta({ pii: "mask", column: true, label: "Subject", linkTo: "orderDetail", propagate: true }),
+  subject: z.string().meta({ pii: "mask", column: true, label: "Subject", linkTo: "orderDetail", propagate: true, xero: true }),
   // Bare `.nullable()` — the dropped `.default(null)` is core#95 batch 10.
   // 1,022 of 1,022 in both projects already carry the key (`createOrder`
   // writes `reference: orderData.reference || null` and `updateOrder` only
   // ever assigns a string-or-null), so nothing produced the absence the
   // declaration allowed.
-  reference: z.string().max(255).nullable().meta({ column: true, label: "Reference", linkTo: "orderDetail", propagate: true }),
+  reference: z.string().max(255).nullable().meta({ column: true, label: "Reference", linkTo: "orderDetail", propagate: true, xero: true }),
   xero_id: z.uuid().nullable().meta({ propagate: false }),
   uid_thread: ThreadId.meta({ propagate: false }),
   version: z.int().min(0).default(0).meta({ propagate: false }),

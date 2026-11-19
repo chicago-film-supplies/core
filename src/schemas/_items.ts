@@ -121,7 +121,11 @@ export const LineItemCore: {
   zero_priced: z.ZodNullable<z.ZodBoolean>;
   quantity_per_parent: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
 } = {
-  uid: ItemUid,
+  // `xero: true` (one-document-model F16): every Xero line body reads it — the
+  // invoice and bill edit bodies key their lines by it and the bill names the
+  // product by it. `.meta()` clones, so `ItemUid` itself, and every `path`
+  // element, stays untagged.
+  uid: ItemUid.meta({ xero: true }),
 
   // CANONICAL RATIONALE for every item `name` in the package — the divider,
   // transaction-fee, invoice and fulfillment leaves all point back here (#40).
@@ -145,7 +149,7 @@ export const LineItemCore: {
   // `api-cloudrun/scripts/audit-document-grain-parity.ts`: 0 invoice lines are
   // empty or over 100 in either project, and 0 of the 154 line items across the
   // 23 committed `invoice`+`quote` fixtures in `templates` (7-46 chars).
-  name: z.string().min(1).max(100).meta({ pii: "none", column: true, propagate: true }),
+  name: z.string().min(1).max(100).meta({ pii: "none", column: true, propagate: true, xero: true }),
 
   // Line-item text, classified the same as `name` above: it carries equipment,
   // service and destination wording — a PO number, a product name — not customer
@@ -187,6 +191,7 @@ export const LineItemCore: {
     column: true,
     label: "Quantity",
     propagate: true,
+    xero: true,
   }),
 
   // 🔴 The row identity, and it has exactly ONE author — `computeItemPaths` in
@@ -224,6 +229,9 @@ export const LineItemCore: {
     column: true,
     label: "Zero Priced",
     propagate: true,
+    // The quote body reads it; on the invoice and bill it is an over-tag a shared
+    // core forces (F16 item 2).
+    xero: true,
   }),
 
   // The catalog's per-kit ratio, snapshotted onto a COMPONENT line at expansion
@@ -325,8 +333,8 @@ export const LinePostingCore: {
   coa_revenue: z.ZodNullable<z.ZodType<COARevenueType>>;
   uid_tracking_category: z.ZodNullable<z.ZodType<string>>;
 } = {
-  coa_revenue: COARevenueEnum.nullable().meta({ propagate: true }),
-  uid_tracking_category: FirestoreId.nullable().meta({ propagate: true }),
+  coa_revenue: COARevenueEnum.nullable().meta({ propagate: true, xero: true }),
+  uid_tracking_category: FirestoreId.nullable().meta({ propagate: true, xero: true }),
 };
 
 /**
@@ -355,7 +363,7 @@ export const LedgerPostingCore: {
   ledger_account: z.ZodType<COACodeType>;
   uid_tracking_category: z.ZodNullable<z.ZodType<string>>;
 } = {
-  ledger_account: COACode.meta({ propagate: true }),
+  ledger_account: COACode.meta({ propagate: true, xero: true }),
   uid_tracking_category: LinePostingCore.uid_tracking_category,
 };
 
@@ -366,7 +374,7 @@ export const LedgerPostingCore: {
  * over the shared core only on those arms, and pinned by
  * `tests/item-shape-parity.test.ts`.
  */
-export const PayableKitLedgerAccount: z.ZodNullable<z.ZodType<COACodeType>> = COACode.nullable().meta({ propagate: true });
+export const PayableKitLedgerAccount: z.ZodNullable<z.ZodType<COACodeType>> = COACode.nullable().meta({ propagate: true, xero: true });
 
 /** The {@link LedgerPostingCore} keys, for code that copies the posting between grains. */
 export const LEDGER_POSTING_FIELDS: readonly ["ledger_account", "uid_tracking_category"] = [

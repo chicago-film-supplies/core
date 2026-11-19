@@ -44,7 +44,7 @@ type OfferSettlement = cat.OfferSettlement;
 interface InvoiceCtx {
   settlements?: readonly OfferSettlement[];
   creditNotes?: readonly CappedNote[];
-  xero_sync_status?: InvoiceXeroSyncStatus;
+  xero_sync_status?: BillingXeroSyncStatus;
 }
 const asDoc = (inv: OfferInvoice): cat.BillingOfferDocuments["receivable"] =>
   ({ ...inv, number: inv.number ?? 2001, items: (inv.items ?? []) as never, xero_id: inv.xero_id ?? null });
@@ -119,15 +119,15 @@ const orderCtx = (ctx: OrderCtx): cat.InitiatorOfferContext<"receivable"> => ({
 const orderInvoiceActionsFor = (order: OfferOrder, ctx: OrderCtx = {}) => cat.initiatorActionsFor("receivable", order, orderCtx(ctx));
 const assertOrderInvoiceAction = (order: OfferOrder, ctx: OrderCtx, request: cat.InitiatorActionRequest) =>
   cat.assertInitiatorAction("receivable", order, orderCtx(ctx), request);
-import type { InvoiceXeroSyncStatus } from "../src/utils/invoice-xero-sync.ts";
+import type { BillingXeroSyncStatus } from "../src/utils/xero-sync.ts";
 import { invoiceFieldIsFrozen } from "../src/utils/invoices.ts";
 import type { AccountedInvoice } from "../src/utils/quantityAccounting.ts";
 
 const INVOICE_STATUSES = Object.keys(INVOICE_STATUS_CONTRACTS) as InvoiceStatusType[];
 const NOTE_STATUSES = Object.keys(CREDIT_NOTE_STATUS_CONTRACTS) as CreditNoteStatusType[];
 const SETTLEMENT_TYPES = Object.keys(SETTLEMENT_CONTRACTS) as SettlementTypeType[];
-/** Every `InvoiceXeroSyncStatus` member. A type-only union, so `satisfies` below is what keeps it whole. */
-const XERO_SYNC_STATUSES = ["in_sync", "out_of_sync", "unknown", "not_applicable"] as const satisfies readonly InvoiceXeroSyncStatus[];
+/** Every `BillingXeroSyncStatus` member. A type-only union, so `satisfies` below is what keeps it whole. */
+const XERO_SYNC_STATUSES = ["in_sync", "out_of_sync", "unknown", "not_applicable"] as const satisfies readonly BillingXeroSyncStatus[];
 
 /** A billed line: `qty` units over `days` chargeable days (null for a sale). */
 function line(uid: string, qty: number, days: number | null): InvoiceDocItemType {
@@ -490,9 +490,9 @@ Deno.test("ruling 117 void: refused while anything is paid or credited against t
 // ── push to Xero (api-cloudrun#1332) ─────────────────────────────────
 
 Deno.test("api-cloudrun#1332 push_to_xero: a linked issued/part_paid/paid invoice whose Xero twin is not known in sync", () => {
-  // Exhaustiveness of the hand-written list: an `InvoiceXeroSyncStatus` member
+  // Exhaustiveness of the hand-written list: an `BillingXeroSyncStatus` member
   // missing from it would be a status this block never tries.
-  const _all: Record<InvoiceXeroSyncStatus, true> = { in_sync: true, out_of_sync: true, unknown: true, not_applicable: true };
+  const _all: Record<BillingXeroSyncStatus, true> = { in_sync: true, out_of_sync: true, unknown: true, not_applicable: true };
   assertEquals(Object.keys(_all).sort(), [...XERO_SYNC_STATUSES].sort());
 
   for (const status of INVOICE_STATUSES) {

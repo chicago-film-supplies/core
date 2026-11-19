@@ -476,13 +476,16 @@ const InvoiceDocItemPrice: z.ZodType<InvoiceDocItemPriceType> = z.strictObject({
   // Metered from the invoice pair's charge windows, as on an order line.
   counts: z.array(TierCountSchema).meta({ derived: true }),
   base_percent: z.number().nullable().optional(),
-  subtotal_cents: z.int().meta({ column: true, label: "Subtotal" }),
+  // `xero: true` on the three keys the edit body prices a line from (F16);
+  // `discount` and `taxes` are tagged at the KEY, so the tag covers the block
+  // without tagging `Discount` / `PriceModifier` everywhere else.
+  subtotal_cents: z.int().meta({ column: true, label: "Subtotal", xero: true }),
   subtotal_discounted_cents: z.int().meta({
     column: true,
     label: "Discounted Subtotal",
   }),
-  discount: Discount.nullable().meta({ label: "Discount" }),
-  taxes: z.array(PriceModifier).meta({ label: "Tax" }),
+  discount: Discount.nullable().meta({ label: "Discount", xero: true }),
+  taxes: z.array(PriceModifier).meta({ label: "Tax", xero: true }),
   // Labelled for the same reason the order side's is: `TaxRef` carries `name`
   // and `rate` as columns, so every key holding one inherits two columns and has
   // to name them, or the pre-override snapshot collides with the live `taxes`.
@@ -1324,12 +1327,14 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
     column: true,
     label: "Date",
     serverSortVia: "date_fs",
+    xero: true,
   }),
   date_fs: FirestoreTimestamp,
   due_date: chicagoStartOfDay().optional().meta({
     column: true,
     label: "Due Date",
     serverSortVia: "due_date_fs",
+    xero: true,
   }),
   due_date_fs: FirestoreTimestamp.optional(),
   // `mask` — see the note on `subject` in `order.ts`; same field, same ruling.
@@ -1340,6 +1345,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
     column: true,
     label: "Subject",
     linkTo: "invoiceDetail",
+    xero: true,
   }),
   // `.max(255)` matches `OrderDocument.reference` and `Fulfillment.reference`;
   // this grain was the only one without a bound. 0 of 1,040 stored invoices
@@ -1348,6 +1354,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
     column: true,
     label: "Reference",
     linkTo: "invoiceDetail",
+    xero: true,
   }),
   notes: z.string().meta({ pii: "mask", column: true, label: "Notes" })
     .nullable(),

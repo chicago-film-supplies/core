@@ -570,10 +570,17 @@ export function collectLeafPaths(
       return;
     }
 
-    let seenAtPath = visited.get(path);
+    // ⚠️ With `inherit`, one node can be reached at one path both under an
+    // inherited tag and without it — `ItemUid`'s union options under a tagged
+    // line `uid` and under an untagged divider `uid` in the same `items[]`
+    // union. Deduping on (path, node) alone keeps whichever arm came first, so
+    // the key carries the inherited tags too. With no `inherit` keys it is the
+    // bare path, as it always was.
+    const visitKey = inheritKeys.length === 0 ? path : `${path}\u0000${JSON.stringify(carried(inherited))}`;
+    let seenAtPath = visited.get(visitKey);
     if (!seenAtPath) {
       seenAtPath = new Set();
-      visited.set(path, seenAtPath);
+      visited.set(visitKey, seenAtPath);
     }
     if (seenAtPath.has(node)) return;
     seenAtPath.add(node);

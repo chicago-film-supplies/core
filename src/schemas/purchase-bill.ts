@@ -483,13 +483,16 @@ const docItemHead = {
   description: LineItemCore.description,
 };
 const docItemShape = {
-  quantity: z.int().min(1).meta({ column: true, label: "Quantity" }),
+  quantity: z.int().min(1).meta({ column: true, label: "Quantity", xero: true }),
   path: LineItemCore.path,
   zero_priced: LineItemCore.zero_priced,
   quantity_per_parent: LineItemCore.quantity_per_parent,
   ...LedgerPostingCore,
   ...LineTaxCore,
-  amount_cents: z.int().min(0).meta({ column: true, label: "Amount" }),
+  // `xero: true` here, `type` on each arm and the shared cores' tags: what the bill
+  // body reads of a line (F16). Shared with the supplier credit line, where nothing
+  // walks them.
+  amount_cents: z.int().min(0).meta({ column: true, label: "Amount", xero: true }),
   price: PurchaseDocumentLinePriceSchema,
   // A linked document's Xero `LineItemID` (docblock above). Not shared.
   xero_line_id: z.uuid().optional(),
@@ -539,7 +542,7 @@ function documentLineIssues(
 // The line rules run at the document level (`documentItemsIssues`), which knows
 // the document's `origin`.
 const PurchaseDocumentProductItemInner = z.strictObject({
-  type: z.enum(PURCHASE_PRODUCT_ITEM_TYPES).meta({ column: true, label: "Type" }),
+  type: z.enum(PURCHASE_PRODUCT_ITEM_TYPES).meta({ column: true, label: "Type", xero: true }),
   ...docItemHead,
   ...docItemShape,
   ledger_account: PayableKitLedgerAccount,
@@ -560,12 +563,12 @@ const noCustodyLine = {
 };
 
 const PurchaseDocumentServiceItemInner = z.strictObject({
-  type: z.literal("service").meta({ column: true, label: "Type" }),
+  type: z.literal("service").meta({ column: true, label: "Type", xero: true }),
   ...noCustodyLine,
 });
 
 const PurchaseDocumentReplacementItemInner = z.strictObject({
-  type: z.literal("replacement").meta({ column: true, label: "Type" }),
+  type: z.literal("replacement").meta({ column: true, label: "Type", xero: true }),
   ...noCustodyLine,
   out_of_service: OutOfServiceList.meta({ seed: false }),
 }).superRefine((item, ctx) => {
@@ -896,12 +899,12 @@ export const PurchaseBillSchema: z.ZodType<PurchaseBill> = z.strictObject({
   origin: PurchaseDocumentOriginEnum.meta({ column: true, label: "Origin" }),
   xero_document: PurchaseBillXeroDocumentEnum.meta({ column: true, label: "Xero Document" }),
   xero_id: z.uuid().nullable(),
-  date: chicagoStartOfDay().meta({ serverSortVia: "date_fs", column: true, label: "Date" }),
+  date: chicagoStartOfDay().meta({ serverSortVia: "date_fs", column: true, label: "Date", xero: true }),
   date_fs: FirestoreTimestamp,
-  due_date: chicagoStartOfDay().nullable().meta({ column: true, label: "Due Date", serverSortVia: "due_date_fs" }),
+  due_date: chicagoStartOfDay().nullable().meta({ column: true, label: "Due Date", serverSortVia: "due_date_fs", xero: true }),
   due_date_fs: FirestoreTimestamp.nullable().optional(),
   subject: z.string().meta({ pii: "mask", column: true, label: "Subject", linkTo: "purchaseBillDetail" }),
-  reference: z.string().max(255).nullable().meta({ column: true, label: "Reference" }),
+  reference: z.string().max(255).nullable().meta({ column: true, label: "Reference", xero: true }),
   // `.min(1)`: a bill bills at least one item. With charge items in the same
   // array that holds without a special case — a historic Vision bill is one
   // document-only or standing-line charge item (D5).

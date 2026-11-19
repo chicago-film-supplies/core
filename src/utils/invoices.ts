@@ -94,6 +94,8 @@ import {
   type OutOfServiceEntryType,
   getSettlementMultiplier,
   INVOICE_FIELD_FREEZE,
+  INVOICE_STATUS_CONTRACTS,
+  type InvoiceStatusContract,
   type InvoiceFieldClass,
   InvoiceSchema,
   isDividerItemType,
@@ -287,6 +289,24 @@ export function invoiceFieldIsFrozen(
     case "never":
       return false;
   }
+}
+
+/**
+ * **May a billing document in this status track CFS edits in Xero?** The status
+ * half of `billingXeroSyncStatus` (`utils/xero-sync.ts`), for a caller that has
+ * not read the watermark — the Eventarc enqueue gate, the edit task's liveness
+ * check, `push_to_xero`'s offer. Reads the status contract's `tracks_xero_edits`
+ * column. `true` for `paid`, whose hash is then the question: ask
+ * `billingXeroSyncStatus` with the real watermark, never with `null` standing in
+ * for "status only".
+ *
+ * Here rather than in `utils/xero-sync.ts` because `pushRefusal`
+ * (`utils/document-actions.ts`) calls it as a value, and that module is imported
+ * by `xero-sync.ts`: putting it there would be a runtime import cycle.
+ */
+export function invoiceStatusTracksXeroEdits(status: string): boolean {
+  return ((INVOICE_STATUS_CONTRACTS as Record<string, InvoiceStatusContract | undefined>)[status]
+    ?.tracks_xero_edits ?? null) !== null;
 }
 
 /**

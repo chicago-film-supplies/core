@@ -154,9 +154,6 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "has", expr: "it.icons.has(name)", desc: "Whether `name` is a known icon (following aliases).", returns: "boolean" },
     { name: "svg", expr: "it.icons.svg(name, arg2)", desc: "Inline SVG markup for a lucide icon. Emit raw: `<%~ it.icons.svg(\"truck\") %>`.", returns: "string" },
   ],
-  "invoice-xero-sync": [
-    { name: "invoiceStatusTracksXeroEdits", expr: "it.invoice-xero-sync.invoiceStatusTracksXeroEdits(status)", desc: "**May an invoice in this status track CFS edits in Xero?** The status half of {@link invoiceXeroSyncStatus}, for a caller that has not read the watermark — the Eventarc enqueue gate, the edit task's liveness check, `push_to_xero`'s offer. `true` for `paid`, whose hash is then the question: ask `invoiceXeroSyncStatus` with the real watermark, never with `null` standing in for \"status only\".", returns: "boolean" },
-  ],
   "invoices": [
     { name: "buildInvoiceDestinationDivider", expr: "it.invoices.buildInvoiceDestinationDivider(source, arg2)", desc: "Build an invoice destination divider from a source order's destination item. Single source of truth for the divider shape — reused by `projectOrderItemToInvoiceItem` (order→invoice projection) and the destination-divider backfill. ⚠️ **It had a third caller, the CRMS invoice webhook, and that whole ingest is deleted with the cutover.**", returns: "OrderDocDestinationItemType" },
     { name: "calculateItemDiscountCents", expr: "it.invoices.calculateItemDiscountCents(item)", desc: "Calculate the discount amount, in cents, for a single line item.", returns: "number" },
@@ -169,6 +166,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "extensionSectionTargets", expr: "it.invoices.extensionSectionTargets(scopedItems, orderDividerUid)", desc: "The date-extension sections in one order scope of an invoice: each extension divider's uid → the ORDER-relative path of the order destination divider it extends (`path_extension_for`).", returns: "Map<string, string[]>" },
     { name: "getDestinationsLegend", expr: "it.invoices.getDestinationsLegend(destinations)", desc: "Pair-derived legend strings for the order's start/end dates.", returns: "typeLiteral" },
     { name: "getOrderScopedItems", expr: "it.invoices.getOrderScopedItems(items, orderDividerUid)", desc: "Get all invoice items scoped to a specific order divider. Returns the order divider itself plus all items whose path starts with the order divider's uid.", returns: "T[]" },
+    { name: "invoiceStatusTracksXeroEdits", expr: "it.invoices.invoiceStatusTracksXeroEdits(status)", desc: "**May a billing document in this status track CFS edits in Xero?** The status half of `billingXeroSyncStatus` (`utils/xero-sync.ts`), for a caller that has not read the watermark — the Eventarc enqueue gate, the edit task's liveness check, `push_to_xero`'s offer. Reads the status contract's `tracks_xero_edits` column. `true` for `paid`, whose hash is then the question: ask `billingXeroSyncStatus` with the real watermark, never with `null` standing in for \"status only\".", returns: "boolean" },
     { name: "isInExtensionSection", expr: "it.invoices.isInExtensionSection(path, orderDividerUid, targets)", desc: "Is this invoice item an extension divider, or anywhere beneath one?", returns: "boolean" },
     { name: "isPaidUp", expr: "it.invoices.isPaidUp(status)", desc: "Nothing is owed: the status settlement moves a live document to.", returns: "boolean" },
     { name: "isPreTaxItem", expr: "it.invoices.isPreTaxItem(item)", desc: "Determine whether a line item participates in subtotal/discount/tax calculations. Standalone predicate (not composed) because TS doesn't support negated predicates.", returns: "item is PreTaxLineItem" },
@@ -305,9 +303,6 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "productHasLedger", expr: "it.products.productHasLedger(type)", desc: "True iff a product of this `type` has an inventory ledger (and so a `stock/{P}` projection and a `stock-locks/{P}` token), counted or not.", returns: "boolean" },
     { name: "removeComponentEntries", expr: "it.products.removeComponentEntries(components, path)", desc: "Remove a component and all its descendants from a flat components array. An entry is removed if its `path` starts with the given path prefix — this covers the component itself and every entry nested beneath it.", returns: "T[]" },
   ],
-  "purchase-bill-xero-sync": [
-
-  ],
   "purchase-documents": [
     { name: "billLineCreditParts", expr: "it.purchase-documents.billLineCreditParts(args)", desc: "**Every bill row a credit of `n` units of the bill line at `path` copies**, each with its units, money and sliced substitution (one-document-model 6d, ruling 23). The API's writer stores them and the manager's form previews their sum, so the screen shows what is stored.", returns: "BillLineCreditPart[]" },
     { name: "billTotalsBreakdown", expr: "it.purchase-documents.billTotalsBreakdown(priced)", desc: "**The one author of a bill's breakdown keys** (ruling 105, one totals shape per role): the invoice's five, read off `priceDocument`'s stage-5 sum. Every bill writer spreads it beside the settlement keys; a writer that only refolds the journal carries the stored ones.", returns: "Required<Pick<indexedAccess, \"subtotal_cents\" | \"subtotal_discounted_cents\" | \"discount_amount_cents\" | \"taxes\" | \"transaction_fees\">>" },
@@ -413,5 +408,8 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "rosterUnitsForBucket", expr: "it.units.rosterUnitsForBucket(roster, bucket, arg3)", desc: "The roster units an UNTRACKED count in booking bucket `bucket` may be drawn from — what a conversion left there physically with no number written down — narrowed to where the movement will say they are, so a pick the picker offers is one the roster fold accepts (gap G11 (g)). Moved from the manager's `untrackedPool`, which offered another record's away units and any shelf's flagged ones.", returns: "number[]" },
     { name: "toUnitRanges", expr: "it.units.toUnitRanges(numbers)", desc: "The fewest inclusive runs covering `numbers`, ascending.", returns: "UnitRange[]" },
     { name: "unflaggedShelfUnits", expr: "it.units.unflaggedShelfUnits(roster, uid_location)", desc: "Unflagged shelf units, ascending — optionally on one location. The manager filtered the roster this way in three places (`recordActions`, `OOSBreakdownEditor`, `unitPicks`).", returns: "number[]" },
+  ],
+  "xero-sync": [
+
   ],
 };

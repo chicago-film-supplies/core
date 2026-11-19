@@ -1,10 +1,12 @@
 /**
- * XeroSyncState document schema — Firestore sidecar: orders/{uid}/xero-sync/state
+ * XeroSyncState document schema — Firestore sidecar:
+ * `{orders,invoices,purchase-bills}/{uid}/xero-sync/state`.
  *
- * The hash of the order state that was last **successfully** pushed to Xero as
- * a Quote. The eventarc order fan-out gates its enqueue on this: recompute the
- * quote-determining projection of the order, and if it equals `pushed_hash`,
- * don't enqueue at all.
+ * The hash of the document state that was last **successfully** pushed to Xero
+ * (an order as a Quote, an invoice or a bill as itself). Every enqueue gate reads
+ * it: recompute the document's tagged Xero projection (`utils/xero-sync.ts`), and
+ * if it equals `pushed_hash`, don't enqueue at all. **One meaning per field, all
+ * three parents** (one-document-model F16).
  *
  * **Why a persisted hash rather than a stateless `event.oldValue` diff.** Both
  * suppress the storm (a migration touching unrelated fields enqueues nothing),
@@ -38,34 +40,31 @@ import { FirestoreTimestamp, type FirestoreTimestampType } from "./common.ts";
 export interface XeroSyncState {
   uid: "state";
   /**
-   * `hash48(version|targetStatus|invoiceSig)` of the order state whose push to
-   * Xero last **succeeded** — the same projection `xeroQuoteTaskName` addresses
-   * its Cloud Task by. Advances only after a successful push.
-   *
-   * ⚠️ **On an INVOICE sidecar (`invoices/{uid}/xero-sync/state`) it is a different
-   * projection of the same idea**: `invoiceXeroProjectionHash`
-   * (`utils/invoice-xero-sync.ts`) of the invoice as of its last successful issue or
-   * edit push, which `invoiceXeroSyncStatus` compares with the current invoice to
-   * make a push that never landed visible (api-cloudrun#1009). Sidecars written
-   * before that carry `v<version>`, which reads as `unknown`, never as a hash.
+   * The Xero PROJECTION hash of the document as of its last push that
+   * **succeeded** — `billingXeroProjectionHash` for an invoice or a bill,
+   * `xeroQuoteProjectionHash` for an order (`utils/xero-sync.ts`): the leaves
+   * tagged `.meta({ xero: true })`, plus the quote's derived inputs. Advances only
+   * after a successful push, so a push that never landed reads out of sync
+   * (`billingXeroSyncStatus`; api-cloudrun#1009).
    */
   pushed_hash: string;
   /**
-   * `hash48` of the Xero quote **body** that was last successfully pushed —
-   * the SECOND, independent watermark (api-cloudrun#703).
+   * `hash48` of the Xero **body** that was last successfully pushed — the
+   * SECOND, independent watermark (api-cloudrun#703). `null` when the last write
+   * sent no body CFS built for an edit (an issue or a create).
    *
    * The two answer different questions and neither replaces the other:
    *
    * | | `pushed_hash` | `pushed_body_hash` |
    * |---|---|---|
-   * | question | *has the order moved since we pushed?* | *would we send the same bytes?* |
+   * | question | *has the document moved since we pushed?* | *would we send the same bytes?* |
    * | cost | free — pure, from the order alone | 1–4 Firestore reads, O(items) |
    * | where | the enqueue gate + the Cloud Task name | inside the task, before the first Xero call |
    *
    * 🔴 **The body hash is a PURE SUPPRESSOR, and that is the property that makes
    * it safe.** It is only ever reached once the cheap gate has already fired, so
    * it can never *add* a push. That matters because the body is not a pure
-   * function of the order — it folds in `product.price.coa_revenue`,
+   * function of the document — it folds in `product.price.coa_revenue`,
    * `product.xero_code`, the `tracking-categories` corpus and the `taxes` docs,
    * two of which ride process-lifetime memo caches with no TTL. As a suppressor,
    * two instances with divergent caches merely disagree about whether to skip;
@@ -78,14 +77,11 @@ export interface XeroSyncState {
    */
   pushed_body_hash?: string | null;
   /**
-   * BILL sidecars only (`purchase-bills/{uid}/xero-sync/state`):
-   * `purchaseBillXeroProjectionHash` (`utils/purchase-bill-xero-sync.ts`) of the bill
-   * as of its last successful push. A bill's `pushed_hash` hashes the API-built body,
-   * which the manager cannot compute, so this is what `purchaseBillXeroSyncStatus`
-   * compares.
-   *
-   * Absent ⇒ nothing recorded yet, which reads `unknown`. Bare `.optional()`: an
-   * order or invoice sidecar never has it, so it cannot be a present `.nullable()`.
+   * 🔴 **RETIRED — no reader in core, and no writer once api-cloudrun stops
+   * writing it** (one-document-model F16, H1). A bill's `pushed_hash` used to hash
+   * the API-built body, so the bill's projection hash lived here; `pushed_hash` is
+   * the projection hash on every parent now. Kept declared (optional) so stored
+   * bill sidecars still parse until H2 purges them and deletes the field.
    */
   pushed_projection_hash?: string;
   pushed_at: FirestoreTimestampType;

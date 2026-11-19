@@ -614,17 +614,21 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "hash48",
     "isSourceHashStale",
   ],
-  // `utils/invoice-xero-sync.ts` answers whether an issued invoice's Xero twin is
-  // current, from the invoice and its `xero-sync/state` sidecar (api-cloudrun#1009).
-  // A template renders the document alone and holds no sidecar.
-  "invoice-xero-sync": [
-    "canonicalJson",
-    "hash48",
+  // `utils/xero-sync.ts` answers whether a billing document's (or an order's
+  // quote's) Xero twin is current, from the document and its `xero-sync/state`
+  // sidecar, and walks SCHEMAS for the tagged projection (one-document-model
+  // F16). A template renders the document alone and holds no sidecar.
+  "xero-sync": [
+    "billingXeroProjectionHash",
+    "billingXeroSyncStatus",
+    "collectXeroProjection",
     "invoiceSettlementsHeldByXero",
-    "invoiceXeroProjection",
-    "invoiceXeroProjectionHash",
-    "invoiceXeroSyncStatus",
-    "shouldPushInvoiceToXero",
+    "shouldPushBillingToXero",
+    "xeroProjection",
+    "xeroProjectionHash",
+    "xeroQuoteProjection",
+    "xeroQuoteProjectionHash",
+    "xeroTaggedPaths",
   ],
   // `utils/shared-fields.ts` classifies how each key an order shares with an
   // invoice or fulfillment propagates (api-cloudrun#890). It reads two Zod
@@ -789,13 +793,6 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // The cost-attribution join (C15) for the margin fold, the tracking default and
     // the api's readers. A render shows a placed charge in its tree, under its row.
     "costedProductUid",
-  ],
-  // `utils/purchase-bill-xero-sync.ts` is `invoice-xero-sync`'s twin: a bill against
-  // its Xero watermark sidecar. A template renders the document alone.
-  "purchase-bill-xero-sync": [
-    "purchaseBillXeroProjection",
-    "purchaseBillXeroProjectionHash",
-    "purchaseBillXeroSyncStatus",
   ],
   // Purchase → bill machinery (purchases-as-documents D5–D7, one-document-model
   // Phase 3): the projector, the scope builder, the billed-count readers and the

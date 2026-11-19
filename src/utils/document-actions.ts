@@ -77,8 +77,17 @@ import {
   type Side,
   type SharedLineType,
 } from "../schemas/mod.ts";
-import { invoiceFieldIsFrozen, invoiceHasMoneySettlement, invoiceIsFrozen, type InvoiceSettledTotals, liveSettlements } from "./invoices.ts";
-import { invoiceStatusTracksXeroEdits, type InvoiceXeroSyncStatus } from "./invoice-xero-sync.ts";
+import {
+  invoiceFieldIsFrozen,
+  invoiceHasMoneySettlement,
+  invoiceIsFrozen,
+  type InvoiceSettledTotals,
+  invoiceStatusTracksXeroEdits,
+  liveSettlements,
+} from "./invoices.ts";
+// TYPES only: `xero-sync.ts` imports this module's `ACTION_SIDES` as a value, and
+// an `import type` emits no runtime edge back.
+import type { BillingXeroSyncStatus } from "./xero-sync.ts";
 import {
   type AccountedInitiator,
   type AccountingContext,
@@ -440,8 +449,8 @@ export interface BillingOfferContext<S extends Side> {
   credits: readonly BillingFoldDocuments[S]["credit"][];
   /** Every initiator the document bills. */
   initiators: readonly OfferInitiatorDocuments<S>[];
-  /** The document's Xero sync status (`invoiceXeroSyncStatus` / `purchaseBillXeroSyncStatus`). */
-  xero_sync_status: InvoiceXeroSyncStatus;
+  /** The document's Xero sync status (`billingXeroSyncStatus`, `utils/xero-sync.ts`). */
+  xero_sync_status: BillingXeroSyncStatus;
 }
 
 /**
@@ -548,7 +557,7 @@ export function voidRefusal<S extends Side>(
  * does not create ({@link ActionSide.pushCreates}), and never a LINKED document
  * once settled.
  */
-export function pushRefusal<S extends Side>(side: S, doc: BillingOfferDocuments[S], status: InvoiceXeroSyncStatus): string | null {
+export function pushRefusal<S extends Side>(side: S, doc: BillingOfferDocuments[S], status: BillingXeroSyncStatus): string | null {
   const noun = ACTION_SIDES[side].nouns.billing;
   if (!invoiceStatusTracksXeroEdits(doc.status)) return `${a(doc.status)} ${noun} is not pushed to Xero`;
   if (!doc.xero_id && !ACTION_SIDES[side].pushCreates) return `the ${noun} is not linked to Xero; it is pushed by issuing it`;
@@ -879,7 +888,7 @@ export type BillingActionRequest<S extends Side> =
   /** The target row and any row that names it — never the whole list (module doc). */
   | { action: "reverse_settlement"; uid_settlement: string; settlements: readonly OfferSettlement[] }
   | { action: "void"; credits: readonly BillingFoldDocuments[S]["credit"][]; initiators: readonly OfferInitiatorDocuments<S>[] }
-  | { action: "push_to_xero"; xero_sync_status: InvoiceXeroSyncStatus }
+  | { action: "push_to_xero"; xero_sync_status: BillingXeroSyncStatus }
   /** `money_moved` is the server's `lineMoneyAgrees` answer, negated. */
   | { action: "edit_items"; money_moved: boolean }
   | ({ action: "add_credit"; lines: readonly CappedCreditLine[] } & CreditableContext<S>);

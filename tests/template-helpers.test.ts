@@ -43,8 +43,7 @@ import * as journalUtils from "../src/utils/journal.ts";
 import * as quantityAccountingUtils from "../src/utils/quantityAccounting.ts";
 import * as iconUtils from "../src/utils/icons.ts";
 import * as invoiceUtils from "../src/utils/invoices.ts";
-import * as invoiceXeroSyncUtils from "../src/utils/invoice-xero-sync.ts";
-import * as purchaseBillXeroSyncUtils from "../src/utils/purchase-bill-xero-sync.ts";
+import * as xeroSyncUtils from "../src/utils/xero-sync.ts";
 import * as fulfillmentUtils from "../src/utils/fulfillments.ts";
 import * as fulfillmentItemUtils from "../src/utils/fulfillment-items.ts";
 import * as fulfillmentBookingRowUtils from "../src/utils/fulfillment-booking-rows.ts";
@@ -247,11 +246,10 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // order field propagates to its downstream documents — sync machinery reading
   // two SCHEMAS, with nothing to render. Listed so the drift guard sees its exports.
   "shared-fields": sharedFieldUtils,
-  // Same exception as `documentDiff`: `utils/invoice-xero-sync.ts` compares an invoice
-  // against its Xero watermark sidecar — sync state no rendered document holds.
-  "invoice-xero-sync": invoiceXeroSyncUtils,
-  // The same for a bill.
-  "purchase-bill-xero-sync": purchaseBillXeroSyncUtils,
+  // Same exception as `documentDiff`: `utils/xero-sync.ts` compares a billing
+  // document or an order against its Xero watermark sidecar — sync state no
+  // rendered document holds.
+  "xero-sync": xeroSyncUtils,
   taxes: taxUtils,
   templates: templateUtils,
   stock: stockUtils,

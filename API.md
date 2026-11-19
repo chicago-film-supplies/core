@@ -43166,7 +43166,7 @@ interface BillingOfferContext {
   settlements: readonly OfferSettlement[];
   credits: readonly indexedAccess[];
   initiators: readonly OfferInitiatorDocuments<S>[];
-  xero_sync_status: InvoiceXeroSyncStatus;
+  xero_sync_status: BillingXeroSyncStatus;
 }
 ```
 
@@ -43578,7 +43578,7 @@ removed nor moved across bases.
 
 A per-line offer's key: the action and the line's path, the row identity.
 
-### `pushRefusal(side: S, doc: indexedAccess, status: InvoiceXeroSyncStatus): string | null`
+### `pushRefusal(side: S, doc: indexedAccess, status: BillingXeroSyncStatus): string | null`
 
 Why an operator may not ask for this billing document to be pushed to Xero, or
 `null`. One refusal (F15 item 4): a status that tracks Xero edits, a sync
@@ -45038,6 +45038,20 @@ one group, or only lost/damaged lines, and lacks the rest.)
 What fails is a divider the ORDER owns carried at another path, or a missing
 one whose lines moved.
 
+### `invoiceStatusTracksXeroEdits(status: string): boolean`
+
+**May a billing document in this status track CFS edits in Xero?** The status
+half of `billingXeroSyncStatus` (`utils/xero-sync.ts`), for a caller that has
+not read the watermark — the Eventarc enqueue gate, the edit task's liveness
+check, `push_to_xero`'s offer. Reads the status contract's `tracks_xero_edits`
+column. `true` for `paid`, whose hash is then the question: ask
+`billingXeroSyncStatus` with the real watermark, never with `null` standing in
+for "status only".
+
+Here rather than in `utils/xero-sync.ts` because `pushRefusal`
+(`utils/document-actions.ts`) calls it as a value, and that module is imported
+by `xero-sync.ts`: putting it there would be a runtime import cycle.
+
 ### `isInExtensionSection(path: readonly string[], orderDividerUid: string, targets: ReadonlyMap<string, readonly string[]>): boolean`
 
 Is this invoice item an extension divider, or anywhere beneath one?
@@ -45812,158 +45826,6 @@ written at issue described a body an edit would not have sent.
 A `custom-` line is never matched to a product, whatever the caller passes.
 The tax mapping and the money stay in the API (`XeroTaxContext`,
 `xeroLineMoney`).
-
-## `@cfs/core/utils/invoice-xero-sync`
-
-**Is this issued invoice's Xero twin up to date?** — answered from the invoice
-and its `invoices/{uid}/xero-sync/state` watermark alone, with no Xero call.
-
-## Why it exists (api-cloudrun#1009, gate (c) of the order-propagation plan)
-
-An edit to an issued invoice reaches Xero through `/tasks/push-xero-invoice`.
-When that push does not land — Xero refuses the payload (the task is dropped),
-Cloud Tasks exhausts its retries, the day budget defers it to abandonment, or
-the invoice needs manual intervention (payments applied) — the only record was
-a log line. The invoice looked fine.
-
-So the state is DERIVED rather than recorded: the watermark's `pushed_hash` holds
-the hash of {@link invoiceXeroProjection} as of the last push that SUCCEEDED, and the invoice
-is out of sync whenever its current projection hashes differently. Every failure
-mode above leaves the watermark behind, so every one shows, including those no
-handler ever observes (a dropped task, a retry exhausted after the process died).
-
-## One author for the projection
-
-The projection hash is ONE key with three readers: the enqueue gate
-({@link shouldPushInvoiceToXero}), the task's supersede check (the task payload
-carries the hash it was enqueued for), and the manager's out-of-sync badge
-({@link invoiceXeroSyncStatus}). It lives here so the three cannot disagree
-about what "the part Xero carries" means.
-
-⚠️ **The gate compares against the WATERMARK, never old-vs-new** (api-cloudrun#1332).
-The gate used to diff the old and new projections while the task superseded on
-`version`. A settlement or a no-op PUT moves `version` and not the projection,
-so it superseded the newest edit's task without re-arming one, and prod #2459
-lost a $44.20 replacement line. Gated on the watermark, every write to a stale
-invoice re-enqueues until a push lands. This is the order-quote push's design
-(`api-cloudrun/src/services/orderDocWritten.ts`, gated on its `pushed_hash`).
-
-### `InvoiceXeroSyncStatus`
-
-- `in_sync` — the invoice's Xero-carried fields are what was last pushed.
-- `out_of_sync` — they have changed since, and no push has landed; OR the invoice
-  is issued and has no `xero_id` at all, because the issue POST never landed
-  (a non-throttle refusal is logged and the status flip is not rolled back). For
-  the moment between the status commit and the POST this reads out of sync too,
-  which is true.
-- `unknown` — linked and live, but no push has recorded a projection hash: no
-  sidecar, or one written before this carried a hash (its `pushed_hash` is the
-  old `v<version>` spelling). Not a claim either way.
-- `not_applicable` — no Xero twin to keep in step: a draft or a void. A `paid`
-  invoice with no recorded hash reads this too — its status's
-  `tracks_xero_edits` is `"once_pushed"`.
-
-```ts
-type InvoiceXeroSyncStatus = "in_sync" | "out_of_sync" | "unknown" | "not_applicable";
-```
-
-### `canonicalJson(value: unknown): string`
-
-Stable JSON serialization: object keys are sorted recursively so the output
-is invariant to key insertion order.
-
-This matters for hashing a Firestore-event document: `unwrapProtoValue`
-(api-cloudrun `firestoreEvent.ts`) builds maps by iterating a proto field map
-whose order is not guaranteed stable across redeliveries, so a plain
-`JSON.stringify` would let the hash flap and defeat dedup on redelivery.
-Arrays keep their order (order is semantic there). Any object exposing
-`toJSON` (e.g. a firebase-admin `Timestamp`, which serializes to a stable
-`{_seconds,_nanoseconds}`) is emitted via its `toJSON` form rather than
-recursed into.
-
-### `hash48(input: string): string`
-
-48-bit FNV-1a of a string, base36 — compact, deterministic, no deps.
-
-### `invoiceSettlementsHeldByXero(settlements: readonly T[]): T[]`
-
-The live invoice-settling rows that **Xero holds** — a payment or credit
-allocation Xero has an id for (`SETTLEMENT_CONTRACTS[type].xero_id_field` set on
-the row). Xero refuses an edit to an invoice carrying one, so the edit push
-stops at a manual seam when this is non-empty.
-
-⚠️ **Not CFS's `status` or `amount_paid_cents`.** A payment an operator records
-in CFS has no Xero id until Xero reports it, and Xero accepts an edit until then.
-Keying on what CFS holds refused edits Xero would have taken. When CFS lags
-Xero (a payment is in Xero and not yet reaped), this reads empty and Xero's own
-ValidationException is the seam.
-
-Reversed rows are skipped ({@link liveSettlements}); reversers carry no Xero id
-by contract, so they never count.
-
-### `invoiceStatusTracksXeroEdits(status: string): boolean`
-
-**May an invoice in this status track CFS edits in Xero?** The status half of
-{@link invoiceXeroSyncStatus}, for a caller that has not read the watermark — the
-Eventarc enqueue gate, the edit task's liveness check, `push_to_xero`'s offer.
-`true` for `paid`, whose hash is then the question: ask `invoiceXeroSyncStatus`
-with the real watermark, never with `null` standing in for "status only".
-
-### `invoiceXeroProjection(invoice: Partial<Invoice>): unknown`
-
-The part of an invoice that the Xero update body is built from.
-
-⚠️ **Money totals and `status` are deliberately absent.** A settlement writer
-advances `version` and moves `status` / `amount_*_cents` without touching a
-line, and Xero learns of a payment from its own ledger, not from a push.
-
-⚠️ **Lines are projected to what the body reads, never compared whole.**
-api-cloudrun's `assembleXeroInvoiceUpdateBody` reads, per billable line: `uid`,
-`name`, `quantity`, `coa_revenue`, `price.subtotal_cents`, `price.discount`,
-and each tax's `uid` and `amount_cents`. Comparing `items` whole made every
-key-only change a real Xero POST (api-cloudrun#993). api-cloudrun's
-`api-cloudrun/tests/unit/xeroInvoiceEdit.test.ts` perturbs every leaf of a real line through
-the real assembler, so a field the body starts reading cannot be missing here
-unnoticed.
-
-⚠️ **The line's `uid_tracking_category` is hashed because the body sends the
-LINE's category's tracking option** (`xeroAccrecLineRefs`,
-`@cfs/core/utils/invoices`). Without it a tracking-only edit never moved the
-hash and was never enqueued. It replaced the two stored fields (the name and
-the option id) in the line-tracking-uid campaign, which made every hashed
-invoice read changed once — the migration's window deletes the tasks that
-mints, so each one pushes on its next REAL write.
-
-⚠️ The option id itself is not hashed: it is looked up from the category doc
-at build time, so a category re-pointed to another Xero option does not move
-any invoice's hash.
-
-### `invoiceXeroProjectionHash(invoice: Partial<Invoice>): string`
-
-The hash a successful push records as the invoice sidecar's `pushed_hash`.
-
-### `invoiceXeroSyncStatus(invoice: Pick<Invoice, "status" | "xero_id"> & Partial<Invoice>, state: Pick<XeroSyncState, "pushed_hash"> | null): InvoiceXeroSyncStatus`
-
-See {@link InvoiceXeroSyncStatus}. `state` is the watermark, or `null` when absent.
-
-### `shouldPushInvoiceToXero(old: Partial<Invoice> | null | undefined, next: Partial<Invoice> | null | undefined, state: Pick<XeroSyncState, "pushed_hash"> | null): boolean`
-
-**Should this write enqueue a Xero edit push?** The one enqueue gate for an
-issued invoice (api-cloudrun#1332).
-
-- `old.xero_id` must be set. The issue path patches `xero_id` onto the invoice
-  before it writes the watermark, so that write would read `unknown` and enqueue
-  an edit push for an invoice whose create POST has only just landed. The old
-  side is what tells the two apart.
-- The new state must read `out_of_sync` or `unknown` against the watermark.
-  `unknown` enqueues because no push has recorded a hash yet, and a push that
-  finds nothing to change is cheap. `void` and `draft` read
-  `not_applicable`, so they never enqueue; so does a `paid` invoice no push has
-  recorded a hash for.
-
-Nothing here compares `old` to `next`. A write that changes no Xero-carried
-field still enqueues while an earlier edit's push has not landed. That is the
-point: the earlier task may already have been superseded by this write.
 
 ## `@cfs/core/utils/fulfillment-booking-rows`
 
@@ -53445,69 +53307,6 @@ mirror, manager's rate editors) before core#146 moved it here.
 - `changedAt` — an ISO instant; snapped to its Chicago calendar day.
 - `mintUid` — the new row's uid; injectable so a test can pin it.
 
-## `@cfs/core/utils/purchase-bill-xero-sync`
-
-**Is this pushed bill's Xero twin up to date?** Answered from the bill and its
-`purchase-bills/{uid}/xero-sync/state` watermark alone, with no Xero call. The
-supplier side's twin of `utils/invoice-xero-sync.ts`, and derived the same way:
-the watermark holds the hash of what the last SUCCESSFUL push carried, so every
-way a push can fail leaves the bill reading out of sync.
-
-## Why a second hash on the watermark
-
-A bill's `pushed_hash` hashes the API-built body, which folds in the product's
-`xero_code` and the category's Xero option. The manager cannot compute that, and
-a product change moved it for no edit anyone made, so the daily sweep sent an
-unrequested Xero edit. {@link purchaseBillXeroProjectionHash} is a pure function
-of the bill, stored as `pushed_projection_hash`. `pushed_hash` could not simply
-change meaning: stored watermarks hold the old value, and every one would read
-as an edit.
-
-### `PurchaseBillXeroFields`
-
-The part of a bill the Xero body is built from.
-
-```ts
-type PurchaseBillXeroFields = Pick<PurchaseBill, "items" | "date" | "due_date" | "reference">;
-```
-
-### `PurchaseBillXeroSyncStatus`
-
-- `in_sync` — Xero carries this bill as it stands.
-- `out_of_sync` — it does not, or the bill never reached Xero at all.
-- `unknown` — no push has recorded a projection hash yet. Not a claim either way.
-- `not_applicable` — a settled linked bill (CFS sends it nothing but tracking) or a void one.
-
-```ts
-type PurchaseBillXeroSyncStatus = "in_sync" | "out_of_sync" | "unknown" | "not_applicable";
-```
-
-### `purchaseBillXeroProjection(bill: PurchaseBillXeroFields): unknown`
-
-Exactly what api-cloudrun's `buildPurchaseBillBody` reads of a bill.
-
-⚠️ **Lines keep their stored order**, which the body's line order follows.
-⚠️ Deliberately absent, each for a reason:
-- `uid` and `price`: the body reads neither (`amount_cents` is the money).
-- the contact: an edit sends back Xero's own.
-- totals and settlements: Xero learns of a payment from its own ledger.
-
-`api-cloudrun/tests/unit/purchaseBillXeroProjection.test.ts` perturbs every leaf
-through the real builder, so a field the body starts reading cannot be missing
-here unnoticed.
-
-### `purchaseBillXeroProjectionHash(bill: PurchaseBillXeroFields): string`
-
-The hash a successful push records as `pushed_projection_hash`.
-
-### `purchaseBillXeroSyncStatus(bill: PurchaseBillXeroFields & Pick<PurchaseBill, "origin" | "xero_id" | "totals" | "status">, state: Pick<XeroSyncState, "pushed_projection_hash"> | null): PurchaseBillXeroSyncStatus`
-
-See {@link PurchaseBillXeroSyncStatus}. `state` is the watermark, or `null` when absent.
-
-⚠️ **A settled bill still compares.** Out of sync is a true statement about Xero
-whether or not CFS can do anything about it; a settled bill only loses the push
-(`pushRefusal`, `@cfs/core/utils/document-actions`).
-
 ## `@cfs/core/utils/purchase-documents`
 
 Purchase → bill: the projector, the "already billed" readers and the
@@ -59386,3 +59185,187 @@ merely starts with the running repo's is swept in.
 ### `resolveSpecifier(path: string): string`
 
 Apply {@link JSR_PREFIXES}; a non-specifier path is returned untouched.
+
+## `@cfs/core/utils/xero-sync`
+
+**Is a billing document's (or an order's quote's) Xero twin up to date?** One
+projection, one sync status and one push gate for both sides, answered from the
+document and its `{orders,invoices,purchase-bills}/{uid}/xero-sync/state`
+watermark alone, with no Xero call (one-document-model F16, ruling 45).
+
+## The projection is declared on the SCHEMA (rulings 120, 124, 125)
+
+Every leaf a Xero body reads carries `.meta({ xero: true })` ({@link XERO_META_KEY})
+on its declaration, and {@link xeroProjection} walks the tagged leaves of a
+document into a canonical object. There is no hand list: the two per-side
+projections this replaced (`invoiceXeroProjection`, `purchaseBillXeroProjection`)
+each restated what their body builder read, and the quote's hash read no field
+at all.
+
+- **A tag on a shared core tags every grain that spreads it**, as `propagate`
+  does: `tests/item-shape-parity.test.ts` asserts instance identity, so a
+  per-site tag on `LineItemCore.name` is unrepresentable. The tagged sets are
+  therefore unions of what the bodies read on a shared node; the cores' tags
+  also land, inert, on fulfillments, receipts, purchases and credits, which
+  nothing walks. `tests/xero-sync.test.ts` pins the set per walked schema.
+- **A shared BLOCK is tagged at the KEY that holds it** (`price.discount`,
+  `price.taxes`), and the tag is inherited by every leaf beneath it, as `pii`
+  is; never inside `Discount` / `PriceModifier`, which would tag
+  `totals.taxes[]` and every other grain's copies.
+- **An `items[]` element is narrowed to its arm by discriminator**, and an arm
+  with no tag (a divider) emits nothing at all: it is dropped, not an empty
+  entry, so adding or moving a divider does not move the hash.
+- The tag is read from the MERGED meta through wrappers and pipes, never from
+  instance identity (`.meta()` clones).
+
+🔴 **A tag is a claim; the BODY is the oracle.** api-cloudrun's leaf-perturbation
+tests drive the real body builders (`tests/unit/xeroInvoiceEdit.test.ts`,
+`tests/unit/purchaseBillXeroProjection.test.ts`) and assert both directions:
+every leaf the body reads moves the hash, and a leaf it does not read moves
+neither.
+
+## One meaning per watermark field, all three parents
+
+`pushed_hash` is {@link xeroProjectionHash} as of the last push that SUCCEEDED;
+`pushed_body_hash` the hash of the body last sent. Every way a push can fail
+leaves the watermark behind, so every one shows as out of sync.
+
+### `BillingXeroDocuments`
+
+A billing document as the Xero sync reads it, per side.
+
+```ts
+interface BillingXeroDocuments {
+  receivable: Pick<Invoice, "status" | "xero_id"> & Partial<Invoice>;
+  payable: Pick<PurchaseBill, "status" | "xero_id" | "origin" | "totals"> & Partial<PurchaseBill>;
+}
+```
+
+### `BillingXeroSyncStatus`
+
+- `in_sync` — the Xero-carried fields are what was last pushed.
+- `out_of_sync` — they have changed since and no push has landed; or the
+  document is live and has no `xero_id` at all, because its create never landed.
+- `unknown` — linked and live, but no push has recorded a hash. Not a claim either way.
+- `not_applicable` — no Xero twin to keep in step: a draft or a void; a
+  `paid` / `credited` document no push has recorded a hash for (its status's
+  `tracks_xero_edits` is `"once_pushed"`); a LINKED payable document once
+  settled (its money is Xero's, so CFS sends it nothing).
+
+```ts
+type BillingXeroSyncStatus = "in_sync" | "out_of_sync" | "unknown" | "not_applicable";
+```
+
+### `XERO_META_KEY`
+
+The meta key that marks a leaf a Xero body reads: `.meta({ xero: true })`. On
+an object or array key it covers every leaf beneath; `xero: false` beneath
+opts back out.
+
+⚠️ Meta keys are untyped, so a misspelt tag is silent. The pinned-path test in
+`tests/xero-sync.test.ts` is the only guard.
+
+```ts
+const XERO_META_KEY: "xero";
+```
+
+### `XeroProjectionResult`
+
+The result of {@link collectXeroProjection}. `unhandled` MUST be empty.
+
+```ts
+interface XeroProjectionResult {
+  projection: Record<string, unknown>;
+  unhandled: Array<typeLiteral>;
+}
+```
+
+### `XeroQuoteDerivedInputs`
+
+The inputs a quote body reads that are not stored leaves of the order — each
+moves the hash (`tests/xero-sync.test.ts`).
+
+- `target_status` — api-cloudrun's `computeXeroQuoteTargetStatus(order)`. An
+  invoice issue or void moves `order.invoices[].status` without bumping
+  `version`, and the expiry sweep moves nothing stored at all, so the target
+  is what reopens the gate for both.
+- `delivery_start` — `deriveOrderDateEnvelope(destinations).delivery_start`,
+  which the body's `Date` and `ExpiryDate` read. Derived rather than tagged
+  because the pair schema is shared with invoices and bills, and a tag there
+  would move their hashes on every pair date edit.
+
+```ts
+interface XeroQuoteDerivedInputs {
+  target_status: string | null;
+  delivery_start: string | null;
+}
+```
+
+### `billingXeroProjectionHash(side: S, doc: Partial<indexedAccess>): string`
+
+The hash a successful push records as a billing document's `pushed_hash`.
+
+### `billingXeroSyncStatus(side: S, doc: indexedAccess, state: Pick<XeroSyncState, "pushed_hash"> | null): BillingXeroSyncStatus`
+
+See {@link BillingXeroSyncStatus}: one function, both sides, on the status
+contract's `tracks_xero_edits` column. `state` is the watermark, or `null`
+when absent.
+
+⚠️ **A settled pushed document still compares.** Out of sync is a true
+statement about Xero whether or not CFS can do anything about it; settlement
+only loses the push (`pushRefusal`).
+
+### `collectXeroProjection(schema: z.ZodType, doc: unknown): XeroProjectionResult`
+
+Walk `doc` against `schema`, keeping every leaf tagged {@link XERO_META_KEY}.
+Fails closed: a node it cannot interpret lands in `unhandled`.
+
+### `invoiceSettlementsHeldByXero(settlements: readonly T[]): T[]`
+
+The live invoice-settling rows that **Xero holds** — a payment or credit
+allocation Xero has an id for (`SETTLEMENT_CONTRACTS[type].xero_id_field` set
+on the row). Xero refuses an edit to an invoice carrying one, so the edit push
+stops at a manual seam when this is non-empty.
+
+⚠️ **Receivable-only and unkeyed** (`settles === "invoice"`), until ruling 44's
+one settlement model: the bill push reads Xero's own status instead.
+
+⚠️ **Not CFS's `status` or `amount_paid_cents`.** A payment an operator records
+in CFS has no Xero id until Xero reports it, and Xero accepts an edit until
+then. When CFS lags Xero, this reads empty and Xero's own ValidationException
+is the seam. Reversed rows are skipped; reversers carry no Xero id by contract.
+
+### `shouldPushBillingToXero(side: S, old: Partial<indexedAccess> | null | undefined, next: Partial<indexedAccess> | null | undefined, state: Pick<XeroSyncState, "pushed_hash"> | null): boolean`
+
+**Should this write enqueue a Xero edit push?** The one enqueue gate, both
+sides (ruling 122; api-cloudrun#1332).
+
+- `old.xero_id` must be set. The create path patches `xero_id` onto the
+  document before it writes the watermark, so that write would read `unknown`
+  and enqueue an edit push for a document whose create has only just landed.
+- The new state must read `out_of_sync` or `unknown` against the watermark.
+
+Nothing here compares `old` to `next`. A write that changes no Xero-carried
+field still enqueues while an earlier edit's push has not landed: the earlier
+task may already have been superseded by this write.
+
+### `xeroProjection(schema: z.ZodType, doc: unknown): Record<string, unknown>`
+
+{@link collectXeroProjection}'s projection; throws when the walk is incomplete.
+
+### `xeroProjectionHash(schema: z.ZodType, doc: unknown): string`
+
+The hash of {@link xeroProjection}: what `pushed_hash` records.
+
+### `xeroQuoteProjection(order: Partial<Order> & Pick<Order, "destinations">, targetStatus: string | null): typeLiteral`
+
+The order's tagged leaves plus {@link XeroQuoteDerivedInputs}.
+
+### `xeroQuoteProjectionHash(order: Partial<Order> & Pick<Order, "destinations">, targetStatus: string | null): string`
+
+The hash an order's quote sidecar records as `pushed_hash`; the quote gate and supersede key.
+
+### `xeroTaggedPaths(schema: z.ZodType): string[]`
+
+The static set of tagged leaf paths of `schema` (`collectLeafPaths` with the
+tag inherited), sorted and deduplicated. Throws when the walk is incomplete.
