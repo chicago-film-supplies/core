@@ -30,8 +30,8 @@
  *   instance identity (`.meta()` clones).
  *
  * 🔴 **A tag is a claim; the BODY is the oracle.** api-cloudrun's leaf-perturbation
- * tests drive the real body builders (`tests/unit/xeroInvoiceEdit.test.ts`,
- * `tests/unit/purchaseBillXeroProjection.test.ts`) and assert both directions:
+ * tests drive the real body builders (`api-cloudrun/tests/unit/xeroInvoiceEdit.test.ts`,
+ * `api-cloudrun/tests/unit/purchaseBillXeroProjection.test.ts`) and assert both directions:
  * every leaf the body reads moves the hash, and a leaf it does not read moves
  * neither.
  *
