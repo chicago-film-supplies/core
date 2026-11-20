@@ -583,7 +583,7 @@ const PURCHASE_CREDIT_ALLOCATED: EnforcementRef = {
 const SUPPLIER_REFUND_FOLDED: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/purchases/purchaseCreditSettlements.test.ts::refund — a supplier refund Xero reports appends one supplier_refund row and refolds the credit, and a reap reverses it",
+    "api-cloudrun/tests/integration/purchases/purchaseCreditSettlements.test.ts::refund — a supplier refund Xero reports appends one refund row and refolds the credit, and a reap reverses it",
   clause:
     "a payment Xero lists on a tracked ACCPAYCREDIT that CFS holds no live row for is appended as one refund row naming the credit (keyed on the credit, the PaymentID and a generation), and the credit's remaining_credit_cents is its journal folded in the same commit; a redelivery writes nothing; a linked row Xero stops listing is reversed (source_retracted) and the credit refolded",
   gates: true,

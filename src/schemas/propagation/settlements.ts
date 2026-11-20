@@ -85,7 +85,7 @@ const SETTLEMENT_BUMPS_VERSION: EnforcementRef = {
 const BILL_PAYMENT_SYNCED: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/purchases/purchaseBillSettlements.test.ts::webhook — a Xero payment on a pushed bill appends one bill_payment row and folds the bill; a redelivery appends nothing",
+    "api-cloudrun/tests/integration/purchases/purchaseBillSettlements.test.ts::webhook — a Xero payment on a pushed bill appends one payment row and folds the bill; a redelivery appends nothing",
   clause:
     "a payment Xero reports on a tracked ACCPAY and CFS has not recorded is appended as a payment row keyed (bill, PaymentID, generation); the bill's totals are the journal folded; replaying the same payload writes nothing and does not bump the bill's version",
   gates: true,
@@ -94,7 +94,7 @@ const BILL_PAYMENT_SYNCED: EnforcementRef = {
 /** The payable reap, asserted on a payment removed in Xero. */
 const BILL_PAYMENT_REAPED: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/purchases/purchaseBillSettlements.test.ts::webhook — a payment Xero stops reporting is reaped by a bill_payment_reversal",
+  ref: "api-cloudrun/tests/integration/purchases/purchaseBillSettlements.test.ts::webhook — a payment Xero stops reporting is reaped by a payment_reversal",
   clause:
     "a linked payment row whose Xero id Xero no longer lists (the Payments key present) gets a payment_reversal with reason source_retracted; a card bill's born-paid row is never reaped, since a bank_transaction bill takes no Payment reap",
   gates: true,
@@ -104,7 +104,7 @@ const BILL_PAYMENT_REAPED: EnforcementRef = {
 const BILL_VOIDED: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/purchases/purchaseBillSettlements.test.ts::webhook — a bill voided in Xero appends one bill_void, retracts its payments and releases its lines",
+    "api-cloudrun/tests/integration/purchases/purchaseBillSettlements.test.ts::webhook — a bill voided in Xero appends one void row, retracts its payments and releases its lines",
   clause:
     "a tracked ACCPAY that Xero reports VOIDED or DELETED retracts every live payment, appends one void for total_cents and folds the bill to amount_due_cents 0, all in one commit, so the billing fold stops counting it; a redelivered void moves nothing",
   gates: true,
@@ -124,7 +124,7 @@ const BILL_VOIDED_FROM_CFS: EnforcementRef = {
 const XERO_CREDIT_FOLDED: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/purchases/purchaseCredits.test.ts::webhook — a credit allocated in Xero appends one bill_credit row and refolds the credit",
+    "api-cloudrun/tests/integration/purchases/purchaseCredits.test.ts::webhook — a credit allocated in Xero appends one credit row and refolds the credit",
   clause:
     "a supplier credit Xero reports allocated to a tracked bill, beyond what CFS's linked rows for that (bill, credit) hold, is first matched against CFS allocations Xero had not yet shown (linked, never duplicated) and the rest appended as a credit row; the bill and the credit are refolded in the same commit; a redelivery writes nothing",
   gates: true,

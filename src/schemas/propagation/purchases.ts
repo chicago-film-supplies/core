@@ -390,7 +390,7 @@ const BILL_MOVES_THE_BUCKET: EnforcementRef = {
 const CARD_BILL_BORN_PAID: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/purchases/purchaseBills.test.ts::link a card payment — the bill is born paid by one bill_payment row",
+    "api-cloudrun/tests/integration/purchases/purchaseBills.test.ts::link a card payment — the bill is born paid by one payment row",
   clause:
     "a linked bank_transaction bill appends exactly one payment row for its whole total in the same commit, keyed from the BankTransactionID, so amount_due_cents is 0 on the first write and a replay appends nothing",
   gates: true,
