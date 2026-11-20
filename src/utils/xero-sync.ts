@@ -409,3 +409,73 @@ export function settlementsHeldByXero<
     return s.xero_id !== null;
   });
 }
+
+// ── the line refs (6e-0b4 K2.3) ──────────────────────────────────────
+
+/** The product fields {@link xeroLineRefs} reads — a structural slice of `Product`. */
+export interface XeroLineProduct {
+  xero_tracking_option_id?: string | null;
+  xero_code?: string | null;
+}
+
+/**
+ * A tracking category's Xero option id, by `tracking-categories` uid — the
+ * lookup {@link xeroLineRefs} resolves a line's `uid_tracking_category`
+ * through. The API builds it from its category cache; a uid with no entry, or a
+ * `null` option, resolves to nothing.
+ */
+export type XeroOptionByCategoryUid = ReadonlyMap<string, string | null>;
+
+/** What one Xero line names besides its money and tax. */
+export interface XeroLineRefs {
+  /** Xero `AccountCode`: the posting account the caller passed. */
+  account_code: string;
+  /**
+   * The tracking option to send, or `null` for none. Not yet checked against
+   * Xero when it came from the product or is a custom line's own: the API's
+   * `resolveXeroTracking` drops (and logs) an option Xero does not know.
+   */
+  tracking_option_id: string | null;
+  /** Xero `ItemCode`: the product's own Xero code, or `null` to omit it. */
+  item_code: string | null;
+}
+
+/**
+ * **The one rule for which account, tracking option and item code a Xero line
+ * carries**, on both sides and every role (6e-0b4 K2.3, replacing the
+ * receivable-only `xeroAccrecLineRefs`).
+ *
+ * - **Account: the caller's.** The line's posting account differs by side
+ *   (`coa_revenue ?? product's ?? 4800` on a receivable initiator or billing
+ *   line until Phase 8, `ledger_account` everywhere else), and a side branch
+ *   here is what `SIDE_COMPARISON_RE` refuses, so the caller passes it.
+ * - **Tracking: the line's category's option when Xero still knows it, else
+ *   the product's** (owner, 2026-10-26). The option is looked up from the
+ *   line's `uid_tracking_category` through `optionByCategoryUid` at build time;
+ *   the line stores no option id. An option Xero has since retired falls back
+ *   rather than sending none. A line with no product sends its own category's.
+ * - **Item code: the product's `xero_code`**, never `crms_id` (#256).
+ *
+ * A `custom-` line is never matched to a product, whatever the caller passes.
+ * The tax mapping and the money stay in the API.
+ */
+export function xeroLineRefs(
+  line: { uid: string; uid_tracking_category?: string | null },
+  product: XeroLineProduct | undefined,
+  accountCode: string,
+  optionByCategoryUid: XeroOptionByCategoryUid,
+  knownTrackingOptionIds: ReadonlySet<string>,
+): XeroLineRefs {
+  const p = line.uid.startsWith("custom-") ? undefined : product;
+  const lineOption = line.uid_tracking_category == null
+    ? null
+    : optionByCategoryUid.get(line.uid_tracking_category) ?? null;
+  const productOption = p?.xero_tracking_option_id ?? null;
+  return {
+    account_code: accountCode,
+    tracking_option_id: lineOption !== null && knownTrackingOptionIds.has(lineOption)
+      ? lineOption
+      : productOption ?? lineOption,
+    item_code: p?.xero_code ?? null,
+  };
+}

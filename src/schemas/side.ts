@@ -155,11 +155,21 @@ export type SideTax = "resolved" | "exempt";
  */
 export type XeroLineMoney = "exact_split" | "unit_amount";
 
-/** The billing and credit documents, the two roles that post lines to Xero. */
-export type XeroDocumentRole = "billing" | "credit";
-
 /** The roles whose lines state an account: the initiator, its billing documents, and its credits. */
 export type PostingRole = "initiator" | "billing" | "credit";
+
+/**
+ * How a line's money is stated (one-document-model ruling 40, 6e-0b4 K7): from
+ * its `rates` (`rate`), or as a gross total over its quantity in
+ * `price.stated_cents` (`stated`). `lineKindOf` (`schemas/_line-money.ts`) is the
+ * one predicate.
+ *
+ * Explicit tuple type rather than `as const` alone: core#43 is JSR's npm `.d.ts`
+ * emit truncating an inferred tuple.
+ */
+export const LINE_KINDS: readonly ["rate", "stated"] = ["rate", "stated"];
+/** One {@link LINE_KINDS} member. */
+export type LineKind = typeof LINE_KINDS[number];
 
 /** One side's entries. Total over {@link SharedLineType}, so a new type is a compile error until both sides state it. */
 export interface SideContract {
@@ -178,8 +188,17 @@ export interface SideContract {
   custody: Readonly<Record<SharedLineType, LineCustody>>;
   /** How the side's lines are taxed. */
   tax: SideTax;
-  /** How each posting role's lines state their money. Xero takes no discount on a credit note, so the role decides too. */
-  xero_line_money: Readonly<Record<XeroDocumentRole, XeroLineMoney>>;
+  /**
+   * How a Xero line states its money, by posting role and then line kind (ruling
+   * 40). A stated line is `exact_split` on every role: its money is a total, and
+   * `exact_split` sends the NET with no discount channel. A rate line is
+   * `unit_amount` where Xero takes a `DiscountRate` (a receivable invoice and
+   * quote) and `exact_split` elsewhere: Xero takes no discount on a credit note,
+   * and a payable document is exact because nothing dedupes or discounts it. The
+   * payable `initiator` row is stated and unused, as in `posting_class` (a
+   * purchase posts nothing to Xero).
+   */
+  xero_line_money: Readonly<Record<PostingRole, Readonly<Record<LineKind, XeroLineMoney>>>>;
   /**
    * Which custody ladder the side's bookings stand on (C11): the outbound ladder
    * (`bookings`, `CUSTODY_RULES`) or the inbound one (`bookings-inbound`,
@@ -208,7 +227,11 @@ export const SIDE_CONTRACTS: Readonly<Record<Side, SideContract>> = {
     },
     custody: { sale: "custody", rental: "custody", service: "custody", replacement: "none" },
     tax: "resolved",
-    xero_line_money: { billing: "unit_amount", credit: "exact_split" },
+    xero_line_money: {
+      initiator: { rate: "unit_amount", stated: "exact_split" },
+      billing: { rate: "unit_amount", stated: "exact_split" },
+      credit: { rate: "exact_split", stated: "exact_split" },
+    },
     custody_ladder: "outbound",
     settlement_type_labels: {
       payment: "Payment",
@@ -253,7 +276,11 @@ export const SIDE_CONTRACTS: Readonly<Record<Side, SideContract>> = {
     },
     custody: { sale: "custody", rental: "custody", service: "none", replacement: "none" },
     tax: "exempt",
-    xero_line_money: { billing: "exact_split", credit: "exact_split" },
+    xero_line_money: {
+      initiator: { rate: "exact_split", stated: "exact_split" },
+      billing: { rate: "exact_split", stated: "exact_split" },
+      credit: { rate: "exact_split", stated: "exact_split" },
+    },
     custody_ladder: "inbound",
     settlement_type_labels: {
       payment: "Payment",

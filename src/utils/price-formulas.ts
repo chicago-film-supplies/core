@@ -616,6 +616,7 @@ export function meanTierCounts(rows: readonly { quantity: number; counts: readon
 export {
   type FormulaDiscount,
   lineDiscountAtCents,
+  lineKindOf,
   type LineMoneyLike,
   lineMoneyAtCents,
   lineUnitsCents,
@@ -628,6 +629,7 @@ export {
   priceFromFormula,
   type RateSnapshot,
   statedLine,
+  statedOf,
 } from "../schemas/_line-money.ts";
 import type { RateSnapshot } from "../schemas/_line-money.ts";
 import type { DocLineItemTypeType } from "../schemas/common.ts";

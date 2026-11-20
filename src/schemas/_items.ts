@@ -161,11 +161,15 @@ export const LineItemCore: {
   // (order, invoice, fulfillment, and their input schemas) states one answer.
   // Consequence: it survives fixture sanitization verbatim and appears raw in
   // logs — the same posture `name` has always had.
+  //
+  // `xero: true` (6e-0b4 ruling 146): every Xero body sends `description || name`
+  // as a line's `Description`, so the sync status reads it.
   description: z.string().meta({
     pii: "none",
     column: true,
     label: "Description",
     propagate: true,
+    xero: true,
   }),
 
   // ⚠️ **`.min(0)` is the tightening.** The invoice declared `z.int()` with no
@@ -320,7 +324,7 @@ export const LINE_TAX_FIELDS: readonly ["uid_tax_class", "uid_tax_class_override
  * **Required and nullable** on every stored priced line, because the line
  * comparator compares KEY SETS first — an absent key read as different has
  * caused three past incidents. `null` is a real answer on both: a custom line
- * has no product to post as (Xero still gets 4800 via `xeroAccrecLineRefs`),
+ * has no product to post as (Xero still gets 4800 via `xeroLineRefs`, `utils/xero-sync.ts`),
  * and a product may have no category. The 2026-10-28 migration
  * (an api-cloudrun one-shot, since deleted) states both keys on
  * every stored order and invoice line.

@@ -265,8 +265,8 @@ export const XERO_EVENT_MSGS = [
   //
   // Deliberately a warn, not a throw. Money resolves or fails; reporting
   // metadata degrades and says so. Carries `xero_tracking_option_id` +
-  // `uid_tracking_category` + `uid_product` + `item_name`, and whichever of `invoice_uid`/`uid_order`
-  // identifies the document being pushed.
+  // `uid_tracking_category` + `uid_product` + `item_name`, and whichever of `invoice_uid`/`uid_order`/
+  // `uid_credit_note`/`uid_purchase_bill`/`uid_purchase_credit` identifies the document being pushed.
   "xero_tracking_option_unresolved",
   "xero_tracking_option_update_failed",
   "xero_void_failed",
@@ -367,6 +367,8 @@ export interface XeroEventLogRecord {
   xero_error?: string;
   invoice_number?: number;
   invoice_uid?: string;
+  /** The credit note a pushed line belongs to (6e-0b4 K7): its tracking and unmapped-tax warns. */
+  uid_credit_note?: string;
   /** The order a quote push or a tracked line belongs to. */
   uid_order?: string;
   /**
@@ -484,6 +486,7 @@ export const XeroEventLogRecordSchema: z.ZodType<XeroEventLogRecord> = z.object(
   xero_error: z.string().optional(),
   invoice_number: z.number().optional(),
   invoice_uid: z.string().optional(),
+  uid_credit_note: z.string().optional(),
   uid_order: z.string().optional(),
   /** @deprecated Use `uid_order`. */
   order_uid: z.string().optional(),

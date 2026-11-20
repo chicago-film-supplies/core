@@ -14,6 +14,7 @@
  */
 import { ITEM_CONTRACTS, type ItemTypeType, type RateType } from "./common.ts";
 import { roundDivHalfAwayFromZero, toCentsBig } from "../utils/money.ts";
+import type { LineKind } from "./side.ts";
 
 /** One tier's exact metered count — `TierCount`, `@cfs/core/utils/price-formulas`. */
 interface TierCountLike {
@@ -129,12 +130,28 @@ export interface LineMoneyLike {
   };
 }
 
-function statedOf(line: LineMoneyLike): number | null {
+/**
+ * **The one predicate for how a line's money is stated** (6e-0b4 K7): `stated`
+ * when it carries `price.stated_cents`, else `rate`. A stated total GOVERNS a
+ * line that also carries rates (a LINKED time line). It reads the key alone, so
+ * it answers for any line, a `transaction_fee` included (whose stored money is
+ * a rate line's); {@link statedOf} is the money step's guarded read of it.
+ */
+export function lineKindOf(line: { price: { stated_cents?: number | null } }): LineKind {
+  return (line.price.stated_cents ?? null) === null ? "rate" : "stated";
+}
+
+/**
+ * A pre-tax line's stated gross, or `null` for a rate line ({@link lineKindOf}).
+ * Throws on a line whose money is the document's (`pricing` other than
+ * `pre_tax`), and on a non-integer total.
+ */
+export function statedOf(line: LineMoneyLike): number | null {
   if (line.type !== undefined && ITEM_CONTRACTS[line.type].pricing !== "pre_tax") {
     throw new Error(`A "${line.type}" line has no line money of its own (pricing "${ITEM_CONTRACTS[line.type].pricing}")`);
   }
-  const stated = line.price.stated_cents ?? null;
-  if (stated === null) return null;
+  if (lineKindOf(line) === "rate") return null;
+  const stated = line.price.stated_cents as number;
   if (!Number.isInteger(stated)) throw new Error(`price.stated_cents is integer cents, got ${stated}`);
   // A stated total GOVERNS a line that also carries rates: a LINKED time line's
   // money is Xero's, and its rates are the formula's, kept for the record.

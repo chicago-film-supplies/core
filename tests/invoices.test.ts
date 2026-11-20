@@ -33,7 +33,6 @@ import {
   syncOrderToInvoiceSelective,
   validateInvoiceItemPaths,
   validateInvoiceItemUniqueness,
-  xeroAccrecLineRefs,
 } from "../src/utils/invoices.ts";
 import type {
   InvoiceDocItemType,
@@ -3302,47 +3301,6 @@ Deno.test("syncOrderItems — the hard snap discards an override but KEEPS a los
   const lost = result.find((r) => r.uid === ITEM_2) as InvoiceItem | undefined;
   assert(lost, "a line billing a lost/damaged record has no order counterpart, so the rebuild keeps it");
   assertEquals(lost.out_of_service, [{ uid: "Oos00000000000000001", quantity: 1 }]);
-});
-
-// ── D6: the one ACCREC line mapper ───────────────────────────────────
-
-Deno.test("D6 xeroAccrecLineRefs: account, tracking and item code — line first, product fallback", () => {
-  const known = new Set(["opt-line", "opt-product"]);
-  // The line names a category by uid; its option is looked up when the body is built.
-  const options = new Map<string, string | null>([
-    ["cat-line", "opt-line"],
-    ["cat-product", "opt-product"],
-    ["cat-retired", "opt-retired"],
-    ["cat-no-option", null],
-  ]);
-  const product = { price: { coa_revenue: 4000 as const }, xero_tracking_option_id: "opt-product", xero_code: "CAM-1" };
-  const cases: [string, Parameters<typeof xeroAccrecLineRefs>[0], typeof product | undefined, ReturnType<typeof xeroAccrecLineRefs>][] = [
-    ["override: the line's account and category's option win",
-      { uid: "cam", coa_revenue: 4100, uid_tracking_category: "cat-line" }, product,
-      { account_code: "4100", tracking_option_id: "opt-line", item_code: "CAM-1" }],
-    ["non-override: the line states the product's own values",
-      { uid: "cam", coa_revenue: 4000, uid_tracking_category: "cat-product" }, product,
-      { account_code: "4000", tracking_option_id: "opt-product", item_code: "CAM-1" }],
-    ["a line with neither falls back to the product",
-      { uid: "cam", coa_revenue: null, uid_tracking_category: null }, product,
-      { account_code: "4000", tracking_option_id: "opt-product", item_code: "CAM-1" }],
-    ["a line option Xero no longer knows falls back to the product's",
-      { uid: "cam", coa_revenue: 4100, uid_tracking_category: "cat-retired" }, product,
-      { account_code: "4100", tracking_option_id: "opt-product", item_code: "CAM-1" }],
-    ["a category the lookup does not know falls back to the product's",
-      { uid: "cam", coa_revenue: 4100, uid_tracking_category: "cat-unknown" }, product,
-      { account_code: "4100", tracking_option_id: "opt-product", item_code: "CAM-1" }],
-    ["a category whose option is null falls back to the product's",
-      { uid: "cam", coa_revenue: 4100, uid_tracking_category: "cat-no-option" }, product,
-      { account_code: "4100", tracking_option_id: "opt-product", item_code: "CAM-1" }],
-    ["a custom line sends its own category's option and never reads a product",
-      { uid: "custom-tent-repair", coa_revenue: 4700, uid_tracking_category: "cat-line" }, product,
-      { account_code: "4700", tracking_option_id: "opt-line", item_code: null }],
-    ["no product and no line account → 4800, no tracking, no item code",
-      { uid: "cam", coa_revenue: null, uid_tracking_category: null }, undefined,
-      { account_code: "4800", tracking_option_id: null, item_code: null }],
-  ];
-  for (const [label, line, p, want] of cases) assertEquals(xeroAccrecLineRefs(line, p, options, known), want, label);
 });
 
 Deno.test("a seeded billing pair states uid_source and no retired source key (ruling 109)", async () => {

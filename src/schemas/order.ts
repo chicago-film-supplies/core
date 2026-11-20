@@ -2619,8 +2619,8 @@ const OrderDocLineItemInner = z.strictObject({
   uid_order: FirestoreId.optional().meta({ propagate: true }),
   inclusion_type: z.enum(INCLUSION_TYPES_NULLABLE).nullable().optional().meta({ column: true, label: "Inclusion" }),
   // `propagate: false` — the CRMS line id is a different record on each document.
-  // `xero: true`: the quote body looks the line's product up by it (F16).
-  crms_id: z.int().nullable().optional().meta({ propagate: false, xero: true }),
+  // Untagged since 6e-0b4 K2.2: the quote body looks a line's product up by `uid`.
+  crms_id: z.int().nullable().optional().meta({ propagate: false }),
   // The account + the tracking category — one declaration shared with the
   // invoice line (`_items.ts`), both `propagate: true`. That reverses
   // manager#309's `propagate: false`: the invoice follows its order line on both

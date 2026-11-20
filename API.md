@@ -7144,6 +7144,20 @@ The {@link LedgerPostingCore} keys, for code that copies the posting between gra
 const LEDGER_POSTING_FIELDS: readonly ["ledger_account", "uid_tracking_category"];
 ```
 
+### `LINE_KINDS`
+
+How a line's money is stated (one-document-model ruling 40, 6e-0b4 K7): from
+its `rates` (`rate`), or as a gross total over its quantity in
+`price.stated_cents` (`stated`). `lineKindOf` (`schemas/_line-money.ts`) is the
+one predicate.
+
+Explicit tuple type rather than `as const` alone: core#43 is JSR's npm `.d.ts`
+emit truncating an inferred tuple.
+
+```ts
+const LINE_KINDS: readonly ["rate", "stated"];
+```
+
 ### `LINE_POSTING_FIELDS`
 
 The {@link LinePostingCore} keys, for code that copies the posting between grains.
@@ -7264,6 +7278,14 @@ freight line must never land on a receipt.
 type LineCustody = "custody" | "none";
 ```
 
+### `LineKind`
+
+One {@link LINE_KINDS} member.
+
+```ts
+type LineKind = indexedAccess;
+```
+
 ### `LinePostingCore`
 
 **Where the line's income POSTS, declared once for the two PRICED grains** — an
@@ -7288,7 +7310,7 @@ three-way merge's ordinary override, with no marker.
 **Required and nullable** on every stored priced line, because the line
 comparator compares KEY SETS first — an absent key read as different has
 caused three past incidents. `null` is a real answer on both: a custom line
-has no product to post as (Xero still gets 4800 via `xeroAccrecLineRefs`),
+has no product to post as (Xero still gets 4800 via `xeroLineRefs`, `utils/xero-sync.ts`),
 and a product may have no category. The 2026-10-28 migration
 (an api-cloudrun one-shot, since deleted) states both keys on
 every stored order and invoice line.
@@ -13743,7 +13765,7 @@ interface SideContract {
   posting_class: Readonly<Record<PostingRole, Readonly<Record<SharedLineType, PostingClass>>>>;
   custody: Readonly<Record<SharedLineType, LineCustody>>;
   tax: SideTax;
-  xero_line_money: Readonly<Record<XeroDocumentRole, XeroLineMoney>>;
+  xero_line_money: Readonly<Record<PostingRole, Readonly<Record<LineKind, XeroLineMoney>>>>;
   custody_ladder: BookingLadderType;
   settlement_type_labels: Readonly<Record<SettlementTypeType, string>>;
   settlement_reasons: SettlementReasons;
@@ -17351,14 +17373,6 @@ Zod schema for XeroBudget.
 
 ```ts
 const XeroBudgetSchema: z.ZodType<XeroBudget>;
-```
-
-### `XeroDocumentRole`
-
-The billing and credit documents, the two roles that post lines to Xero.
-
-```ts
-type XeroDocumentRole = "billing" | "credit";
 ```
 
 ### `XeroId`
@@ -38099,6 +38113,7 @@ interface XeroEventLogRecord {
   xero_error?: string;
   invoice_number?: number;
   invoice_uid?: string;
+  uid_credit_note?: string;
   uid_order?: string;
   order_uid?: string;
   uid_product?: string;
@@ -44414,41 +44429,6 @@ interface UnmatchedInvoiceLine {
 }
 ```
 
-### `XeroAccrecLineRefs`
-
-What one ACCREC Xero line names besides its money and tax.
-
-```ts
-interface XeroAccrecLineRefs {
-  account_code: string;
-  tracking_option_id: string | null;
-  item_code: string | null;
-}
-```
-
-### `XeroLineProduct`
-
-The product fields {@link xeroAccrecLineRefs} reads — a structural slice of `Product`.
-
-```ts
-interface XeroLineProduct {
-  price: typeLiteral;
-  xero_tracking_option_id?: string | null;
-  xero_code?: string | null;
-}
-```
-
-### `XeroOptionByCategoryUid`
-
-A tracking category's Xero option id, by `tracking-categories` uid — the
-lookup {@link xeroAccrecLineRefs} resolves a line's `uid_tracking_category`
-through. The API builds it from its category cache; a uid with no entry, or a
-`null` option, resolves to nothing.
-
-```ts
-type XeroOptionByCategoryUid = ReadonlyMap<string, string | null>;
-```
-
 ### `adoptOrderDividerStructure(scopedInvoiceItems: InvoiceDocItemType[], orderItems: LineItem[], orderDividerUid: string): AdoptedDividerStructure`
 
 Re-hang one order-scope of an invoice's items on the ORDER's divider
@@ -45933,28 +45913,6 @@ exclude self from `path` — use {@link validateComponentUniqueness} for them.
 ### `validatePurchaseDocumentItemPaths(items: T[]): ItemPathIssue[]`
 
 {@link validateInvoiceItemPaths}' twin at {@link PURCHASE_DOCUMENT_ITEM_LEVELS}.
-
-### `xeroAccrecLineRefs(line: Pick<InvoiceDocLineItemType, "uid" | "coa_revenue" | "uid_tracking_category">, product: XeroLineProduct | undefined, optionByCategoryUid: XeroOptionByCategoryUid, knownTrackingOptionIds: ReadonlySet<string>): XeroAccrecLineRefs`
-
-**The one rule for which account, tracking option and item code an ACCREC
-Xero line carries** — for the issue body and the edit body alike. They used
-to differ: issue read the account product-first and the tracking from the
-product only, while the edit push read the account line-first. So the hash
-written at issue described a body an edit would not have sent.
-
-- **Account: the line first** — `line.coa_revenue ?? product's ?? 4800`. A
-  line's account is an operator override where it differs from the product.
-- **Tracking: the line's category's option when Xero still knows it, else
-  the product's** (owner, 2026-10-26). The option is looked up from the
-  line's `uid_tracking_category` through `optionByCategoryUid` at build time —
-  the line stores no option id. An option Xero has since retired falls back
-  rather than sending none. A custom line has no product, so it sends its own
-  category's.
-- **Item code: the product's `xero_code`**, never `crms_id` (#256).
-
-A `custom-` line is never matched to a product, whatever the caller passes.
-The tax mapping and the money stay in the API (`XeroTaxContext`,
-`xeroLineMoney`).
 
 ## `@cfs/core/utils/fulfillment-booking-rows`
 
@@ -53277,6 +53235,14 @@ The formula uids a set of lines name — what a caller must load into {@link Pri
 so a part's discount RECORD is a difference of cumulative values too and the
 parts' records sum to the whole line's.
 
+### `lineKindOf(line: typeLiteral): LineKind`
+
+**The one predicate for how a line's money is stated** (6e-0b4 K7): `stated`
+when it carries `price.stated_cents`, else `rate`. A stated total GOVERNS a
+line that also carries rates (a LINKED time line). It reads the key alone, so
+it answers for any line, a `transaction_fee` included (whose stored money is
+a rate line's); {@link statedOf} is the money step's guarded read of it.
+
 ### `lineMoneyAtCents(line: LineMoneyLike, k: number): number`
 
 **The money of a line's first `k` units** — pre-tax, after discount — the one
@@ -53400,6 +53366,12 @@ S3): a landed cost over its units, a bill split's leftover over its group, a
 billed POOL over its units, a row's money rescaled to a new count. Named so a
 reader can tell it from a real line. `lineUnitsCents(statedLine(a, q), b, k)`
 is `round(a·k ÷ q) − round(a·b ÷ q)`, defined past `q`.
+
+### `statedOf(line: LineMoneyLike): number | null`
+
+A pre-tax line's stated gross, or `null` for a rate line ({@link lineKindOf}).
+Throws on a line whose money is the document's (`pricing` other than
+`pre_tax`), and on a non-integer total.
 
 ### `statedUnits(formula: PriceFormulaRule, count: number, opts: typeLiteral): TierCount[]`
 
@@ -59379,6 +59351,40 @@ opts back out.
 const XERO_META_KEY: "xero";
 ```
 
+### `XeroLineProduct`
+
+The product fields {@link xeroLineRefs} reads — a structural slice of `Product`.
+
+```ts
+interface XeroLineProduct {
+  xero_tracking_option_id?: string | null;
+  xero_code?: string | null;
+}
+```
+
+### `XeroLineRefs`
+
+What one Xero line names besides its money and tax.
+
+```ts
+interface XeroLineRefs {
+  account_code: string;
+  tracking_option_id: string | null;
+  item_code: string | null;
+}
+```
+
+### `XeroOptionByCategoryUid`
+
+A tracking category's Xero option id, by `tracking-categories` uid — the
+lookup {@link xeroLineRefs} resolves a line's `uid_tracking_category`
+through. The API builds it from its category cache; a uid with no entry, or a
+`null` option, resolves to nothing.
+
+```ts
+type XeroOptionByCategoryUid = ReadonlyMap<string, string | null>;
+```
+
 ### `XeroProjectionResult`
 
 The result of {@link collectXeroProjection}. `unhandled` MUST be empty.
@@ -59460,6 +59466,26 @@ sides (ruling 122; api-cloudrun#1332).
 Nothing here compares `old` to `next`. A write that changes no Xero-carried
 field still enqueues while an earlier edit's push has not landed: the earlier
 task may already have been superseded by this write.
+
+### `xeroLineRefs(line: typeLiteral, product: XeroLineProduct | undefined, accountCode: string, optionByCategoryUid: XeroOptionByCategoryUid, knownTrackingOptionIds: ReadonlySet<string>): XeroLineRefs`
+
+**The one rule for which account, tracking option and item code a Xero line
+carries**, on both sides and every role (6e-0b4 K2.3, replacing the
+receivable-only `xeroAccrecLineRefs`).
+
+- **Account: the caller's.** The line's posting account differs by side
+  (`coa_revenue ?? product's ?? 4800` on a receivable initiator or billing
+  line until Phase 8, `ledger_account` everywhere else), and a side branch
+  here is what `SIDE_COMPARISON_RE` refuses, so the caller passes it.
+- **Tracking: the line's category's option when Xero still knows it, else
+  the product's** (owner, 2026-10-26). The option is looked up from the
+  line's `uid_tracking_category` through `optionByCategoryUid` at build time;
+  the line stores no option id. An option Xero has since retired falls back
+  rather than sending none. A line with no product sends its own category's.
+- **Item code: the product's `xero_code`**, never `crms_id` (#256).
+
+A `custom-` line is never matched to a product, whatever the caller passes.
+The tax mapping and the money stay in the API.
 
 ### `xeroProjection(schema: z.ZodType, doc: unknown): Record<string, unknown>`
 

@@ -23,6 +23,7 @@ import {
   XERO_META_KEY,
   xeroProjection,
   xeroProjectionHash,
+  xeroLineRefs,
   xeroQuoteProjectionHash,
   xeroTaggedPaths,
 } from "../src/utils/xero-sync.ts";
@@ -43,6 +44,7 @@ Deno.test("xeroTaggedPaths: the invoice's set", () => {
       "date",
       "due_date",
       "items[].coa_revenue",
+      "items[].description",
       "items[].name",
       ...DISCOUNT_LEAVES,
       "items[].price.subtotal_cents",
@@ -63,6 +65,7 @@ Deno.test("xeroTaggedPaths: the bill's set", () => {
     "date",
     "due_date",
     "items[].amount_cents",
+    "items[].description",
     "items[].ledger_account",
     "items[].name",
     "items[].quantity",
@@ -79,7 +82,7 @@ Deno.test("xeroTaggedPaths: the order's (quote's) set", () => {
     xeroTaggedPaths(OrderSchema),
     [
       "items[].coa_revenue",
-      "items[].crms_id",
+      "items[].description",
       "items[].name",
       ...DISCOUNT_LEAVES,
       "items[].price.subtotal_cents",
@@ -148,7 +151,8 @@ Deno.test("xeroProjection: tagged leaves only, absent reads null, and a divider 
     subject: "Shoot",
     organization: { xero_id: "contact-1" },
     items: [{
-      uid: "tent", name: "tent", quantity: 1, zero_priced: null, coa_revenue: 4000, uid_tracking_category: null,
+      uid: "tent", name: "tent", description: null, quantity: 1, zero_priced: null, coa_revenue: 4000,
+      uid_tracking_category: null,
       price: { subtotal_cents: 5000, discount: null, taxes: [{ uid: "t", amount_cents: 10, name: null, rate: null, type: null }] },
     }],
   });
@@ -169,10 +173,11 @@ Deno.test("collectXeroProjection: an element no arm claims is unhandled, and the
 Deno.test("xeroProjectionHash: the stored form is byte-stable", () => {
   // What `pushed_hash` records. A change here reads every stored watermark as an
   // edit and enqueues a push for every live document, so it needs a re-stamp
-  // window (F16 Rollout). FNV-1a 48 of the canonical projection.
+  // window (F16 Rollout; moved again by 6e-0b4 tagging `description`). FNV-1a 48
+  // of the canonical projection.
   assertEquals(inv(), hash48(canonicalJson(xeroProjection(InvoiceSchema, invoice()))));
-  assertEquals(inv(), "kvtncl7lb");
-  assertEquals(billingXeroProjectionHash("payable", bill()), "2gib77x6sv");
+  assertEquals(inv(), "1df85glx1o");
+  assertEquals(billingXeroProjectionHash("payable", bill()), "zh9chajf2");
 });
 
 // ── the receivable side (ported from invoice-xero-sync) ─────────────
@@ -196,6 +201,7 @@ Deno.test("billingXeroSyncStatus receivable: every line leaf the body reads move
   const edits: Record<string, unknown>[] = [
     { uid: "tent-2" },
     { name: "Tent XL" },
+    { description: "Tent, 20x20" },
     { quantity: 2 },
     { coa_revenue: 4100 },
     { uid_tracking_category: "cat-grip" },
@@ -215,7 +221,7 @@ Deno.test("billingXeroSyncStatus receivable: settlement and bookkeeping writes d
   const moved = invoice({ version: 9, status: "part_paid", totals: { total_cents: 5010, amount_paid_cents: 1000 }, notes: "called" });
   assertEquals(billingXeroSyncStatus("receivable", moved, state), "in_sync");
   // A line key the body does not read.
-  const untouched = invoice({ items: [{ uid: "o", type: "order", path: ["o"] }, { ...line("tent", 5000), description: "new" }] });
+  const untouched = invoice({ items: [{ uid: "o", type: "order", path: ["o"] }, { ...line("tent", 5000), order_number: 7 }] });
   assertEquals(billingXeroSyncStatus("receivable", untouched, state), "in_sync");
 });
 
@@ -336,6 +342,7 @@ Deno.test("billingXeroProjectionHash payable: every field the body reads moves i
     { reference: "INV-8" },
     { items: [{ ...item, name: "Cart" }] },
     { items: [{ ...item, quantity: 4 }] },
+    { items: [{ ...item, description: "moved" }] },
     { items: [{ ...item, amount_cents: 12346 }] },
     { items: [{ ...item, ledger_account: 5200 }] },
     { items: [{ ...item, uid_tracking_category: null }] },
@@ -354,7 +361,7 @@ Deno.test("billingXeroProjectionHash payable: line order is part of it", () => {
 Deno.test("billingXeroProjectionHash payable: what Xero does not carry does not move it", () => {
   const base = billHash();
   const moved = {
-    version: 9, xero_id: "x-2", subject: "other", items: [{ ...item, description: "moved" }],
+    version: 9, xero_id: "x-2", subject: "other", items: [{ ...item, uid_purchase_line: "moved" }],
     totals: { total_cents: 12345, amount_paid_cents: 100, amount_credited_cents: 0, amount_void_cents: 0, amount_due_cents: 12245 },
   };
   assertEquals(billHash(moved), base);
@@ -400,7 +407,7 @@ const destination = (start: string) => ({ uid: "d", dates: { delivery_start: sta
 const order = (over: Record<string, unknown> = {}) => ({
   number: 905, reference: null, subject: "Shoot", organization: { uid: "org", xero_id: "contact-1" },
   destinations: [destination("2026-09-01T09:00:00.000-05:00")],
-  items: [{ uid: "d", type: "destination", path: ["d"] }, { ...line("tent", 5000), crms_id: 12 }],
+  items: [{ uid: "d", type: "destination", path: ["d"] }, line("tent", 5000)],
   version: 4,
   ...over,
 }) as unknown as Order;
@@ -424,12 +431,13 @@ Deno.test("xeroQuoteProjectionHash: the tagged order leaves move it", () => {
     { reference: "PO-1" },
     { subject: "Other" },
     { organization: { uid: "org", xero_id: "contact-2" } },
-    { items: [{ ...line("tent", 5000), crms_id: 13 }] },
-    { items: [{ ...line("tent", 5100), crms_id: 12 }] },
+    { items: [{ ...line("tent", 5000), uid: "tent-2" }] },
+    { items: [{ ...line("tent", 5000), description: "Tent, 20x20" }] },
+    { items: [line("tent", 5100)] },
   ];
   for (const edit of edits) assertNotEquals(xeroQuoteProjectionHash(order(edit), "SENT"), base, JSON.stringify(edit));
   assertEquals(
-    xeroQuoteProjectionHash(order({ items: [{ ...line("tent", 5000), crms_id: 12 }] }), "SENT"),
+    xeroQuoteProjectionHash(order({ items: [line("tent", 5000)] }), "SENT"),
     base,
     "the destination divider is dropped",
   );
@@ -459,4 +467,47 @@ Deno.test("settlementsHeldByXero: only live rows of the side carrying their Xero
   assertEquals(settlementsHeldByXero("receivable", [billPayment]), [], "a bill's payment on the invoice side");
   assertEquals(settlementsHeldByXero("payable", [billPayment]), [billPayment], "a bill's payment on its own side");
   assertEquals(settlementsHeldByXero("payable", [linked]), [], "an invoice's payment on the bill side");
+});
+
+// ── the line refs (6e-0b4 K2.3; moved from tests/invoices.test.ts) ───
+
+Deno.test("xeroLineRefs: the caller's account, the line's tracking first, the product's item code", () => {
+  const known = new Set(["opt-line", "opt-product"]);
+  // The line names a category by uid; its option is looked up when the body is built.
+  const options = new Map<string, string | null>([
+    ["cat-line", "opt-line"],
+    ["cat-product", "opt-product"],
+    ["cat-retired", "opt-retired"],
+    ["cat-no-option", null],
+  ]);
+  const product = { xero_tracking_option_id: "opt-product", xero_code: "CAM-1" };
+  const cases: [string, Parameters<typeof xeroLineRefs>[0], typeof product | undefined, ReturnType<typeof xeroLineRefs>][] = [
+    ["the line's category's option wins",
+      { uid: "cam", uid_tracking_category: "cat-line" }, product,
+      { account_code: "4100", tracking_option_id: "opt-line", item_code: "CAM-1" }],
+    ["a line naming the product's own category",
+      { uid: "cam", uid_tracking_category: "cat-product" }, product,
+      { account_code: "4100", tracking_option_id: "opt-product", item_code: "CAM-1" }],
+    ["a line with no category falls back to the product",
+      { uid: "cam", uid_tracking_category: null }, product,
+      { account_code: "4100", tracking_option_id: "opt-product", item_code: "CAM-1" }],
+    ["a line option Xero no longer knows falls back to the product's",
+      { uid: "cam", uid_tracking_category: "cat-retired" }, product,
+      { account_code: "4100", tracking_option_id: "opt-product", item_code: "CAM-1" }],
+    ["a category the lookup does not know falls back to the product's",
+      { uid: "cam", uid_tracking_category: "cat-unknown" }, product,
+      { account_code: "4100", tracking_option_id: "opt-product", item_code: "CAM-1" }],
+    ["a category whose option is null falls back to the product's",
+      { uid: "cam", uid_tracking_category: "cat-no-option" }, product,
+      { account_code: "4100", tracking_option_id: "opt-product", item_code: "CAM-1" }],
+    ["a custom line sends its own category's option and never reads a product",
+      { uid: "custom-tent-repair", uid_tracking_category: "cat-line" }, product,
+      { account_code: "4100", tracking_option_id: "opt-line", item_code: null }],
+    ["no product and no category: no tracking, no item code",
+      { uid: "cam", uid_tracking_category: null }, undefined,
+      { account_code: "4100", tracking_option_id: null, item_code: null }],
+  ];
+  for (const [label, line, p, want] of cases) {
+    assertEquals(xeroLineRefs(line, p, "4100", options, known), want, label);
+  }
 });

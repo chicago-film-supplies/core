@@ -472,7 +472,7 @@ export function buildCustomOrderLine(opts: CustomLineBuildOptions): OrderDocLine
     zero_priced: null,
     quantity_per_parent: null,
     uid_tax_class: opts.uid_tax_class,
-    // No product to post as: Xero still gets 4800 via `xeroAccrecLineRefs`.
+    // No product to post as: Xero still gets 4800 via the api's posting account and `xeroLineRefs`.
     coa_revenue: null,
     uid_tracking_category: null,
     price: {
