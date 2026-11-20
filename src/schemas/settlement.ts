@@ -349,7 +349,7 @@ function checkSettlementContract(s: Settlement, ctx: z.RefinementCtx): void {
 /** Zod schema for a Settlement. */
 export const SettlementSchema: z.ZodType<Settlement> = z.strictObject({
   // A document id, so `FirestoreId`. Payable and session-keyed ids are derived
-  // but still 20-char ids (`src/lib/settlementIds.ts` in api-cloudrun).
+  // but still 20-char ids (`api-cloudrun/src/lib/settlementIds.ts`).
   uid: FirestoreId,
   billing: SettlementBillingRefSchema.nullable().meta({ label: "Billing" }),
   credit: SettlementCreditRefSchema.nullable().meta({ label: "Credit" }),
