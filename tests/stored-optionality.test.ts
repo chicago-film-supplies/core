@@ -101,6 +101,12 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["purchases.items[].price.stated_cents", "mid-expand"],
   ["purchase-bills.items[].price.stated_cents", "mid-expand"],
   ["purchase-credits.items[].price.stated_cents", "mid-expand"],
+  // ── mid-expand — one-document-model ruling 145 (6e-0b3 J9). The receivable
+  //    credit line's twin of the three above: a value = the stated gross a Xero
+  //    import wrote; absent = every line written before it. The 6e-0b3 window's
+  //    migration stamps `null` on every stored credit-note line (it rewrites each
+  //    note anyway), then tighten to bare `.nullable()`.
+  ["credit-notes.items[].price.stated_cents", "mid-expand"],
   // The note's `destinations` carry the invoice pair's shape, so its array
   // members' nullable-optional leaves come with it.
   ["credit-notes.destinations[].collection.address.address_coordinates", "array-member-uncensusable"],

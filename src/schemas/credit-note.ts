@@ -202,6 +202,15 @@ export interface CreditNoteDocItemPrice {
   counts: TierCountType[];
   /** See {@link OrderDocItemPriceType.base_percent} — same biconditional. */
   base_percent?: number | null;
+  /**
+   * A stated GROSS total over the line's quantity, the payable side's field
+   * (`PayableStatedCore`, `schemas/purchase.ts`). It governs the line's money
+   * when present (`lineMoneyAtCents`), and the rates are then kept for the
+   * record only. Written by the import of a credit note Xero holds and CFS does
+   * not (one-document-model ruling 145): Xero prices its lines to 4dp per unit,
+   * which no integer-cent rate reproduces. Absent on every line CFS prices.
+   */
+  stated_cents?: number | null;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
@@ -214,6 +223,7 @@ const CreditNoteDocItemPriceSchema: z.ZodType<CreditNoteDocItemPrice> = z.strict
   rates: z.array(RateSnapshotSchema).meta({ label: "Rate" }),
   counts: z.array(TierCountSchema),
   base_percent: z.number().nullable().optional(),
+  stated_cents: z.int().min(0).nullable().optional().meta({ column: true, label: "Stated" }),
   subtotal_cents: z.int().meta({ column: true, label: "Subtotal" }),
   subtotal_discounted_cents: z.int().meta({ column: true, label: "Discounted Subtotal" }),
   discount: Discount.nullable().meta({ label: "Discount" }),

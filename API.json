@@ -1731,7 +1731,7 @@
         {
           "kind": "interface",
           "name": "CreditNoteDocItemPrice",
-          "declaration": "interface CreditNoteDocItemPrice {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  total_cents: number;\n}",
+          "declaration": "interface CreditNoteDocItemPrice {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent?: number | null;\n  stated_cents?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  total_cents: number;\n}",
           "doc": "Pricing breakdown for a single credit-note line."
         },
         {
@@ -13877,7 +13877,7 @@
           "kind": "variable",
           "name": "PayableStatedCore",
           "declaration": "const PayableStatedCore: typeLiteral;",
-          "doc": "**`price.stated_cents` — a payable line's stated GROSS, the input its money is\nderived from** (one-document-model ruling 39, 6e-0b1 S2). ONE instance, spread\nby the purchase line and the bill/credit line alike, like\n{@link PayablePriceMoneyCore}, which it is deliberately not part of: every key\nthere is derived, and this one is the input.\n\nSet, `subtotal_cents` is `stated_cents` and the line's `amount_cents` (the\nnet) is `stated_cents − discount.amount_cents`, on every line, whole or part\n(D7). The discount's CENTS are the money: an operator's stated price turns the\nrate into cents once (`applyDiscountTerms`), and a part of a line takes its\nslice of the line's stated gross and cents (`sliceStoredMoney`), so nothing\nre-applies a rate to a part. A stated total governs a line that also carries\nrates (a LINKED time line: Xero's money).\n\nIn the `flat_money` merge group with `quantity` and `amount_cents`: it is\nwhat they are derived from, so it follows or is kept with them as one unit.\n\n⚠️ **Required on a FLAT line by the money refine, not by the key**\n({@link purchaseLineMoneyIssues}, core beta B, after the 2026-11-14 backfill:\nprod 976 flat lines, `test` 808). The key stays nullable and optional because\nthe price schema is shared with time lines, which state none.\n\n⚠️ Receivable lines do not carry it until 6e-0b2 (D2): there an invoice or\ncredit-note line is priced from its rates.\n\nNot on the `@cfs/core/schemas` barrel, like {@link PayablePriceMoneyCore}."
+          "doc": "**`price.stated_cents` — a payable line's stated GROSS, the input its money is\nderived from** (one-document-model ruling 39, 6e-0b1 S2). ONE instance, spread\nby the purchase line and the bill/credit line alike, like\n{@link PayablePriceMoneyCore}, which it is deliberately not part of: every key\nthere is derived, and this one is the input.\n\nSet, `subtotal_cents` is `stated_cents` and the line's `amount_cents` (the\nnet) is `stated_cents − discount.amount_cents`, on every line, whole or part\n(D7). The discount's CENTS are the money: an operator's stated price turns the\nrate into cents once (`applyDiscountTerms`), and a part of a line takes its\nslice of the line's stated gross and cents (`sliceStoredMoney`), so nothing\nre-applies a rate to a part. A stated total governs a line that also carries\nrates (a LINKED time line: Xero's money).\n\nIn the `flat_money` merge group with `quantity` and `amount_cents`: it is\nwhat they are derived from, so it follows or is kept with them as one unit.\n\n⚠️ **Required on a FLAT line by the money refine, not by the key**\n({@link purchaseLineMoneyIssues}, core beta B, after the 2026-11-14 backfill:\nprod 976 flat lines, `test` 808). The key stays nullable and optional because\nthe price schema is shared with time lines, which state none.\n\n⚠️ On the receivable side only a CREDIT-NOTE line carries it, and only one a\nXero import wrote (one-document-model ruling 145, `schemas/credit-note.ts`);\nan invoice line, and every credit line CFS prices, is priced from its rates.\n\nNot on the `@cfs/core/schemas` barrel, like {@link PayablePriceMoneyCore}."
         },
         {
           "kind": "interface",
@@ -14961,7 +14961,7 @@
         {
           "kind": "interface",
           "name": "CreditNoteDocItemPrice",
-          "declaration": "interface CreditNoteDocItemPrice {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  total_cents: number;\n}",
+          "declaration": "interface CreditNoteDocItemPrice {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent?: number | null;\n  stated_cents?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  total_cents: number;\n}",
           "doc": "Pricing breakdown for a single credit-note line."
         },
         {

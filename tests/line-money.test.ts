@@ -299,3 +299,26 @@ Deno.test("line money: refusals", () => {
   assertThrows(() => lineMoneyAtCents({ type: "transaction_fee", ...stated(100, 1) }, 1));
   assertEquals(lineMoneyAtCents(stated(100, 0), 5), 0);
 });
+
+// ── The money refine's stated arm (one-document-model ruling 145) ──
+
+import { checkFormulaLineMoney } from "../src/schemas/_line-money.ts";
+
+Deno.test("checkFormulaLineMoney: a STATED line is checked against its stated total, not its rates (ruling 145)", () => {
+  const issues: string[] = [];
+  const ctx = { addIssue: (i: { message: string }) => issues.push(i.message) };
+  const FIXED = { uid: "FixedPriceFormula000", name: "Fixed", basis: "flat" };
+  // CN-1029's vest line: 42 units at Xero's $0.2663 is $11.18, which no integer-cent rate reproduces.
+  const stated = (sub: number, net: number) => ({
+    quantity: 42,
+    price: { price_formula: FIXED, rates: [], counts: [], discount: null, stated_cents: 1118, subtotal_cents: sub, subtotal_discounted_cents: net },
+  });
+  checkFormulaLineMoney(stated(1118, 1118), ctx);
+  assertEquals(issues, []);
+  checkFormulaLineMoney(stated(1119, 1119), ctx);
+  assertEquals(issues.length, 2, "a stated line one cent off its stated total is refused");
+  // Without the stated arm the same honest line reads as $0 of rates × counts and is refused.
+  issues.length = 0;
+  checkFormulaLineMoney({ ...stated(1118, 1118), price: { ...stated(1118, 1118).price, stated_cents: null } }, ctx);
+  assertEquals(issues.length, 2);
+});

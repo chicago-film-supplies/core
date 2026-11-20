@@ -347,6 +347,7 @@ export interface FormulaPricedLineLike {
     rates?: readonly RateSnapshot[];
     counts?: readonly TierCountLike[];
     discount?: FormulaDiscount | null;
+    stated_cents?: number | null;
     subtotal_cents?: number;
     subtotal_discounted_cents?: number;
   } | null;
@@ -371,7 +372,19 @@ export function checkFormulaLineMoney(
   if (typeof item.quantity !== "number") return;
   let expected: { subtotal_cents: number; subtotal_discounted_cents: number };
   try {
-    expected = priceFromFormula(price.rates, price.counts, item.quantity, price.discount ?? null);
+    // A stated total governs a line that carries one (`statedOf`): its money is
+    // the stated gross and the net `lineMoneyAtCents` derives from it.
+    const quantity = item.quantity;
+    const stated = price.stated_cents ?? null;
+    expected = stated === null
+      ? priceFromFormula(price.rates, price.counts, quantity, price.discount ?? null)
+      : {
+        subtotal_cents: stated,
+        subtotal_discounted_cents: lineMoneyAtCents(
+          { quantity, price: { rates: price.rates, counts: price.counts, discount: price.discount ?? null, stated_cents: stated } },
+          quantity,
+        ),
+      };
   } catch (e) {
     ctx.addIssue({ code: "custom", path: ["price", "counts"], message: (e as Error).message });
     return;

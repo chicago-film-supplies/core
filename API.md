@@ -3835,6 +3835,7 @@ interface CreditNoteDocItemPrice {
   rates: RateSnapshotType[];
   counts: TierCountType[];
   base_percent?: number | null;
+  stated_cents?: number | null;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
@@ -29563,8 +29564,9 @@ what they are derived from, so it follows or is kept with them as one unit.
 prod 976 flat lines, `test` 808). The key stays nullable and optional because
 the price schema is shared with time lines, which state none.
 
-⚠️ Receivable lines do not carry it until 6e-0b2 (D2): there an invoice or
-credit-note line is priced from its rates.
+⚠️ On the receivable side only a CREDIT-NOTE line carries it, and only one a
+Xero import wrote (one-document-model ruling 145, `schemas/credit-note.ts`);
+an invoice line, and every credit line CFS prices, is priced from its rates.
 
 Not on the `@cfs/core/schemas` barrel, like {@link PayablePriceMoneyCore}.
 
@@ -31751,6 +31753,7 @@ interface CreditNoteDocItemPrice {
   rates: RateSnapshotType[];
   counts: TierCountType[];
   base_percent?: number | null;
+  stated_cents?: number | null;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
