@@ -148,11 +148,13 @@ export interface ActionSide {
   /** Who authored a billing document. A `linked` document's money is Xero's, so CFS neither voids nor pushes it once settled. */
   authorship(doc: object): BillingAuthorship;
   /**
-   * Whether a billing document takes credit at all, beside having money due. A
-   * payable card bill (`xero_document: "bank_transaction"`) is born paid and has
-   * no Xero ACCPAY to allocate against.
+   * Whether a billing document takes an operator payment or credit at all,
+   * beside having money due. A payable card bill (`xero_document:
+   * "bank_transaction"`) is born paid by its bank transaction: it has no Xero
+   * ACCPAY to pay or allocate against, and an edit that leaves a balance on it
+   * is a diff for the operator, not a payment to record (ruling 134).
    */
-  takesCredit(doc: object): boolean;
+  takesSettlement(doc: object): boolean;
   /**
    * May an operator push a billing document Xero has not got yet? The create
    * idempotency differs (`SIDE_CONTRACTS` list, ruling 51): an invoice `POST`
@@ -192,7 +194,7 @@ export const ACTION_SIDES: Readonly<Record<Side, ActionSide>> = {
   receivable: {
     nouns: { initiator: "order", billing: "invoice", credit: "credit note" },
     authorship: () => "cfs",
-    takesCredit: () => true,
+    takesSettlement: () => true,
     pushCreates: false,
     creditCapsByPool: false,
     creditNeedsScope: false,
@@ -202,7 +204,7 @@ export const ACTION_SIDES: Readonly<Record<Side, ActionSide>> = {
   payable: {
     nouns: { initiator: "purchase", billing: "bill", credit: "supplier credit" },
     authorship: (doc) => (doc as { origin?: string }).origin === "linked" ? "linked" : "pushed",
-    takesCredit: (doc) => (doc as { xero_document?: string }).xero_document === "invoice",
+    takesSettlement: (doc) => (doc as { xero_document?: string }).xero_document === "invoice",
     pushCreates: true,
     creditCapsByPool: true,
     creditNeedsScope: true,
@@ -560,7 +562,7 @@ export function pushRefusal<S extends Side>(side: S, doc: BillingOfferDocuments[
 
 /** The most credit a billing document can take now: what is due, where it accepts payment and the side takes credit on it. */
 function creditRoom<S extends Side>(side: S, doc: BillingOfferDocuments[S]): number {
-  if (!statusContract(doc.status)?.accepts_payment || !ACTION_SIDES[side].takesCredit(doc)) return 0;
+  if (!statusContract(doc.status)?.accepts_payment || !ACTION_SIDES[side].takesSettlement(doc)) return 0;
   return Math.max(0, doc.totals.amount_due_cents);
 }
 
@@ -824,8 +826,8 @@ export function creditParts<S extends Side>(
  *   6e-0d, so the status contract fails closed with no branch.
  * - `void` — {@link voidRefusal}.
  * - `close` — {@link closeRefusal}.
- * - `add_payment` — the status `accepts_payment` and something is due; `max_cents`
- *   is the amount due.
+ * - `add_payment` — the status `accepts_payment`, something is due and the side
+ *   takes settlement on it (a card bill does not); `max_cents` is the amount due.
  * - `allocate_credit` — the document has credit room (due, and the side takes credit on it).
  * - `reverse_settlement` — one offer per reversible row ({@link reversalRefusal}); a
  *   $0 document is un-closed by reversing its closure row (ruling 115).
@@ -851,7 +853,7 @@ export function billingActionsFor<S extends Side>(
   if (voidRefusal(side, doc, ctx.credits, ctx.initiators) === null) offer("void");
   if (closeRefusal(side, doc) === null) offer("close");
   const due = doc.totals.amount_due_cents;
-  if (contract.accepts_payment && due > 0) offer("add_payment", { max_cents: due });
+  if (contract.accepts_payment && due > 0 && ACTION_SIDES[side].takesSettlement(doc)) offer("add_payment", { max_cents: due });
   const room = creditRoom(side, doc);
   if (room > 0) offer("allocate_credit", { max_cents: room });
   if (sideOffers(side, "billing", "reverse_settlement")) {
@@ -913,6 +915,7 @@ export function assertBillingAction<S extends Side>(
       if (request.amount_cents <= 0) refuse("a payment must be more than $0");
       const due = doc.totals.amount_due_cents;
       if (!contract.accepts_payment || due <= 0) refuse(`${a(doc.status)} ${noun} with ${due} cents due does not accept a payment`);
+      if (!ACTION_SIDES[side].takesSettlement(doc)) refuse(`a card ${noun} is born paid by its bank transaction and takes no payment`);
       if (request.amount_cents > due) refuse(`a payment of ${request.amount_cents} cents exceeds the amount due (${due} cents)`);
       return;
     }
@@ -995,7 +998,7 @@ function allocationRefusal<S extends Side>(side: S, credit: CreditOfferDocuments
   if (credit.remaining_credit_cents <= 0) return `the ${noun} has no credit left`;
   if (target === null) return null;
   const billing = data.nouns.billing;
-  if (!statusContract(target.status)?.accepts_payment || !data.takesCredit(target)) return `${a(target.status)} ${billing} does not accept credit`;
+  if (!statusContract(target.status)?.accepts_payment || !data.takesSettlement(target)) return `${a(target.status)} ${billing} does not accept credit`;
   if (target.totals.amount_due_cents <= 0) return `the ${billing} has nothing due`;
   const key = data.counterparty(credit);
   if (key === null || key !== data.counterparty(target)) return `the ${noun} and the ${billing} are not on the same counterparty`;

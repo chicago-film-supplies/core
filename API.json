@@ -20378,7 +20378,7 @@
         {
           "kind": "interface",
           "name": "ActionSide",
-          "declaration": "interface ActionSide {\n  nouns: Readonly<Record<DocumentActionRole, string>>;\n  pushCreates: boolean;\n  creditCapsByPool: boolean;\n  creditNeedsScope: boolean;\n  closeWaitsForReturn: boolean;\n  authorship(doc: object): BillingAuthorship;\n  takesCredit(doc: object): boolean;\n  counterparty(doc: object): string | null;\n}",
+          "declaration": "interface ActionSide {\n  nouns: Readonly<Record<DocumentActionRole, string>>;\n  pushCreates: boolean;\n  creditCapsByPool: boolean;\n  creditNeedsScope: boolean;\n  closeWaitsForReturn: boolean;\n  authorship(doc: object): BillingAuthorship;\n  takesSettlement(doc: object): boolean;\n  counterparty(doc: object): string | null;\n}",
           "doc": "**Everything that differs between the sides in the action catalog** — data,\nnever an `if side`, each entry a domain fact with its reason (ruling 51)."
         },
         {
@@ -20577,7 +20577,7 @@
           "kind": "function",
           "name": "billingActionsFor",
           "signature": "billingActionsFor(side: S, doc: indexedAccess, ctx: BillingOfferContext<S>): DocumentActionOffer[]",
-          "doc": "**Every action an operator may take on this billing document** (F15 items 3–4).\n\n- `issue` — `canOperatorTransition(…, \"issued\")`. A bill is never a draft until\n  6e-0d, so the status contract fails closed with no branch.\n- `void` — {@link voidRefusal}.\n- `close` — {@link closeRefusal}.\n- `add_payment` — the status `accepts_payment` and something is due; `max_cents`\n  is the amount due.\n- `allocate_credit` — the document has credit room (due, and the side takes credit on it).\n- `reverse_settlement` — one offer per reversible row ({@link reversalRefusal}); a\n  $0 document is un-closed by reversing its closure row (ruling 115).\n- `add_credit` — a status live in Xero with credit left on a line ({@link creditableLines}).\n- `edit_items` — always; `frozen_classes` from `INVOICE_FIELD_FREEZE`, both sides.\n- `edit_date` / `edit_counterparty` — while their field class is not frozen.\n- `push_to_xero` — {@link pushRefusal}.\n\nGaps ({@link ACTION_GAPS}) are never offered.",
+          "doc": "**Every action an operator may take on this billing document** (F15 items 3–4).\n\n- `issue` — `canOperatorTransition(…, \"issued\")`. A bill is never a draft until\n  6e-0d, so the status contract fails closed with no branch.\n- `void` — {@link voidRefusal}.\n- `close` — {@link closeRefusal}.\n- `add_payment` — the status `accepts_payment`, something is due and the side\n  takes settlement on it (a card bill does not); `max_cents` is the amount due.\n- `allocate_credit` — the document has credit room (due, and the side takes credit on it).\n- `reverse_settlement` — one offer per reversible row ({@link reversalRefusal}); a\n  $0 document is un-closed by reversing its closure row (ruling 115).\n- `add_credit` — a status live in Xero with credit left on a line ({@link creditableLines}).\n- `edit_items` — always; `frozen_classes` from `INVOICE_FIELD_FREEZE`, both sides.\n- `edit_date` / `edit_counterparty` — while their field class is not frozen.\n- `push_to_xero` — {@link pushRefusal}.\n\nGaps ({@link ACTION_GAPS}) are never offered.",
           "paramTags": [],
           "returnsTag": null
         },

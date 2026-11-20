@@ -43220,7 +43220,7 @@ interface ActionSide {
   creditNeedsScope: boolean;
   closeWaitsForReturn: boolean;
   authorship(doc: object): BillingAuthorship;
-  takesCredit(doc: object): boolean;
+  takesSettlement(doc: object): boolean;
   counterparty(doc: object): string | null;
 }
 ```
@@ -43569,8 +43569,8 @@ Refuse an initiator action the catalog does not offer. Operator routes only.
   6e-0d, so the status contract fails closed with no branch.
 - `void` — {@link voidRefusal}.
 - `close` — {@link closeRefusal}.
-- `add_payment` — the status `accepts_payment` and something is due; `max_cents`
-  is the amount due.
+- `add_payment` — the status `accepts_payment`, something is due and the side
+  takes settlement on it (a card bill does not); `max_cents` is the amount due.
 - `allocate_credit` — the document has credit room (due, and the side takes credit on it).
 - `reverse_settlement` — one offer per reversible row ({@link reversalRefusal}); a
   $0 document is un-closed by reversing its closure row (ruling 115).

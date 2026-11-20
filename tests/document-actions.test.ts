@@ -45,6 +45,23 @@ Deno.test("a gap is refused by its reason, naming the action, on the assert (rul
   cat.assertBillingAction("payable", bill, { action: "add_payment", amount_cents: 1 });
 });
 
+Deno.test("a card bill takes no operator payment, offered or asserted, even with a balance (ruling 134)", () => {
+  const totals = { total_cents: 100, amount_paid_cents: 0, amount_credited_cents: 0, amount_void_cents: 0, amount_due_cents: 100 };
+  const accpay = { uid: "b", number: 9, status: "issued" as const, origin: "linked" as const, xero_document: "invoice" as const, xero_id: "x", items: [], totals };
+  const card = { ...accpay, xero_document: "bank_transaction" as const };
+  const e = assertThrows(
+    () => cat.assertBillingAction("payable", card, { action: "add_payment", amount_cents: 1 }),
+    cat.DocumentActionRefusal,
+    "born paid",
+  );
+  assertEquals(e.action, "add_payment");
+  // The same document as an ACCPAY bill takes it: the refusal is the card's, not the balance's.
+  cat.assertBillingAction("payable", accpay, { action: "add_payment", amount_cents: 1 });
+  const ctx = { settlements: [], credits: [], initiators: [], xero_sync_status: "in_sync" as const };
+  const offered = (doc: typeof accpay | typeof card) => cat.billingActionsFor("payable", doc, ctx).some((o) => o.action === "add_payment");
+  assertEquals([offered(accpay), offered(card)], [true, false]);
+});
+
 // ── void: the pointer arm (the live payable defect found at F15 conformance) ──
 
 const PU = "testpurch10000000000";
