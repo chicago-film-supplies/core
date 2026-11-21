@@ -95,6 +95,10 @@ import { PERMISSIONS, type Permission } from "./permissions.ts";
  * rate. **A scoped view must not widen the vocabulary it borrows.**
  */
 const ACTIVITY_SUBJECT_COLLECTIONS = [
+  // ⚠️ `bookings-inbound` is the ONE entry that carries no actor, admitted by
+  // owner ruling (one-document-model 164, 2026-11-21) beside its custody
+  // document `purchase-receipts`, although `bookings` stays out for that reason.
+  "bookings-inbound",
   "cards",
   "chart-of-accounts",
   "comments",
@@ -111,6 +115,7 @@ const ACTIVITY_SUBJECT_COLLECTIONS = [
   "products",
   "purchase-bills",
   "purchase-credits",
+  "purchase-receipts",
   "purchases",
   "recurrences",
   "settlements",
@@ -167,6 +172,8 @@ export const ActivitySubjectCollectionEnum: z.ZodType<ActivitySubjectCollection>
 export const ACTIVITY_READ_PERMISSION_BY_COLLECTION: Readonly<
   Record<ActivitySubjectCollection, Permission>
 > = {
+  // The supplier custody pair shares one read, as the rules gate both on it.
+  "bookings-inbound": "receipts.read",
   "cards": "cards.read",
   "chart-of-accounts": "chartOfAccounts.read",
   "comments": "comments.read",
@@ -184,10 +191,12 @@ export const ACTIVITY_READ_PERMISSION_BY_COLLECTION: Readonly<
   "organizations": "organizations.read",
   "out-of-service": "outOfService.read",
   "products": "products.read",
-  // All three purchase documents share one read — `readableCollections.ts`
-  // gates them together, and the manager rules (api-cloudrun#1210 P3) will too.
-  "purchase-bills": "purchases.read",
-  "purchase-credits": "purchases.read",
+  // One read per supplier-side ROLE (one-document-model 6e-0d1, ruling 48): a
+  // bill or credit carries money a purchase's readers need not hold (ruling
+  // 158), so neither shares `purchases.read`.
+  "purchase-bills": "bills.read",
+  "purchase-credits": "supplierCredits.read",
+  "purchase-receipts": "receipts.read",
   "purchases": "purchases.read",
   "recurrences": "recurrences.read",
   "settlements": "settlements.read",
@@ -208,8 +217,9 @@ export const ACTIVITY_READ_PERMISSION_BY_COLLECTION: Readonly<
  * The DISTINCT permissions a feed row can carry — the universe a client
  * intersects against.
  *
- * ⚠️ **26, not 29** — `templates` and `template-components` both map to
- * `templates.read`, and the three purchase documents all to `purchases.read`. Derived rather than listed so it cannot disagree with the
+ * ⚠️ **29, not 31** — `templates` and `template-components` both map to
+ * `templates.read`, and `purchase-receipts` and `bookings-inbound` both to
+ * `receipts.read`. ONE under the cap of 30. Derived rather than listed so it cannot disagree with the
  * map above; the COUNT is asserted in `tests/activity.test.ts`, because the
  * number is the thing that has to stay under Firestore's `in` cap of 30 and a
  * comment cannot notice when it stops being true.
@@ -220,7 +230,7 @@ export const ACTIVITY_READ_PERMISSION_BY_COLLECTION: Readonly<
  * distinct permissions** across 42 collection rules (measured 2026-09-05), so
  * "one permission per readable collection" is *already* over the cap by four —
  * only the feed's narrower scope keeps it under, and every new actor-carrying
- * collection spends one of the 4 spare (a collection sharing a permission spends none).
+ * collection spends the 1 spare (a collection sharing a permission spends none).
  */
 export const ACTIVITY_FEED_PERMISSIONS: readonly Permission[] = [
   ...new Set(Object.values(ACTIVITY_READ_PERMISSION_BY_COLLECTION)),

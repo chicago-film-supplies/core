@@ -286,12 +286,12 @@ export const SEARCH_PERMISSION_BY_ALIAS: Partial<Record<TypesenseAlias, Permissi
   "organizations": "organizations.search",
   "out-of-service": "outOfService.search",
   "products": "products.search",
-  // All three purchase-family aliases share ONE verb, as their reads already
-  // share `purchases.read` (`schemas/activity.ts`) — a bill or credit is not a
-  // separate permission scope from the purchase it names (api-cloudrun#1220).
+  // One verb per supplier-side ROLE (one-document-model 6e-0d1, ruling 48), as
+  // each receivable role has its own: a bill or credit carries money the
+  // purchase's readers need not hold (ruling 158).
   "purchases": "purchases.search",
-  "purchase-bills": "purchases.search",
-  "purchase-credits": "purchases.search",
+  "purchase-bills": "bills.search",
+  "purchase-credits": "supplierCredits.search",
   // A purchase's custody documents share ONE verb, as their reads share
   // `receipts.read` (one-document-model 7a, C13) — the twin of the outbound
   // pair's `fulfillment.search` / `bookings.search`, folded into one because

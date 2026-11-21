@@ -213,31 +213,51 @@ export const PERMISSIONS = [
   "outOfService.update",
   "outOfService.delete",
   "outOfService.search",
-  // A purchase order and its receipts (api-cloudrun#1210). CRUD-verbed, plus
-  // `receive`: receiving moves stock, so it is a different grant from editing
-  // the order. `bill` pushes or links a supplier bill — it writes the live
-  // Xero ledger, so it is its own grant too.
+  // The supplier side's four ROLE namespaces (one-document-model 6e-0d1,
+  // rulings 48, 159, 165): each copies its receivable twin's verbs, the
+  // unrouted ones included — `purchases.` ↔ `orders.`, `bills.` ↔ `invoices.`,
+  // `supplierCredits.` ↔ `creditNotes.`, `receipts.` ↔ `fulfillment.`. A
+  // namespace keeps the ROLE's name, not the collection's (`purchase-bills`,
+  // `purchase-credits`, `purchase-receipts`), as `fulfillment.` does.
+  //
+  // The initiator: a purchase order (api-cloudrun#1210). `orders.checkout` /
+  // `orders.return` are not copied — the inbound custody motion is
+  // `receipts.update`.
   "purchases.create",
   "purchases.read",
-  // One search verb for all three purchase-family aliases — purchases, bills
-  // and supplier credits (api-cloudrun#1220), mirroring how they share
-  // `purchases.read`.
   "purchases.search",
   "purchases.update",
+  "purchases.delete",
+  // ⚠️ RETIRING (6e-0d1): `receive` became `receipts.update` and `bill` became
+  // `bills.*` / `supplierCredits.*`. They stay until every stored role drops
+  // them; a later beta deletes them.
   "purchases.receive",
   "purchases.bill",
-  // A purchase's CUSTODY documents — its receipt (`purchase-receipts`) and its
-  // inbound bookings (`bookings-inbound`), one-document-model 7a (C13). A read
-  // of its own, as `fulfillment.read` is beside `orders.read`: the receipt
-  // carries no price, so the warehouse reads what arrived without
-  // `purchases.read`. The permission keeps the ROLE's name; the collection is
-  // `purchase-receipts` (ruling 58). Moving custody stays `purchases.receive`
-  // until 6e-0d's role-namespace migration (ruling 48).
+  // The billing role: a supplier bill. Its own grant, not `purchases.read`:
+  // a bill carries money, and the warehouse reads purchases without it
+  // (ruling 158). `update` covers edit, void and the Xero push, as
+  // `invoices.update` does.
+  "bills.create",
+  "bills.read",
+  "bills.update",
+  "bills.delete",
+  "bills.search",
+  // The credit role: a supplier credit.
+  "supplierCredits.create",
+  "supplierCredits.read",
+  "supplierCredits.update",
+  "supplierCredits.void",
+  "supplierCredits.search",
+  // The custody role: a purchase's receipt (`purchase-receipts`) and its
+  // inbound bookings (`bookings-inbound`), one-document-model 7a (C13). The
+  // receipt carries no price, so the warehouse reads what arrived as it reads
+  // a fulfillment. `update` moves custody on the inbound lever; `search` backs
+  // the Typesense lists, which render empty without it, as `fulfillment.read`
+  // without `fulfillment.search` did.
   "receipts.read",
-  // Searching them (the `purchase-receipts` and `bookings-inbound` Typesense
-  // aliases): a list surface is Typesense-backed, so a read without this renders
-  // an empty page, as `fulfillment.read` without `fulfillment.search` did.
   "receipts.search",
+  "receipts.update",
+  "receipts.reset",
   "stockSummaries.read",
   "typesenseSync.read",
 

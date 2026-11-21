@@ -9,8 +9,9 @@ import { typesenseAddressFields } from "./types.ts";
  * Mirrors the receipt document as stored (`PurchaseReceiptSchema`), which the
  * purchase writers project and the inbound lever's finalize keeps current. The
  * index behind a receipts list (the custody page, ruling 29): searched on
- * `receipts.search`, so the warehouse role, which holds `receipts.read` and no
- * `purchases.read`, gets a list rather than an empty page — the trap
+ * `receipts.search`, so the warehouse role gets a list rather than an empty
+ * page without `purchases.read` (which it drops once the custody page ships,
+ * ruling 158) — the trap
  * `fulfillment.read` without `fulfillment.search` set on the outbound side.
  *
  * `number` is the `default_sorting_field` (the purchase's, never null);
