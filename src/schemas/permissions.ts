@@ -228,11 +228,8 @@ export const PERMISSIONS = [
   "purchases.search",
   "purchases.update",
   "purchases.delete",
-  // ⚠️ RETIRING (6e-0d1): `receive` became `receipts.update` and `bill` became
-  // `bills.*` / `supplierCredits.*`. They stay until every stored role drops
-  // them; a later beta deletes them.
-  "purchases.receive",
-  "purchases.bill",
+  // `purchases.receive` and `purchases.bill` were retired in 6e-0d1: `receive`
+  // became `receipts.update`, `bill` became `bills.*` / `supplierCredits.*`.
   // The billing role: a supplier bill. Its own grant, not `purchases.read`:
   // a bill carries money, and the warehouse reads purchases without it
   // (ruling 158). `update` covers edit, void and the Xero push, as
