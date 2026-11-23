@@ -630,7 +630,7 @@ const purchaseMirrorRules: CollectionRule[] = [
     mode: "co-write",
     side: "payable",
     invariant:
-      "Every purchase a bill bills (`query_by_purchases`) carries it in `bills[]`, whose uids are exactly `query_by_bills`, and the entry's number and status CONVERGE on the bill. CONVERGENT, not co-written: the writer that moves a bill's status (create, settle, void, close, reopen, a credit allocation, the Xero webhook) converges each purchase by compare-and-set after its own commit, unconditionally and gated on disagreement, and the `purchase-bills` eventarc backstop repairs whatever it missed. The twin of `update-invoice:status-to-orders`. A void bill stays listed at `void`.",
+      "Every purchase a bill bills (`query_by_purchases`) carries it in `bills[]`, whose uids are exactly `query_by_bills`, and the entry's number and status CONVERGE on the bill. CONVERGENT, not co-written: the writer that moves a bill's status (create, issue, settle, void, close, reopen, a credit allocation, the Xero webhook) converges each purchase by compare-and-set after its own commit, unconditionally and gated on disagreement, and the `purchase-bills` eventarc backstop repairs whatever it missed. The twin of `update-invoice:status-to-orders`. A void bill stays listed at `void`.",
     enforced_by: [DOC_REF_MERGE, DOC_REF_AUDIT],
     trigger: "any bill write that moves its status — targets the purchases in its `query_by_purchases`",
     fields: [
@@ -661,7 +661,7 @@ const purchaseMirrorRules: CollectionRule[] = [
 const createPurchaseBillTransaction: TransactionDefinition = {
   id: "create-purchase-bill",
   description:
-    "Bills a purchase: either PUSHES a new ACCPAY (`CFS-BILL-n`, posted by a post-commit task with read-before-create) or LINKS an existing Xero bill or card payment, read from Xero rather than the caller. The bill's uid is appended to its purchases' `query_by_bills` in the same transaction; what a line has billed is the billing fold, so nothing is counted on the purchase (ruling 42). A linked card payment is born paid, and a linked ACCPAY carries the payments Xero already reports, as `payment` settlement rows in the same transaction — fires on: a link whose Xero document holds any payment.",
+    "Bills one or more purchases (`POST /purchase-bills`, `query_by_purchases`): either creates a PUSHED bill, born `draft` with its number and NOTHING posted to Xero until it is issued (`update-purchase-bill`; rulings 41, 160), or LINKS an existing Xero bill or card payment, read from Xero rather than the caller. The bill's uid is appended to each of its purchases' `query_by_bills` in the same transaction; what a line has billed is the billing fold, so nothing is counted on the purchase (ruling 42). A linked card payment is born paid, and a linked ACCPAY carries the payments Xero already reports, as `payment` settlement rows in the same transaction — fires on: a link whose Xero document holds any payment.",
   steps: [
     "create-purchase-bill:bill-to-purchase",
     "create-purchase-bill:bill-to-settlements",
@@ -674,8 +674,8 @@ const createPurchaseBillTransaction: TransactionDefinition = {
 const updatePurchaseBillTransaction: TransactionDefinition = {
   id: "update-purchase-bill",
   description:
-    "Edits a PUSHED, unsettled bill (`PUT /purchase-bills/{uid}`, D5): any line's shared field may be overridden until the bill settles, exactly the invoice rule; the writer re-prices the edited bill with `priceDocument` (payable arm), whose stated-total arm states each line's money from its amount and discount. Refused on a linked bill (Xero is authoritative) and, per field class, on a frozen one (`PURCHASE_BILL_FIELD_FREEZE`). The accepted edit is pushed to Xero after the commit by the ACCPAY edit push — GET-modify-POST against Xero's own InvoiceID, hash-gated so an unchanged body pushes nothing. Editing a line's quantity moves what the billing fold bills at its purchase line, and nothing is written to the purchase (ruling 42).",
-  steps: [],
+    "Edits a PUSHED, unsettled bill (`PUT /purchase-bills/{uid}`, D5), and ISSUES a draft one (`status: \"issued\"`, the invoice's twin, ruling 160), which enqueues its first Xero post and converges the bill's status onto its purchases — fires on: an issue. Any line's shared field may be overridden until the bill settles, exactly the invoice rule; the writer re-prices the edited bill with `priceDocument` (payable arm), whose stated-total arm states each line's money from its amount and discount. Refused on a linked bill (Xero is authoritative) and, per field class, on a frozen one (`PURCHASE_BILL_FIELD_FREEZE`). The accepted edit is pushed to Xero after the commit by the ACCPAY edit push — GET-modify-POST against Xero's own InvoiceID, hash-gated so an unchanged body pushes nothing. Editing a line's quantity moves what the billing fold bills at its purchase line, and nothing is written to the purchase (ruling 42).",
+  steps: ["update-purchase-bill:status-to-purchases"],
 };
 
 const createPurchaseCreditTransaction: TransactionDefinition = {

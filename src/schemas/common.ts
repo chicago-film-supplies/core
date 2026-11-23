@@ -2012,9 +2012,9 @@ export const CreditNoteStatusEnum: z.ZodType<CreditNoteStatusType> = z.enum(
 /**
  * The supplier credit's statuses — the AR credit note's vocabulary, one list for
  * the credit role on both sides (one-document-model ruling 34, Q1). A refine on
- * `PurchaseCreditSchema` refuses `draft` until 6e-0d's create mode writes one, as
- * the bill refuses a draft: a supplier credit is raised by a close or recorded
- * from the supplier, never drafted, today.
+ * `PurchaseCreditSchema` refuses `draft`: a supplier credit is raised by a close
+ * or recorded from the supplier, never drafted, today. (The bill is drafted since
+ * one-document-model 6e-0d2, rulings 41 and 160.)
  */
 export const PURCHASE_CREDIT_STATUSES = ["draft", "issued", "applied", "void"] as const;
 /**

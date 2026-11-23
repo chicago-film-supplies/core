@@ -9904,9 +9904,9 @@ const PURCHASE_CREDIT_REASONS: readonly SettlementReasonType[];
 
 The supplier credit's statuses — the AR credit note's vocabulary, one list for
 the credit role on both sides (one-document-model ruling 34, Q1). A refine on
-`PurchaseCreditSchema` refuses `draft` until 6e-0d's create mode writes one, as
-the bill refuses a draft: a supplier credit is raised by a close or recorded
-from the supplier, never drafted, today.
+`PurchaseCreditSchema` refuses `draft`: a supplier credit is raised by a close
+or recorded from the supplier, never drafted, today. (The bill is drafted since
+one-document-model 6e-0d2, rulings 41 and 160.)
 
 ```ts
 const PURCHASE_CREDIT_STATUSES: "draft" | "issued" | "applied" | "void"[];
@@ -20957,9 +20957,9 @@ const PRE_TAX_ITEM_TYPES: "rental" | "replacement" | "sale" | "service" | "surch
 
 The supplier credit's statuses — the AR credit note's vocabulary, one list for
 the credit role on both sides (one-document-model ruling 34, Q1). A refine on
-`PurchaseCreditSchema` refuses `draft` until 6e-0d's create mode writes one, as
-the bill refuses a draft: a supplier credit is raised by a close or recorded
-from the supplier, never drafted, today.
+`PurchaseCreditSchema` refuses `draft`: a supplier credit is raised by a close
+or recorded from the supplier, never drafted, today. (The bill is drafted since
+one-document-model 6e-0d2, rulings 41 and 160.)
 
 ```ts
 const PURCHASE_CREDIT_STATUSES: "draft" | "issued" | "applied" | "void"[];
@@ -30584,9 +30584,9 @@ const PURCHASE_CREDIT_REASONS: readonly SettlementReasonType[];
 
 The supplier credit's statuses — the AR credit note's vocabulary, one list for
 the credit role on both sides (one-document-model ruling 34, Q1). A refine on
-`PurchaseCreditSchema` refuses `draft` until 6e-0d's create mode writes one, as
-the bill refuses a draft: a supplier credit is raised by a close or recorded
-from the supplier, never drafted, today.
+`PurchaseCreditSchema` refuses `draft`: a supplier credit is raised by a close
+or recorded from the supplier, never drafted, today. (The bill is drafted since
+one-document-model 6e-0d2, rulings 41 and 160.)
 
 ```ts
 const PURCHASE_CREDIT_STATUSES: "draft" | "issued" | "applied" | "void"[];
@@ -43584,8 +43584,9 @@ Refuse an initiator action the catalog does not offer. Operator routes only.
 
 **Every action an operator may take on this billing document** (F15 items 3–4).
 
-- `issue` — `canOperatorTransition(…, "issued")`. A bill is never a draft until
-  6e-0d, so the status contract fails closed with no branch.
+- `issue` — `canOperatorTransition(…, "issued")`, on both sides: a pushed bill
+  is born `draft` (one-document-model rulings 41, 160) and issued as an invoice
+  is, with no branch.
 - `void` — {@link voidRefusal}.
 - `close` — {@link closeRefusal}.
 - `add_payment` — the status `accepts_payment`, something is due and the side

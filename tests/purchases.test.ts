@@ -1315,12 +1315,20 @@ Deno.test("PurchaseBillSchema: the stored status is the derivation's, and void i
   const paths = (over: Record<string, unknown>) => issuePaths(PurchaseBillSchema, bill(over)).filter((p) => p === "status");
   assertEquals(paths({}), []);
   assertEquals(paths({ status: "paid" }), ["status"], "nothing is settled");
-  assertEquals(paths({ status: "draft" }).length > 0, true, "a bill has no draft step");
+  assertEquals(paths({ status: "draft" }), [], "a pushed bill is born draft (rulings 41, 160)");
   assertEquals(paths({ status: "void" }), ["status"], "void with no stamp and no void money");
   assertEquals(paths({ voided_at: mockTimestamp }), ["status"], "a stamp with a live status");
   assertEquals(paths({ status: "void", voided_at: mockTimestamp }), []);
   const closedOwing = bill({ totals: { ...bill().totals, closure_count: 1 } });
   assertEquals(issuePaths(PurchaseBillSchema, closedOwing), ["totals.closure_count"]);
+});
+
+Deno.test("PurchaseBillSchema: a draft has not reached Xero, so it is pushed and names no Xero id", () => {
+  const draft = (over: Record<string, unknown> = {}) => issuePaths(PurchaseBillSchema, bill({ status: "draft", ...over }));
+  assertEquals(draft(), []);
+  assertEquals(draft({ xero_id: "b95e3e5e-d5d9-4c38-ac93-bbc880b363e6" }).includes("xero_id"), true, "a draft names no Xero document");
+  assertEquals(draft({ origin: "linked", xero_id: "b95e3e5e-d5d9-4c38-ac93-bbc880b363e6" }).includes("origin"), true, "a linked bill is never a draft");
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ xero_id: null })).includes("xero_id"), false, "an issued bill awaiting its push keeps a null id");
 });
 
 Deno.test("PurchaseCreditSchema: a line naming a bill row sits under that bill's billing divider (ruling 34, 107)", () => {

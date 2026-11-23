@@ -452,7 +452,7 @@ Deno.test("overrides — objects merge key-wise, arrays and scalars replace, und
   assertThrows(() => getTestDoc(S, { gone: undefined }), Error, "gone");
 });
 
-Deno.test("enum-arm search — re-chooses exactly five arms across the corpus, by name", () => {
+Deno.test("enum-arm search — re-chooses exactly six arms across the corpus, by name", () => {
   // `product` parses only as a SALE: a rental obliges `price.replacement_cents`
   // through a superRefine. Documented, because it is surprising.
   const product = getTestDoc(ProductSchema, undefined, NOW);
@@ -505,7 +505,8 @@ Deno.test("enum-arm search — re-chooses exactly five arms across the corpus, b
     "booking.type",
     "inventory-ledger.stock_method",
     "product.type",
-    "purchase-bill.status",
+    // `purchase-bill.status` left this list when a pushed bill became draftable
+    // (one-document-model rulings 41, 160): `draft`, the first member, now parses.
     // A supplier credit refuses `draft`, the shared vocabulary's first member (ruling 34 Q1).
     "purchase-credit.status",
     "templates-versions.status",

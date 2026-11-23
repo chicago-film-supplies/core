@@ -4378,7 +4378,7 @@
           "kind": "variable",
           "name": "PURCHASE_CREDIT_STATUSES",
           "declaration": "const PURCHASE_CREDIT_STATUSES: \"draft\" | \"issued\" | \"applied\" | \"void\"[];",
-          "doc": "The supplier credit's statuses — the AR credit note's vocabulary, one list for\nthe credit role on both sides (one-document-model ruling 34, Q1). A refine on\n`PurchaseCreditSchema` refuses `draft` until 6e-0d's create mode writes one, as\nthe bill refuses a draft: a supplier credit is raised by a close or recorded\nfrom the supplier, never drafted, today."
+          "doc": "The supplier credit's statuses — the AR credit note's vocabulary, one list for\nthe credit role on both sides (one-document-model ruling 34, Q1). A refine on\n`PurchaseCreditSchema` refuses `draft`: a supplier credit is raised by a close\nor recorded from the supplier, never drafted, today. (The bill is drafted since\none-document-model 6e-0d2, rulings 41 and 160.)"
         },
         {
           "kind": "variable",
@@ -9795,7 +9795,7 @@
           "kind": "variable",
           "name": "PURCHASE_CREDIT_STATUSES",
           "declaration": "const PURCHASE_CREDIT_STATUSES: \"draft\" | \"issued\" | \"applied\" | \"void\"[];",
-          "doc": "The supplier credit's statuses — the AR credit note's vocabulary, one list for\nthe credit role on both sides (one-document-model ruling 34, Q1). A refine on\n`PurchaseCreditSchema` refuses `draft` until 6e-0d's create mode writes one, as\nthe bill refuses a draft: a supplier credit is raised by a close or recorded\nfrom the supplier, never drafted, today."
+          "doc": "The supplier credit's statuses — the AR credit note's vocabulary, one list for\nthe credit role on both sides (one-document-model ruling 34, Q1). A refine on\n`PurchaseCreditSchema` refuses `draft`: a supplier credit is raised by a close\nor recorded from the supplier, never drafted, today. (The bill is drafted since\none-document-model 6e-0d2, rulings 41 and 160.)"
         },
         {
           "kind": "interface",
@@ -14387,7 +14387,7 @@
           "kind": "variable",
           "name": "PURCHASE_CREDIT_STATUSES",
           "declaration": "const PURCHASE_CREDIT_STATUSES: \"draft\" | \"issued\" | \"applied\" | \"void\"[];",
-          "doc": "The supplier credit's statuses — the AR credit note's vocabulary, one list for\nthe credit role on both sides (one-document-model ruling 34, Q1). A refine on\n`PurchaseCreditSchema` refuses `draft` until 6e-0d's create mode writes one, as\nthe bill refuses a draft: a supplier credit is raised by a close or recorded\nfrom the supplier, never drafted, today."
+          "doc": "The supplier credit's statuses — the AR credit note's vocabulary, one list for\nthe credit role on both sides (one-document-model ruling 34, Q1). A refine on\n`PurchaseCreditSchema` refuses `draft`: a supplier credit is raised by a close\nor recorded from the supplier, never drafted, today. (The bill is drafted since\none-document-model 6e-0d2, rulings 41 and 160.)"
         },
         {
           "kind": "variable",
@@ -20583,7 +20583,7 @@
           "kind": "function",
           "name": "billingActionsFor",
           "signature": "billingActionsFor(side: S, doc: indexedAccess, ctx: BillingOfferContext<S>): DocumentActionOffer[]",
-          "doc": "**Every action an operator may take on this billing document** (F15 items 3–4).\n\n- `issue` — `canOperatorTransition(…, \"issued\")`. A bill is never a draft until\n  6e-0d, so the status contract fails closed with no branch.\n- `void` — {@link voidRefusal}.\n- `close` — {@link closeRefusal}.\n- `add_payment` — the status `accepts_payment`, something is due and the side\n  takes settlement on it (a card bill does not); `max_cents` is the amount due.\n- `allocate_credit` — the document has credit room (due, and the side takes credit on it).\n- `reverse_settlement` — one offer per reversible row ({@link reversalRefusal}); a\n  $0 document is un-closed by reversing its closure row (ruling 115).\n- `add_credit` — a status live in Xero with credit left on a line ({@link creditableLines}).\n- `edit_items` — always; `frozen_classes` from `INVOICE_FIELD_FREEZE`, both sides.\n- `edit_date` / `edit_counterparty` — while their field class is not frozen.\n- `push_to_xero` — {@link pushRefusal}.\n\nGaps ({@link ACTION_GAPS}) are never offered.",
+          "doc": "**Every action an operator may take on this billing document** (F15 items 3–4).\n\n- `issue` — `canOperatorTransition(…, \"issued\")`, on both sides: a pushed bill\n  is born `draft` (one-document-model rulings 41, 160) and issued as an invoice\n  is, with no branch.\n- `void` — {@link voidRefusal}.\n- `close` — {@link closeRefusal}.\n- `add_payment` — the status `accepts_payment`, something is due and the side\n  takes settlement on it (a card bill does not); `max_cents` is the amount due.\n- `allocate_credit` — the document has credit room (due, and the side takes credit on it).\n- `reverse_settlement` — one offer per reversible row ({@link reversalRefusal}); a\n  $0 document is un-closed by reversing its closure row (ruling 115).\n- `add_credit` — a status live in Xero with credit left on a line ({@link creditableLines}).\n- `edit_items` — always; `frozen_classes` from `INVOICE_FIELD_FREEZE`, both sides.\n- `edit_date` / `edit_counterparty` — while their field class is not frozen.\n- `push_to_xero` — {@link pushRefusal}.\n\nGaps ({@link ACTION_GAPS}) are never offered.",
           "paramTags": [],
           "returnsTag": null
         },

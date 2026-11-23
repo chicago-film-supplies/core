@@ -117,6 +117,7 @@ import { extendChecked } from "./_extend.ts";
 import type { InvoiceDocDestinationItemType } from "./invoice.ts";
 import { PriceFormulaRefSchema, RateKey, RateSnapshotSchema, TierCountSchema, type TierCountType } from "./price-formula.ts";
 import { deriveInvoiceStatus } from "./_invoice-freeze.ts";
+import { INVOICE_STATUS_CONTRACTS } from "./invoice.ts";
 import {
   type OutOfServiceLinkCarrier,
   ActorRef,
@@ -755,7 +756,10 @@ export interface PurchaseBill {
   number_purchases: number[];
   /**
    * The invoice's status vocabulary, stored and refined equal to
-   * `deriveInvoiceStatus`. A bill has no draft step, so it is born `issued`.
+   * `deriveInvoiceStatus`. A PUSHED bill is born `draft` and issued by the
+   * operator (one-document-model rulings 41, 160), as an invoice is; a draft has
+   * not reached Xero, so it carries no `xero_id`. A LINKED bill is a document Xero
+   * already holds, so it is never a draft.
    */
   status: InvoiceStatusType;
   /** Must equal the purchase's `supplier` — asserted by the writer. */
@@ -770,7 +774,7 @@ export interface PurchaseBill {
   /**
    * `null` on a `bank_transaction` — a bill born paid is due on nothing — and on
    * a linked ACCPAY Xero holds without one (Xero does not require `DueDate`).
-   * A pushed bill always states one: `CreatePurchaseBillInput` requires it.
+   * A pushed bill, draft or issued, always states one: `CreatePurchaseBillInput` requires it.
    */
   due_date: string | null;
   /**
@@ -872,8 +876,17 @@ function checkPurchaseBill(b: PurchaseBill, ctx: z.RefinementCtx): void {
  * the stamp say: a $0 bill's void folds to 0, so the stamp carries it.
  */
 function checkBillStatus(b: PurchaseBill, ctx: z.RefinementCtx): void {
-  // One vocabulary, and a bill has no draft step: it is born `issued`.
-  if (b.status === "draft") ctx.addIssue({ code: "custom", path: ["status"], message: "a bill has no draft status" });
+  // One vocabulary with the invoice, draft included (rulings 41, 160). A status
+  // that has not reached Xero is read off the contract, never a literal, so the
+  // rule names no status: such a bill is a pushed one with no Xero id yet.
+  if (!INVOICE_STATUS_CONTRACTS[b.status].reached_xero) {
+    if (b.origin !== "pushed") {
+      ctx.addIssue({ code: "custom", path: ["origin"], message: `a ${b.status} bill has not reached Xero, so it cannot be a linked one` });
+    }
+    if (b.xero_id !== null) {
+      ctx.addIssue({ code: "custom", path: ["xero_id"], message: `a ${b.status} bill has not reached Xero, so it names no Xero document` });
+    }
+  }
   // The #2396 shape from the other side: a closed bill that still owes money.
   if ((b.totals.closure_count ?? 0) > 0 && b.totals.total_cents !== 0) {
     ctx.addIssue({ code: "custom", path: ["totals", "closure_count"], message: "closure_count > 0 is legal only on a bill whose total_cents is 0" });
@@ -1077,8 +1090,10 @@ function checkPurchaseCredit(c: PurchaseCredit, ctx: z.RefinementCtx): void {
       message: "remaining_credit_cents must lie between 0 and total_cents",
     });
   }
-  // One vocabulary with the AR note, and no draft step yet: 6e-0d's create mode
-  // is the first writer of one, as the bill refuses its own.
+  // One vocabulary with the AR note, and no draft step yet: a supplier credit is
+  // raised by a close or recorded from the supplier, never drafted. (The bill
+  // gained its draft in one-document-model 6e-0d2, rulings 41 and 160; the credit
+  // did not.)
   if (c.status === "draft") {
     ctx.addIssue({ code: "custom", path: ["status"], message: "a supplier credit has no draft status yet" });
   }

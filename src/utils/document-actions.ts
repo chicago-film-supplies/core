@@ -822,8 +822,9 @@ export function creditParts<S extends Side>(
 /**
  * **Every action an operator may take on this billing document** (F15 items 3–4).
  *
- * - `issue` — `canOperatorTransition(…, "issued")`. A bill is never a draft until
- *   6e-0d, so the status contract fails closed with no branch.
+ * - `issue` — `canOperatorTransition(…, "issued")`, on both sides: a pushed bill
+ *   is born `draft` (one-document-model rulings 41, 160) and issued as an invoice
+ *   is, with no branch.
  * - `void` — {@link voidRefusal}.
  * - `close` — {@link closeRefusal}.
  * - `add_payment` — the status `accepts_payment`, something is due and the side
