@@ -16710,9 +16710,16 @@ alone. An accepted edit is pushed to Xero through the ACCPAY edit push (D5).
 pair it leaves out is unchanged. A pair's membership follows its divider in
 `items`, as on an invoice.
 
+`status: "issued"` ISSUES a draft bill, the invoice's twin (one-document-model
+ruling 160): the writer asserts the catalog's `issue` and enqueues the bill's
+first Xero post. It is the only status this input takes: a bill is voided
+through its own route (`VoidPurchaseBillInput`), and every other status is
+derived from the settlement fold.
+
 ```ts
 interface UpdatePurchaseBillInputType {
   version: number;
+  status?: "issued";
   date?: string;
   due_date?: string;
   subject?: string;
@@ -31268,9 +31275,16 @@ alone. An accepted edit is pushed to Xero through the ACCPAY edit push (D5).
 pair it leaves out is unchanged. A pair's membership follows its divider in
 `items`, as on an invoice.
 
+`status: "issued"` ISSUES a draft bill, the invoice's twin (one-document-model
+ruling 160): the writer asserts the catalog's `issue` and enqueues the bill's
+first Xero post. It is the only status this input takes: a bill is voided
+through its own route (`VoidPurchaseBillInput`), and every other status is
+derived from the settlement fold.
+
 ```ts
 interface UpdatePurchaseBillInputType {
   version: number;
+  status?: "issued";
   date?: string;
   due_date?: string;
   subject?: string;

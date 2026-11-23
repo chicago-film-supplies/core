@@ -1506,9 +1506,16 @@ export type PurchaseBillRowInputType = PurchaseBillDividerInputType | PurchaseBi
  * `destinations`, when present, edits the pairs it names, each stated whole; a
  * pair it leaves out is unchanged. A pair's membership follows its divider in
  * `items`, as on an invoice.
+ *
+ * `status: "issued"` ISSUES a draft bill, the invoice's twin (one-document-model
+ * ruling 160): the writer asserts the catalog's `issue` and enqueues the bill's
+ * first Xero post. It is the only status this input takes: a bill is voided
+ * through its own route (`VoidPurchaseBillInput`), and every other status is
+ * derived from the settlement fold.
  */
 export interface UpdatePurchaseBillInputType {
   version: number;
+  status?: "issued";
   date?: string;
   due_date?: string;
   subject?: string;
@@ -1594,6 +1601,7 @@ export const PurchaseBillRowInput: z.ZodType<PurchaseBillRowInputType> = z.discr
 /** Zod schema for UpdatePurchaseBillInputType. */
 export const UpdatePurchaseBillInput: z.ZodType<UpdatePurchaseBillInputType> = z.object({
   version: z.int().min(0),
+  status: z.literal("issued").optional(),
   date: chicagoStartOfDay().optional(),
   due_date: chicagoStartOfDay().optional(),
   subject: z.string().optional(),

@@ -1511,6 +1511,13 @@ Deno.test("UpdatePurchaseBillInput: takes the W3 keys and a bill's pair, and ref
   assertEquals(old.error.issues.map((i) => i.path), [["destinations", 0, "dates", "collection_start"]]);
 });
 
+Deno.test("UpdatePurchaseBillInput: status takes \"issued\" alone (ruling 160); a void is its own route", () => {
+  assert(UpdatePurchaseBillInput.safeParse({ version: 1, status: "issued" }).success);
+  for (const status of ["draft", "void", "paid", "part_paid"]) {
+    assert(!UpdatePurchaseBillInput.safeParse({ version: 1, status }).success, status);
+  }
+});
+
 Deno.test("stored bill line: substituted_for is on the product arm only", () => {
   const entry = [{ path: [DIV, iuid(2)], quantity: 1 }];
   const ok = { ...project(buyLine(), 10, 1), substituted_for: entry } as PurchaseDocumentItem;
