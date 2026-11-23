@@ -95,10 +95,12 @@ import { PERMISSIONS, type Permission } from "./permissions.ts";
  * rate. **A scoped view must not widen the vocabulary it borrows.**
  */
 const ACTIVITY_SUBJECT_COLLECTIONS = [
-  // ⚠️ `bookings-inbound` is the ONE entry that carries no actor, admitted by
-  // owner ruling (one-document-model 164, 2026-11-21) beside its custody
-  // document `purchase-receipts`, although `bookings` stays out for that reason.
-  "bookings-inbound",
+  // ⚠️ Neither booking collection is a subject: a booking carries no actor on
+  // either side. The feed records custody through the movement that initiates
+  // it (`transactions`, sourced to its document). `bookings-inbound` was
+  // admitted by ruling 164 and removed by ruling 167 (one-document-model,
+  // api-cloudrun#1529), which measured all 32 prod operator inbound movements
+  // already in the feed.
   "cards",
   "chart-of-accounts",
   "comments",
@@ -172,8 +174,6 @@ export const ActivitySubjectCollectionEnum: z.ZodType<ActivitySubjectCollection>
 export const ACTIVITY_READ_PERMISSION_BY_COLLECTION: Readonly<
   Record<ActivitySubjectCollection, Permission>
 > = {
-  // The supplier custody pair shares one read, as the rules gate both on it.
-  "bookings-inbound": "receipts.read",
   "cards": "cards.read",
   "chart-of-accounts": "chartOfAccounts.read",
   "comments": "comments.read",
@@ -217,9 +217,8 @@ export const ACTIVITY_READ_PERMISSION_BY_COLLECTION: Readonly<
  * The DISTINCT permissions a feed row can carry — the universe a client
  * intersects against.
  *
- * ⚠️ **29, not 31** — `templates` and `template-components` both map to
- * `templates.read`, and `purchase-receipts` and `bookings-inbound` both to
- * `receipts.read`. ONE under the cap of 30. Derived rather than listed so it cannot disagree with the
+ * ⚠️ **29, not 30** — `templates` and `template-components` both map to
+ * `templates.read`. ONE under the cap of 30. Derived rather than listed so it cannot disagree with the
  * map above; the COUNT is asserted in `tests/activity.test.ts`, because the
  * number is the thing that has to stay under Firestore's `in` cap of 30 and a
  * comment cannot notice when it stops being true.

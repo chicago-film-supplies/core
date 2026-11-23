@@ -17,9 +17,8 @@ const ACCEPTS_PAYMENT_STATUSES: readonly InvoiceStatusType[];
 The DISTINCT permissions a feed row can carry — the universe a client
 intersects against.
 
-⚠️ **29, not 31** — `templates` and `template-components` both map to
-`templates.read`, and `purchase-receipts` and `bookings-inbound` both to
-`receipts.read`. ONE under the cap of 30. Derived rather than listed so it cannot disagree with the
+⚠️ **29, not 30** — `templates` and `template-components` both map to
+`templates.read`. ONE under the cap of 30. Derived rather than listed so it cannot disagree with the
 map above; the COUNT is asserted in `tests/activity.test.ts`, because the
 number is the thing that has to stay under Firestore's `in` cap of 30 and a
 comment cannot notice when it stops being true.

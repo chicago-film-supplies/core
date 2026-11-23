@@ -103,6 +103,12 @@ Deno.test("the derivation is NOT the kebab→camel rule — two collections prov
   );
 });
 
+Deno.test("no booking collection is a feed subject: a booking names no actor (ruling 167)", () => {
+  for (const c of ["bookings", "bookings-inbound"]) {
+    assertEquals((FEED_COLLECTIONS as readonly string[]).includes(c), false, c);
+  }
+});
+
 Deno.test("the feed stamps 29 DISTINCT permissions, 1 under Firestore's `in` cap of 30", () => {
   // 🔴 The number is asserted, not commented, because it is what has to stay
   // under the cap — and the cap binds on the ADMIN first, so the feed breaks for
@@ -123,12 +129,13 @@ Deno.test("the feed stamps 29 DISTINCT permissions, 1 under Firestore's `in` cap
   // `fulfillment.read`. The three purchase documents (api-cloudrun#1210) spent
   // one between them: all gate on `purchases.read`. One-document-model 6e-0d1
   // (rulings 48, 164) spent THREE more: bills and supplier credits each take
-  // their role's read, and `purchase-receipts` + `bookings-inbound` share
-  // `receipts.read`. The next actor-carrying collection on a NEW permission
+  // their role's read, and `purchase-receipts` takes `receipts.read`
+  // (`bookings-inbound` joined it under ruling 164 and left under ruling 167:
+  // a booking names no actor). The next actor-carrying collection on a NEW permission
   // breaks the admin's feed; it must share a read or the feed must page.
   //
-  // 31 collections, 29 permissions.
-  assertEquals(FEED_COLLECTIONS.length, 31, "feed collections");
+  // 30 collections, 29 permissions.
+  assertEquals(FEED_COLLECTIONS.length, 30, "feed collections");
   assertEquals(ACTIVITY_FEED_PERMISSIONS.length, 29, "distinct feed permissions");
   assertEquals(
     ACTIVITY_FEED_PERMISSIONS.length <= 30,
