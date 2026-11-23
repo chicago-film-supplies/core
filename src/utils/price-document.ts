@@ -110,8 +110,6 @@ import {
   type LineMoneyLike,
   lineUnitsCents,
   type MoneySlice,
-  payableStoredMoney,
-  type PayableMoneyLineLike,
   sliceStoredMoney,
 } from "../schemas/_line-money.ts";
 import { pairItemsAcrossRebuild, type PathedItem } from "./item-pairing.ts";
@@ -1105,38 +1103,51 @@ export interface BillingRowMoneyLike {
 }
 
 /**
- * **The money of units `(before, after]` of a billing row, per side** (ruling
- * 88): what the row's money IS decides the door.
+ * **The money of units `(before, after]` of a billing row** — ONE door on both
+ * sides, decided by what the row's money IS, never by side (one-document-model
+ * ruling 178; it replaced the per-side `BILLING_ROW_PART`):
  *
- * - **receivable:** a RATE row (rates, no stated total) through the one
- *   line-money function, the gross and discount each a difference of cumulative
- *   values; a stated or frozen row sliced from its stored gross and net.
- * - **payable:** the row's stored money sliced (`payableStoredMoney`).
+ * - **a RATE row** (rates, no stated total; `lineKindOf`): the one line-money
+ *   function, `formula(after) − formula(before)`, the gross and the discount each
+ *   a difference of cumulative values. Its stored money is itself the formula at
+ *   its quantity, so slicing that total would round twice; the formula rounds
+ *   once. A payable TIME row is a rate row, and moved from a slice of its stored
+ *   net to this (±1¢ on a part).
+ * - **a STATED row** (`price.stated_cents`): its stated gross and declared
+ *   discount cents sliced (`sliceStoredMoney`). There is no formula to re-run,
+ *   so the stated gross is the truth. A LINKED time row is one: its stated
+ *   total governs its rates (`statedOf`). Prod, 2026-11-23: all 534 payable
+ *   rows are flat and stated, so ruling 178 moved no stored money.
+ * - **neither** (a frozen CRMS row, a credit row): its stored gross and net.
  *
- * Every door slices CUMULATIVE values, so the parts along any path from 0 to the
+ * Every arm slices CUMULATIVE values, so the parts along any path from 0 to the
  * row's quantity sum exactly to it on every figure.
  */
-export const BILLING_ROW_PART: { [S in Side]: (row: BillingRowMoneyLike, before: number, after: number) => MoneySlice } = {
-  receivable: (row, before, after) => {
-    // A fold's credit row may carry no price at all (it moves no money of its own).
-    const price: Partial<BillingRowMoneyLike["price"]> = row.price ?? {};
-    const rates = price.rates ?? [];
-    if (rates.length > 0 && (price.stated_cents ?? null) === null) {
-      const line: LineMoneyLike = {
-        ...(row.type !== undefined ? { type: row.type } : {}),
-        quantity: row.quantity,
-        price: { rates, counts: price.counts ?? [], discount: price.discount ?? null, stated_cents: null },
-      };
-      const net = lineUnitsCents(line, before, after);
-      const discount = lineDiscountAtCents(line, after) - lineDiscountAtCents(line, before);
-      return { gross_cents: net + discount, discount_cents: discount, net_cents: net };
-    }
-    const net = price.subtotal_discounted_cents ?? 0;
-    const gross = price.subtotal_cents ?? net;
-    return sliceStoredMoney({ quantity: row.quantity, gross_cents: gross, discount_cents: gross - net }, before, after);
-  },
-  payable: (row, before, after) => sliceStoredMoney(payableStoredMoney(row as PayableMoneyLineLike), before, after),
-};
+export function billingRowPart(row: BillingRowMoneyLike, before: number, after: number): MoneySlice {
+  // A fold's credit row may carry no price at all (it moves no money of its own).
+  const price: Partial<BillingRowMoneyLike["price"]> = row.price ?? {};
+  const rates = price.rates ?? [];
+  if (rates.length > 0 && (price.stated_cents ?? null) === null) {
+    const line: LineMoneyLike = {
+      ...(row.type !== undefined ? { type: row.type } : {}),
+      quantity: row.quantity,
+      price: { rates, counts: price.counts ?? [], discount: price.discount ?? null, stated_cents: null },
+    };
+    const net = lineUnitsCents(line, before, after);
+    const discount = lineDiscountAtCents(line, after) - lineDiscountAtCents(line, before);
+    return { gross_cents: net + discount, discount_cents: discount, net_cents: net };
+  }
+  // A STATED row: its gross is `stated_cents` and its discount the declared
+  // cents (D7, `priceStatedTotalLine`), so nothing re-derives either.
+  const stated = price.stated_cents ?? null;
+  if (stated !== null) {
+    return sliceStoredMoney({ quantity: row.quantity, gross_cents: stated, discount_cents: price.discount?.amount_cents ?? 0 }, before, after);
+  }
+  // Neither (a frozen CRMS row, a credit row): its stored gross and net.
+  const net = price.subtotal_discounted_cents ?? row.amount_cents ?? 0;
+  const gross = price.subtotal_cents ?? net;
+  return sliceStoredMoney({ quantity: row.quantity, gross_cents: gross, discount_cents: gross - net }, before, after);
+}
 
 /** A part's money as a stored credit line states it (one-document-model D7). */
 export interface PartMoney {
@@ -1162,7 +1173,7 @@ export interface CreditMoney extends PartMoney {
  * **What a credit of `n` units of one billing row is worth, on both sides**
  * (ruling 34 F14 item 6; one-document-model 6d, D4): units `(c, c + n]` of the
  * row, `c` the units live credits already took (`credited.quantity`), priced
- * FIRST-COME through the side's part door ({@link BILLING_ROW_PART}), so
+ * FIRST-COME through the one part door ({@link billingRowPart}), so
  * crediting a row in parts sums to exactly its money — $100.00 over 3 units
  * credited one at a time is 3333 + 3334 + 3333, never 9999. The credit
  * INHERITS the row's discount terms, its record over the same units.
@@ -1192,7 +1203,7 @@ export function billingRowCreditMoney(args: {
   if (!Number.isInteger(n) || n < 1 || n > left) {
     throw new RangeError(`crediting ${n} exceeds the ${Math.max(0, left)} left on the billing row`);
   }
-  const whole = BILLING_ROW_PART[side](row, 0, row.quantity).net_cents;
+  const whole = billingRowPart(row, 0, row.quantity).net_cents;
   const room = Math.max(0, whole - credited.amount_cents);
   if (memo_cents !== undefined) {
     if (side !== "payable") throw new RangeError("a credit of a receivable row is priced from the row; it states no amount");
@@ -1200,7 +1211,7 @@ export function billingRowCreditMoney(args: {
     return { amount_cents: memo_cents, discount: null, stated_cents: memo_cents, units_from: null };
   }
   const from = credited.quantity;
-  const slice = BILLING_ROW_PART[side](row, from, from + n);
+  const slice = billingRowPart(row, from, from + n);
   // A row part-credited by a memo may have less left than the slice: what is left, as a net figure.
   if (slice.net_cents > room) return { amount_cents: room, discount: null, stated_cents: room, units_from: null };
   const terms = row.price.discount;

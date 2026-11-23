@@ -25107,12 +25107,6 @@
       "moduleDoc": "",
       "symbols": [
         {
-          "kind": "variable",
-          "name": "BILLING_ROW_PART",
-          "declaration": "const BILLING_ROW_PART: mapped;",
-          "doc": "**The money of units `(before, after]` of a billing row, per side** (ruling\n88): what the row's money IS decides the door.\n\n- **receivable:** a RATE row (rates, no stated total) through the one\n  line-money function, the gross and discount each a difference of cumulative\n  values; a stated or frozen row sliced from its stored gross and net.\n- **payable:** the row's stored money sliced (`payableStoredMoney`).\n\nEvery door slices CUMULATIVE values, so the parts along any path from 0 to the\nrow's quantity sum exactly to it on every figure."
-        },
-        {
           "kind": "interface",
           "name": "BillingRowMoneyLike",
           "declaration": "interface BillingRowMoneyLike {\n  type?: indexedAccess;\n  quantity: number;\n  amount_cents?: number | null;\n  price: typeLiteral;\n}",
@@ -25266,7 +25260,15 @@
           "kind": "function",
           "name": "billingRowCreditMoney",
           "signature": "billingRowCreditMoney(args: typeLiteral): CreditMoney",
-          "doc": "**What a credit of `n` units of one billing row is worth, on both sides**\n(ruling 34 F14 item 6; one-document-model 6d, D4): units `(c, c + n]` of the\nrow, `c` the units live credits already took (`credited.quantity`), priced\nFIRST-COME through the side's part door ({@link BILLING_ROW_PART}), so\ncrediting a row in parts sums to exactly its money — $100.00 over 3 units\ncredited one at a time is 3333 + 3334 + 3333, never 9999. The credit\nINHERITS the row's discount terms, its record over the same units.\n\n- `memo_cents` (payable only: a supplier states what it credits): it\n  governs, refused above what is left of the row's money, and is stored as the\n  credit line's `price.stated_cents`.\n- The first-come share is capped at what is left of the row's money\n  (`credited.amount_cents` taken), so a row part-credited by a memo cannot be\n  over-credited.\n\nPre-tax only: an AR credit's taxes are priced on the part by\n{@link priceCreditNote}.",
+          "doc": "**What a credit of `n` units of one billing row is worth, on both sides**\n(ruling 34 F14 item 6; one-document-model 6d, D4): units `(c, c + n]` of the\nrow, `c` the units live credits already took (`credited.quantity`), priced\nFIRST-COME through the one part door ({@link billingRowPart}), so\ncrediting a row in parts sums to exactly its money — $100.00 over 3 units\ncredited one at a time is 3333 + 3334 + 3333, never 9999. The credit\nINHERITS the row's discount terms, its record over the same units.\n\n- `memo_cents` (payable only: a supplier states what it credits): it\n  governs, refused above what is left of the row's money, and is stored as the\n  credit line's `price.stated_cents`.\n- The first-come share is capped at what is left of the row's money\n  (`credited.amount_cents` taken), so a row part-credited by a memo cannot be\n  over-credited.\n\nPre-tax only: an AR credit's taxes are priced on the part by\n{@link priceCreditNote}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "billingRowPart",
+          "signature": "billingRowPart(row: BillingRowMoneyLike, before: number, after: number): MoneySlice",
+          "doc": "**The money of units `(before, after]` of a billing row** — ONE door on both\nsides, decided by what the row's money IS, never by side (one-document-model\nruling 178; it replaced the per-side `BILLING_ROW_PART`):\n\n- **a RATE row** (rates, no stated total; `lineKindOf`): the one line-money\n  function, `formula(after) − formula(before)`, the gross and the discount each\n  a difference of cumulative values. Its stored money is itself the formula at\n  its quantity, so slicing that total would round twice; the formula rounds\n  once. A payable TIME row is a rate row, and moved from a slice of its stored\n  net to this (±1¢ on a part).\n- **a STATED row** (`price.stated_cents`): its stated gross and declared\n  discount cents sliced (`sliceStoredMoney`). There is no formula to re-run,\n  so the stated gross is the truth. A LINKED time row is one: its stated\n  total governs its rates (`statedOf`). Prod, 2026-11-23: all 534 payable\n  rows are flat and stated, so ruling 178 moved no stored money.\n- **neither** (a frozen CRMS row, a credit row): its stored gross and net.\n\nEvery arm slices CUMULATIVE values, so the parts along any path from 0 to the\nrow's quantity sum exactly to it on every figure.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25898,7 +25900,7 @@
           "kind": "function",
           "name": "partMoney",
           "signature": "partMoney(line: PayableMoneyLineLike & typeLiteral, from: number, to: number): PartMoney",
-          "doc": "**Units `(from, to]` of a source line, as a part stores them** (D7): its\nslices of the source's stored gross and discount cents, and the net as their\ndifference — the payable part door ({@link BILLING_ROW_PART}). A part never\nre-applies a rate, so the parts of a line sum to it exactly on every figure\nand each part's own `net = gross − discount` holds.",
+          "doc": "**Units `(from, to]` of a source line, as a part stores them** (D7): its\nslices of the source's stored gross and discount cents, and the net as their\ndifference — the one part door ({@link billingRowPart}). A part never\nre-applies a rate, so the parts of a line sum to it exactly on every figure\nand each part's own `net = gross − discount` holds.",
           "paramTags": [],
           "returnsTag": null
         },

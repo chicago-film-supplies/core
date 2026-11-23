@@ -144,7 +144,6 @@ import type {
 } from "../schemas/mod.ts";
 import { withRowSourcePath } from "../schemas/mod.ts";
 import { billsOutOfService, isDividerItemType, isLineItemType } from "../schemas/mod.ts";
-import { payableStoredMoney, sliceStoredMoney } from "../schemas/_line-money.ts";
 import {
   extensionSectionTargets,
   getOrderScopedItems,
@@ -178,7 +177,7 @@ import { chargeEnvelope, chicagoDayAtTimeOf, toChicagoYmd } from "./dates.ts";
 import { combineTierCounts, meterUnits, priceFromFormula, type PricingFormulas, type TierCount } from "./price-formulas.ts";
 import { isPreTaxItem, type LineItem } from "./orders.ts";
 import { billingInCreditPool, creditIsLive } from "../schemas/mod.ts";
-import { BILLING_ROW_PART, type BillingRowMoneyLike, priceLine } from "./price-document.ts";
+import { billingRowPart, type BillingRowMoneyLike, priceLine } from "./price-document.ts";
 
 /** The invoice shape these functions read — every linked invoice, live or void. */
 export interface AccountedInvoice {
@@ -823,12 +822,12 @@ function receivableNetCents(row: { price?: unknown }): number {
 }
 
 /**
- * A receivable part (ruling 88): the receivable door of {@link BILLING_ROW_PART},
- * its net. A credit-note line (which carries no rates) is sliced from its
- * stored money.
+ * A billing row's part, its net, through the one part door (ruling 178:
+ * {@link billingRowPart}, by line kind on both sides). A credit-note line (which
+ * carries no rates) is sliced from its stored money.
  */
 function receivablePartCents(row: InvoiceItem, before: number, after: number): number {
-  return BILLING_ROW_PART.receivable(row as unknown as BillingRowMoneyLike, before, after).net_cents;
+  return billingRowPart(row as unknown as BillingRowMoneyLike, before, after).net_cents;
 }
 
 /** A payable row as the fold's typed accessors read it. */
@@ -887,7 +886,8 @@ export const PAYABLE_BILLING_FOLD: BillingFoldSide<PayableFoldBill, PayableFoldC
   }),
   billingRows: (doc) => ({ items: doc.items as unknown as InvoiceItem[], destinations: doc.destinations }),
   rowNetCents: (row) => payableRow(row).amount_cents ?? 0,
-  partCents: (row, before, after) => sliceStoredMoney(payableStoredMoney(payableRow(row)), before, after).net_cents,
+  // The one part door (ruling 178), as the receivable side reads it.
+  partCents: receivablePartCents,
   creditRows: (doc) => ({ items: doc.items as unknown as InvoiceItem[], destinations: doc.destinations ?? [] }),
 };
 
@@ -1688,7 +1688,7 @@ export function accountInitiator(
             // through (ruling 88, F14 item 6): AR's rate pricer reads `rates ×
             // counts`, so a FLAT payable row (no rates) previewed $0 under it and
             // throws once it states its flat tier (ruling 108).
-            preview_cents: BILLING_ROW_PART[side](row.item as unknown as BillingRowMoneyLike, 0, take).net_cents,
+            preview_cents: billingRowPart(row.item as unknown as BillingRowMoneyLike, 0, take).net_cents,
           });
         }
         if (left > 0) refused.push(`${left} unit(s) over-billed beyond any attributable billing row in the credit pool`);

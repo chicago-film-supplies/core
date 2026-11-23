@@ -91,7 +91,7 @@ import {
 } from "./invoices.ts";
 import type { DocumentTotalsCore, LineItem } from "./orders.ts";
 import {
-  BILLING_ROW_PART,
+  billingRowPart,
   billingRowCreditMoney,
   chargeWindowContext,
   type CreditMoney,
@@ -367,7 +367,7 @@ export type { CreditMoney, PartMoney } from "./price-document.ts";
 /**
  * **Units `(from, to]` of a source line, as a part stores them** (D7): its
  * slices of the source's stored gross and discount cents, and the net as their
- * difference — the payable part door ({@link BILLING_ROW_PART}). A part never
+ * difference — the one part door ({@link billingRowPart}). A part never
  * re-applies a rate, so the parts of a line sum to it exactly on every figure
  * and each part's own `net = gross − discount` holds.
  */
@@ -376,7 +376,7 @@ export function partMoney(
   from: number,
   to: number,
 ): PartMoney {
-  const slice = BILLING_ROW_PART.payable(line, from, to);
+  const slice = billingRowPart(line, from, to);
   const terms = line.price.discount;
   return {
     amount_cents: slice.net_cents,

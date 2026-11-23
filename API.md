@@ -52483,23 +52483,6 @@ Returns `[]` when every flagged line is a component.
 
 ## `@cfs/core/utils/price-document`
 
-### `BILLING_ROW_PART`
-
-**The money of units `(before, after]` of a billing row, per side** (ruling
-88): what the row's money IS decides the door.
-
-- **receivable:** a RATE row (rates, no stated total) through the one
-  line-money function, the gross and discount each a difference of cumulative
-  values; a stated or frozen row sliced from its stored gross and net.
-- **payable:** the row's stored money sliced (`payableStoredMoney`).
-
-Every door slices CUMULATIVE values, so the parts along any path from 0 to the
-row's quantity sum exactly to it on every figure.
-
-```ts
-const BILLING_ROW_PART: mapped;
-```
-
 ### `BillingRowMoneyLike`
 
 A billing row as a credit part reads its money, on either side.
@@ -52827,7 +52810,7 @@ interface StoredDaysRow {
 **What a credit of `n` units of one billing row is worth, on both sides**
 (ruling 34 F14 item 6; one-document-model 6d, D4): units `(c, c + n]` of the
 row, `c` the units live credits already took (`credited.quantity`), priced
-FIRST-COME through the side's part door ({@link BILLING_ROW_PART}), so
+FIRST-COME through the one part door ({@link billingRowPart}), so
 crediting a row in parts sums to exactly its money — $100.00 over 3 units
 credited one at a time is 3333 + 3334 + 3333, never 9999. The credit
 INHERITS the row's discount terms, its record over the same units.
@@ -52841,6 +52824,28 @@ INHERITS the row's discount terms, its record over the same units.
 
 Pre-tax only: an AR credit's taxes are priced on the part by
 {@link priceCreditNote}.
+
+### `billingRowPart(row: BillingRowMoneyLike, before: number, after: number): MoneySlice`
+
+**The money of units `(before, after]` of a billing row** — ONE door on both
+sides, decided by what the row's money IS, never by side (one-document-model
+ruling 178; it replaced the per-side `BILLING_ROW_PART`):
+
+- **a RATE row** (rates, no stated total; `lineKindOf`): the one line-money
+  function, `formula(after) − formula(before)`, the gross and the discount each
+  a difference of cumulative values. Its stored money is itself the formula at
+  its quantity, so slicing that total would round twice; the formula rounds
+  once. A payable TIME row is a rate row, and moved from a slice of its stored
+  net to this (±1¢ on a part).
+- **a STATED row** (`price.stated_cents`): its stated gross and declared
+  discount cents sliced (`sliceStoredMoney`). There is no formula to re-run,
+  so the stated gross is the truth. A LINKED time row is one: its stated
+  total governs its rates (`statedOf`). Prod, 2026-11-23: all 534 payable
+  rows are flat and stated, so ruling 178 moved no stored money.
+- **neither** (a frozen CRMS row, a credit row): its stored gross and net.
+
+Every arm slices CUMULATIVE values, so the parts along any path from 0 to the
+row's quantity sum exactly to it on every figure.
 
 ### `carriedLines(items: readonly T[], document: PriceDocumentKind): ReadonlyMap<T, readonly TierCount[]>`
 
@@ -53913,7 +53918,7 @@ writer does, or an open hire's pair meters nothing and no group is billed.
 
 **Units `(from, to]` of a source line, as a part stores them** (D7): its
 slices of the source's stored gross and discount cents, and the net as their
-difference — the payable part door ({@link BILLING_ROW_PART}). A part never
+difference — the one part door ({@link billingRowPart}). A part never
 re-applies a rate, so the parts of a line sum to it exactly on every figure
 and each part's own `net = gross − discount` holds.
 
