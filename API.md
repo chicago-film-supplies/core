@@ -3966,6 +3966,7 @@ interface CreditNoteDocLineItem {
   xero_id: string | null;
   uid_billing?: string;
   path_billing_item?: string[];
+  units_from?: number | null;
   path: string[];
   reverses_billing: boolean;
   substituted_for?: SubstitutedForEntryType[];
@@ -6811,6 +6812,7 @@ interface InvoiceDocLineItemType {
   substituted_for?: SubstitutedForEntryType[];
   out_of_service?: OutOfServiceEntryType[];
   path_source_item?: string[];
+  units_from?: number | null;
   exchanged_for?: ExchangedForEntryType[];
 }
 ```
@@ -6978,6 +6980,7 @@ interface InvoiceItemInputLineType {
   quantity_per_parent?: number | null;
   out_of_service?: OutOfServiceEntryType[];
   path_source_item?: string[];
+  units_from?: number | null;
 }
 ```
 
@@ -25034,6 +25037,7 @@ interface InvoiceDocLineItemType {
   substituted_for?: SubstitutedForEntryType[];
   out_of_service?: OutOfServiceEntryType[];
   path_source_item?: string[];
+  units_from?: number | null;
   exchanged_for?: ExchangedForEntryType[];
 }
 ```
@@ -25195,6 +25199,7 @@ interface InvoiceItemInputLineType {
   quantity_per_parent?: number | null;
   out_of_service?: OutOfServiceEntryType[];
   path_source_item?: string[];
+  units_from?: number | null;
 }
 ```
 
@@ -31990,6 +31995,7 @@ interface CreditNoteDocLineItem {
   xero_id: string | null;
   uid_billing?: string;
   path_billing_item?: string[];
+  units_from?: number | null;
   path: string[];
   reverses_billing: boolean;
   substituted_for?: SubstitutedForEntryType[];
@@ -44379,6 +44385,7 @@ order-input item satisfy it.
 interface PricingItem {
   type: ItemTypeType;
   quantity?: number;
+  units_from?: number | null;
   price?: PricingPrice | null;
   coa_revenue?: number | null;
 }
@@ -51083,6 +51090,7 @@ order-input item satisfy it.
 interface PricingItem {
   type: ItemTypeType;
   quantity?: number;
+  units_from?: number | null;
   price?: PricingPrice | null;
   coa_revenue?: number | null;
 }
@@ -52491,6 +52499,7 @@ A billing row as a credit part reads its money, on either side.
 interface BillingRowMoneyLike {
   type?: indexedAccess;
   quantity: number;
+  units_from?: number | null;
   amount_cents?: number | null;
   price: typeLiteral;
 }
@@ -53196,6 +53205,7 @@ stated total governs (a LINKED time line: Xero's money, the formula's rates).
 interface LineMoneyLike {
   type?: ItemTypeType;
   quantity: number;
+  units_from?: number | null;
   price: typeLiteral;
 }
 ```
@@ -53368,6 +53378,16 @@ or that is retired (`active: false`): a default never fails a line.
 
 Feed the result to `buildCustomOrderLine` / `retypedLinePrice`; it prices
 nothing itself, so it is not a second price author.
+
+### `formulaPartMoney(rates: readonly RateSnapshot[], tiers: readonly TierCountLike[], from: number, quantity: number, discount: FormulaDiscount | null): typeLiteral`
+
+**A rate line's money over its source's units `(from, from + quantity]`**
+(one-document-model ruling 174): `priceFromFormula` at both cumulative bounds,
+each figure their difference, so the parts of a line along any path sum
+EXACTLY to the whole and each rounds once. `from = 0` is the whole-line
+formula, unchanged. The ONE place a part's rate money is computed: the
+line-money function, the pricer (`calculateItemSubtotal`) and the stored-money
+refine all read it.
 
 ### `formulaPeriods(formula: PriceFormulaRule, input: typeLiteral, range: MeterRange): typeLiteral[]`
 

@@ -92,6 +92,7 @@ import {
   payableInputUidIssue,
   payableLineUidIssue,
 } from "./purchase.ts";
+import { UnitsFromField } from "./_line-money.ts";
 import {
   billingExchangedForViolations,
   checkDestinationJoin,
@@ -258,13 +259,15 @@ interface PurchaseDocumentLineBase {
   path_billing_item?: string[];
   /**
    * **The first unit of its SOURCE line this line covers** (one-document-model
-   * D7): a bill line's units `(units_from, units_from + quantity]` of its
-   * purchase line, a credit line's of the bill row it credits. Its money is that
-   * slice of the source's stored gross and discount cents (`sliceStoredMoney`),
-   * and the purchase → bill sync reads it to tell an untouched part (still
-   * exactly its slice) from an overridden one. Absent on a line written before
-   * D7, and on a line that is not a part (a bill-authored row, a memo credit, a
-   * pool credit): read as 0, the sync's behaviour before D7.
+   * D7, ruling 174; `UnitsFromField` in `schemas/_line-money.ts`, one declaration
+   * on every billing and credit line, both sides): a bill line's units
+   * `(units_from, units_from + quantity]` of its purchase line, a credit line's
+   * of the bill row it credits. A STATED line's money is its slice of the
+   * source's stored gross (`sliceStoredMoney`) and the field is the marker the
+   * purchase → bill sync reads to tell an untouched part from an overridden one;
+   * a RATE line prices the part from it (`formulaPartMoney`). Absent on a line
+   * that is not a part (a bill-authored row, a memo credit, a pool credit): read
+   * as 0.
    */
   units_from?: number | null;
   /**
@@ -502,7 +505,7 @@ const docItemShape = {
   uid_billing: FirestoreId.optional().meta({ seed: false }),
   path_billing_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
   // A part's first unit of its source line (the docblock above). Writer-set.
-  units_from: z.int().min(0).nullable().optional().meta({ seed: false }),
+  units_from: UnitsFromField,
   // A credit line's billing-reversal marker (the docblock above). `seed: false`:
   // a seeded `false` would put the key on a bill line, which the bill refuses.
   reverses_billing: z.boolean().optional().meta({ seed: false }),

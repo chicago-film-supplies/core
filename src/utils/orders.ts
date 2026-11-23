@@ -49,7 +49,7 @@ import {
 import { componentSignatureHash } from "./booking-id.ts";
 import { closestAncestor } from "./item-pairing.ts";
 import { applyDateEdit, type ChargeDates, chargeWindowBusinessDays, chargeWindowsOf, toChicagoYmd } from "./dates.ts";
-import { priceFromFormula, type RateSnapshot, type TierCount } from "./price-formulas.ts";
+import { formulaPartMoney, type RateSnapshot, type TierCount } from "./price-formulas.ts";
 import {
   fromCents,
   roundDivHalfAwayFromZero,
@@ -251,6 +251,8 @@ export interface PricingPrice {
 export interface PricingItem {
   type: ItemTypeType;
   quantity?: number;
+  /** A part's first source unit (ruling 174, `UnitsFromField`); absent prices the whole line. */
+  units_from?: number | null;
   price?: PricingPrice | null;
   /**
    * Revenue chart-of-accounts code — where the line's income posts in Xero, and
@@ -886,7 +888,7 @@ export function calculateItemSubtotal(
       "Item is not priceable: missing price object or is a destination/group/transaction_fee",
     );
   }
-  return perUnitSubtotal(item.price, item.quantity);
+  return perUnitSubtotal(item.price, item.quantity, item.units_from ?? 0);
 }
 
 /**
@@ -923,6 +925,7 @@ export interface LinePricingOptions {
 function perUnitSubtotal(
   price: PricingPrice,
   itemQuantity: number,
+  unitsFrom = 0,
 ): { subtotal_cents: number; subtotal_discounted_cents: number } {
   if (price.base_percent != null) {
     // Not a per-unit price: the rate is a percentage of the DOCUMENT's
@@ -936,7 +939,8 @@ function perUnitSubtotal(
   if (price.price_formula == null || price.rates == null || price.counts == null) {
     throw new Error("A line priced from itself carries price_formula, rates and counts");
   }
-  return priceFromFormula(price.rates, price.counts, itemQuantity, price.discount ?? null);
+  // A part prices its source's units (from, from + quantity] (ruling 174).
+  return formulaPartMoney(price.rates, price.counts, unitsFrom, itemQuantity, price.discount ?? null);
 }
 
 /**

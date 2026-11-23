@@ -12,6 +12,7 @@
  *
  * @module
  */
+import { z } from "zod";
 import { ITEM_CONTRACTS, type ItemTypeType, type RateType } from "./common.ts";
 import { roundDivHalfAwayFromZero, toCentsBig } from "../utils/money.ts";
 import type { LineKind } from "./side.ts";
@@ -122,6 +123,14 @@ export interface LineMoneyLike {
   /** Read only to refuse a line whose money is the document's (`pricing: "from_total"`). */
   type?: ItemTypeType;
   quantity: number;
+  /**
+   * A RATE line that is a PART of its source line covers the source's units
+   * `(units_from, units_from + quantity]` (one-document-model ruling 174), so its
+   * first `k` units are worth `formula(units_from + k) − formula(units_from)`.
+   * Absent or `null` is 0: a whole line, the money every line had before. A
+   * stated line ignores it: its stated gross is already the part's.
+   */
+  units_from?: number | null;
   price: {
     rates: readonly RateSnapshot[];
     counts: readonly TierCountLike[];
@@ -168,12 +177,54 @@ function statedGrossAt(stated: number, quantity: number, k: number): bigint {
   return roundDivHalfAwayFromZero(BigInt(stated) * BigInt(k), BigInt(quantity));
 }
 
+/**
+ * **A rate line's money over its source's units `(from, from + quantity]`**
+ * (one-document-model ruling 174): `priceFromFormula` at both cumulative bounds,
+ * each figure their difference, so the parts of a line along any path sum
+ * EXACTLY to the whole and each rounds once. `from = 0` is the whole-line
+ * formula, unchanged. The ONE place a part's rate money is computed: the
+ * line-money function, the pricer (`calculateItemSubtotal`) and the stored-money
+ * refine all read it.
+ */
+export function formulaPartMoney(
+  rates: readonly RateSnapshot[],
+  tiers: readonly TierCountLike[],
+  from: number,
+  quantity: number,
+  discount: FormulaDiscount | null,
+): { subtotal_cents: number; subtotal_discounted_cents: number } {
+  const to = priceFromFormula(rates, tiers, from + quantity, discount);
+  if (from === 0) return to;
+  assertUnits(from);
+  const at = priceFromFormula(rates, tiers, from, discount);
+  return {
+    subtotal_cents: to.subtotal_cents - at.subtotal_cents,
+    subtotal_discounted_cents: to.subtotal_discounted_cents - at.subtotal_discounted_cents,
+  };
+}
+
+/**
+ * **`units_from` — the first unit of its SOURCE line a part covers**
+ * (one-document-model D7, ruling 174), ONE declaration for every billing and
+ * credit line on both sides: an invoice or bill line's units
+ * `(units_from, units_from + quantity]` of its initiator line, a credit line's
+ * of the billing row it credits.
+ *
+ * - On a RATE line it prices the part ({@link formulaPartMoney}): the line's own
+ *   counts, the cumulative formula at both bounds.
+ * - On a STATED line it is the marker the initiator → billing sync reads to tell
+ *   an untouched part (still exactly its slice) from an overridden one; the
+ *   stated gross is the money.
+ * - Absent or `null` reads as 0: a whole line, as every line written before it.
+ */
+export const UnitsFromField: z.ZodType<number | null | undefined> = z.int().min(0).nullable().optional().meta({ seed: false });
+
 function moneyAt(line: LineMoneyLike, k: number): { gross: bigint; net: bigint } {
   assertUnits(k);
   const stated = statedOf(line);
   const discount = line.price.discount;
   if (stated === null) {
-    const m = priceFromFormula(line.price.rates, line.price.counts, k, discount);
+    const m = formulaPartMoney(line.price.rates, line.price.counts, line.units_from ?? 0, k, discount);
     return { gross: BigInt(m.subtotal_cents), net: BigInt(m.subtotal_discounted_cents) };
   }
   const gross = statedGrossAt(stated, line.quantity, k);
@@ -346,10 +397,11 @@ export function formulaMoneyMismatch(
   price: { rates: readonly RateSnapshot[]; counts: readonly TierCountLike[]; discount: FormulaDiscount | null },
   quantity: number,
   amountCents: number,
+  unitsFrom: number | null = null,
 ): number | null {
   let expected: number;
   try {
-    expected = priceFromFormula(price.rates, price.counts, quantity, price.discount).subtotal_discounted_cents;
+    expected = formulaPartMoney(price.rates, price.counts, unitsFrom ?? 0, quantity, price.discount).subtotal_discounted_cents;
   } catch {
     return Number.NaN;
   }
@@ -359,6 +411,8 @@ export function formulaMoneyMismatch(
 /** The line surface {@link checkFormulaLineMoney} reads. */
 export interface FormulaPricedLineLike {
   quantity?: number;
+  /** A part's first source unit (ruling 174); absent is a whole line. */
+  units_from?: number | null;
   price?: {
     price_formula?: unknown;
     rates?: readonly RateSnapshot[];
@@ -394,7 +448,7 @@ export function checkFormulaLineMoney(
     const quantity = item.quantity;
     const stated = price.stated_cents ?? null;
     expected = stated === null
-      ? priceFromFormula(price.rates, price.counts, quantity, price.discount ?? null)
+      ? formulaPartMoney(price.rates, price.counts, item.units_from ?? 0, quantity, price.discount ?? null)
       : {
         subtotal_cents: stated,
         subtotal_discounted_cents: lineMoneyAtCents(

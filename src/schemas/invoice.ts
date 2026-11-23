@@ -52,7 +52,7 @@ import {
   TierCountSchema,
   type TierCountType,
 } from "./price-formula.ts";
-import { checkItemsLineMoney } from "./_line-money.ts";
+import { checkItemsLineMoney, UnitsFromField } from "./_line-money.ts";
 import { deriveInvoiceStatus, invoiceIsFrozen } from "./_invoice-freeze.ts";
 import type {
   PurchaseBill,
@@ -667,6 +667,14 @@ export interface InvoiceDocLineItemType {
    */
   path_source_item?: string[];
   /**
+   * The first unit of its SOURCE line this line covers (one-document-model ruling
+   * 174, `UnitsFromField` in `schemas/_line-money.ts`, one declaration on every
+   * billing and credit line): a rate line prices units `(units_from, units_from +
+   * quantity]` of its source as cumulative formula differences, so its parts sum
+   * exactly to the source's money. Absent or `null` is a whole line.
+   */
+  units_from?: number | null;
+  /**
    * An exchange line's take-back list, as the order line states it
    * (`OrderDocLineItemType.exchanged_for`; ruling 82 of the one-document-model
    * plan): the rows of the order this line goes out against, with how many units
@@ -774,6 +782,7 @@ const InvoiceDocLineItemInner = z.strictObject({
   // `path_billing_item` is its twin one grain down.
   // `seed: false`: `[]` fails `.min(1)`, so the form seed must omit the key.
   path_source_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
+  units_from: UnitsFromField,
   // See the interface docblock. Plain `.optional()`, as the fulfillment line's.
   // `seed: false`, as `path_source_item`: a seeded `[]` claims the take-back list of
   // an exchange line on a line under no exchange pair, which `checkInvoiceExchangedFor`
@@ -1597,6 +1606,11 @@ export interface InvoiceItemInputLineType {
    * order (core#125 D3).
    */
   path_source_item?: string[];
+  /**
+   * @see `InvoiceDocLineItemType.units_from`. Echoed by the client so an operator
+   * edit of a part keeps the units it covers (ruling 174); the server stamps it.
+   */
+  units_from?: number | null;
 }
 
 // Un-annotated for `_zod.propValues`, `z.object` so unknown keys are stripped
@@ -1644,6 +1658,7 @@ const InvoiceItemInputLineInner = z.object({
   quantity_per_parent: z.number().min(0).nullable().optional(),
   out_of_service: OutOfServiceListInput.optional().meta({ seed: false }),
   path_source_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
+  units_from: UnitsFromField,
   exchanged_for: ExchangedForListInput.optional().meta({ seed: false }),
 }).superRefine(checkItemPriceFormula).superRefine(checkOutOfServiceLineType);
 

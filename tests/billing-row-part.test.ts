@@ -5,7 +5,8 @@
  */
 import { assertEquals } from "@std/assert";
 import { billingRowPart } from "../src/utils/price-document.ts";
-import { lineMoneyAtCents } from "../src/schemas/_line-money.ts";
+import { checkFormulaLineMoney, lineMoneyAtCents } from "../src/schemas/_line-money.ts";
+import { calculateItemSubtotal } from "../src/utils/orders.ts";
 
 /** A small deterministic PRNG, so a failure reproduces. */
 function rng(seed: number): () => number {
@@ -68,4 +69,32 @@ Deno.test("billingRowPart: the side does not enter — the old payable door's sl
   // stored net would have rounded a second time.
   const row = { quantity: 3, price: { rates: [{ rate_key: "day", amount_cents: 1005 }], counts: [{ rate_key: "day", num: 1, den: 1 }], discount: { type: "percent" as const, rate: 10 } } };
   assertEquals([0, 1, 2].map((k) => billingRowPart(row, k, k + 1).net_cents), [905, 904, 905]);
+});
+
+Deno.test("units_from (ruling 174): a rate line's parts priced one per document sum EXACTLY to the whole, and the refine reads it", () => {
+  const price = {
+    price_formula: { uid: "fixed", name: "Fixed", basis: "fixed" },
+    rates: [{ rate_key: "day", amount_cents: 1005 }],
+    counts: [{ rate_key: "day", num: 1, den: 1 }],
+    discount: { type: "percent" as const, rate: 10 },
+  };
+  const whole = calculateItemSubtotal({ type: "rental", quantity: 3, price } as never).subtotal_discounted_cents;
+  // One unit per invoice, each a part of the order line at its own units_from.
+  const parts = [0, 1, 2].map((from) => calculateItemSubtotal({ type: "rental", quantity: 1, units_from: from, price } as never).subtotal_discounted_cents);
+  assertEquals(parts.reduce((a, b) => a + b, 0), whole);
+  // Without units_from each part re-prices at its own quantity, and the three overshoot the whole.
+  const unanchored = calculateItemSubtotal({ type: "rental", quantity: 1, price } as never).subtotal_discounted_cents * 3;
+  assertEquals(unanchored === whole, false, "the gap ruling 174 closes is real on this line");
+  // The stored-money refine prices a part the same way: a part's stored money passes with units_from, fails without.
+  const issues = (units_from: number | undefined, net: number) => {
+    const out: string[] = [];
+    checkFormulaLineMoney(
+      { quantity: 1, ...(units_from !== undefined ? { units_from } : {}), price: { ...price, subtotal_discounted_cents: net } },
+      { addIssue: (i) => out.push(i.path.join(".")) },
+    );
+    return out;
+  };
+  assertEquals(issues(1, parts[1]), []);
+  assertEquals(parts, [905, 904, 905]);
+  assertEquals(issues(undefined, parts[1]), ["price.subtotal_discounted_cents"], "unanchored, the middle part reads as the whole-line formula");
 });

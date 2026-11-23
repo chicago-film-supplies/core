@@ -65,7 +65,7 @@ import {
   TierCountSchema,
   type TierCountType,
 } from "./price-formula.ts";
-import { checkItemsLineMoney } from "./_line-money.ts";
+import { checkItemsLineMoney, UnitsFromField } from "./_line-money.ts";
 import {
   Discount,
   type DiscountType,
@@ -338,6 +338,14 @@ export interface CreditNoteDocLineItem {
   /** The `path` of the billing row credited, on its own document (ruling 34). */
   path_billing_item?: string[];
   /**
+   * The first unit of its SOURCE line this line covers (one-document-model ruling
+   * 174, `UnitsFromField` in `schemas/_line-money.ts`, one declaration on every
+   * billing and credit line): a rate line prices units `(units_from, units_from +
+   * quantity]` of its source as cumulative formula differences, so its parts sum
+   * exactly to the source's money. Absent or `null` is a whole line.
+   */
+  units_from?: number | null;
+  /**
    * The row's identity on this note, self-inclusive (ruling 107):
    * `[uid_billing, ...billing row path]` for a pointed line, `[uid]` for a flat
    * historic one (the F14 migration wrote it on every stored line, 2026-11-18).
@@ -444,6 +452,7 @@ const CreditNoteDocLineItemInner = z.strictObject({
   // `seed: false`: `[]` fails `.min(1)`, so the form seed must omit the key.
   uid_billing: FirestoreId.optional().meta({ seed: false }),
   path_billing_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
+  units_from: UnitsFromField,
   reverses_billing: z.boolean(),
   // See the interface docblock. The invoice line's spelling, field for field:
   // `substituted_for` plain `.optional()`; `exchanged_for` `seed: false`, so a form

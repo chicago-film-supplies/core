@@ -117,6 +117,9 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   // D7: a part's first unit of its source line. Absent on a line that is no part, and on a pre-D7 one.
   ["purchase-bills.items[].units_from", "array-member-uncensusable"],
   ["purchase-credits.items[].units_from", "array-member-uncensusable"],
+  // Ruling 174: the same field on the receivable lines, one declaration (`UnitsFromField`).
+  ["invoices.items[].units_from", "array-member-uncensusable"],
+  ["credit-notes.items[].units_from", "array-member-uncensusable"],
   // ── pending-census — measurable with `orderBy`, awaiting the both-environment
   //    census before any of them is tightened. The directly actionable set.
   ["bookings.destinations.collection.address.address_coordinates", "pending-census"],

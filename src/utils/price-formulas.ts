@@ -626,6 +626,7 @@ export {
   payableStoredMoney,
   sliceStoredMoney,
   type StoredLineMoney,
+  formulaPartMoney,
   priceFromFormula,
   type RateSnapshot,
   statedLine,

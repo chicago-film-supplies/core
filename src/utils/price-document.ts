@@ -1088,6 +1088,8 @@ export function priceDocument<T extends LineItem | PayableLine>(
 export interface BillingRowMoneyLike {
   type?: LineItem["type"];
   quantity: number;
+  /** A part row's first source unit (ruling 174). */
+  units_from?: number | null;
   /** A payable row's stored net. */
   amount_cents?: number | null;
   price: {
@@ -1128,9 +1130,11 @@ export function billingRowPart(row: BillingRowMoneyLike, before: number, after: 
   const price: Partial<BillingRowMoneyLike["price"]> = row.price ?? {};
   const rates = price.rates ?? [];
   if (rates.length > 0 && (price.stated_cents ?? null) === null) {
+    // A part row's units are its source's, offset by its own `units_from`.
     const line: LineMoneyLike = {
       ...(row.type !== undefined ? { type: row.type } : {}),
       quantity: row.quantity,
+      units_from: row.units_from ?? null,
       price: { rates, counts: price.counts ?? [], discount: price.discount ?? null, stated_cents: null },
     };
     const net = lineUnitsCents(line, before, after);

@@ -1761,7 +1761,7 @@
         {
           "kind": "interface",
           "name": "CreditNoteDocLineItem",
-          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  ledger_account: COACodeType;\n  source_ledger_account: COARevenueType | null;\n  uid_tracking_category: string | null;\n  xero_id: string | null;\n  uid_billing?: string;\n  path_billing_item?: string[];\n  path: string[];\n  reverses_billing: boolean;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  ledger_account: COACodeType;\n  source_ledger_account: COARevenueType | null;\n  uid_tracking_category: string | null;\n  xero_id: string | null;\n  uid_billing?: string;\n  path_billing_item?: string[];\n  units_from?: number | null;\n  path: string[];\n  reverses_billing: boolean;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "A credited line.\n\n**`coa_revenue` is required, not optional.** A credit spanning lines with\ndifferent revenue accounts (#1689 hits 4000 and 4100; #1322 is all 4210)\ncannot be posted correctly from a document-level amount, and apportioning it\nafterwards is inferring cause from effect — the thing `schemas/transaction.ts` warns\nagainst. This is also the gap Xero *has*: its allocation view carries\n`LineItems: []`, and Odoo's users pay OCA for a module that adds line-level\nprovenance.\n\n**Dividers only when raised from billing rows** (ruling 107): a credit row\ncopies its billing row's path under that document's `billing` divider, so a\nnote crediting rows carries the invoice's dividers and pairs; a historic or\ngoodwill note is flat (each line's path is `[uid]`).\n\n## `source_ledger_account` and `ledger_account` are TWO facts, and a line has both\n\nThey are routinely different, and collapsing them loses real information.\nMeasured on the live tenant: CN-1009 writes off 35 lines whose products are\nrentals — `product.price.coa_revenue` 4000 Rental Income — and every one of\nthem posts to **6900 Bad Debt**. Store only the posting account and the\nrevenue attribution that tracking-category rollups and the tax tables depend\non is gone; store only the revenue account and the write-off is invisible.\n\n- **`source_ledger_account`** — the revenue account of the *thing being credited*.\n  Product-sourced, same vocabulary as the invoice line it mirrors. Never the\n  account the credit posts to, and — since the owner ruling of 2026-08-20 —\n  never an input to what the line is taxed either.\n- **`ledger_account`** — where this credit lands in the ledger. Any account in\n  the `chart-of-accounts` catalog, including the expense range, which is\n  exactly why it cannot be `COARevenueEnum`: that enum is shared with\n  `Product.price.coa_revenue`, and widening it would make a catalog product\n  whose revenue account is Bad Debt Expense representable."
         },
         {
@@ -3039,7 +3039,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocLineItemType",
-          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  xero_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  out_of_service?: OutOfServiceEntryType[];\n  path_source_item?: string[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  xero_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  out_of_service?: OutOfServiceEntryType[];\n  path_source_item?: string[];\n  units_from?: number | null;\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "A billable line item on an invoice."
         },
         {
@@ -3111,7 +3111,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  uid_tax_class_override?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_source_item?: string[];\n}",
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  uid_tax_class_override?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_source_item?: string[];\n  units_from?: number | null;\n}",
           "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItem`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
@@ -11775,7 +11775,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocLineItemType",
-          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  xero_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  out_of_service?: OutOfServiceEntryType[];\n  path_source_item?: string[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  xero_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  out_of_service?: OutOfServiceEntryType[];\n  path_source_item?: string[];\n  units_from?: number | null;\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "A billable line item on an invoice."
         },
         {
@@ -11841,7 +11841,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  uid_tax_class_override?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_source_item?: string[];\n}",
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  uid_tax_class_override?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_source_item?: string[];\n  units_from?: number | null;\n}",
           "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItem`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
@@ -15039,7 +15039,7 @@
         {
           "kind": "interface",
           "name": "CreditNoteDocLineItem",
-          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  ledger_account: COACodeType;\n  source_ledger_account: COARevenueType | null;\n  uid_tracking_category: string | null;\n  xero_id: string | null;\n  uid_billing?: string;\n  path_billing_item?: string[];\n  path: string[];\n  reverses_billing: boolean;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  ledger_account: COACodeType;\n  source_ledger_account: COARevenueType | null;\n  uid_tracking_category: string | null;\n  xero_id: string | null;\n  uid_billing?: string;\n  path_billing_item?: string[];\n  units_from?: number | null;\n  path: string[];\n  reverses_billing: boolean;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "A credited line.\n\n**`coa_revenue` is required, not optional.** A credit spanning lines with\ndifferent revenue accounts (#1689 hits 4000 and 4100; #1322 is all 4210)\ncannot be posted correctly from a document-level amount, and apportioning it\nafterwards is inferring cause from effect — the thing `schemas/transaction.ts` warns\nagainst. This is also the gap Xero *has*: its allocation view carries\n`LineItems: []`, and Odoo's users pay OCA for a module that adds line-level\nprovenance.\n\n**Dividers only when raised from billing rows** (ruling 107): a credit row\ncopies its billing row's path under that document's `billing` divider, so a\nnote crediting rows carries the invoice's dividers and pairs; a historic or\ngoodwill note is flat (each line's path is `[uid]`).\n\n## `source_ledger_account` and `ledger_account` are TWO facts, and a line has both\n\nThey are routinely different, and collapsing them loses real information.\nMeasured on the live tenant: CN-1009 writes off 35 lines whose products are\nrentals — `product.price.coa_revenue` 4000 Rental Income — and every one of\nthem posts to **6900 Bad Debt**. Store only the posting account and the\nrevenue attribution that tracking-category rollups and the tax tables depend\non is gone; store only the revenue account and the write-off is invisible.\n\n- **`source_ledger_account`** — the revenue account of the *thing being credited*.\n  Product-sourced, same vocabulary as the invoice line it mirrors. Never the\n  account the credit posts to, and — since the owner ruling of 2026-08-20 —\n  never an input to what the line is taxed either.\n- **`ledger_account`** — where this credit lands in the ledger. Any account in\n  the `chart-of-accounts` catalog, including the expense range, which is\n  exactly why it cannot be `COARevenueEnum`: that enum is shared with\n  `Product.price.coa_revenue`, and widening it would make a catalog product\n  whose revenue account is Bad Debt Expense representable."
         },
         {
@@ -20970,7 +20970,7 @@
         {
           "kind": "interface",
           "name": "PricingItem",
-          "declaration": "interface PricingItem {\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PricingPrice | null;\n  coa_revenue?: number | null;\n}",
+          "declaration": "interface PricingItem {\n  type: ItemTypeType;\n  quantity?: number;\n  units_from?: number | null;\n  price?: PricingPrice | null;\n  coa_revenue?: number | null;\n}",
           "doc": "The item surface the pricing pipeline reads: a type (to look up the contract),\na quantity, and a {@link PricingPrice}. Both a stored {@link LineItem} and an\norder-input item satisfy it."
         },
         {
@@ -24452,7 +24452,7 @@
         {
           "kind": "interface",
           "name": "PricingItem",
-          "declaration": "interface PricingItem {\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PricingPrice | null;\n  coa_revenue?: number | null;\n}",
+          "declaration": "interface PricingItem {\n  type: ItemTypeType;\n  quantity?: number;\n  units_from?: number | null;\n  price?: PricingPrice | null;\n  coa_revenue?: number | null;\n}",
           "doc": "The item surface the pricing pipeline reads: a type (to look up the contract),\na quantity, and a {@link PricingPrice}. Both a stored {@link LineItem} and an\norder-input item satisfy it."
         },
         {
@@ -25109,7 +25109,7 @@
         {
           "kind": "interface",
           "name": "BillingRowMoneyLike",
-          "declaration": "interface BillingRowMoneyLike {\n  type?: indexedAccess;\n  quantity: number;\n  amount_cents?: number | null;\n  price: typeLiteral;\n}",
+          "declaration": "interface BillingRowMoneyLike {\n  type?: indexedAccess;\n  quantity: number;\n  units_from?: number | null;\n  amount_cents?: number | null;\n  price: typeLiteral;\n}",
           "doc": "A billing row as a credit part reads its money, on either side."
         },
         {
@@ -25467,7 +25467,7 @@
         {
           "kind": "interface",
           "name": "LineMoneyLike",
-          "declaration": "interface LineMoneyLike {\n  type?: ItemTypeType;\n  quantity: number;\n  price: typeLiteral;\n}",
+          "declaration": "interface LineMoneyLike {\n  type?: ItemTypeType;\n  quantity: number;\n  units_from?: number | null;\n  price: typeLiteral;\n}",
           "doc": "The line surface {@link lineMoneyAtCents} reads: a line's money comes from its\n`rates` (and `counts`), or from a total over its quantity in\n`price.stated_cents` (the GROSS, before `discount`). When both are present the\nstated total governs (a LINKED time line: Xero's money, the formula's rates)."
         },
         {
@@ -25565,6 +25565,14 @@
           "name": "defaultPriceFormulaFor",
           "signature": "defaultPriceFormulaFor(settings: typeLiteral | null, formulas: ReadonlyMap<string, F>, type: DocLineItemTypeType): F | null",
           "doc": "**The formula a new custom line, or a line retyped to `type`, starts on**\n(`settings/pricing`, api-cloudrun purchases-as-documents D10 item 11) — or\n`null` for none, when the operator must choose. `null` too when the settings\nare absent, name no formula for the type, or name one the caller did not load\nor that is retired (`active: false`): a default never fails a line.\n\nFeed the result to `buildCustomOrderLine` / `retypedLinePrice`; it prices\nnothing itself, so it is not a second price author.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "formulaPartMoney",
+          "signature": "formulaPartMoney(rates: readonly RateSnapshot[], tiers: readonly TierCountLike[], from: number, quantity: number, discount: FormulaDiscount | null): typeLiteral",
+          "doc": "**A rate line's money over its source's units `(from, from + quantity]`**\n(one-document-model ruling 174): `priceFromFormula` at both cumulative bounds,\neach figure their difference, so the parts of a line along any path sum\nEXACTLY to the whole and each rounds once. `from = 0` is the whole-line\nformula, unchanged. The ONE place a part's rate money is computed: the\nline-money function, the pricer (`calculateItemSubtotal`) and the stored-money\nrefine all read it.",
           "paramTags": [],
           "returnsTag": null
         },
