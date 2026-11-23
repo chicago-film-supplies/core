@@ -20039,7 +20039,7 @@
         {
           "kind": "interface",
           "name": "OverbillingCreditNote",
-          "declaration": "interface OverbillingCreditNote {\n  uid_invoice: string;\n  lines: OverbillingCreditLine[];\n  preview_cents: number;\n}",
+          "declaration": "interface OverbillingCreditNote {\n  uid_billing: string;\n  lines: OverbillingCreditLine[];\n  preview_cents: number;\n}",
           "doc": "One credit note the offer would raise — a note belongs to exactly ONE invoice."
         },
         {

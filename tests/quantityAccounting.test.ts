@@ -835,7 +835,7 @@ Deno.test("buildOverbillingCredits: over-billed units become one credit line aga
   const invoices = [biller("a", lightOrder(5), 2001, 5000)];
   const out = overbillingOf(src(lightOrder(2)), invoices, CTX);
   assertEquals(out.notes.length, 1);
-  assertEquals(out.notes[0].uid_invoice, "a");
+  assertEquals(out.notes[0].uid_billing, "a");
   assertEquals(out.notes[0].lines.map((l) => [l.order_path.join("/"), l.quantity, l.preview_cents]), [[lightKey, 3, 3000]]);
   // The row identity it will credit is the INVOICE path, not the order path.
   assertEquals(out.notes[0].lines[0].path_billing_item, [O, D, G, LIGHT]);
@@ -857,7 +857,7 @@ Deno.test("buildOverbillingCredits: ordering is a choice of MONEY — an invoice
   // it is the higher number.
   const invoices = [biller("paid", lightOrder(3), 2001, 0), biller("owing", lightOrder(3), 2002, 9000)];
   const out = overbillingOf(src(lightOrder(2)), invoices, CTX);
-  assertEquals(out.notes.map((n) => n.uid_invoice), ["owing", "paid"]);
+  assertEquals(out.notes.map((n) => n.uid_billing), ["owing", "paid"]);
 });
 
 Deno.test("buildOverbillingCredits: a DRAFT biller is refused — edit the draft, do not credit it", () => {
@@ -891,7 +891,7 @@ Deno.test("buildOverbillingCredits: over-billing across two invoices is two note
   // Ordered 2, billed 3 + 3 = 6 → 4 units over, taken from the larger rows first.
   const invoices = [biller("a", lightOrder(3), 2001, 9000), biller("b", lightOrder(3), 2002, 9000)];
   const out = overbillingOf(src(lightOrder(2)), invoices, CTX);
-  assertEquals(out.notes.map((n) => n.uid_invoice), ["a", "b"]);
+  assertEquals(out.notes.map((n) => n.uid_billing), ["a", "b"]);
   assertEquals(out.notes.reduce((t, n) => t + n.lines.reduce((s, l) => s + l.quantity, 0), 0), 4);
 });
 

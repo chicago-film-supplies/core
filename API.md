@@ -42834,7 +42834,7 @@ One credit note the offer would raise — a note belongs to exactly ONE invoice.
 
 ```ts
 interface OverbillingCreditNote {
-  uid_invoice: string;
+  uid_billing: string;
   lines: OverbillingCreditLine[];
   preview_cents: number;
 }

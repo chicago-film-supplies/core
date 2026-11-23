@@ -2069,7 +2069,8 @@ export interface OverbillingCreditLine {
 
 /** One credit note the offer would raise — a note belongs to exactly ONE invoice. */
 export interface OverbillingCreditNote {
-  uid_invoice: string;
+  /** The billing document the note is raised from: `CreateCreditNoteInput.uid_billing` (one-document-model ruling 169). */
+  uid_billing: string;
   lines: OverbillingCreditLine[];
   /** Σ `preview_cents`, pre-tax. */
   preview_cents: number;
@@ -2219,11 +2220,11 @@ export function buildOverbillingCredits(account: InitiatorAccount): OverbillingC
   }
   const header = (uid: string) => account.documents.get(uid);
   const notes = [...perBilling.entries()]
-    .map(([uid_invoice, lines]) => ({ uid_invoice, lines, preview_cents: lines.reduce((t, l) => t + l.preview_cents, 0) }))
+    .map(([uid_billing, lines]) => ({ uid_billing, lines, preview_cents: lines.reduce((t, l) => t + l.preview_cents, 0) }))
     .sort((a, b) => {
       const owedOn = (uid: string) => header(uid)?.amount_due_cents ?? 0;
-      if ((owedOn(a.uid_invoice) > 0) !== (owedOn(b.uid_invoice) > 0)) return owedOn(a.uid_invoice) > 0 ? -1 : 1;
-      return (header(a.uid_invoice)?.number ?? 0) - (header(b.uid_invoice)?.number ?? 0);
+      if ((owedOn(a.uid_billing) > 0) !== (owedOn(b.uid_billing) > 0)) return owedOn(a.uid_billing) > 0 ? -1 : 1;
+      return (header(a.uid_billing)?.number ?? 0) - (header(b.uid_billing)?.number ?? 0);
     });
   return { ...empty, notes, refused };
 }
