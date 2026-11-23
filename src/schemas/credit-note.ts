@@ -59,6 +59,7 @@ import {
 import {
   type PriceFormulaRef,
   PriceFormulaRefSchema,
+  RateKey,
   RateSnapshotSchema,
   type RateSnapshotType,
   TierCountSchema,
@@ -865,4 +866,86 @@ export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
       { field: "status", label: "Status", kind: "enum" },
     ],
   },
+});
+
+// ── Create input (one-document-model 6e-0d2, ruling 169) ─────────
+
+/** One line of an AR credit note as an operator raises it: an invoice row and what it credits. */
+export interface CreateCreditNoteItemInputType {
+  /**
+   * The invoice row credited, by its path on the note's `uid_billing` (ruling 34).
+   * A path, never a uid: `item.uid` repeats within one invoice (api-cloudrun#680 R1).
+   */
+  path_billing_item: string[];
+  /**
+   * A credited count is whole: `credit-notes:items.quantity` is `int32[]` in
+   * Typesense, so a fractional one fails the next rebuild of the whole collection.
+   */
+  quantity: number;
+  /**
+   * The metered TIME to credit, per tier, for a charge window the order SHORTENED
+   * (api-cloudrun#1028; ruling 8: a count of the line's own formula periods, exact
+   * rationals, never calendar days). The writer refuses it unless
+   * `overbilling_of_order` is also present; this schema does not express the
+   * dependency, because a stripping object cannot refuse what it strips. The
+   * payable twin is `PurchaseCreditItemInputType.counts`, a named difference.
+   */
+  credited_counts?: TierCountType[];
+  /** The posting account (ruling 34). */
+  ledger_account?: COACodeType;
+}
+
+/**
+ * **Input for raising an AR credit note** (`POST /credit-notes`): name the
+ * invoice and its rows and quantities, and the server prices the note from them.
+ * The supplier twin is `CreatePurchaseCreditInput`; both are raised from a
+ * billing document named by **`uid_billing`** (one-document-model ruling 169,
+ * the stored credit line's own pointer name, ruling 34). Promoted from the api's
+ * route-local `InvoiceCreditBody` (api-cloudrun `src/routes/creditNotes.ts`) and
+ * rewritten onto core's fragments: a calendar `date` is `chicagoStartOfDay()`,
+ * ids are `FirestoreId` / `ItemUid`, a rate key is `RateKey`, an account is
+ * `COACode`.
+ *
+ * ⚠️ **A stripping `z.object`, deliberately.** A caller still sending a retired
+ * field (`uid_invoice`, the client-money `items[].price` / `totals` /
+ * `organization`) has it STRIPPED rather than refused, which is what lets the
+ * manager send both `uid_invoice` and `uid_billing` across the rename with no
+ * release ordering, and a body carrying only the retired name is a 400 naming
+ * `uid_billing`.
+ */
+export interface CreateCreditNoteInputType {
+  uid_billing: string;
+  reason: SettlementReasonType;
+  date: string;
+  items: CreateCreditNoteItemInputType[];
+  reference?: string | null;
+  notes?: string | null;
+  /**
+   * Names the order whose over-billing this note gives back (api-cloudrun#1028).
+   * Turns on the order-level guard AND stamps every line `reverses_billing`.
+   */
+  overbilling_of_order?: string;
+  /**
+   * Client-minted and REQUIRED: the note's document id derives from it, so a
+   * replay returns the note the first call created rather than minting a second
+   * number and pushing a second note to the live Xero ledger.
+   */
+  uuid_session: string;
+}
+
+/** Zod schema for {@link CreateCreditNoteInputType}. */
+export const CreateCreditNoteInput: z.ZodType<CreateCreditNoteInputType> = z.object({
+  uid_billing: FirestoreId,
+  reason: z.enum(CREDIT_NOTE_REASONS as unknown as [SettlementReasonType, ...SettlementReasonType[]]),
+  date: chicagoStartOfDay(),
+  items: z.array(z.object({
+    path_billing_item: z.array(ItemUid).min(1),
+    quantity: z.int().positive(),
+    credited_counts: z.array(z.object({ rate_key: RateKey, num: z.int(), den: z.int().positive() })).min(1).optional(),
+    ledger_account: COACode.optional(),
+  })).min(1),
+  reference: z.string().max(255).nullable().optional(),
+  notes: z.string().meta({ pii: "mask" }).nullable().optional(),
+  overbilling_of_order: FirestoreId.optional(),
+  uuid_session: z.uuid(),
 });

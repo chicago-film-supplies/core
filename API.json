@@ -1340,6 +1340,24 @@
         },
         {
           "kind": "variable",
+          "name": "CreateCreditNoteInput",
+          "declaration": "const CreateCreditNoteInput: z.ZodType<CreateCreditNoteInputType>;",
+          "doc": "Zod schema for {@link CreateCreditNoteInputType}."
+        },
+        {
+          "kind": "interface",
+          "name": "CreateCreditNoteInputType",
+          "declaration": "interface CreateCreditNoteInputType {\n  uid_billing: string;\n  reason: SettlementReasonType;\n  date: string;\n  items: CreateCreditNoteItemInputType[];\n  reference?: string | null;\n  notes?: string | null;\n  overbilling_of_order?: string;\n  uuid_session: string;\n}",
+          "doc": "**Input for raising an AR credit note** (`POST /credit-notes`): name the\ninvoice and its rows and quantities, and the server prices the note from them.\nThe supplier twin is `CreatePurchaseCreditInput`; both are raised from a\nbilling document named by **`uid_billing`** (one-document-model ruling 169,\nthe stored credit line's own pointer name, ruling 34). Promoted from the api's\nroute-local `InvoiceCreditBody` (api-cloudrun `src/routes/creditNotes.ts`) and\nrewritten onto core's fragments: a calendar `date` is `chicagoStartOfDay()`,\nids are `FirestoreId` / `ItemUid`, a rate key is `RateKey`, an account is\n`COACode`.\n\n⚠️ **A stripping `z.object`, deliberately.** A caller still sending a retired\nfield (`uid_invoice`, the client-money `items[].price` / `totals` /\n`organization`) has it STRIPPED rather than refused, which is what lets the\nmanager send both `uid_invoice` and `uid_billing` across the rename with no\nrelease ordering, and a body carrying only the retired name is a 400 naming\n`uid_billing`."
+        },
+        {
+          "kind": "interface",
+          "name": "CreateCreditNoteItemInputType",
+          "declaration": "interface CreateCreditNoteItemInputType {\n  path_billing_item: string[];\n  quantity: number;\n  credited_counts?: TierCountType[];\n  ledger_account?: COACodeType;\n}",
+          "doc": "One line of an AR credit note as an operator raises it: an invoice row and what it credits."
+        },
+        {
+          "kind": "variable",
           "name": "CreateDepartmentTypeInput",
           "declaration": "const CreateDepartmentTypeInput: z.ZodType<CreateDepartmentTypeInputType>;",
           "doc": "Input schema for creating a department type."
@@ -1389,7 +1407,7 @@
         {
           "kind": "interface",
           "name": "CreateInvoiceInputType",
-          "declaration": "interface CreateInvoiceInputType {\n  uid: string;\n  query_by_orders: string[];\n  remaining_of_order?: string;\n  organization: typeLiteral;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDestinationInputType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n}",
+          "declaration": "interface CreateInvoiceInputType {\n  uid: string;\n  query_by_orders: string[];\n  organization: typeLiteral;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDestinationInputType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n}",
           "doc": "Input schema for POST /invoices — create an invoice from orders."
         },
         {
@@ -1504,7 +1522,7 @@
           "kind": "typeAlias",
           "name": "CreatePurchaseBillInputType",
           "declaration": "type CreatePurchaseBillInputType = typeLiteral | typeLiteral;",
-          "doc": "Input for billing a purchase — push a new ACCPAY, or link an existing Xero\nbill or card payment.\n\nA PUSHED bill item carries no amount: the writer defaults it from the\npurchase item (`projectPurchaseLineToBillLine`, `@cfs/core/utils/purchase-documents`) —\na flat line at the item's cumulative share, a time line priced from its\nunits' UNBILLED charge windows — and stamps the purchase item's `name`,\n`description`, `price`, `ledger_account`, `uid_tracking_category` and tax\nclass. The operator then\noverrides any of them until the bill is settled ({@link UpdatePurchaseBillInput}).\nA LINKED bill carries `total_cents` as Xero has it."
+          "doc": "**Input for creating a bill** (`POST /purchase-bills`, one-document-model\n6e-0d2): the INVOICE's create shape on the payable side (ruling 168), naming\nevery purchase it bills in `query_by_purchases` (ruling 30), the\n`CreateInvoiceInput.query_by_orders` twin.\n\n- **push** — a bill CFS authors, born `draft` with its number and posted to\n  Xero only when issued (rulings 41, 160). No `items` is the REMAINDER of every\n  purchase (ruling 172, the one remainder builder): what each bills that no\n  live bill has, owed time included, as extension sections. `items` (with\n  `destinations`) are the client's rows, in the row shape\n  {@link UpdatePurchaseBillInput} takes, purchase dividers included; a charge\n  line is a row. Partial billing is an edit of the draft, as on an invoice.\n- **link** — an existing Xero bill or card payment. Its lines are PICKS, each\n  naming its purchase (`uid_source`, one of `query_by_purchases`) and purchase\n  item: the link states which purchase lines the Xero document bills, and its\n  money is Xero's. Its date, due date, reference and total are read FROM Xero,\n  so the stored bill cannot disagree with the document it links.\n\nNo `version`: the writer re-reads every purchase inside its transaction, and a\ndraft is reviewed before it is issued, as an invoice's create has none."
         },
         {
           "kind": "variable",
@@ -5079,7 +5097,7 @@
         {
           "kind": "interface",
           "name": "PurchaseCreditItemInputType",
-          "declaration": "interface PurchaseCreditItemInputType {\n  path_source_item?: string[];\n  counts?: TierCountType[];\n  uid_billing?: string;\n  path_billing_item?: string[];\n  price?: typeLiteral;\n}",
+          "declaration": "interface PurchaseCreditItemInputType {\n  path_source_item?: string[];\n  uid_source?: string;\n  counts?: TierCountType[];\n  path_billing_item?: string[];\n  price?: typeLiteral;\n}",
           "doc": "One line of a supplier CREDIT as an operator states it: a purchase item, or a\nbill line (one-document-model 6d), and what it un-bills.\n\n- **flat, naming no bill line** — `quantity` units, priced from the line's\n  billed pool (`billedPoolCreditMoney`): the pool's share, or the supplier's\n  memo, which the pool caps.\n- **flat, naming a bill line** — units `(c, c + quantity]` of that line, `c`\n  what live credits already took from it, priced first-come from the line's\n  own money with its discount terms (`billLineCreditMoney`), or the supplier's\n  memo, capped at what is left of it. The units are capped per bill line and\n  by the pools behind them (`creditableBillLines`).\n- **the memo** (6e-0b1 D4) is the credit line's own `price.stated_cents`, net\n  by nature, so the line stores `discount: null`.\n- **time** — credited by COUNTS, as an AR credit note is (0b ruling 3):\n  `quantity` units over `counts`, priced `rates × counts` like the bill line\n  it reverses. Absent `counts`, the writer takes the line's billed time\n  newest first and states its quantity-weighted mean (`creditTimeCounts`,\n  6e-0b2 F5). The per-unit windows this\n  input used to take retired with the unit charge windows\n  (one-document-model Phase 3)."
         },
         {
@@ -5164,7 +5182,7 @@
           "kind": "interface",
           "name": "PurchaseDocumentChargeItemInputType",
           "declaration": "interface PurchaseDocumentChargeItemInputType {\n  name: string;\n  description?: string;\n  ledger_account: COACodeType;\n  amount_cents: number;\n  uid?: string;\n  out_of_service?: OutOfServiceEntryType[];\n  uid_tracking_category?: string | null;\n}",
-          "doc": "A document-only charge item as an operator states it on a PUSHED bill or\ncredit (freight nobody expected, a fee). The writer mints its `uid`/`path`,\nstamps a Fixed formula snapshot and `quantity: 1`.\n`uid_tracking_category` follows the order/invoice line rule: absent or `null`\ntakes the attributed product's category (none when it names no product); a\nuid sets it and must name a live category.\n\n⚠️ **The node stays STRICT, though both push inputs embed it.** Stripping\nwould let an api that predates a field silently drop it rather than 400, and\nan attribution would vanish with nothing failing (api-cloudrun#1360)."
+          "doc": "A document-only charge item as an operator states it on a PUSHED bill or\ncredit (freight nobody expected, a fee). The writer mints its `uid`/`path`,\nstamps a Fixed formula snapshot and `quantity: 1`.\n`uid_tracking_category` follows the order/invoice line rule: absent or `null`\ntakes the attributed product's category (none when it names no product); a\nuid sets it and must name a live category.\n\n⚠️ **The node stays STRICT, though the credit's push input embeds it.** Stripping\nwould let an api that predates a field silently drop it rather than 400, and\nan attribution would vanish with nothing failing (api-cloudrun#1360)."
         },
         {
           "kind": "typeAlias",
@@ -5181,7 +5199,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocumentItemInputType",
-          "declaration": "interface PurchaseDocumentItemInputType {\n  path_source_item: string[];\n  quantity: number;\n}",
+          "declaration": "interface PurchaseDocumentItemInputType {\n  path_source_item: string[];\n  uid_source: string;\n  quantity: number;\n}",
           "doc": "A bill or credit item as an operator matches it to a purchase item."
         },
         {
@@ -11667,7 +11685,7 @@
         {
           "kind": "interface",
           "name": "CreateInvoiceInputType",
-          "declaration": "interface CreateInvoiceInputType {\n  uid: string;\n  query_by_orders: string[];\n  remaining_of_order?: string;\n  organization: typeLiteral;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDestinationInputType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n}",
+          "declaration": "interface CreateInvoiceInputType {\n  uid: string;\n  query_by_orders: string[];\n  organization: typeLiteral;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDestinationInputType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n}",
           "doc": "Input schema for POST /invoices — create an invoice from orders."
         },
         {
@@ -14381,7 +14399,7 @@
           "kind": "typeAlias",
           "name": "CreatePurchaseBillInputType",
           "declaration": "type CreatePurchaseBillInputType = typeLiteral | typeLiteral;",
-          "doc": "Input for billing a purchase — push a new ACCPAY, or link an existing Xero\nbill or card payment.\n\nA PUSHED bill item carries no amount: the writer defaults it from the\npurchase item (`projectPurchaseLineToBillLine`, `@cfs/core/utils/purchase-documents`) —\na flat line at the item's cumulative share, a time line priced from its\nunits' UNBILLED charge windows — and stamps the purchase item's `name`,\n`description`, `price`, `ledger_account`, `uid_tracking_category` and tax\nclass. The operator then\noverrides any of them until the bill is settled ({@link UpdatePurchaseBillInput}).\nA LINKED bill carries `total_cents` as Xero has it."
+          "doc": "**Input for creating a bill** (`POST /purchase-bills`, one-document-model\n6e-0d2): the INVOICE's create shape on the payable side (ruling 168), naming\nevery purchase it bills in `query_by_purchases` (ruling 30), the\n`CreateInvoiceInput.query_by_orders` twin.\n\n- **push** — a bill CFS authors, born `draft` with its number and posted to\n  Xero only when issued (rulings 41, 160). No `items` is the REMAINDER of every\n  purchase (ruling 172, the one remainder builder): what each bills that no\n  live bill has, owed time included, as extension sections. `items` (with\n  `destinations`) are the client's rows, in the row shape\n  {@link UpdatePurchaseBillInput} takes, purchase dividers included; a charge\n  line is a row. Partial billing is an edit of the draft, as on an invoice.\n- **link** — an existing Xero bill or card payment. Its lines are PICKS, each\n  naming its purchase (`uid_source`, one of `query_by_purchases`) and purchase\n  item: the link states which purchase lines the Xero document bills, and its\n  money is Xero's. Its date, due date, reference and total are read FROM Xero,\n  so the stored bill cannot disagree with the document it links.\n\nNo `version`: the writer re-reads every purchase inside its transaction, and a\ndraft is reviewed before it is issued, as an invoice's create has none."
         },
         {
           "kind": "variable",
@@ -14506,7 +14524,7 @@
         {
           "kind": "interface",
           "name": "PurchaseCreditItemInputType",
-          "declaration": "interface PurchaseCreditItemInputType {\n  path_source_item?: string[];\n  counts?: TierCountType[];\n  uid_billing?: string;\n  path_billing_item?: string[];\n  price?: typeLiteral;\n}",
+          "declaration": "interface PurchaseCreditItemInputType {\n  path_source_item?: string[];\n  uid_source?: string;\n  counts?: TierCountType[];\n  path_billing_item?: string[];\n  price?: typeLiteral;\n}",
           "doc": "One line of a supplier CREDIT as an operator states it: a purchase item, or a\nbill line (one-document-model 6d), and what it un-bills.\n\n- **flat, naming no bill line** — `quantity` units, priced from the line's\n  billed pool (`billedPoolCreditMoney`): the pool's share, or the supplier's\n  memo, which the pool caps.\n- **flat, naming a bill line** — units `(c, c + quantity]` of that line, `c`\n  what live credits already took from it, priced first-come from the line's\n  own money with its discount terms (`billLineCreditMoney`), or the supplier's\n  memo, capped at what is left of it. The units are capped per bill line and\n  by the pools behind them (`creditableBillLines`).\n- **the memo** (6e-0b1 D4) is the credit line's own `price.stated_cents`, net\n  by nature, so the line stores `discount: null`.\n- **time** — credited by COUNTS, as an AR credit note is (0b ruling 3):\n  `quantity` units over `counts`, priced `rates × counts` like the bill line\n  it reverses. Absent `counts`, the writer takes the line's billed time\n  newest first and states its quantity-weighted mean (`creditTimeCounts`,\n  6e-0b2 F5). The per-unit windows this\n  input used to take retired with the unit charge windows\n  (one-document-model Phase 3)."
         },
         {
@@ -14561,7 +14579,7 @@
           "kind": "interface",
           "name": "PurchaseDocumentChargeItemInputType",
           "declaration": "interface PurchaseDocumentChargeItemInputType {\n  name: string;\n  description?: string;\n  ledger_account: COACodeType;\n  amount_cents: number;\n  uid?: string;\n  out_of_service?: OutOfServiceEntryType[];\n  uid_tracking_category?: string | null;\n}",
-          "doc": "A document-only charge item as an operator states it on a PUSHED bill or\ncredit (freight nobody expected, a fee). The writer mints its `uid`/`path`,\nstamps a Fixed formula snapshot and `quantity: 1`.\n`uid_tracking_category` follows the order/invoice line rule: absent or `null`\ntakes the attributed product's category (none when it names no product); a\nuid sets it and must name a live category.\n\n⚠️ **The node stays STRICT, though both push inputs embed it.** Stripping\nwould let an api that predates a field silently drop it rather than 400, and\nan attribution would vanish with nothing failing (api-cloudrun#1360)."
+          "doc": "A document-only charge item as an operator states it on a PUSHED bill or\ncredit (freight nobody expected, a fee). The writer mints its `uid`/`path`,\nstamps a Fixed formula snapshot and `quantity: 1`.\n`uid_tracking_category` follows the order/invoice line rule: absent or `null`\ntakes the attributed product's category (none when it names no product); a\nuid sets it and must name a live category.\n\n⚠️ **The node stays STRICT, though the credit's push input embeds it.** Stripping\nwould let an api that predates a field silently drop it rather than 400, and\nan attribution would vanish with nothing failing (api-cloudrun#1360)."
         },
         {
           "kind": "typeAlias",
@@ -14578,7 +14596,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocumentItemInputType",
-          "declaration": "interface PurchaseDocumentItemInputType {\n  path_source_item: string[];\n  quantity: number;\n}",
+          "declaration": "interface PurchaseDocumentItemInputType {\n  path_source_item: string[];\n  uid_source: string;\n  quantity: number;\n}",
           "doc": "A bill or credit item as an operator matches it to a purchase item."
         },
         {
@@ -14957,6 +14975,24 @@
           "name": "CREDIT_NOTE_STATUS_CONTRACTS",
           "declaration": "const CREDIT_NOTE_STATUS_CONTRACTS: Readonly<Record<CreditNoteStatusType, CreditNoteStatusContract>>;",
           "doc": "The per-status credit-note contract. `Readonly<Record<CreditNoteStatusType, …>>`\nmakes a fifth status a type error here, at the declaration — the same\ntotality `INVOICE_STATUS_CONTRACTS` relies on."
+        },
+        {
+          "kind": "variable",
+          "name": "CreateCreditNoteInput",
+          "declaration": "const CreateCreditNoteInput: z.ZodType<CreateCreditNoteInputType>;",
+          "doc": "Zod schema for {@link CreateCreditNoteInputType}."
+        },
+        {
+          "kind": "interface",
+          "name": "CreateCreditNoteInputType",
+          "declaration": "interface CreateCreditNoteInputType {\n  uid_billing: string;\n  reason: SettlementReasonType;\n  date: string;\n  items: CreateCreditNoteItemInputType[];\n  reference?: string | null;\n  notes?: string | null;\n  overbilling_of_order?: string;\n  uuid_session: string;\n}",
+          "doc": "**Input for raising an AR credit note** (`POST /credit-notes`): name the\ninvoice and its rows and quantities, and the server prices the note from them.\nThe supplier twin is `CreatePurchaseCreditInput`; both are raised from a\nbilling document named by **`uid_billing`** (one-document-model ruling 169,\nthe stored credit line's own pointer name, ruling 34). Promoted from the api's\nroute-local `InvoiceCreditBody` (api-cloudrun `src/routes/creditNotes.ts`) and\nrewritten onto core's fragments: a calendar `date` is `chicagoStartOfDay()`,\nids are `FirestoreId` / `ItemUid`, a rate key is `RateKey`, an account is\n`COACode`.\n\n⚠️ **A stripping `z.object`, deliberately.** A caller still sending a retired\nfield (`uid_invoice`, the client-money `items[].price` / `totals` /\n`organization`) has it STRIPPED rather than refused, which is what lets the\nmanager send both `uid_invoice` and `uid_billing` across the rename with no\nrelease ordering, and a body carrying only the retired name is a 400 naming\n`uid_billing`."
+        },
+        {
+          "kind": "interface",
+          "name": "CreateCreditNoteItemInputType",
+          "declaration": "interface CreateCreditNoteItemInputType {\n  path_billing_item: string[];\n  quantity: number;\n  credited_counts?: TierCountType[];\n  ledger_account?: COACodeType;\n}",
+          "doc": "One line of an AR credit note as an operator raises it: an invoice row and what it credits."
         },
         {
           "kind": "variable",
@@ -20197,7 +20233,7 @@
           "kind": "function",
           "name": "buildRemainingInvoice",
           "signature": "buildRemainingInvoice(order: RemainingOrderSource, account: InitiatorAccount, _: unknown): RemainingInvoice",
-          "doc": "Build the invoice that bills what is left on an order: new lines whole,\nquantity increases at their own path, and each extension of dates as a\ndate-extension section (owner decisions, 2026-09-13 and 2026-09-15).\n\nThe one builder, shared by `POST /invoices { remaining_of_order }` (which\nrebuilds it from EVERY sibling invoice and ignores the client's items) and the\nmanager's preview.\n\n- **Every order divider is carried**, empty or not: alignment compares the\n  whole divider skeleton, so a remainder without it would be unaligned and\n  bill everything again on the next remainder.\n- **An ancestor of a billed line is carried at quantity 0** when it has\n  nothing of its own left (owner, 2026-09-15). `path` is resolved from the\n  parent, so a component without its kit would bill a different path.\n- **One extension section per billed window**: per order destination, the\n  line's owed {@link LineAccount.extension} groups that share their billed days. Its divider\n  is a new uid carrying `path_extension_for`; each line in it is the billed\n  row's terms at the group's added days. A path already in the section (the\n  same product billed on different terms) opens another section.\n- **Its pair** is the order's pair re-keyed to the section, with ONE charge\n  window from the day after the billed window's end (at the order's first\n  window start's time of day) to the order's last window end. Its `days` is\n  the section's ADDED days, never a count of the window (owner, 2026-09-17),\n  so its lines derive exactly that. An extension is only owed on a window\n  that ends before the order's, so the section never starts after it ends.\n- **Over-billing is never netted in.** A negative quantity or extension is\n  returned in `overbilled`, for the credit-note flow.\n- **Credit notes net through the account** (core#121, owner 2026-10-01). A\n  `reverses_billing` line means \"billed beyond the order\" — its only writer is\n  the over-billing offer — so units it gave back are unbilled, and an order\n  that grows to need them again bills them again. 🔴 Build the account from\n  EVERY credit note: one built without them answers a different `billed` than\n  the offer counted, the defect this closes.\n\nEvery per-line decision is read from {@link LineAccount.remaining} and\n{@link LineAccount.overbilled} (6e-0b2 F9), never re-derived here.\n\n🔴 Fails closed on the account's shared refusal ({@link InitiatorAccount.refused}:\nan unaligned scope or a live CRMS-authored invoice), building nothing.",
+          "doc": "Build the invoice that bills what is left on an order: new lines whole,\nquantity increases at their own path, and each extension of dates as a\ndate-extension section (owner decisions, 2026-09-13 and 2026-09-15).\n\nThe one builder, shared by `POST /invoices` with no `items` (which rebuilds\nit from EVERY sibling invoice; ruling 172) and the manager's preview.\n\n- **Every order divider is carried**, empty or not: alignment compares the\n  whole divider skeleton, so a remainder without it would be unaligned and\n  bill everything again on the next remainder.\n- **An ancestor of a billed line is carried at quantity 0** when it has\n  nothing of its own left (owner, 2026-09-15). `path` is resolved from the\n  parent, so a component without its kit would bill a different path.\n- **One extension section per billed window**: per order destination, the\n  line's owed {@link LineAccount.extension} groups that share their billed days. Its divider\n  is a new uid carrying `path_extension_for`; each line in it is the billed\n  row's terms at the group's added days. A path already in the section (the\n  same product billed on different terms) opens another section.\n- **Its pair** is the order's pair re-keyed to the section, with ONE charge\n  window from the day after the billed window's end (at the order's first\n  window start's time of day) to the order's last window end. Its `days` is\n  the section's ADDED days, never a count of the window (owner, 2026-09-17),\n  so its lines derive exactly that. An extension is only owed on a window\n  that ends before the order's, so the section never starts after it ends.\n- **Over-billing is never netted in.** A negative quantity or extension is\n  returned in `overbilled`, for the credit-note flow.\n- **Credit notes net through the account** (core#121, owner 2026-10-01). A\n  `reverses_billing` line means \"billed beyond the order\" — its only writer is\n  the over-billing offer — so units it gave back are unbilled, and an order\n  that grows to need them again bills them again. 🔴 Build the account from\n  EVERY credit note: one built without them answers a different `billed` than\n  the offer counted, the defect this closes.\n\nEvery per-line decision is read from {@link LineAccount.remaining} and\n{@link LineAccount.overbilled} (6e-0b2 F9), never re-derived here.\n\n🔴 Fails closed on the account's shared refusal ({@link InitiatorAccount.refused}:\nan unaligned scope or a live CRMS-authored invoice), building nothing.",
           "paramTags": [
             {
               "name": "account",

@@ -174,7 +174,6 @@ const FROZEN: ReadonlySet<string> = new Set([
   "CreateOutOfServiceInput destination(kind=address).address.user_coordinates",
   "CreateOutOfServiceInput destination(kind=uid)",
   "CreateOutOfServiceInput sources[]",
-  "CreatePurchaseBillInput (mode=push).charge_items[]",
   "CreatePurchaseCreditInput (mode=push).charge_items[]",
   "CreateRecurrenceInput prototype.attachments[]",
   "CreateRecurrenceInput prototype.destination",

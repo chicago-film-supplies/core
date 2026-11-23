@@ -1779,15 +1779,17 @@ const InvoiceItemInputSchema: z.ZodType<InvoiceItemInputType> = z
 /** Input schema for POST /invoices — create an invoice from orders. */
 export interface CreateInvoiceInputType {
   uid: string;
-  query_by_orders: string[];
   /**
-   * **Bill what is left on this order** (api-cloudrun#680 R1). The server
-   * builds the items and destinations with `buildRemainingInvoice`
-   * (`@cfs/core/utils/quantityAccounting`) from the order and EVERY invoice
-   * linked to it, and ignores `items` and `destinations` on the input.
-   * `query_by_orders` must be exactly `[remaining_of_order]`.
+   * Every order the invoice bills. **With no `items`, the invoice IS the
+   * remainder of every one of them** (one-document-model rulings 168, 172; the
+   * one remainder builder, both sides): what each bills that no live invoice
+   * has, owed time included as date-extension sections, built by the server
+   * from the orders and every invoice linked to them. When nothing is left
+   * anywhere, that is exactly the divider skeleton. `items` present are the
+   * client's rows. `remaining_of_order` (one order, a flag) retired here: the
+   * remainder is derived, never asked for.
    */
-  remaining_of_order?: string;
+  query_by_orders: string[];
   organization: { uid: string };
   /**
    * **The only tax fact a draft states.** `tax_profile` left this input at
@@ -1825,7 +1827,6 @@ export const CreateInvoiceInput: z.ZodType<CreateInvoiceInputType> = z.object({
     1,
     "At least one source order is required",
   ),
-  remaining_of_order: FirestoreId.optional(),
   organization: z.object({ uid: FirestoreId }),
   tax_exempt: z.boolean().optional(),
   uid_store: FirestoreId.nullable().optional(),

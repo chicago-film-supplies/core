@@ -2244,9 +2244,8 @@ function assembleRemainder(
  * quantity increases at their own path, and each extension of dates as a
  * date-extension section (owner decisions, 2026-09-13 and 2026-09-15).
  *
- * The one builder, shared by `POST /invoices { remaining_of_order }` (which
- * rebuilds it from EVERY sibling invoice and ignores the client's items) and the
- * manager's preview.
+ * The one builder, shared by `POST /invoices` with no `items` (which rebuilds
+ * it from EVERY sibling invoice; ruling 172) and the manager's preview.
  *
  * - **Every order divider is carried**, empty or not: alignment compares the
  *   whole divider skeleton, so a remainder without it would be unaligned and

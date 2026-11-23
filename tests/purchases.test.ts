@@ -42,6 +42,7 @@ import {
   PurchaseRentalItemSchema,
   UpdatePurchaseInput,
   billingInCreditPool,
+  CreateCreditNoteInput,
   INVOICE_STATUS_CONTRACTS,
   creditIsLive,
 } from "../src/schemas/mod.ts";
@@ -1102,35 +1103,44 @@ Deno.test("PurchaseBillSchema: due_date_fs is a mirror — absent until backfill
   assertEquals(issuePaths(PurchaseBillSchema, bill({ due_date: null, due_date_fs: mockTimestamp })), ["due_date_fs"]);
 });
 
-Deno.test("CreatePurchaseBillInput: items by path_source_item, charge items separately; a purchase item once", () => {
-  const items = [{ path_source_item: [iuid(1)], quantity: 3 }];
-  const common = { items, uuid_session: SESSION, version: 0 };
-  const push = { mode: "push", date: "2026-10-01T00:00:00.000-05:00", due_date: "2026-10-31T00:00:00.000-05:00" };
-  assertEquals(issuePaths(CreatePurchaseBillInput, { ...push, ...common }), []);
-  assertEquals(issuePaths(CreatePurchaseBillInput, { mode: "link", xero_document: "bank_transaction", xero_id: XERO_ID, ...common }), []);
-  assertEquals(issuePaths(CreatePurchaseBillInput, { mode: "push", date: "2026-10-01T00:00:00.000-05:00", ...common }), ["due_date"]);
-  assertEquals(
-    issuePaths(CreatePurchaseBillInput, { mode: "link", xero_document: "invoice", xero_id: XERO_ID, ...common, items: [items[0], items[0]] }),
-    ["items.1.path_source_item"],
-  );
-  // A push of charge items alone is a bill; a push of nothing is not.
-  const fee = { name: "Freight", ledger_account: 5100, amount_cents: 1500 };
-  assertEquals(issuePaths(CreatePurchaseBillInput, { ...push, ...common, items: [], charge_items: [fee] }), []);
-  assertEquals(issuePaths(CreatePurchaseBillInput, { ...push, ...common, items: [] }), ["items"]);
+Deno.test("CreatePurchaseBillInput: the invoice's create shape — every purchase named, rows or the remainder; a link picks by purchase (ruling 168)", () => {
+  const P = "testpurch10000000000";
+  const Q = "testpurch20000000000";
+  const push = { mode: "push", query_by_purchases: [P, Q], date: "2026-10-01T00:00:00.000-05:00", due_date: "2026-10-31T00:00:00.000-05:00", uuid_session: SESSION };
+  // No items: the remainder of every purchase.
+  assertEquals(issuePaths(CreatePurchaseBillInput, push), []);
+  assertEquals(issuePaths(CreatePurchaseBillInput, { ...push, query_by_purchases: [] }), ["query_by_purchases"]);
+  assertEquals(issuePaths(CreatePurchaseBillInput, { ...push, query_by_purchases: [P, P] }), ["query_by_purchases"]);
+  const { due_date: _d, ...noDue } = push;
+  assertEquals(issuePaths(CreatePurchaseBillInput, noDue), ["due_date"]);
+  // Rows: a purchase divider names one of the bill's purchases, and a row appears once.
+  const divider = (uid: string) => ({ type: "purchase", uid, path: [uid] });
+  assertEquals(issuePaths(CreatePurchaseBillInput, { ...push, items: [divider(P), divider(Q)] }), []);
+  assertEquals(issuePaths(CreatePurchaseBillInput, { ...push, items: [divider(P), divider("testpurch30000000000")] }), ["items.1.uid"]);
+  assertEquals(issuePaths(CreatePurchaseBillInput, { ...push, items: [divider(P), divider(P)] }), ["items.1.path"]);
+  // A link picks: each line names its purchase, one of the bill's, and each row once.
+  const link = { mode: "link", query_by_purchases: [P, Q], xero_document: "invoice", xero_id: XERO_ID, uuid_session: SESSION };
+  const pick = (uid_source: string) => ({ uid_source, path_source_item: [iuid(1)], quantity: 3 });
+  assertEquals(issuePaths(CreatePurchaseBillInput, { ...link, items: [pick(P), pick(Q)] }), []);
+  assertEquals(issuePaths(CreatePurchaseBillInput, { ...link, items: [pick(P), pick(P)] }), ["items.1.path_source_item"]);
+  assertEquals(issuePaths(CreatePurchaseBillInput, { ...link, items: [pick("testpurch30000000000")] }), ["items.0.uid_source"]);
+  assertEquals(issuePaths(CreatePurchaseBillInput, { ...link, items: [{ path_source_item: [iuid(1)], quantity: 3 }] }), ["items.0.uid_source"]);
+  assertEquals(issuePaths(CreatePurchaseBillInput, { ...link, items: [] }), ["items"]);
 });
 
 Deno.test("a charge item input stays STRICT inside the push input — an unknown key is a 400, not dropped", () => {
   // The fail-closed half of keeping the node strict: an api predating a field
   // must refuse it rather than store an item with the attribution stripped.
+  // A supplier credit's push input is its one host since a bill's charge became a row (6e-0d2).
   const push = (d: Record<string, unknown>) =>
-    CreatePurchaseBillInput.safeParse({
+    CreatePurchaseCreditInput.safeParse({
       mode: "push",
+      uid_billing: "testbillA0000000000a",
+      reason: "supplier_adjustment",
       date: "2026-10-25T00:00:00.000-05:00",
-      due_date: "2026-11-24T00:00:00.000-06:00",
-      items: [{ path_source_item: [iuid(1)], quantity: 1 }],
+      items: [],
       charge_items: [d],
       uuid_session: SESSION,
-      version: 0,
     });
   const charge = { name: "Loss charge", ledger_account: 5100, amount_cents: 1500, uid: PRODUCT };
   assertEquals(push(charge).success, true, "the otherwise-valid payload parses, so the refusal below is the key alone");
@@ -1480,50 +1490,52 @@ Deno.test("PurchaseCreditSchema: a PUSHED credit's total is its items', at the c
   assertEquals(issuePaths(PurchaseCreditSchema, credit({ total_cents: 47000, remaining_credit_cents: 47000 })), ["totals.total_cents"]);
 });
 
-Deno.test("CreatePurchaseCreditInput: a pushed credit names an item or a direct item", () => {
-  const base = { mode: "push", reason: "supplier_adjustment", date: "2026-10-01T00:00:00.000-05:00", uuid_session: SESSION, version: 0 };
+Deno.test("CreatePurchaseCreditInput: a pushed credit names its bill and an item or a direct item (ruling 169)", () => {
+  const P = "testpurch10000000000";
+  const base = { mode: "push", uid_billing: "testbillA0000000000a", reason: "supplier_adjustment", date: "2026-10-01T00:00:00.000-05:00", uuid_session: SESSION };
   assertEquals(issuePaths(CreatePurchaseCreditInput, { ...base, items: [] }), ["items"]);
-  assertEquals(issuePaths(CreatePurchaseCreditInput, { ...base, items: [{ path_source_item: [iuid(1)], quantity: 1 }] }), []);
+  assertEquals(issuePaths(CreatePurchaseCreditInput, { ...base, items: [{ uid_source: P, path_source_item: [iuid(1)], quantity: 1 }] }), []);
+  const { uid_billing: _b, ...noBill } = base;
+  assertEquals(issuePaths(CreatePurchaseCreditInput, { ...noBill, items: [{ uid_source: P, path_source_item: [iuid(1)], quantity: 1 }] }), ["uid_billing"]);
 });
 
-Deno.test("CreatePurchaseCreditInput: a line names a purchase item OR a bill line, and each credited row once (6d, ruling 23)", () => {
-  const base = { mode: "push", reason: "supplier_adjustment", date: "2026-10-01T00:00:00.000-05:00", uuid_session: SESSION, version: 0 };
+Deno.test("CreatePurchaseCreditInput: a line names a row of its bill OR a purchase item with its purchase, and each row once (6d, rulings 23, 169)", () => {
   const P = "testpurch10000000000";
-  const billA = "testbillA0000000000a";
-  const billB = "testbillB0000000000b";
+  const Q = "testpurch20000000000";
+  const base = { mode: "push", uid_billing: "testbillA0000000000a", reason: "supplier_adjustment", date: "2026-10-01T00:00:00.000-05:00", uuid_session: SESSION };
   const issues = (items: unknown[]) => issuePaths(CreatePurchaseCreditInput, { ...base, items });
-  // A bill line alone is enough: the writer derives the purchase line from the row.
-  assertEquals(issues([{ uid_billing: billA, path_billing_item: [P, iuid(1)], quantity: 1 }]), []);
+  // A bill row alone is enough: the writer derives the purchase line from the row.
+  assertEquals(issues([{ path_billing_item: [P, iuid(1)], quantity: 1 }]), []);
   // A client sending both still parses.
-  assertEquals(issues([{ path_source_item: [iuid(1)], uid_billing: billA, path_billing_item: [P, iuid(1)], quantity: 1 }]), []);
+  assertEquals(issues([{ uid_source: P, path_source_item: [iuid(1)], path_billing_item: [P, iuid(1)], quantity: 1 }]), []);
   // Neither: refused at the purchase item, by name.
   assertEquals(issues([{ quantity: 1 }]), ["items.0.path_source_item"]);
-  // Half a bill line: one issue, the pairing one, not a second "names nothing".
-  assertEquals(issues([{ uid_billing: billA, quantity: 1 }]), ["items.0.path_billing_item"]);
-  // Two bills' lines at ONE path would store one credit row twice.
+  // A purchase item with no purchase: a bill may bill several, so the path alone is ambiguous.
+  assertEquals(issues([{ path_source_item: [iuid(1)], quantity: 1 }]), ["items.0.uid_source"]);
+  // One bill row named twice would store one credit row twice.
   assertEquals(
-    issues([
-      { uid_billing: billA, path_billing_item: [P, iuid(1)], quantity: 1 },
-      { uid_billing: billB, path_billing_item: [P, iuid(1)], quantity: 1 },
-    ]),
+    issues([{ path_billing_item: [P, iuid(1)], quantity: 1 }, { path_billing_item: [P, iuid(1)], quantity: 2 }]),
     ["items.1.path_billing_item"],
   );
-  // A purchase-line item and a bill line resolving to the same row collide too.
+  // A purchase-line item and a bill row resolving to the same row collide too.
   assertEquals(
-    issues([{ path_source_item: [iuid(1)], quantity: 1 }, { uid_billing: billA, path_billing_item: [P, iuid(1)], quantity: 1 }]),
+    issues([{ uid_source: P, path_source_item: [iuid(1)], quantity: 1 }, { path_billing_item: [P, iuid(1)], quantity: 1 }]),
     ["items.1.path_billing_item"],
+  );
+  // The same path on two purchases of one bill is two rows: one write.
+  assertEquals(
+    issues([{ uid_source: P, path_source_item: [iuid(1)], quantity: 1 }, { uid_source: Q, path_source_item: [iuid(1)], quantity: 1 }]),
+    [],
   );
   // Two rows of one split purchase line sit at different paths: one write.
   assertEquals(
-    issues([
-      { uid_billing: billA, path_billing_item: [P, iuid(1)], quantity: 1 },
-      { uid_billing: billA, path_billing_item: [P, iuid(7), iuid(1)], quantity: 1 },
-    ]),
+    issues([{ path_billing_item: [P, iuid(1)], quantity: 1 }, { path_billing_item: [P, iuid(7), iuid(1)], quantity: 1 }]),
     [],
   );
-  // A link names no bill line, so it still names its purchase item.
-  const link = { mode: "link", reason: "supplier_adjustment", xero_id: "2c3d4e5f-0000-4000-8000-000000000001", uuid_session: SESSION, version: 0 };
+  // A link names no bill row (its money is Xero's), so it names its purchase item.
+  const link = { mode: "link", uid_billing: "testbillA0000000000a", reason: "supplier_adjustment", xero_id: "2c3d4e5f-0000-4000-8000-000000000001", uuid_session: SESSION };
   assertEquals(issuePaths(CreatePurchaseCreditInput, { ...link, items: [{ quantity: 1 }] }), ["items.0.path_source_item"]);
+  assertEquals(issuePaths(CreatePurchaseCreditInput, { ...link, items: [{ path_billing_item: [P, iuid(1)], quantity: 1 }] }), ["items.0.path_billing_item"]);
 });
 
 // ── pack expansion (api-cloudrun#1081) ───────────────────────────────
@@ -2098,4 +2110,25 @@ Deno.test("one liveness rule per role, read off the status contracts (rulings 16
     [false, true, true, false],
   );
   assertEquals([billingInCreditPool({ status: "nonsense" }), creditIsLive({ status: "nonsense" })], [false, false]);
+});
+
+Deno.test("CreateCreditNoteInput: AR credit notes are raised from billing by uid_billing, on core's fragments (ruling 169)", () => {
+  const INV = "testinvoice000000001";
+  const ok = {
+    uid_billing: INV,
+    reason: "correction",
+    date: "2026-10-01T00:00:00.000-05:00",
+    items: [{ path_billing_item: [iuid(1)], quantity: 1, ledger_account: 4000 }],
+    uuid_session: SESSION,
+  };
+  assertEquals(issuePaths(CreateCreditNoteInput, ok), []);
+  // The retired name is STRIPPED, so a manager may send both across the rename,
+  // and a body carrying only the retired name is a 400 naming uid_billing.
+  const { uid_billing: _u, ...retired } = ok;
+  assertEquals(issuePaths(CreateCreditNoteInput, { ...ok, uid_invoice: INV }), []);
+  assertEquals(issuePaths(CreateCreditNoteInput, { ...retired, uid_invoice: INV }), ["uid_billing"]);
+  // A calendar date needs an offset: a bare day is refused, as every business datetime is.
+  assertEquals(issuePaths(CreateCreditNoteInput, { ...ok, date: "2026-10-01" }), ["date"]);
+  assertEquals(issuePaths(CreateCreditNoteInput, { ...ok, items: [] }), ["items"]);
+  assertEquals(issuePaths(CreateCreditNoteInput, { ...ok, items: [{ path_billing_item: [iuid(1)], quantity: 1.5 }] }), ["items.0.quantity"]);
 });

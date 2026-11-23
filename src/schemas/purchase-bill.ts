@@ -1148,17 +1148,25 @@ export const PurchaseCreditSchema: z.ZodType<PurchaseCredit> = z.strictObject({
 /** A bill or credit item as an operator matches it to a purchase item. */
 export interface PurchaseDocumentItemInputType {
   /**
-   * The purchase item billed, by its path on the purchase: the row identity.
-   * Its uid is its product's (W4K), and one product may sit on two items.
-   * One key on both sides (ruling 109).
+   * The purchase item billed, by its path on the purchase {@link uid_source}
+   * names: the row identity. Its uid is its product's (W4K), and one product may
+   * sit on two items. One key on both sides (ruling 109).
    */
   path_source_item: string[];
+  /**
+   * The purchase this line bills, one of the bill's `query_by_purchases`: a bill
+   * may bill several, so the path alone is ambiguous (one-document-model 6e-0d2).
+   * The initiator, as `uid_source` means on a pair (ruling 109). The first use of
+   * the key on a LINE: lines are otherwise scoped by their leading divider.
+   */
+  uid_source: string;
   quantity: number;
 }
 
 /** Zod schema for PurchaseDocumentItemInputType. */
 export const PurchaseDocumentItemInput: z.ZodType<PurchaseDocumentItemInputType> = z.object({
   path_source_item: z.array(ItemUid).min(1),
+  uid_source: FirestoreId,
   quantity: z.int().min(1),
 });
 
@@ -1184,27 +1192,34 @@ export const PurchaseDocumentItemInput: z.ZodType<PurchaseDocumentItemInputType>
  *   input used to take retired with the unit charge windows
  *   (one-document-model Phase 3).
  */
-export interface PurchaseCreditItemInputType extends Omit<PurchaseDocumentItemInputType, "path_source_item"> {
+export interface PurchaseCreditItemInputType extends Omit<PurchaseDocumentItemInputType, "path_source_item" | "uid_source"> {
   /**
-   * The purchase item credited, by its path on the purchase (ruling 109: one key
-   * on both sides). Required unless the line names a bill row
-   * ({@link uid_billing} + {@link path_billing_item}): a credit raised from a
-   * bill is keyed on the BILL ROW, and the writer derives the purchase line from
-   * the row (one-document-model 6d, owner ruling 23), so a substitute or a
-   * bill-authored line, which projects no purchase line of its own, can be
-   * credited. A client may still send both.
+   * The purchase item credited, by its path on the purchase named by
+   * {@link uid_source} (ruling 109: one key on both sides). Required unless the
+   * line names a row of the credited bill ({@link path_billing_item}): a line
+   * pointed at a bill row is keyed on that ROW, and the writer derives the
+   * purchase line from it (one-document-model 6d, owner ruling 23), so a
+   * substitute or a bill-authored line, which projects no purchase line of its
+   * own, can be credited. A client may still send both.
    */
   path_source_item?: string[];
+  /**
+   * The purchase an UNPOINTED line credits (one-document-model ruling 169): one of
+   * the credited bill's `query_by_purchases`, since a bill may bill several.
+   * Required with {@link path_source_item} on a line that names no bill row. The
+   * initiator, as `uid_source` means everywhere (ruling 109); the billing
+   * document is the credit's own `uid_billing`.
+   */
+  uid_source?: string;
   /** A time line's counts to credit; refused on a flat line by the writer. */
   counts?: TierCountType[];
   /**
-   * The bill credited (api-cloudrun#1439; ruling 34: the one pointer name on
-   * both sides). Both or neither with {@link path_billing_item}; refused on a
-   * link. Its units are capped per bill row (`creditableBillLines`) and priced
-   * first-come from it (`billLineCreditMoney`).
+   * The row of the credited bill (the credit's `uid_billing`, ruling 169) this
+   * line credits, by its path on the bill (ruling 34). Refused on a link. Its
+   * units are capped per bill row (`creditableLines`) and priced first-come from
+   * it (`billLineCreditMoney`). The stored credit line carries the bill as its
+   * own `uid_billing` beside it.
    */
-  uid_billing?: string;
-  /** The bill row credited, by its path on the bill. */
   path_billing_item?: string[];
   /** The supplier's memo for a pushed flat line: the credit line's own stated total (D4), capped at what it credits. */
   price?: { stated_cents?: number | null };
@@ -1216,7 +1231,7 @@ export const PurchaseCreditItemInput: z.ZodType<PurchaseCreditItemInputType> = z
   path_source_item: z.array(ItemUid).min(1).optional(),
   quantity: z.int().min(1),
   counts: z.array(z.object({ rate_key: RateKey, num: z.int().min(0), den: z.int().min(1) })).min(1).optional(),
-  uid_billing: FirestoreId.optional(),
+  uid_source: FirestoreId.optional(),
   path_billing_item: z.array(ItemUid).min(1).optional(),
   price: z.object({ stated_cents: z.int().min(0).nullable().optional() }).optional(),
 });
@@ -1238,7 +1253,7 @@ export function creditItemMemoCents(item: Pick<PurchaseCreditItemInputType, "pri
  * takes the attributed product's category (none when it names no product); a
  * uid sets it and must name a live category.
  *
- * ⚠️ **The node stays STRICT, though both push inputs embed it.** Stripping
+ * ⚠️ **The node stays STRICT, though the credit's push input embeds it.** Stripping
  * would let an api that predates a field silently drop it rather than 400, and
  * an attribution would vanish with nothing failing (api-cloudrun#1360).
  */
@@ -1259,7 +1274,8 @@ export interface PurchaseDocumentChargeItemInputType {
   uid_tracking_category?: string | null;
 }
 
-// Not exported: it is reached only through the two push inputs, and an exported
+// Not exported: it is reached only through the credit's push input (a bill's
+// charge is a row since 6e-0d2), and an exported
 // `*Input` would be a strict node of its own in `tests/input-strictness.test.ts`.
 const PurchaseDocumentChargeItemInput: z.ZodType<PurchaseDocumentChargeItemInputType> = z.strictObject({
   name: LineItemCore.name,
@@ -1279,115 +1295,54 @@ const PurchaseDocumentChargeItemInput: z.ZodType<PurchaseDocumentChargeItemInput
 });
 
 /**
- * Each credited ROW once per write, and every line names what it bills or
- * credits.
+ * Each credited or billed ROW once per write, and every line names what it bills
+ * or credits.
  *
- * - A line names a purchase item (`path_source_item`) or, on a credit, a bill
- *   row (`uid_billing` + `path_billing_item`, both or neither).
- * - Keyed on the row the write produces under the purchase divider: a bill line's
- *   own path below that divider when one is named, else the purchase line's
- *   path. A credit row copies the bill row it credits (owner ruling 23), so two
- *   items resolving to one row would store one path twice. Two bills' lines at
- *   one path are therefore credited in two writes; two rows of one split
- *   purchase line, at different paths, in one.
+ * - A line names a row of the credited bill (`path_billing_item`, a credit only),
+ *   or a purchase item: `uid_source` + `path_source_item` (ruling 169; a bill may
+ *   bill several purchases, so the path alone is ambiguous).
+ * - `uid_source` must be one of the document's `query_by_purchases` when the
+ *   input states them (a link bill); a credit's purchases are its bill's, which
+ *   the writer checks.
+ * - Keyed on the ROW the write produces: a pointed line copies the bill row's
+ *   path (owner ruling 23), which leads with its purchase divider; an unpointed
+ *   one lands at `[uid_source, ...path_source_item]`. Two items resolving to one
+ *   row would store one path twice.
  */
 function uniqueItemInputs(
-  items: readonly { path_source_item?: string[]; uid_billing?: string; path_billing_item?: readonly string[] }[],
+  items: readonly { path_source_item?: string[]; uid_source?: string; path_billing_item?: readonly string[] }[],
   ctx: z.RefinementCtx,
+  sources: readonly string[] | null,
 ): void {
   const seen = new Set<string>();
   items.forEach((item, i) => {
-    const halves = (item.uid_billing === undefined) !== (item.path_billing_item === undefined);
-    if (halves) {
-      ctx.addIssue({ code: "custom", path: ["items", i, "path_billing_item"], message: "uid_billing and path_billing_item are set together" });
-    }
-    const named = item.path_billing_item !== undefined && item.uid_billing !== undefined;
-    const row = named ? item.path_billing_item!.slice(1) : item.path_source_item;
-    if (row === undefined) {
-      if (!halves) {
-        ctx.addIssue({ code: "custom", path: ["items", i, "path_source_item"], message: "a line names its purchase item, or a bill line it credits" });
-      }
+    let row: readonly string[];
+    if (item.path_billing_item !== undefined) {
+      row = item.path_billing_item;
+    } else if (item.path_source_item === undefined) {
+      ctx.addIssue({ code: "custom", path: ["items", i, "path_source_item"], message: "a line names a purchase item, or a row of the bill it credits" });
       return;
+    } else if (item.uid_source === undefined) {
+      ctx.addIssue({ code: "custom", path: ["items", i, "uid_source"], message: "a line naming a purchase item names its purchase (uid_source)" });
+      return;
+    } else {
+      if (sources !== null && !sources.includes(item.uid_source)) {
+        ctx.addIssue({ code: "custom", path: ["items", i, "uid_source"], message: "uid_source must be one of query_by_purchases" });
+      }
+      row = [item.uid_source, ...item.path_source_item];
     }
     const key = row.join("/");
     if (seen.has(key)) {
       ctx.addIssue({
         code: "custom",
-        path: ["items", i, named ? "path_billing_item" : "path_source_item"],
-        message: "one item per credited row; credit another bill's line at the same path in a second credit",
+        path: ["items", i, item.path_billing_item !== undefined ? "path_billing_item" : "path_source_item"],
+        message: "one item per row",
       });
     }
     seen.add(key);
   });
 }
 
-/**
- * Input for billing a purchase — push a new ACCPAY, or link an existing Xero
- * bill or card payment.
- *
- * A PUSHED bill item carries no amount: the writer defaults it from the
- * purchase item (`projectPurchaseLineToBillLine`, `@cfs/core/utils/purchase-documents`) —
- * a flat line at the item's cumulative share, a time line priced from its
- * units' UNBILLED charge windows — and stamps the purchase item's `name`,
- * `description`, `price`, `ledger_account`, `uid_tracking_category` and tax
- * class. The operator then
- * overrides any of them until the bill is settled ({@link UpdatePurchaseBillInput}).
- * A LINKED bill carries `total_cents` as Xero has it.
- */
-export type CreatePurchaseBillInputType =
-  | {
-    mode: "push";
-    date: string;
-    due_date: string;
-    subject?: string;
-    reference?: string | null;
-    items: PurchaseDocumentItemInputType[];
-    charge_items?: PurchaseDocumentChargeItemInputType[];
-    uuid_session: string;
-    version: number;
-  }
-  | {
-    mode: "link";
-    xero_document: PurchaseBillXeroDocumentType;
-    xero_id: string;
-    items: PurchaseDocumentItemInputType[];
-    uuid_session: string;
-    version: number;
-  };
-
-const pushBillInput = z.object({
-  mode: z.literal("push"),
-  date: chicagoStartOfDay(),
-  due_date: chicagoStartOfDay(),
-  subject: z.string().optional(),
-  reference: z.string().max(255).nullable().optional(),
-  items: z.array(PurchaseDocumentItemInput),
-  charge_items: z.array(PurchaseDocumentChargeItemInput).optional(),
-  uuid_session: z.uuid(),
-  version: z.int().min(0),
-});
-
-// A link reads date, due date, reference and total FROM Xero rather than from
-// the caller, so the stored bill cannot disagree with the document it links.
-const linkBillInput = z.object({
-  mode: z.literal("link"),
-  xero_document: PurchaseBillXeroDocumentEnum,
-  xero_id: XeroId,
-  items: z.array(PurchaseDocumentItemInput).min(1),
-  uuid_session: z.uuid(),
-  version: z.int().min(0),
-});
-
-/** Zod schema for CreatePurchaseBillInputType. */
-export const CreatePurchaseBillInput: z.ZodType<CreatePurchaseBillInputType> = z.discriminatedUnion("mode", [
-  pushBillInput,
-  linkBillInput,
-]).superRefine((b, ctx) => {
-  uniqueItemInputs(b.items, ctx);
-  if (b.mode === "push" && b.items.length + (b.charge_items?.length ?? 0) === 0) {
-    ctx.addIssue({ code: "custom", path: ["items"], message: "a bill names at least one item or charge item" });
-  }
-}) as z.ZodType<CreatePurchaseBillInputType>;
 
 /**
  * Input for recording a supplier credit against a purchase — push a new
@@ -1403,41 +1358,43 @@ export const CreatePurchaseBillInput: z.ZodType<CreatePurchaseBillInputType> = z
 export type CreatePurchaseCreditInputType =
   | {
     mode: "push";
+    /** The bill the credit is raised from (ruling 169; AR's `CreateCreditNoteInput.uid_billing`). */
+    uid_billing: string;
     reason: SettlementReasonType;
     date: string;
     reference?: string | null;
     items: PurchaseCreditItemInputType[];
     charge_items?: PurchaseDocumentChargeItemInputType[];
     uuid_session: string;
-    version: number;
   }
   | {
     mode: "link";
+    /** The bill the linked Xero credit is raised from (ruling 169). */
+    uid_billing: string;
     reason: SettlementReasonType;
     xero_id: string;
     items: PurchaseCreditItemInputType[];
     uuid_session: string;
-    version: number;
   };
 
 const pushCreditInput = z.object({
   mode: z.literal("push"),
+  uid_billing: FirestoreId,
   reason: PurchaseCreditReasonEnum,
   date: chicagoStartOfDay(),
   reference: z.string().max(255).nullable().optional(),
   items: z.array(PurchaseCreditItemInput),
   charge_items: z.array(PurchaseDocumentChargeItemInput).optional(),
   uuid_session: z.uuid(),
-  version: z.int().min(0),
 });
 
 const linkCreditInput = z.object({
   mode: z.literal("link"),
+  uid_billing: FirestoreId,
   reason: PurchaseCreditReasonEnum,
   xero_id: XeroId,
   items: z.array(PurchaseCreditItemInput),
   uuid_session: z.uuid(),
-  version: z.int().min(0),
 });
 
 /** Zod schema for CreatePurchaseCreditInputType. */
@@ -1445,7 +1402,14 @@ export const CreatePurchaseCreditInput: z.ZodType<CreatePurchaseCreditInputType>
   pushCreditInput,
   linkCreditInput,
 ]).superRefine((c, ctx) => {
-  uniqueItemInputs(c.items, ctx);
+  uniqueItemInputs(c.items, ctx, null);
+  if (c.mode === "link") {
+    c.items.forEach((item, i) => {
+      if (item.path_billing_item !== undefined) {
+        ctx.addIssue({ code: "custom", path: ["items", i, "path_billing_item"], message: "a linked credit's lines name no bill row: its money is Xero's" });
+      }
+    });
+  }
   if (c.mode === "push" && c.items.length + (c.charge_items?.length ?? 0) === 0) {
     ctx.addIssue({ code: "custom", path: ["items"], message: "a pushed credit names at least one item or charge item" });
   }
@@ -1637,6 +1601,94 @@ export const UpdatePurchaseBillInput: z.ZodType<UpdatePurchaseBillInputType> = z
     seen.add(key);
   });
 }) as z.ZodType<UpdatePurchaseBillInputType>;
+
+/**
+ * **Input for creating a bill** (`POST /purchase-bills`, one-document-model
+ * 6e-0d2): the INVOICE's create shape on the payable side (ruling 168), naming
+ * every purchase it bills in `query_by_purchases` (ruling 30), the
+ * `CreateInvoiceInput.query_by_orders` twin.
+ *
+ * - **push** — a bill CFS authors, born `draft` with its number and posted to
+ *   Xero only when issued (rulings 41, 160). No `items` is the REMAINDER of every
+ *   purchase (ruling 172, the one remainder builder): what each bills that no
+ *   live bill has, owed time included, as extension sections. `items` (with
+ *   `destinations`) are the client's rows, in the row shape
+ *   {@link UpdatePurchaseBillInput} takes, purchase dividers included; a charge
+ *   line is a row. Partial billing is an edit of the draft, as on an invoice.
+ * - **link** — an existing Xero bill or card payment. Its lines are PICKS, each
+ *   naming its purchase (`uid_source`, one of `query_by_purchases`) and purchase
+ *   item: the link states which purchase lines the Xero document bills, and its
+ *   money is Xero's. Its date, due date, reference and total are read FROM Xero,
+ *   so the stored bill cannot disagree with the document it links.
+ *
+ * No `version`: the writer re-reads every purchase inside its transaction, and a
+ * draft is reviewed before it is issued, as an invoice's create has none.
+ */
+export type CreatePurchaseBillInputType =
+  | {
+    mode: "push";
+    query_by_purchases: string[];
+    date: string;
+    due_date: string;
+    subject?: string;
+    reference?: string | null;
+    items?: PurchaseBillRowInputType[];
+    destinations?: PurchaseBillDestinationInputType[];
+    uuid_session: string;
+  }
+  | {
+    mode: "link";
+    query_by_purchases: string[];
+    xero_document: PurchaseBillXeroDocumentType;
+    xero_id: string;
+    items: PurchaseDocumentItemInputType[];
+    uuid_session: string;
+  };
+
+const pushBillInput = z.object({
+  mode: z.literal("push"),
+  query_by_purchases: z.array(FirestoreId).min(1, "A bill bills at least one purchase"),
+  date: chicagoStartOfDay(),
+  due_date: chicagoStartOfDay(),
+  subject: z.string().optional(),
+  reference: z.string().max(255).nullable().optional(),
+  items: z.array(PurchaseBillRowInput).optional(),
+  destinations: z.array(PurchaseBillDestinationInput).optional(),
+  uuid_session: z.uuid(),
+});
+
+const linkBillInput = z.object({
+  mode: z.literal("link"),
+  query_by_purchases: z.array(FirestoreId).min(1, "A bill bills at least one purchase"),
+  xero_document: PurchaseBillXeroDocumentEnum,
+  xero_id: XeroId,
+  items: z.array(PurchaseDocumentItemInput).min(1),
+  uuid_session: z.uuid(),
+});
+
+/** Zod schema for CreatePurchaseBillInputType. */
+export const CreatePurchaseBillInput: z.ZodType<CreatePurchaseBillInputType> = z.discriminatedUnion("mode", [
+  pushBillInput,
+  linkBillInput,
+]).superRefine((b, ctx) => {
+  if (new Set(b.query_by_purchases).size !== b.query_by_purchases.length) {
+    ctx.addIssue({ code: "custom", path: ["query_by_purchases"], message: "a purchase is named once" });
+  }
+  if (b.mode === "link") {
+    uniqueItemInputs(b.items, ctx, b.query_by_purchases);
+    return;
+  }
+  // The client's rows, each once, every purchase divider one of the bill's.
+  const seen = new Set<string>();
+  b.items?.forEach((item, i) => {
+    const key = item.path.join("/");
+    if (seen.has(key)) ctx.addIssue({ code: "custom", path: ["items", i, "path"], message: "a row appears once per write" });
+    seen.add(key);
+    if (item.type === "purchase" && !b.query_by_purchases.includes(item.uid)) {
+      ctx.addIssue({ code: "custom", path: ["items", i, "uid"], message: "a purchase divider names one of query_by_purchases" });
+    }
+  });
+}) as z.ZodType<CreatePurchaseBillInputType>;
 
 /**
  * Input for voiding a supplier credit from CFS. `version` is the credit's.
