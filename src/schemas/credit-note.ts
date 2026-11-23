@@ -910,7 +910,7 @@ export interface CreateCreditNoteItemInputType {
  * The supplier twin is `CreatePurchaseCreditInput`; both are raised from a
  * billing document named by **`uid_billing`** (one-document-model ruling 169,
  * the stored credit line's own pointer name, ruling 34). Promoted from the api's
- * route-local `InvoiceCreditBody` (api-cloudrun `src/routes/creditNotes.ts`) and
+ * route-local `InvoiceCreditBody` (`api-cloudrun/src/routes/creditNotes.ts`) and
  * rewritten onto core's fragments: a calendar `date` is `chicagoStartOfDay()`,
  * ids are `FirestoreId` / `ItemUid`, a rate key is `RateKey`, an account is
  * `COACode`.
