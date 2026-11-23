@@ -487,7 +487,10 @@ const docItemHead = {
   description: LineItemCore.description,
 };
 const docItemShape = {
-  quantity: z.int().min(1).meta({ column: true, label: "Quantity", xero: true }),
+  // ≥ 0, as an invoice line's (one-document-model ruling 180): the remainder
+  // carries a kit header at quantity 0 when only a component has units left, so
+  // the component's path still resolves from its parent (ruling 176, AR's rule).
+  quantity: z.int().min(0).meta({ column: true, label: "Quantity", xero: true }),
   path: LineItemCore.path,
   zero_priced: LineItemCore.zero_priced,
   quantity_per_parent: LineItemCore.quantity_per_parent,
@@ -1544,7 +1547,8 @@ const billLineShape = (type: SharedLineType) => ({
   path: z.array(ItemUid).min(1),
   name: LineItemCore.name.optional(),
   description: LineItemCore.description.optional(),
-  quantity: z.int().min(1).optional(),
+  // ≥ 0 (ruling 180): a draft's remainder kit header is echoed back at 0.
+  quantity: z.int().min(0).optional(),
   ledger_account: COACode.nullable().optional(),
   zero_priced: z.boolean().nullable().optional(),
   quantity_per_parent: z.number().min(0).nullable().optional(),
