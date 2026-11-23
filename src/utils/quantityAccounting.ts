@@ -177,6 +177,7 @@ export { substitutionCredit };
 import { chargeEnvelope, chicagoDayAtTimeOf, toChicagoYmd } from "./dates.ts";
 import { combineTierCounts, meterUnits, priceFromFormula, type PricingFormulas, type TierCount } from "./price-formulas.ts";
 import { isPreTaxItem, type LineItem } from "./orders.ts";
+import { billingInCreditPool, creditIsLive } from "../schemas/mod.ts";
 import { BILLING_ROW_PART, type BillingRowMoneyLike, priceLine } from "./price-document.ts";
 
 /** The invoice shape these functions read — every linked invoice, live or void. */
@@ -524,7 +525,7 @@ export function unitsCreditedBefore(
 }
 
 /**
- * **What the non-void `notes` already took of `row`**: whole units
+ * **What the LIVE `notes` (`creditIsLive`, ruling 171) already took of `row`**: whole units
  * ({@link unitsCreditedBefore}'s `c`) and money, the net of every keyed credit
  * line on it, time credits included (they take money, not units, R3). The AR
  * twin of the payable `billLineCredited`, and the `credited` a first-come
@@ -541,7 +542,8 @@ export function rowCreditedBefore(
   const k = key(row.path);
   const out = { quantity: 0, amount_cents: 0 };
   for (const note of notes) {
-    if (note.status === "void") continue;
+    // One credit liveness rule (ruling 171): a draft note caps nothing.
+    if (!creditIsLive(note)) continue;
     for (const credit of keyCreditLines(billing, note.items).keyed) {
       if (key(credit.row.path) !== k) continue;
       if (credit.kind === "units") out.quantity += credit.line.quantity;
@@ -838,7 +840,8 @@ function payableRow(row: InvoiceItem): PurchaseDocumentItem {
 export const RECEIVABLE_BILLING_FOLD: BillingFoldSide<AccountedInvoice, AccountedCreditNote> = {
   scopeType: "order",
   billingIsLive: (doc) => doc.status !== "void",
-  creditIsLive: (doc) => doc.status === "issued" || doc.status === "applied",
+  // One liveness rule for a credit, both sides (ruling 171): the contract's column.
+  creditIsLive: (doc) => creditIsLive(doc),
   billingHeader: (doc) => ({
     uid: doc.uid,
     status: doc.status,
@@ -1659,13 +1662,18 @@ export function accountInitiator(
     const refused: string[] = [];
     if (quantity < 0) {
       let left = -quantity;
-      const rows = (at?.rows ?? []).filter((r) => r.via === "direct" && r.quantity > 0);
+      // The credit pool is ISSUED billing (ruling 162): a row a draft bills still
+      // counts as billed, so it is part of the over-billing, but no credit draws
+      // on it (ruling 170, both sides: excluded, no longer a refusal of the line).
+      const direct = (at?.rows ?? []).filter((r) => r.via === "direct" && r.quantity > 0);
+      const inPool = (r: { documentUid: string }) => billingInCreditPool(fold.documents.get(r.documentUid) ?? { status: "void" });
+      const rows = direct.filter(inPool);
       if (rows.length === 0) {
-        if ((at?.rows ?? []).some((r) => r.via === "substitute")) {
-          refused.push("billed only through a substitute — one substitute row can stand in for several order lines, so its cap is not this line's");
+        if (direct.length > 0) {
+          refused.push("billed only by a DRAFT billing document, which is not in the credit pool — edit the draft rather than crediting it");
+        } else if ((at?.rows ?? []).some((r) => r.via === "substitute")) {
+          refused.push("billed only through a substitute — one substitute row can stand in for several initiator lines, so its cap is not this line's");
         }
-      } else if (rows.some((r) => fold.documents.get(r.documentUid)?.status === "draft")) {
-        refused.push("billed by a DRAFT invoice — edit the draft rather than crediting it");
       } else {
         for (const row of [...rows].sort((a, b) => b.quantity - a.quantity)) {
           if (left <= 0) break;
@@ -1683,12 +1691,13 @@ export function accountInitiator(
             preview_cents: BILLING_ROW_PART[side](row.item as unknown as BillingRowMoneyLike, 0, take).net_cents,
           });
         }
-        if (left > 0) refused.push(`${left} unit(s) over-billed beyond any attributable invoice row`);
+        if (left > 0) refused.push(`${left} unit(s) over-billed beyond any attributable billing row in the credit pool`);
       }
     }
     for (const group of shortened) {
-      if (fold.documents.get(group.last_billed.documentUid)?.status === "draft") {
-        refused.push("window shortened on a DRAFT invoice — edit the draft rather than crediting it");
+      if (!billingInCreditPool(fold.documents.get(group.last_billed.documentUid) ?? { status: "void" })) {
+        // Excluded from the credit pool (rulings 162, 170): nothing issued to credit.
+        refused.push("window shortened on a DRAFT billing document, which is not in the credit pool — edit the draft rather than crediting it");
         continue;
       }
       if (group.via === "substitute") {

@@ -555,6 +555,19 @@ Deno.test("creditableBillLines: the per-line cap binds while the pool still has 
   assertPurchaseBillAction(b, { action: "add_credit", context: c, lines: [{ path_billing_item: [PU, "x"], quantity: 5 }] });
 });
 
+Deno.test("creditableBillLines: a DRAFT bill is not in the credit pool, though it bills (ruling 162)", () => {
+  const a = bill6d("A", [row(["x"], 5)]);
+  const draft = bill6d("B", [row(["x"], 5)], { status: "draft" });
+  // A pool credit of 4: the pool is A's 5 alone, so 1 is left; counted with the draft it would be 6, capped at A's 5.
+  const c = ctx6d([a, draft], [credit6d([row(["x"], 4)])]);
+  assertEquals(unitsAt(a, c), { x: 1 });
+  assertEquals(creditableBillLines(draft, c), [], "a draft offers nothing of its own");
+});
+
+Deno.test("add_credit: a purchase billed only by DRAFTS offers no credit (ruling 162)", () => {
+  assertEquals(offer(offersOf(po([timeCharge()]), {}, { bills: [voidBill("bill1", [], { status: "draft" })] }), "add_credit"), undefined);
+});
+
 Deno.test("creditableBillLines: the pool caps a line too, when a purchase-form credit drew on it (6d)", () => {
   const a = bill6d("A", [row(["x"], 5)]);
   const b = bill6d("B", [row(["x"], 5)]);

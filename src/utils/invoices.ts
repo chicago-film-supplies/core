@@ -91,6 +91,7 @@ import { fitOutOfServiceEntries } from "./replacements.ts";
 import type { InitiatorAccount } from "./quantityAccounting.ts";
 import {
   billsOutOfService,
+  creditIsLive,
   type OutOfServiceEntryType,
   getSettlementMultiplier,
   INVOICE_FIELD_FREEZE,
@@ -321,7 +322,9 @@ export function purchaseBillIsLive(bill: { status: InvoiceStatusType }): boolean
  * `utils/purchase-documents.ts` (which re-exports it) imports that module.
  */
 export function purchaseCreditIsLive(credit: { status: PurchaseCreditStatusType }): boolean {
-  return credit.status !== "void";
+  // The one credit liveness rule (ruling 171), read off the contract: a draft is
+  // not live either, though a supplier credit cannot be one today.
+  return creditIsLive(credit);
 }
 
 /**

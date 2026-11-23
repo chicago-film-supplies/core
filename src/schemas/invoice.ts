@@ -229,6 +229,19 @@ export const INVOICE_STATUS_CONTRACTS: Readonly<
 };
 
 /**
+ * **Is this billing document in the CREDIT POOL?** — what a credit may draw on:
+ * {@link InvoiceStatusContract.live_in_xero}, so an issued, part-paid, paid or
+ * credited invoice or bill, never a `draft` or a `void` one, on BOTH sides (one
+ * vocabulary). One-document-model ruling 162: a draft still counts as BILLED in
+ * remaining-to-bill (the fold's own liveness, `status !== "void"`), but no credit
+ * draws on it; edit the draft instead. A status outside the vocabulary answers
+ * `false`.
+ */
+export function billingInCreditPool(billing: { status: string }): boolean {
+  return (INVOICE_STATUS_CONTRACTS as Record<string, InvoiceStatusContract | undefined>)[billing.status]?.live_in_xero ?? false;
+}
+
+/**
  * May an operator move `from` to `to` via `PUT /invoices/{uid}`?
  *
  * Read this rather than the column, so the manager cannot offer a button the

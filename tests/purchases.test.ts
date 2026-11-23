@@ -41,6 +41,9 @@ import {
   type PurchaseRentalItem,
   PurchaseRentalItemSchema,
   UpdatePurchaseInput,
+  billingInCreditPool,
+  INVOICE_STATUS_CONTRACTS,
+  creditIsLive,
 } from "../src/schemas/mod.ts";
 import { buildFirestoreColumns } from "../src/schemas/display-columns.ts";
 import { classifySharedFields } from "../src/utils/shared-fields.ts";
@@ -2081,4 +2084,18 @@ Deno.test("PurchaseCreditItemInput: the memo is price.stated_cents, and amount_c
   assertEquals(creditItemMemoCents({ price: { stated_cents: 700 } }), 700);
   assertEquals(creditItemMemoCents({ price: { stated_cents: null } }), undefined);
   assertEquals(creditItemMemoCents({}), undefined);
+});
+
+Deno.test("one liveness rule per role, read off the status contracts (rulings 162, 171)", () => {
+  // A billing document is in the credit pool exactly when it is live in Xero.
+  for (const status of ["draft", "issued", "part_paid", "paid", "credited", "void"] as const) {
+    assertEquals(billingInCreditPool({ status }), INVOICE_STATUS_CONTRACTS[status].live_in_xero, status);
+  }
+  assertEquals([billingInCreditPool({ status: "draft" }), billingInCreditPool({ status: "void" })], [false, false]);
+  // A credit is live when issued or applied; a draft and a void one are not.
+  assertEquals(
+    (["draft", "issued", "applied", "void"] as const).map((status) => creditIsLive({ status })),
+    [false, true, true, false],
+  );
+  assertEquals([billingInCreditPool({ status: "nonsense" }), creditIsLive({ status: "nonsense" })], [false, false]);
 });

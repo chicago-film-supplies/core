@@ -115,6 +115,16 @@ Deno.test("accountInitiator: what ACTS floors an over-credit; what is SHOWN does
   assertEquals(line.credit_sources, ["cn-1"]);
 });
 
+Deno.test("accountInitiator: a draft's units are BILLED but not in the credit pool — the issued row is credited (rulings 162, 170)", () => {
+  // Ordered 2: an issued invoice bills 1 and a draft 2. The draft still counts as
+  // billed, so the line is over-billed by 1. The larger row would be taken first,
+  // so the credit landing on the ISSUED row is the exclusion, not the ordering.
+  const both = accountAR(orderOf(2), [invoice("inv-1", 1, "issued", { amount_due_cents: 1000 }), { ...invoice("inv-2", 2, "draft"), number: 101 }]).lines[0];
+  assertEquals(both.overbilled.units, 1);
+  assertEquals(both.credit.lines.map((l) => [l.uid_billing, l.quantity]), [["inv-1", 1]]);
+  assertEquals(both.credit.refused, []);
+});
+
 Deno.test("accountInitiator: over-billing offers a credit on the row that billed it, and refuses a DRAFT biller", () => {
   const issued = accountAR(orderOf(2), [invoice("inv-1", 3, "issued", { amount_due_cents: 3000 })]).lines[0];
   assertEquals(issued.overbilled.units, 1);

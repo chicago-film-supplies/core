@@ -175,6 +175,7 @@ import type {
 } from "../schemas/mod.ts";
 import {
   billsOutOfService,
+  creditIsLive,
   deriveQueryByPurchases,
   exchangedForKey,
   exchangedForOf,
@@ -1626,7 +1627,7 @@ function creditKeys(notes: readonly DocumentDiffCreditNote[], invoices: readonly
   const rows: CreditKeys["rows"] = new Map();
   const unkeyed: DocumentUnkeyedCredit[] = [];
   for (const note of notes) {
-    if (note.status !== "issued" && note.status !== "applied") continue;
+    if (!creditIsLive(note)) continue;
     const sourced = (note.sources ?? []).filter((s) => s.collection === "invoices");
     const noteInvoice = sourced.length === 1 ? sourced[0].uid : null;
     for (const line of note.items) {

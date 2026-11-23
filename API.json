@@ -1779,7 +1779,7 @@
         {
           "kind": "interface",
           "name": "CreditNoteStatusContract",
-          "declaration": "interface CreditNoteStatusContract {\n  voidable: boolean;\n  accepts_allocation: boolean;\n}",
+          "declaration": "interface CreditNoteStatusContract {\n  voidable: boolean;\n  accepts_allocation: boolean;\n  live_in_xero: boolean;\n}",
           "doc": "What one credit-note status admits (api-cloudrun#1169). Until this table the\nnote's transitions were implicit in its writers, and the manager offered Void\non any non-void note while the API 409'd it whenever an allocation was live.\n\nRead by `creditActionsFor` (`@cfs/core/utils/document-actions`). Each\ncolumn is a STATUS gate only: the action also needs its own runtime condition\n(no live allocation to void, remaining credit to allocate), which the ruleset\nchecks and this table cannot state."
         },
         {
@@ -7887,6 +7887,14 @@
         },
         {
           "kind": "function",
+          "name": "billingInCreditPool",
+          "signature": "billingInCreditPool(billing: typeLiteral): boolean",
+          "doc": "**Is this billing document in the CREDIT POOL?** — what a credit may draw on:\n{@link InvoiceStatusContract.live_in_xero}, so an issued, part-paid, paid or\ncredited invoice or bill, never a `draft` or a `void` one, on BOTH sides (one\nvocabulary). One-document-model ruling 162: a draft still counts as BILLED in\nremaining-to-bill (the fold's own liveness, `status !== \"void\"`), but no credit\ndraws on it; edit the draft instead. A status outside the vocabulary answers\n`false`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "billsOutOfService",
           "signature": "billsOutOfService(line: OutOfServiceLinkCarrier): boolean",
           "doc": "Whether a line bills an out-of-service record at all.",
@@ -8026,6 +8034,14 @@
           "name": "coveringColumn",
           "signature": "coveringColumn(alias: string, fieldName: string): DisplayTableColumn | null",
           "doc": "The declared column that **covers** an indexed field: the field itself if it\nis a column, otherwise the longest column key it sits beneath.\n\nA column names an entity, and the index's sub-fields of that entity belong to\nit. `organizations.contacts` is one column rendering a joined name, and the\nindex carries `contacts.first_name` / `contacts.last_name` / `contacts.roles`\nseparately — those are how you *search* for the org whose contact is Andrea,\nand they take their heading from the column above them. Same for\n`created_by.name`, which is a facet under the `created_by` column.\n\nThis is what keeps the search and filter surfaces from shrinking to the column\nsurface. Gating them on exact column membership alone lost contact-name search\non organizations, orders and fulfillments, and the created-by facet everywhere.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "creditIsLive",
+          "signature": "creditIsLive(credit: typeLiteral): boolean",
+          "doc": "**Is this credit live?** — {@link CreditNoteStatusContract.live_in_xero}, for an\nAR credit note or a supplier credit (one vocabulary). A status outside the\nvocabulary answers `false` rather than throwing. One-document-model ruling 171:\nthe fold read `issued || applied` while the credit caps read `!== \"void\"`; both\nread this now.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -11884,6 +11900,14 @@
         },
         {
           "kind": "function",
+          "name": "billingInCreditPool",
+          "signature": "billingInCreditPool(billing: typeLiteral): boolean",
+          "doc": "**Is this billing document in the CREDIT POOL?** — what a credit may draw on:\n{@link InvoiceStatusContract.live_in_xero}, so an issued, part-paid, paid or\ncredited invoice or bill, never a `draft` or a `void` one, on BOTH sides (one\nvocabulary). One-document-model ruling 162: a draft still counts as BILLED in\nremaining-to-bill (the fold's own liveness, `status !== \"void\"`), but no credit\ndraws on it; edit the draft instead. A status outside the vocabulary answers\n`false`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "canOperatorTransition",
           "signature": "canOperatorTransition(from: string, to: string): boolean",
           "doc": "May an operator move `from` to `to` via `PUT /invoices/{uid}`?\n\nRead this rather than the column, so the manager cannot offer a button the\nserver will 400 — and so a status outside the vocabulary answers `false`\ninstead of throwing on an undefined lookup.",
@@ -15009,7 +15033,7 @@
         {
           "kind": "interface",
           "name": "CreditNoteStatusContract",
-          "declaration": "interface CreditNoteStatusContract {\n  voidable: boolean;\n  accepts_allocation: boolean;\n}",
+          "declaration": "interface CreditNoteStatusContract {\n  voidable: boolean;\n  accepts_allocation: boolean;\n  live_in_xero: boolean;\n}",
           "doc": "What one credit-note status admits (api-cloudrun#1169). Until this table the\nnote's transitions were implicit in its writers, and the manager offered Void\non any non-void note while the API 409'd it whenever an allocation was live.\n\nRead by `creditActionsFor` (`@cfs/core/utils/document-actions`). Each\ncolumn is a STATUS gate only: the action also needs its own runtime condition\n(no live allocation to void, remaining credit to allocate), which the ruleset\nchecks and this table cannot state."
         },
         {
@@ -15029,6 +15053,14 @@
           "name": "CreditSourceRow",
           "declaration": "interface CreditSourceRow {\n  type?: string;\n  uid_billing?: string;\n  path_billing_item?: string[];\n}",
           "doc": "The row keys {@link deriveCreditNoteSources} reads: a divider's `type`, a line's pointer."
+        },
+        {
+          "kind": "function",
+          "name": "creditIsLive",
+          "signature": "creditIsLive(credit: typeLiteral): boolean",
+          "doc": "**Is this credit live?** — {@link CreditNoteStatusContract.live_in_xero}, for an\nAR credit note or a supplier credit (one vocabulary). A status outside the\nvocabulary answers `false` rather than throwing. One-document-model ruling 171:\nthe fold read `issued || applied` while the credit caps read `!== \"void\"`; both\nread this now.",
+          "paramTags": [],
+          "returnsTag": null
         },
         {
           "kind": "function",
@@ -20307,7 +20339,7 @@
           "kind": "function",
           "name": "rowCreditedBefore",
           "signature": "rowCreditedBefore(billing: typeLiteral, row: Pick<KeyedBillingRow, \"path\">, notes: readonly typeLiteral[]): typeLiteral",
-          "doc": "**What the non-void `notes` already took of `row`**: whole units\n({@link unitsCreditedBefore}'s `c`) and money, the net of every keyed credit\nline on it, time credits included (they take money, not units, R3). The AR\ntwin of the payable `billLineCredited`, and the `credited` a first-come\ncredit is priced from (`priceCreditNote`, `billingRowCreditMoney`).",
+          "doc": "**What the LIVE `notes` (`creditIsLive`, ruling 171) already took of `row`**: whole units\n({@link unitsCreditedBefore}'s `c`) and money, the net of every keyed credit\nline on it, time credits included (they take money, not units, R3). The AR\ntwin of the payable `billLineCredited`, and the `credited` a first-come\ncredit is priced from (`priceCreditNote`, `billingRowCreditMoney`).",
           "paramTags": [],
           "returnsTag": null
         },

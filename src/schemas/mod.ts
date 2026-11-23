@@ -1130,6 +1130,7 @@ export {
 
 export {
   ACCEPTS_PAYMENT_STATUSES,
+  billingInCreditPool,
   canOperatorTransition,
   checkInvoiceExchangedFor,
   CreateInvoiceInput,
@@ -1392,6 +1393,7 @@ export {
   CreditNoteStatusEnum,
   type CreditNoteStatusType,
   CREDIT_NOTE_STATUS_CONTRACTS,
+  creditIsLive,
   type CreditNoteStatusContract,
   type CreditNoteDocTotals,
   CreditNoteDocTotalsSchema,

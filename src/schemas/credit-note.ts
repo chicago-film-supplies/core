@@ -160,6 +160,16 @@ export interface CreditNoteStatusContract {
    * allocation does (api-cloudrun#1207).
    */
   accepts_allocation: boolean;
+  /**
+   * Is it a LIVE credit — one that nets billing and takes from a billing row's
+   * credit cap? `issued` and `applied`; never `draft` (it has not reached Xero)
+   * or `void`. The one liveness rule for a credit on BOTH sides (a supplier
+   * credit shares this vocabulary, ruling 34 Q1), read through
+   * {@link creditIsLive} by the billing fold, the credit cap and the payable
+   * per-line cap alike (one-document-model ruling 171). Named as the invoice
+   * contract's column is, and answering the same question of a credit.
+   */
+  live_in_xero: boolean;
 }
 
 /**
@@ -170,11 +180,22 @@ export interface CreditNoteStatusContract {
 export const CREDIT_NOTE_STATUS_CONTRACTS: Readonly<
   Record<CreditNoteStatusType, CreditNoteStatusContract>
 > = {
-  draft: { voidable: true, accepts_allocation: false },
-  issued: { voidable: true, accepts_allocation: true },
-  applied: { voidable: true, accepts_allocation: false },
-  void: { voidable: false, accepts_allocation: false },
+  draft: { voidable: true, accepts_allocation: false, live_in_xero: false },
+  issued: { voidable: true, accepts_allocation: true, live_in_xero: true },
+  applied: { voidable: true, accepts_allocation: false, live_in_xero: true },
+  void: { voidable: false, accepts_allocation: false, live_in_xero: false },
 };
+
+/**
+ * **Is this credit live?** — {@link CreditNoteStatusContract.live_in_xero}, for an
+ * AR credit note or a supplier credit (one vocabulary). A status outside the
+ * vocabulary answers `false` rather than throwing. One-document-model ruling 171:
+ * the fold read `issued || applied` while the credit caps read `!== "void"`; both
+ * read this now.
+ */
+export function creditIsLive(credit: { status: string }): boolean {
+  return (CREDIT_NOTE_STATUS_CONTRACTS as Record<string, CreditNoteStatusContract | undefined>)[credit.status]?.live_in_xero ?? false;
+}
 
 /**
  * Why this credit was issued — the receivable `credit` arm of

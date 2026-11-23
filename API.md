@@ -3979,6 +3979,7 @@ checks and this table cannot state.
 interface CreditNoteStatusContract {
   voidable: boolean;
   accepts_allocation: boolean;
+  live_in_xero: boolean;
 }
 ```
 
@@ -17597,6 +17598,16 @@ resolves locally: it is named on the exchange pair itself (`exchange.uid_pair`).
 
 A pair's scope is its `uid_source`, one key on both sides (ruling 109).
 
+### `billingInCreditPool(billing: typeLiteral): boolean`
+
+**Is this billing document in the CREDIT POOL?** — what a credit may draw on:
+{@link InvoiceStatusContract.live_in_xero}, so an issued, part-paid, paid or
+credited invoice or bill, never a `draft` or a `void` one, on BOTH sides (one
+vocabulary). One-document-model ruling 162: a draft still counts as BILLED in
+remaining-to-bill (the fold's own liveness, `status !== "void"`), but no credit
+draws on it; edit the draft instead. A status outside the vocabulary answers
+`false`.
+
 ### `billsOutOfService(line: OutOfServiceLinkCarrier): boolean`
 
 Whether a line bills an out-of-service record at all.
@@ -17902,6 +17913,14 @@ and they take their heading from the column above them. Same for
 This is what keeps the search and filter surfaces from shrinking to the column
 surface. Gating them on exact column membership alone lost contact-name search
 on organizations, orders and fulfillments, and the created-by facet everywhere.
+
+### `creditIsLive(credit: typeLiteral): boolean`
+
+**Is this credit live?** — {@link CreditNoteStatusContract.live_in_xero}, for an
+AR credit note or a supplier credit (one vocabulary). A status outside the
+vocabulary answers `false` rather than throwing. One-document-model ruling 171:
+the fold read `issued || applied` while the credit caps read `!== "void"`; both
+read this now.
 
 ### `creditItemMemoCents(item: Pick<PurchaseCreditItemInputType, "price">): number | undefined`
 
@@ -25261,6 +25280,16 @@ interface UpdateInvoiceInputType {
 }
 ```
 
+### `billingInCreditPool(billing: typeLiteral): boolean`
+
+**Is this billing document in the CREDIT POOL?** — what a credit may draw on:
+{@link InvoiceStatusContract.live_in_xero}, so an issued, part-paid, paid or
+credited invoice or bill, never a `draft` or a `void` one, on BOTH sides (one
+vocabulary). One-document-model ruling 162: a draft still counts as BILLED in
+remaining-to-bill (the fold's own liveness, `status !== "void"`), but no credit
+draws on it; edit the draft instead. A status outside the vocabulary answers
+`false`.
+
 ### `canOperatorTransition(from: string, to: string): boolean`
 
 May an operator move `from` to `to` via `PUT /invoices/{uid}`?
@@ -31907,6 +31936,7 @@ checks and this table cannot state.
 interface CreditNoteStatusContract {
   voidable: boolean;
   accepts_allocation: boolean;
+  live_in_xero: boolean;
 }
 ```
 
@@ -31937,6 +31967,14 @@ interface CreditSourceRow {
   path_billing_item?: string[];
 }
 ```
+
+### `creditIsLive(credit: typeLiteral): boolean`
+
+**Is this credit live?** — {@link CreditNoteStatusContract.live_in_xero}, for an
+AR credit note or a supplier credit (one vocabulary). A status outside the
+vocabulary answers `false` rather than throwing. One-document-model ruling 171:
+the fold read `issued || applied` while the credit caps read `!== "void"`; both
+read this now.
 
 ### `creditLineBillingPointer(line: typeLiteral): typeLiteral | null`
 
@@ -43097,7 +43135,7 @@ TIME is its owed extension groups (`LineAccount.remaining.owed`), not this.
 
 ### `rowCreditedBefore(billing: typeLiteral, row: Pick<KeyedBillingRow, "path">, notes: readonly typeLiteral[]): typeLiteral`
 
-**What the non-void `notes` already took of `row`**: whole units
+**What the LIVE `notes` (`creditIsLive`, ruling 171) already took of `row`**: whole units
 ({@link unitsCreditedBefore}'s `c`) and money, the net of every keyed credit
 line on it, time credits included (they take money, not units, R3). The AR
 twin of the payable `billLineCredited`, and the `credited` a first-come

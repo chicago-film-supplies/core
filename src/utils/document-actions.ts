@@ -51,6 +51,8 @@
  * @module
  */
 import {
+  billingInCreditPool,
+  creditIsLive,
   canOperatorTransition,
   CREDIT_NOTE_STATUS_CONTRACTS,
   type CreditNote,
@@ -641,7 +643,8 @@ export function creditableLines<S extends Side>(
   const allRows = billing.items.filter((r) => isLineItemType(r.type)) as unknown as { uid: string; path: string[]; quantity: number }[];
   const keyed = { uid: billing.uid, rows: allRows };
   const notes = ctx.credits as unknown as readonly { status: string; items: readonly (KeyableCreditLine | CreditDividerRow)[] }[];
-  const live = notes.filter((n) => n.status !== "void");
+  // One credit liveness rule on both sides (ruling 171): the contract's column.
+  const live = notes.filter((n) => creditIsLive(n));
   const credited = new Map<string, TimeAmount>();
   for (const note of live) {
     for (const { line, row, time } of keyCreditLines(keyed, note.items).keyed) {
@@ -651,7 +654,11 @@ export function creditableLines<S extends Side>(
   }
   const folds = new Map<string, { keys: Set<string>; pool: (path: readonly string[]) => number }>();
   for (const p of ctx.initiators) {
-    const fold = billedByPath(side, p.initiator as unknown as AccountedInitiator, p.billing, p.credits);
+    // The pool is ISSUED billing only (ruling 162): a draft counts as billed in
+    // remaining-to-bill, never as something a credit draws on. A second fold, as
+    // `voidRefusal` folds a filtered `billing`: one fold cannot give both answers.
+    const pool = p.billing.filter((b) => billingInCreditPool(b));
+    const fold = billedByPath(side, p.initiator as unknown as AccountedInitiator, pool, p.credits);
     folds.set(p.initiator.uid, {
       keys: new Set(p.initiator.items.map((i) => pathKey(i.path))),
       pool: (path) => Math.max(0, fold.byPath.get(pathKey(path))?.quantity ?? 0),
@@ -1224,7 +1231,9 @@ export function initiatorActionsFor<S extends Side>(
       offer("close_remaining", { outcome: cancels ? "cancel" : "close" });
     }
   }
-  if (ctx.billing.length > 0) offer("add_credit");
+  // A credit draws on issued billing only (ruling 162), so a purchase or order
+  // billed only by drafts offers none: the server would refuse it.
+  if (ctx.billing.some((b) => billingInCreditPool(b))) offer("add_credit");
 
   const line = (action: DocumentActionId, path: readonly string[]) => {
     if (sideOffers(side, "initiator", action)) offers.push({ key: lineActionKey(action, path), action, path: [...path] });
