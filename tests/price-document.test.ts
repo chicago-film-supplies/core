@@ -409,6 +409,8 @@ Deno.test("priceCreditNote: credited_counts credits TIME at the line's terms, wi
   assertEquals([r.prices[0].subtotal_cents, r.prices[0].total_cents], [24000, 27600]);
   // The stored line says how much time it CREDITED, not how much the invoice charged.
   assertEquals(r.prices[0].counts, [tier("week", 4, 5)]);
+  // A time credit credits time, not a part of the row's units (ruling 174).
+  assertEquals(r.units_from, [null]);
 });
 
 Deno.test("priceCreditNote: a time credit refuses a line whose formula never read its time", () => {
@@ -481,7 +483,10 @@ Deno.test("priceCreditNote: whole-unit credits are first-come PARTS of the row â
       // Credit 1 unit at a time, first-come.
       let c = 0, net = 0, gross = 0, perLine = 0;
       while (c < q) {
-        const part = priceCreditNote([{ credited: { quantity: c, amount_cents: net }, line: src, quantity: 1 }], [], []).prices[0];
+        const parted = priceCreditNote([{ credited: { quantity: c, amount_cents: net }, line: src, quantity: 1 }], [], []);
+        // Each part states where it starts on the row, as the payable credit stores it (ruling 174).
+        assertEquals(parted.units_from, [c]);
+        const part = parted.prices[0];
         net += part.subtotal_discounted_cents;
         gross += part.subtotal_cents;
         perLine += priceCreditNote([{ credited: NONE_CREDITED, line: { ...src, quantity: 1 }, quantity: 1 }], [], []).prices[0].subtotal_discounted_cents;

@@ -52783,6 +52783,7 @@ What {@link priceCreditNote} returns.
 ```ts
 interface PricedCreditNote {
   prices: CreditLinePrice[];
+  units_from: parenthesized[];
   totals: Omit<DocumentTotalsCore, "transaction_fees">;
 }
 ```

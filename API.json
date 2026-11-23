@@ -25286,7 +25286,7 @@
         {
           "kind": "interface",
           "name": "PricedCreditNote",
-          "declaration": "interface PricedCreditNote {\n  prices: CreditLinePrice[];\n  totals: Omit<DocumentTotalsCore, \"transaction_fees\">;\n}",
+          "declaration": "interface PricedCreditNote {\n  prices: CreditLinePrice[];\n  units_from: parenthesized[];\n  totals: Omit<DocumentTotalsCore, \"transaction_fees\">;\n}",
           "doc": "What {@link priceCreditNote} returns."
         },
         {

@@ -1287,6 +1287,13 @@ export interface CreditLinePrice extends LinePriceMoney {
 export interface PricedCreditNote {
   /** One price per selection entry, in selection order. */
   prices: CreditLinePrice[];
+  /**
+   * Per selection entry, the first unit of its billing row the credit covers
+   * (`billingRowCreditMoney`'s `units_from`, one-document-model ruling 174), the
+   * value the payable credit writer stores on its line; `null` on a time credit,
+   * which credits time rather than units.
+   */
+  units_from: (number | null)[];
   /** A credit note's totals: a sum of `prices`. A credit note has no fee rows. */
   totals: Omit<DocumentTotalsCore, "transaction_fees">;
 }
@@ -1327,6 +1334,7 @@ export function priceCreditNote(
   extensions: readonly PriceDocumentExtension[],
 ): PricedCreditNote {
   const prices: CreditLinePrice[] = [];
+  const unitsFrom: (number | null)[] = [];
   const priced: LineItem[] = [];
   for (const { line, quantity, credited, credited_counts } of selection) {
     if (!Number.isInteger(quantity) || quantity <= 0) {
@@ -1402,6 +1410,7 @@ export function priceCreditNote(
         unitItem,
       ) as CreditLinePrice;
       prices.push(price);
+      unitsFrom.push(part.units_from);
       priced.push({ ...unitItem, price } as unknown as LineItem);
       continue;
     }
@@ -1412,10 +1421,11 @@ export function priceCreditNote(
       item,
     ) as CreditLinePrice;
     prices.push(price);
+    unitsFrom.push(null);
     priced.push({ ...item, price } as unknown as LineItem);
   }
   const { transaction_fees: _fees, ...totals } = sumPricedLines(priced);
-  return { prices, totals };
+  return { prices, units_from: unitsFrom, totals };
 }
 
 /**
