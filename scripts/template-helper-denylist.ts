@@ -646,6 +646,16 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // (api-cloudrun#680). Every export needs the order and all of its linked
   // invoices at once; a template renders one document and holds neither half.
   // Listed in UTIL_MODULES only so the drift guard sees its exports.
+  // `utils/billing-remainder.ts` builds what is LEFT to bill on every source of a
+  // billing document from each source's account over all its sibling documents
+  // (one-document-model 6e-0d2); a template renders one document and holds none
+  // of that. Listed in UTIL_MODULES only so the drift guard sees its exports.
+  "billing-remainder": [
+    "billableInitiator",
+    "buildRemainder",
+    "buildRemainingInvoice",
+    "clipOpenHires",
+  ],
   quantityAccounting: [
     // The one per-line account (6e-0b2 F9): the fold over every billing and
     // credit document of an initiator, which no render context holds.
@@ -659,7 +669,6 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "purchaseOutOfServiceInputs",
     // The remainder and the over-billing offer assembled from that account.
     "buildOverbillingCredits",
-    "buildRemainingInvoice",
     // The remainder's decision (ruling 101), read by both sides' row authors.
     "remainingBilling",
     // Ruling 42's acted floor, remainder and "is it named": each reads the fold
@@ -798,12 +807,10 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // purchase → bill sync. A template renders a bill whose lines already carry
   // their counts and money.
   "purchase-documents": [
-    // The bill writer's time split and extension sections, and a supplier credit's
-    // time default (6e-0b2 F5): they read
-    // a line's ACCOUNT over every bill of the purchase, which no render context holds.
-    "billExtensionSections",
+    // A supplier credit's time default (6e-0b2 F5): it reads a line's ACCOUNT over
+    // every bill of the purchase, which no render context holds. (The bill writer's
+    // time split and extension sections became the one remainder builder, 6e-0d2.)
     "creditTimeCounts",
-    "splitBillTime",
     "projectPurchaseLineForBill",
     "projectPurchaseLineToBillLine",
     "projectPurchaseRowForBill",

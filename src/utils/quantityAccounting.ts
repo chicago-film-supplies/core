@@ -125,12 +125,10 @@
  */
 import type {
   CreditNoteStatusType,
-  DocDestinationType,
   Fulfillment,
   FulfillmentItemType,
   Invoice,
   InvoiceDocDestinationType,
-  InvoiceDocItemType,
   InvoiceStatusType,
   Order,
   OutOfService,
@@ -154,10 +152,8 @@ import {
   isInInvoiceAuthoredSubtree,
   isInExtensionSection,
   liveInvoiceAnchors,
-  projectOrderItemToInvoiceItem,
   purchaseBillIsLive,
   purchaseCreditIsLive,
-  toInvoiceDestinationPair,
   toOrderRelativePath,
 } from "./invoices.ts";
 import {
@@ -173,7 +169,7 @@ import { parseBookingId } from "./booking-id.ts";
 import { inboundBookingIdFor, isReceivedDamagedRecord, PAYABLE_OOS_REASONS } from "./bookings-inbound.ts";
 
 export { substitutionCredit };
-import { chargeEnvelope, chicagoDayAtTimeOf, toChicagoYmd } from "./dates.ts";
+import { chargeEnvelope, toChicagoYmd } from "./dates.ts";
 import { combineTierCounts, meterUnits, priceFromFormula, type PricingFormulas, type TierCount } from "./price-formulas.ts";
 import { isPreTaxItem, type LineItem } from "./orders.ts";
 import { billingInCreditPool, creditIsLive } from "../schemas/mod.ts";
@@ -2098,213 +2094,8 @@ export interface OverbillingCredits {
 
 // ── The remainder invoice (api-cloudrun#680 R1) ─────────────────
 
-/** The order fields {@link buildRemainingInvoice} reads. */
-export interface RemainingOrderSource {
-  uid: string;
-  number: number;
-  items: readonly LineItem[];
-  destinations: readonly DocDestinationType[];
-}
 
-/** An invoice as {@link buildRemainingInvoice} reads it: its lines, and the pairs that date its sections. */
-export type RemainingInvoiceSource = AccountedInvoice;
 
-/** @see {@link buildRemainingInvoice} */
-export interface RemainingInvoice {
-  /** The order divider, then the order's scope. Empty when `unaligned` or `crms_authored` is non-empty, or nothing remains. */
-  items: InvoiceDocItemType[];
-  /** Every order pair, then one pair per extension section. */
-  destinations: InvoiceDocDestinationType[];
-  /** The order lines and extension groups billed BEYOND the order: a credit note's to settle, never this invoice's. */
-  overbilled: { path: string[]; quantity: number; extension_counts: readonly TierCount[] }[];
-  compared: string[];
-  unaligned: string[];
-  /** Live CRMS-authored invoices; non-empty ⇒ nothing is built. See the module header. */
-  crms_authored: string[];
-}
-
-/**
- * The remainder's items and pairs, from what each line bills: `units` by order
- * path key, and the extension groups owed under each order destination. The one
- * assembly behind {@link buildRemainingInvoice}.
- */
-function assembleRemainder(
-  order: RemainingOrderSource,
-  units: ReadonlyMap<string, number>,
-  owed: ReadonlyMap<string, Array<{ line: LineItem; group: ExtensionGroup }>>,
-  mintUid: () => string,
-): { items: InvoiceDocItemType[]; destinations: InvoiceDocDestinationType[] } {
-  const O = order.uid;
-  const isAncestorOf = (candidate: readonly string[], keys: Iterable<string>): boolean => {
-    const prefix = key(candidate) + "/";
-    for (const k of keys) if (k.startsWith(prefix)) return true;
-    return false;
-  };
-
-  const orderDivider = { uid: O, type: "order", name: `Order #${order.number}`, description: "", path: [O] } as InvoiceDocItemType;
-  const items: InvoiceDocItemType[] = [orderDivider];
-  for (const item of order.items) {
-    if (!isLineItemType(item.type)) {
-      items.push(projectOrderItemToInvoiceItem(item as LineItem, O));
-      continue;
-    }
-    const k = key(item.path ?? []);
-    const quantity = units.get(k) ?? (isAncestorOf(item.path ?? [], units.keys()) ? 0 : undefined);
-    if (quantity === undefined) continue;
-    items.push(projectOrderItemToInvoiceItem({ ...item, quantity } as LineItem, O));
-  }
-
-  const pairs = order.destinations.map((pair) => toInvoiceDestinationPair(O, pair));
-  const extensionPairs: InvoiceDocDestinationType[] = [];
-
-  for (const [destination, entries] of owed) {
-    const divider = order.items.find((it) => it.type === "destination" && it.uid === destination);
-    const orderPair = order.destinations.find((pair) => pair.uid === destination);
-    // A pair with no windows bills no days, so it holds no rental and nothing
-    // here can have extended it.
-    if (!divider || !orderPair || orderPair.dates.charge_windows === null) continue;
-
-    /** One section: its billed window, and the entries keyed by order path. */
-    // A section is one billed WINDOW SET; each line in it states its own
-    // counts, because its lines may be on different formulas (ruling 8).
-    const sections: Array<{ billedSet: readonly WindowBounds[]; billedEnd: string; byPath: Map<string, { line: LineItem; group: ExtensionGroup }> }> = [];
-    for (const entry of entries) {
-      const k = key(entry.line.path ?? []);
-      let section = sections.find((s) =>
-        sameWindowDates(s.billedSet, entry.group.billed_set) && s.billedEnd === entry.group.billed_end && !s.byPath.has(k)
-      );
-      if (!section) {
-        section = { billedSet: entry.group.billed_set, billedEnd: entry.group.billed_end, byPath: new Map() };
-        sections.push(section);
-      }
-      section.byPath.set(k, entry);
-    }
-
-    for (const section of sections) {
-      const E = mintUid();
-      items.push({
-        ...projectOrderItemToInvoiceItem(divider as LineItem, O),
-        uid: E,
-        path: [O, E],
-        path_extension_for: [destination],
-      } as InvoiceDocItemType);
-      for (const item of order.items) {
-        const path = item.path ?? [];
-        if (path[0] !== destination || item.type === "destination") continue;
-        const k = key(path);
-        const entry = section.byPath.get(k);
-        if (!entry && !isAncestorOf(path, section.byPath.keys())) continue;
-        const scoped = [O, E, ...path.slice(1)];
-        if (!isLineItemType(item.type)) {
-          items.push({ ...projectOrderItemToInvoiceItem(item as LineItem, O), path: scoped } as InvoiceDocItemType);
-          continue;
-        }
-        // A billed group prices on the row that billed it, at the counts the
-        // order's windows add. An ancestor bills nothing (quantity 0), and states
-        // zero counts only because every line in an extension section must state
-        // some.
-        const source = entry ? entry.group.item : item;
-        const counts = entry
-          ? [...entry.group.extension_counts]
-          : (source.price?.rates ?? []).slice(0, 1).map((r) => ({ rate_key: r.rate_key, num: 0, den: 1 }));
-        const projected = projectOrderItemToInvoiceItem({
-          ...source,
-          uid: item.uid,
-          path,
-          quantity: entry ? entry.group.quantity : 0,
-          price: { ...source.price, counts },
-        } as LineItem, O);
-        // An extension section bills more days of a leg; it is not an exchange, so a
-        // copied exchange line keeps no take-back list (its pair's `exchange` is
-        // nulled below, and `checkInvoiceExchangedFor` refuses the field off one).
-        const { exchanged_for: _notAnExchange, ...line } = projected as InvoiceDocItemType & { exchanged_for?: unknown };
-        items.push({ ...line, path: scoped } as InvoiceDocItemType);
-      }
-
-      const projectedPair = toInvoiceDestinationPair(O, orderPair);
-      const orderWindows = orderPair.dates.charge_windows!;
-      const start = chicagoDayAtTimeOf(section.billedEnd, 1, orderWindows[0].start);
-      const end = orderWindows[orderWindows.length - 1].end;
-      extensionPairs.push({
-        ...projectedPair,
-        uid: E,
-        // Spread from the projected pair, so an extension of an exchange leg would
-        // otherwise claim to BE an exchange (ruling 82): it bills days, it swaps nothing.
-        exchange: null,
-        dates: { ...projectedPair.dates, charge_windows: [{ start, end }] },
-      });
-    }
-  }
-
-  return { items, destinations: [...pairs, ...extensionPairs] };
-}
-
-/**
- * Build the invoice that bills what is left on an order: new lines whole,
- * quantity increases at their own path, and each extension of dates as a
- * date-extension section (owner decisions, 2026-09-13 and 2026-09-15).
- *
- * The one builder, shared by `POST /invoices` with no `items` (which rebuilds
- * it from EVERY sibling invoice; ruling 172) and the manager's preview.
- *
- * - **Every order divider is carried**, empty or not: alignment compares the
- *   whole divider skeleton, so a remainder without it would be unaligned and
- *   bill everything again on the next remainder.
- * - **An ancestor of a billed line is carried at quantity 0** when it has
- *   nothing of its own left (owner, 2026-09-15). `path` is resolved from the
- *   parent, so a component without its kit would bill a different path.
- * - **One extension section per billed window**: per order destination, the
- *   line's owed {@link LineAccount.extension} groups that share their billed days. Its divider
- *   is a new uid carrying `path_extension_for`; each line in it is the billed
- *   row's terms at the group's added days. A path already in the section (the
- *   same product billed on different terms) opens another section.
- * - **Its pair** is the order's pair re-keyed to the section, with ONE charge
- *   window from the day after the billed window's end (at the order's first
- *   window start's time of day) to the order's last window end. Its `days` is
- *   the section's ADDED days, never a count of the window (owner, 2026-09-17),
- *   so its lines derive exactly that. An extension is only owed on a window
- *   that ends before the order's, so the section never starts after it ends.
- * - **Over-billing is never netted in.** A negative quantity or extension is
- *   returned in `overbilled`, for the credit-note flow.
- * - **Credit notes net through the account** (core#121, owner 2026-10-01). A
- *   `reverses_billing` line means "billed beyond the order" — its only writer is
- *   the over-billing offer — so units it gave back are unbilled, and an order
- *   that grows to need them again bills them again. 🔴 Build the account from
- *   EVERY credit note: one built without them answers a different `billed` than
- *   the offer counted, the defect this closes.
- *
- * Every per-line decision is read from {@link LineAccount.remaining} and
- * {@link LineAccount.overbilled} (6e-0b2 F9), never re-derived here.
- *
- * 🔴 Fails closed on the account's shared refusal ({@link InitiatorAccount.refused}:
- * an unaligned scope or a live CRMS-authored invoice), building nothing.
- *
- * @param account - {@link accountBilling} over EVERY invoice and credit note on the order, never a page
- * @throws Error when an extension is owed on a unit a SUBSTITUTE billed: the
- *   extension line would price the substitute at the replaced line's path, and
- *   substitution merges (manager#414) have not settled what that row is.
- */
-export function buildRemainingInvoice(
-  order: RemainingOrderSource,
-  account: InitiatorAccount,
-  mintUid: () => string = () => crypto.randomUUID(),
-): RemainingInvoice {
-  const crmsAuthored = liveCrmsAuthored(account);
-  const empty = { items: [], destinations: [], overbilled: [], compared: account.compared, unaligned: account.unaligned, crms_authored: crmsAuthored };
-  const decision = remainingBilling(account);
-  if (decision.refused) return empty;
-  for (const entries of decision.owed.values()) {
-    const bySubstitute = entries.find((e) => e.group.via === "substitute");
-    if (bySubstitute !== undefined) {
-      throw new Error(
-        `Order line ${bySubstitute.line.name} was billed by a substitute; an extension on a substituted line cannot be built yet (manager#414)`,
-      );
-    }
-  }
-  if (decision.units.size === 0 && decision.owed.size === 0) return { ...empty, overbilled: decision.overbilled };
-  const { items, destinations } = assembleRemainder(order, decision.units, decision.owed, mintUid);
-  return { items, destinations, overbilled: decision.overbilled, compared: account.compared, unaligned: [], crms_authored: [] };
-}
 
 /** {@link remainingBilling}'s answer: what a remainder bills, line by line. */
 export interface RemainingBilling {

@@ -20080,24 +20080,6 @@
         },
         {
           "kind": "interface",
-          "name": "RemainingInvoice",
-          "declaration": "interface RemainingInvoice {\n  items: InvoiceDocItemType[];\n  destinations: InvoiceDocDestinationType[];\n  overbilled: typeLiteral[];\n  compared: string[];\n  unaligned: string[];\n  crms_authored: string[];\n}",
-          "doc": ""
-        },
-        {
-          "kind": "typeAlias",
-          "name": "RemainingInvoiceSource",
-          "declaration": "type RemainingInvoiceSource = AccountedInvoice;",
-          "doc": "An invoice as {@link buildRemainingInvoice} reads it: its lines, and the pairs that date its sections."
-        },
-        {
-          "kind": "interface",
-          "name": "RemainingOrderSource",
-          "declaration": "interface RemainingOrderSource {\n  uid: string;\n  number: number;\n  items: readonly LineItem[];\n  destinations: readonly DocDestinationType[];\n}",
-          "doc": "The order fields {@link buildRemainingInvoice} reads."
-        },
-        {
-          "kind": "interface",
           "name": "TimeAmount",
           "declaration": "interface TimeAmount {\n  num: number;\n  den: number;\n}",
           "doc": "An exact, non-negative-denominator rational — a quantity of a formula's periods."
@@ -20227,19 +20209,6 @@
           "signature": "buildOverbillingCredits(account: InitiatorAccount): OverbillingCredits",
           "doc": "**Build the credit notes that give back what an order's invoices over-billed\nit** (api-cloudrun#1028). The ONE author of the offer: the server rebuilds it\ninside the create transaction and the manager renders it as a preview, so the\ntwo cannot answer differently.\n\n## The ROW is the unit of work, not the path\n\n🔴 An over-billed path with no rows of its own is a kit component credited\nthrough its PARENT's substitute. It has nothing to raise a credit against, it\nemits no line, and it clears when the anchor is credited — so it is neither\noffered nor refused. Driving this off paths instead would mint a credit line\nwith no invoice row behind it.\n\n## Which invoice, and the ordering is a choice of MONEY\n\nA credit note belongs to one invoice, so over-billing spanning several is\nseveral notes. They are ordered by **outstanding balance first**, then by\nnumber — not by recency. A note against a fully paid invoice is issuable but\nnot ALLOCATABLE to it, so it would leave the money sitting as unconsumed credit\nrather than settling anything.\n\n⚠️ For a shortening the target row is {@link ExtensionGroup.last_billed}, never\n`group.section`. In the ordinary case `group.item` and `group.section` name one\ninvoice; once an extension row has moved units they do not, and `section[1]` is\na divider uid rather than a line.\n\n## Refusals\n\nFails closed on the account's shared refusal ({@link InitiatorAccount.refused}:\nan unaligned scope or a live CRMS-authored invoice) — **plus**, per path, the\nrefusals each {@link LineAccount.credit} carries:\n\n- a **draft** invoice among the billers: a draft has billed nothing to give\n  back, and crediting one is not a correction but a reason to edit it;\n- a path with **no attributable row** that is not the kit-component case above;\n- a path attributable only through a **substitute**: one Y row can stand in for\n  several X paths, and the cap is Y's full quantity, so a credit raised there\n  could exceed what any single X was billed.\n\nEvery per-line decision is the account's ({@link LineAccount.credit}); this\nonly groups the lines one note per billing document and orders the notes.\n\n⚠️ **Preview cents come from the ROW the note will be priced from**, not from\n{@link LineAccount.quantity_cents}, which prices at the ORDER line's terms, while `priceCreditNote` prices the stored INVOICE line — and where the\ntwo disagree, the second is what the operator will be asked to approve.",
           "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
-          "name": "buildRemainingInvoice",
-          "signature": "buildRemainingInvoice(order: RemainingOrderSource, account: InitiatorAccount, _: unknown): RemainingInvoice",
-          "doc": "Build the invoice that bills what is left on an order: new lines whole,\nquantity increases at their own path, and each extension of dates as a\ndate-extension section (owner decisions, 2026-09-13 and 2026-09-15).\n\nThe one builder, shared by `POST /invoices` with no `items` (which rebuilds\nit from EVERY sibling invoice; ruling 172) and the manager's preview.\n\n- **Every order divider is carried**, empty or not: alignment compares the\n  whole divider skeleton, so a remainder without it would be unaligned and\n  bill everything again on the next remainder.\n- **An ancestor of a billed line is carried at quantity 0** when it has\n  nothing of its own left (owner, 2026-09-15). `path` is resolved from the\n  parent, so a component without its kit would bill a different path.\n- **One extension section per billed window**: per order destination, the\n  line's owed {@link LineAccount.extension} groups that share their billed days. Its divider\n  is a new uid carrying `path_extension_for`; each line in it is the billed\n  row's terms at the group's added days. A path already in the section (the\n  same product billed on different terms) opens another section.\n- **Its pair** is the order's pair re-keyed to the section, with ONE charge\n  window from the day after the billed window's end (at the order's first\n  window start's time of day) to the order's last window end. Its `days` is\n  the section's ADDED days, never a count of the window (owner, 2026-09-17),\n  so its lines derive exactly that. An extension is only owed on a window\n  that ends before the order's, so the section never starts after it ends.\n- **Over-billing is never netted in.** A negative quantity or extension is\n  returned in `overbilled`, for the credit-note flow.\n- **Credit notes net through the account** (core#121, owner 2026-10-01). A\n  `reverses_billing` line means \"billed beyond the order\" — its only writer is\n  the over-billing offer — so units it gave back are unbilled, and an order\n  that grows to need them again bills them again. 🔴 Build the account from\n  EVERY credit note: one built without them answers a different `billed` than\n  the offer counted, the defect this closes.\n\nEvery per-line decision is read from {@link LineAccount.remaining} and\n{@link LineAccount.overbilled} (6e-0b2 F9), never re-derived here.\n\n🔴 Fails closed on the account's shared refusal ({@link InitiatorAccount.refused}:\nan unaligned scope or a live CRMS-authored invoice), building nothing.",
-          "paramTags": [
-            {
-              "name": "account",
-              "doc": "{@link accountBilling} over EVERY invoice and credit note on the order, never a page"
-            }
-          ],
           "returnsTag": null
         },
         {
@@ -20423,6 +20392,106 @@
               "doc": "The billing document `row` is on, and its line rows"
             }
           ],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/utils/billing-remainder",
+      "moduleDoc": "",
+      "symbols": [
+        {
+          "kind": "interface",
+          "name": "BillingRemainder",
+          "declaration": "interface BillingRemainder {\n  items: indexedAccess[];\n  destinations: indexedAccess[];\n  bills: boolean;\n  overbilled: typeLiteral[];\n  refused: typeLiteral[];\n  compared: string[];\n}",
+          "doc": "{@link buildRemainder}'s answer."
+        },
+        {
+          "kind": "variable",
+          "name": "REMAINDER_SIDES",
+          "declaration": "const REMAINDER_SIDES: mapped;",
+          "doc": "The two sides' remainder data."
+        },
+        {
+          "kind": "interface",
+          "name": "RemainderInitiators",
+          "declaration": "interface RemainderInitiators {\n  receivable: typeLiteral;\n  payable: Pick<Purchase, \"uid\" | \"number\" | \"items\" | \"destinations\">;\n}",
+          "doc": "An initiator as the builder reads it, per side."
+        },
+        {
+          "kind": "interface",
+          "name": "RemainderRows",
+          "declaration": "interface RemainderRows {\n  receivable: typeLiteral;\n  payable: typeLiteral;\n}",
+          "doc": "A billing document's row and pair, per side."
+        },
+        {
+          "kind": "interface",
+          "name": "RemainderSource",
+          "declaration": "interface RemainderSource {\n  initiator: indexedAccess;\n  account: InitiatorAccount;\n}",
+          "doc": "One source of a remainder: an initiator and its account over EVERY billing and credit document on it."
+        },
+        {
+          "kind": "interface",
+          "name": "RemainingInvoice",
+          "declaration": "interface RemainingInvoice {\n  items: InvoiceDocItemType[];\n  destinations: InvoiceDocDestinationType[];\n  overbilled: typeLiteral[];\n  compared: string[];\n  unaligned: string[];\n  crms_authored: string[];\n}",
+          "doc": ""
+        },
+        {
+          "kind": "typeAlias",
+          "name": "RemainingInvoiceSource",
+          "declaration": "type RemainingInvoiceSource = AccountedInvoice;",
+          "doc": "An invoice as {@link buildRemainingInvoice} reads it: its lines, and the pairs that date its sections."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "RemainingOrderSource",
+          "declaration": "type RemainingOrderSource = indexedAccess;",
+          "doc": "The order fields {@link buildRemainingInvoice} reads."
+        },
+        {
+          "kind": "function",
+          "name": "billableInitiator",
+          "signature": "billableInitiator(side: S, initiator: I, asOf: string): I",
+          "doc": "**The initiator a billing reader meters**, per side: the receivable order as\nit is (an order with a rental states windows on every pair), the payable\npurchase with its open hires clipped at `asOf` ({@link clipOpenHires}). The\nbuilder's account, the credit writer's account and the catalog's offer all\nread this, so none answers over different windows.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "buildRemainder",
+          "signature": "buildRemainder(side: S, sources: readonly RemainderSource<S>[], _: unknown): BillingRemainder<S>",
+          "doc": "**Build the remainder of every source** — see the module header.",
+          "paramTags": [
+            {
+              "name": "sources",
+              "doc": "Each initiator, already {@link billableInitiator}'d, with its account over the same"
+            },
+            {
+              "name": "mintUid",
+              "doc": "Mints each extension section divider's uid"
+            }
+          ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "buildRemainingInvoice",
+          "signature": "buildRemainingInvoice(order: RemainingOrderSource, account: InitiatorAccount, _: unknown): RemainingInvoice",
+          "doc": "**One order's remainder**, the receivable single-source form of\n{@link buildRemainder} the manager's preview reads: empty `items` when the\naccount refuses (naming `unaligned` / `crms_authored`) or when nothing remains,\nso \"nothing left\" stays one test for that caller.",
+          "paramTags": [
+            {
+              "name": "account",
+              "doc": "{@link accountBilling} over EVERY invoice and credit note on the order, never a page"
+            }
+          ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "clipOpenHires",
+          "signature": "clipOpenHires(purchase: Pick<Purchase, \"items\" | \"destinations\">, asOf: string): indexedAccess",
+          "doc": "**A purchase's pairs as a billing document meters them at `asOf`**: a pair\nholding a TIME line with no charge window yet (an open hire) is windowed from\nits delivery start to `asOf`, so what it has run so far meters. Every other\npair is unchanged. Moved from the api's `billingPairs` (6e-0d2) so the offer,\nthe builder and the credit writer read ONE clip.",
+          "paramTags": [],
           "returnsTag": null
         }
       ]
@@ -20707,7 +20776,7 @@
           "kind": "function",
           "name": "initiatorActionsFor",
           "signature": "initiatorActionsFor(side: S, initiator: indexedAccess, ctx: InitiatorOfferContext<S>): DocumentActionOffer[]",
-          "doc": "**Every action an operator may take on this initiator and its lines.** Per-line\noffers follow the initiator-level ones, in line order.\n\n- `create_billing` — the initiator is not canceled; `bill_lines` names every\n  line with something to bill (ruling 114): a flat line's units the account\n  leaves (`remaining.units`), a TIME line its ordered units (what is left of its\n  time is the writer's split, `splitBillTime`).\n- `create_remaining_billing` — the account finds a line the remainder would bill\n  ({@link remainingBilling}). An over-billed line is not one: it is `credit_overbilling`'s.\n- `create_replacement_billing` / `create_service_charge_billing` — their unit counts.\n- `credit_overbilling` — `buildOverbillingCredits` offers at least one note.\n- `close_remaining` — an active initiator with a closable line and, where the\n  side's close waits for returns, no subrented unit out; `outcome` says\n  whether it cancels.\n- `add_credit` — (payable, until ruling 112) any billing document exists.\n- per line: `close_item`; `remove_item` and `change_basis` on an untouched\n  line ({@link initiatorLineTouched}), `change_basis` only on a line with a\n  formula. A kit header (payable) may be removed while nothing under it is touched.",
+          "doc": "**Every action an operator may take on this initiator and its lines.** Per-line\noffers follow the initiator-level ones, in line order.\n\n- `create_billing` — the initiator is not canceled; `bill_lines` names every\n  line with something to bill (ruling 114): a flat line's units the account\n  leaves (`remaining.units`), a TIME line its ordered units (what is left of its\n  time is the one remainder builder's, `buildRemainder`).\n- `create_remaining_billing` — the account finds a line the remainder would bill\n  ({@link remainingBilling}). An over-billed line is not one: it is `credit_overbilling`'s.\n- `create_replacement_billing` / `create_service_charge_billing` — their unit counts.\n- `credit_overbilling` — `buildOverbillingCredits` offers at least one note.\n- `close_remaining` — an active initiator with a closable line and, where the\n  side's close waits for returns, no subrented unit out; `outcome` says\n  whether it cancels.\n- `add_credit` — (payable, until ruling 112) any billing document exists.\n- per line: `close_item`; `remove_item` and `change_basis` on an untouched\n  line ({@link initiatorLineTouched}), `change_basis` only on a line with a\n  formula. A kit header (payable) may be removed while nothing under it is touched.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25753,12 +25822,6 @@
       "symbols": [
         {
           "kind": "interface",
-          "name": "BillExtensionTake",
-          "declaration": "interface BillExtensionTake {\n  item: PurchaseItem;\n  extensions: indexedAccess;\n}",
-          "doc": "One purchase line's owed time a bill takes: the line and {@link splitBillTime}'s extensions for it."
-        },
-        {
-          "kind": "interface",
           "name": "BillLineCreditPart",
           "declaration": "interface BillLineCreditPart {\n  line: PurchaseDocumentItem;\n  credited: BillLineCredited;\n  n: number;\n  amount_cents: number;\n  discount: DiscountType | null;\n  stated_cents: number;\n  units_from: number | null;\n  substituted_for: SubstitutedForEntryType[];\n}",
           "doc": "One bill row a supplier credit copies: {@link billLineCreditParts}' element."
@@ -25768,12 +25831,6 @@
           "name": "BillLineCredited",
           "declaration": "interface BillLineCredited {\n  quantity: number;\n  amount_cents: number;\n}",
           "doc": "What live supplier credits have already taken from one bill line."
-        },
-        {
-          "kind": "interface",
-          "name": "BillTimeSplit",
-          "declaration": "interface BillTimeSplit {\n  own: number;\n  extensions: typeLiteral[];\n}",
-          "doc": "{@link splitBillTime}'s answer: where a bill's units of one TIME purchase line go."
         },
         {
           "kind": "interface",
@@ -25834,27 +25891,6 @@
           "name": "SyncPurchaseToBillsArgs",
           "declaration": "interface SyncPurchaseToBillsArgs {\n  prev: Purchase;\n  next: Purchase;\n  bills: readonly PurchaseBill[];\n  tax: Omit<indexedAccess, \"asOf\">;\n  time: typeLiteral;\n  linked_cleared?: ReadonlySet<string>;\n}",
           "doc": "{@link syncPurchaseToBills}' inputs."
-        },
-        {
-          "kind": "function",
-          "name": "billExtensionSections",
-          "signature": "billExtensionSections(purchase: Pick<Purchase, \"uid\" | \"items\" | \"destinations\">, takes: readonly BillExtensionTake[], _: unknown): typeLiteral",
-          "doc": "**A bill's date-extension sections** (ruling 89; F5): the extra time a bill\ntakes on lines earlier bills already billed, as the receivable remainder\nbuilds it. One section per destination and billed window: a destination\ndivider at `[purchase, E]` carrying `path_extension_for: [destination]`, the\ngroup dividers above each line, and each line at `[purchase, E, ...its path\nbelow the destination]` with `quantity` the units taken and `counts` the\ngroup's `extension_counts` (priced with no minimum: `priceDocument` reads the\nsection off the divider). Its pair is the destination's, windowed from the day\nafter the group's `billed_end` to the end of the destination's CLIPPED\nwindows.",
-          "paramTags": [
-            {
-              "name": "purchase",
-              "doc": "The purchase with its open hires clipped at the bill date (the bill's pairs)"
-            },
-            {
-              "name": "takes",
-              "doc": "Per line, the owed groups {@link splitBillTime} took"
-            },
-            {
-              "name": "mintUid",
-              "doc": "Mints each section divider's uid"
-            }
-          ],
-          "returnsTag": "Rows to append to the purchase's block (dividers first, in path\norder), and the pairs their sections name; empty when nothing is taken"
         },
         {
           "kind": "function",
@@ -26047,14 +26083,6 @@
           "doc": "Rewrite a stored pointer (a bill line's `path_source_item`, a `substituted_for`\nentry's `path`, a movement's `path_source_item`, a credit's `path_billing_item`)\nthrough a re-key's `map`.\n\nA pointer at a row the document still holds maps exactly. One that names a\nrow it no longer holds is legal stored state (a spent `substituted_for`, a\nmove pointer at a removed line), so it is never refused: its longest mapped\nprefix is rewritten and the rest kept verbatim, and `exact: false` reports\nit, as `repointExchangedFor` keeps a dangling `exchanged_for`.\n\n⚠️ Pass the map of the document the pointer's path space belongs to: a bill\nline's `path_source_item` and `substituted_for`, and a movement's\n`path_source_item` (one-document-model ruling 65a), take the PURCHASE's; a credit's `path_billing_item` takes\nthe BILL's.",
           "paramTags": [],
           "returnsTag": null
-        },
-        {
-          "kind": "function",
-          "name": "splitBillTime",
-          "signature": "splitBillTime(line: LineAccount, quantity: number): BillTimeSplit | null",
-          "doc": "**Split a bill's `quantity` of one TIME purchase line** by the line's account\n(one-document-model 6e-0b2 F5; owner 2026-11-15, \"unbilled first\"): the\nline's never-billed units first ({@link LineAccount.remaining}`.units`), then\nits owed extension groups, oldest `billed_end` first, each taking at most its\nown units. Units past both bill at the line's own path: over-billing is legal\n(D5) and the diff reports it.\n\nThe account must be built over the purchase with its open hires CLIPPED at\nthe bill date (the bill's pairs), or an open hire's pair meters nothing and\nnothing is ever owed.",
-          "paramTags": [],
-          "returnsTag": "`null` when neither covers a single unit: there is nothing unbilled,\nwhich the bill writer refuses by name"
         },
         {
           "kind": "function",

@@ -17,13 +17,11 @@ import {
   type AccountingContext,
   billedByPath,
   buildOverbillingCredits,
-  buildRemainingInvoice,
   type DocumentOnlyLines,
   type InitiatorAccount,
   type OverbillingCredits,
-  type RemainingInvoice,
-  type RemainingOrderSource,
 } from "../../src/utils/quantityAccounting.ts";
+import { buildRemainingInvoice, type RemainingInvoice, type RemainingOrderSource } from "../../src/utils/billing-remainder.ts";
 import { computeOrderInvoiceCoverage, type OrderInvoiceCoverage } from "../../src/utils/invoices.ts";
 import type { LineItem } from "../../src/utils/orders.ts";
 import type { DocDestinationType } from "../../src/schemas/mod.ts";

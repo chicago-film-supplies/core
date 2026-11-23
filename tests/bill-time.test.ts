@@ -1,16 +1,18 @@
 /**
  * A bill's TIME line on the account (one-document-model 6e-0b2 F5; owner
- * 2026-11-15): `splitBillTime` fills a bill's units from the line's never-billed
- * units, then its owed extension groups; `billExtensionSections` builds the
- * owed time as a date-extension section. The round trip is the proof: fold the
- * built bill beside the first and nothing is owed any more.
+ * 2026-11-15), built by the ONE remainder builder since 6e-0d2 (ruling 168): a
+ * line's never-billed units at its own path, then its owed extension groups as
+ * date-extension sections priced on the billed row's terms (ruling 175). The
+ * round trip is the proof: fold the built bill beside the first and nothing is
+ * owed any more.
  */
 import { assertEquals, assertThrows } from "@std/assert";
 import { accountInitiator, type AccountingContext, billedByPath, type PayableFoldBill } from "../src/utils/quantityAccounting.ts";
-import { billExtensionSections, creditTimeCounts, splitBillTime } from "../src/utils/purchase-documents.ts";
+import { creditTimeCounts } from "../src/utils/purchase-documents.ts";
+import { buildRemainder } from "../src/utils/billing-remainder.ts";
 import { businessDayWindow, fdwCounts, fdwPrice, FORMULAS, tier } from "./helpers/formulas.ts";
 import type { LineItem } from "../src/utils/orders.ts";
-import type { Purchase, PurchaseItem } from "../src/schemas/mod.ts";
+import type { Purchase } from "../src/schemas/mod.ts";
 
 type Billable = Pick<Purchase, "uid" | "items" | "destinations">;
 const asPurchase = (p: unknown) => p as Billable;
@@ -60,64 +62,61 @@ function lineOf(purchase: ReturnType<typeof purchaseOf>, bills: PayableFoldBill[
 let seq = 0;
 const mint = () => `ext-${++seq}`;
 
-Deno.test("splitBillTime: owed time is taken after the line's never-billed units, the rest is over-billing", () => {
+/** The payable remainder of `purchase` over `bills`, through the one builder. */
+function remainderOf(purchase: ReturnType<typeof purchaseOf>, bills: PayableFoldBill[]) {
+  const account = accountInitiator("payable", purchase, billedByPath("payable", purchase, bills), null, [], ctx);
+  return buildRemainder("payable", [{ initiator: { number: 1, ...asPurchase(purchase) } as never, account }], mint);
+}
+
+Deno.test("the remainder: a line's never-billed units at its own path, as a part, then its owed time", () => {
   // 3 hired, 2 billed over 5 days; the bill now runs to 7.
   const line = lineOf(purchaseOf(3, 7), [firstBill(2, 5)]);
   assertEquals(line.remaining.units, 1);
   assertEquals(line.remaining.owed.map((g) => [g.quantity, g.extension_counts]), [[2, [tier("week", 2, 5)]]]);
-  // 4 asked: 1 never billed, 2 owed time, 1 past both.
-  const split = splitBillTime(line, 4)!;
-  assertEquals([split.own, split.extensions.map((e) => e.quantity)], [2, [2]]);
-  // 1 asked: the never-billed unit alone.
-  assertEquals(splitBillTime(line, 1), { own: 1, extensions: [] });
+  const built = remainderOf(purchaseOf(3, 7), [firstBill(2, 5)]);
+  const own = built.items.find((r) => r.path.join("/") === `${P}/${D}/${G}/${X}`) as unknown as { quantity: number; units_from?: number };
+  // The never-billed unit, continuing where the line's billing stands (ruling 174).
+  assertEquals([own.quantity, own.units_from], [1, 2]);
+  const section = built.items.filter((r) => r.path[1] !== D && r.path.length > 1);
+  assertEquals(section.map((r) => r.type), ["destination", "group", "rental"]);
+  assertEquals((section[2] as unknown as { quantity: number }).quantity, 2);
 });
 
-Deno.test("splitBillTime: nothing unbilled is null, so the writer can refuse by name", () => {
+Deno.test("the remainder: nothing unbilled builds the divider skeleton and bills nothing", () => {
   // Billed 2 over the whole 5-day window: nothing new, no time owed.
-  assertEquals(splitBillTime(lineOf(purchaseOf(2, 5), [firstBill(2, 5)]), 2), null);
+  const built = remainderOf(purchaseOf(2, 5), [firstBill(2, 5)]);
+  assertEquals(built.bills, false);
+  assertEquals(built.items.map((r) => r.type), ["purchase", "destination", "group"]);
 });
 
-Deno.test("billExtensionSections: the owed time is a section extending its destination, and folds back to nothing owed", () => {
+Deno.test("the remainder: the owed time is a section extending its destination, and folds back to nothing owed", () => {
   const purchase = purchaseOf(2, 7);
-  const line = lineOf(purchase, [firstBill(2, 5)]);
-  const split = splitBillTime(line, 2)!;
-  assertEquals(split.own, 0);
-  const built = billExtensionSections(asPurchase(purchase), [{ item: purchase.items[2] as unknown as PurchaseItem, extensions: split.extensions }], mint);
-  const E = built.items[0].uid;
-  assertEquals(built.items.map((r) => [r.type, r.path.join("/")]), [
+  const built = remainderOf(purchase, [firstBill(2, 5)]);
+  const sectionDivider = built.items.find((r) => (r as { path_extension_for?: string[] }).path_extension_for !== undefined)!;
+  const E = sectionDivider.uid;
+  assertEquals(built.items.filter((r) => r.path[1] === E).map((r) => [r.type, r.path.join("/")]), [
     ["destination", `${P}/${E}`],
     ["group", `${P}/${E}/${G}`],
     ["rental", `${P}/${E}/${G}/${X}`],
   ]);
-  assertEquals((built.items[0] as { path_extension_for?: string[] }).path_extension_for, [D]);
-  const ext = built.items[2] as unknown as { quantity: number; price: { counts: unknown } };
+  assertEquals((sectionDivider as { path_extension_for?: string[] }).path_extension_for, [D]);
+  const ext = built.items.find((r) => r.path.join("/") === `${P}/${E}/${G}/${X}`) as unknown as { quantity: number; price: { counts: unknown } };
   assertEquals([ext.quantity, ext.price.counts], [2, [tier("week", 2, 5)]]);
   // The section's window starts the day after the first bill's ended (Fri Jan 9).
-  assertEquals(built.destinations.map((d) => [d.uid, d.dates.charge_windows![0].start.slice(0, 10)]), [[E, "2026-01-10"]]);
+  assertEquals(built.destinations.filter((d) => d.uid === E).map((d) => d.dates.charge_windows![0].start.slice(0, 10)), ["2026-01-10"]);
 
   // Round trip: the two bills together owe nothing, and add no units.
-  const second = {
-    uid: "bill-2",
-    status: "issued",
-    number: 2,
-    destinations: built.destinations,
-    items: [{ uid: P, type: "purchase", path: [P], name: "PO-1", description: "" }, ...built.items],
-  } as unknown as PayableFoldBill;
+  const second = { uid: "bill-2", status: "issued", number: 2, destinations: built.destinations, items: built.items } as unknown as PayableFoldBill;
   const after = lineOf(purchase, [firstBill(2, 5), second]);
   assertEquals([after.billed.quantity, after.remaining.units, after.remaining.owed], [2, 0, []]);
   assertEquals(after.extension.groups, []);
 });
 
-Deno.test("billExtensionSections: nothing taken builds nothing; a destination with no window refuses", () => {
+Deno.test("the remainder: owed time on a destination with no charge window refuses by name", () => {
   const purchase = purchaseOf(2, 7);
-  assertEquals(billExtensionSections(asPurchase(purchase), [], mint), { items: [], destinations: [] });
-  const line = lineOf(purchase, [firstBill(2, 5)]);
-  const open = { ...purchase, destinations: [{ uid: D, dates: { delivery_start: null, charge_windows: null } }] };
-  assertThrows(
-    () => billExtensionSections(asPurchase(open), [{ item: purchase.items[2] as unknown as PurchaseItem, extensions: splitBillTime(line, 2)!.extensions }], mint),
-    Error,
-    "no charge window",
-  );
+  const account = accountInitiator("payable", purchase, billedByPath("payable", purchase, [firstBill(2, 5)]), null, [], ctx);
+  const open = { ...purchase, number: 1, destinations: [{ uid: D, dates: { delivery_start: null, charge_windows: null } }] };
+  assertThrows(() => buildRemainder("payable", [{ initiator: open as never, account }], mint), Error, "no charge window");
 });
 
 // The companion: today's writer re-billed the SAME units over the cumulative window,
@@ -152,8 +151,7 @@ Deno.test("creditTimeCounts: no billed time is null; an extended group credits i
   assertEquals(creditTimeCounts(lineOf(purchaseOf(2, 7), []), 1), null);
   // The extended units' group carries the section's added days on top of the first bill's.
   const purchase = purchaseOf(2, 7);
-  const split = splitBillTime(lineOf(purchase, [firstBill(2, 5)]), 2)!;
-  const built = billExtensionSections(asPurchase(purchase), [{ item: purchase.items[2] as unknown as PurchaseItem, extensions: split.extensions }], mint);
-  const second = { uid: "bill-2", status: "issued", number: 2, destinations: built.destinations, items: [{ uid: P, type: "purchase", path: [P] }, ...built.items] } as unknown as PayableFoldBill;
+  const built = remainderOf(purchase, [firstBill(2, 5)]);
+  const second = { uid: "bill-2", status: "issued", number: 2, destinations: built.destinations, items: built.items } as unknown as PayableFoldBill;
   assertEquals(creditTimeCounts(lineOf(purchase, [firstBill(2, 5), second]), 2), [tier("week", 7, 5)]);
 });

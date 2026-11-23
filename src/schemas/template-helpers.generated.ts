@@ -24,6 +24,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   "allocation": [
 
   ],
+  "billing-remainder": [
+
+  ],
   "booking-id": [
 
   ],

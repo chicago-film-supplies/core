@@ -79,6 +79,7 @@
     "./utils/destinations": "./src/utils/destinations.ts",
     "./utils/documentDiff": "./src/utils/documentDiff.ts",
     "./utils/quantityAccounting": "./src/utils/quantityAccounting.ts",
+    "./utils/billing-remainder": "./src/utils/billing-remainder.ts",
     "./utils/document-actions": "./src/utils/document-actions.ts",
     "./utils/icons": "./src/utils/icons.ts",
     "./utils/invoices": "./src/utils/invoices.ts",

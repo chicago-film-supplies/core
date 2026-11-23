@@ -107,12 +107,10 @@ import {
   billedByPath,
   type BilledAtPath,
   type BilledByPath,
-  type ExtensionGroup,
   type LineAccount,
   type PayableFoldBill,
   type PayableFoldCredit,
 } from "./quantityAccounting.ts";
-import { chicagoDayAtTimeOf } from "./dates.ts";
 
 export { purchaseBillIsLive, purchaseCreditIsLive };
 
@@ -187,144 +185,6 @@ export function purchaseBillingFold(documents: PurchaseBilledDocuments): BilledB
   );
 }
 
-// ── Billing a time line: unbilled units first, then owed time (6e-0b2 F5) ──
-
-/** {@link splitBillTime}'s answer: where a bill's units of one TIME purchase line go. */
-export interface BillTimeSplit {
-  /** Units billed at the line's own path: its never-billed units, then any past every owed group (over-billing, D5). */
-  own: number;
-  /** Owed extension groups the bill takes, oldest `billed_end` first, each with the units taken. */
-  extensions: { group: ExtensionGroup; quantity: number }[];
-}
-
-/**
- * **Split a bill's `quantity` of one TIME purchase line** by the line's account
- * (one-document-model 6e-0b2 F5; owner 2026-11-15, "unbilled first"): the
- * line's never-billed units first ({@link LineAccount.remaining}`.units`), then
- * its owed extension groups, oldest `billed_end` first, each taking at most its
- * own units. Units past both bill at the line's own path: over-billing is legal
- * (D5) and the diff reports it.
- *
- * The account must be built over the purchase with its open hires CLIPPED at
- * the bill date (the bill's pairs), or an open hire's pair meters nothing and
- * nothing is ever owed.
- *
- * @returns `null` when neither covers a single unit: there is nothing unbilled,
- *   which the bill writer refuses by name
- * @throws Error when a taken group was billed by a substitute: an extension on a
- *   substituted line cannot be built yet, as on the receivable side (manager#414)
- */
-export function splitBillTime(line: LineAccount, quantity: number): BillTimeSplit | null {
-  let left = quantity;
-  const unbilled = Math.min(left, Math.max(0, line.remaining.units));
-  left -= unbilled;
-  const extensions: BillTimeSplit["extensions"] = [];
-  const owed = [...line.remaining.owed].sort((a, b) => Date.parse(a.billed_end) - Date.parse(b.billed_end));
-  for (const group of owed) {
-    if (left <= 0) break;
-    const take = Math.min(left, group.quantity);
-    if (take <= 0) continue;
-    if (group.via === "substitute") {
-      throw new Error(
-        `Purchase line ${line.item.name} was billed by a substitute; an extension on a substituted line cannot be built yet (manager#414)`,
-      );
-    }
-    extensions.push({ group, quantity: take });
-    left -= take;
-  }
-  if (unbilled === 0 && extensions.length === 0) return null;
-  return { own: unbilled + left, extensions };
-}
-
-/** One purchase line's owed time a bill takes: the line and {@link splitBillTime}'s extensions for it. */
-export interface BillExtensionTake {
-  item: PurchaseItem;
-  extensions: BillTimeSplit["extensions"];
-}
-
-/**
- * **A bill's date-extension sections** (ruling 89; F5): the extra time a bill
- * takes on lines earlier bills already billed, as the receivable remainder
- * builds it. One section per destination and billed window: a destination
- * divider at `[purchase, E]` carrying `path_extension_for: [destination]`, the
- * group dividers above each line, and each line at `[purchase, E, ...its path
- * below the destination]` with `quantity` the units taken and `counts` the
- * group's `extension_counts` (priced with no minimum: `priceDocument` reads the
- * section off the divider). Its pair is the destination's, windowed from the day
- * after the group's `billed_end` to the end of the destination's CLIPPED
- * windows.
- *
- * @param purchase - The purchase with its open hires clipped at the bill date (the bill's pairs)
- * @param takes - Per line, the owed groups {@link splitBillTime} took
- * @param mintUid - Mints each section divider's uid
- * @returns Rows to append to the purchase's block (dividers first, in path
- *   order), and the pairs their sections name; empty when nothing is taken
- */
-export function billExtensionSections(
-  purchase: Pick<Purchase, "uid" | "items" | "destinations">,
-  takes: readonly BillExtensionTake[],
-  mintUid: () => string = () => crypto.randomUUID(),
-): { items: PurchaseDocumentRow[]; destinations: PurchaseDocDestination[] } {
-  const P = purchase.uid;
-  const items: PurchaseDocumentRow[] = [];
-  const destinations: PurchaseDocDestination[] = [];
-  const byKey = new Map(purchase.items.map((r) => [r.path.join("/"), r]));
-  /** Per destination, its sections: one billed window set and end each, one entry per line. */
-  const sections = new Map<string, Array<{ group: ExtensionGroup; entries: Array<{ item: PurchaseItem; quantity: number; group: ExtensionGroup }> }>>();
-  for (const take of takes) {
-    const destination = take.item.path[0];
-    for (const { group, quantity } of take.extensions) {
-      const list = sections.get(destination) ?? sections.set(destination, []).get(destination)!;
-      let section = list.find((s) =>
-        s.group.billed_end === group.billed_end && sameWindowDates(s.group.billed_set, group.billed_set) &&
-        !s.entries.some((e) => e.item.path.join("/") === take.item.path.join("/"))
-      );
-      if (section === undefined) list.push(section = { group, entries: [] });
-      section.entries.push({ item: take.item, quantity, group });
-    }
-  }
-  for (const [destination, list] of sections) {
-    const divider = byKey.get(destination);
-    const pair = purchase.destinations.find((d) => d.uid === destination);
-    const windows = pair?.dates.charge_windows ?? null;
-    if (divider === undefined || divider.type !== "destination" || pair === undefined || windows === null || windows.length === 0) {
-      throw new Error(`billExtensionSections: destination ${destination} of purchase ${P} states no charge window to extend`);
-    }
-    for (const section of list) {
-      const E = mintUid();
-      items.push({ ...divider, uid: E, path: [P, E], path_extension_for: [destination] } as PurchaseDocumentRow);
-      const placedGroups = new Set<string>();
-      for (const entry of section.entries) {
-        // The group dividers between the destination and the line, carried once per section.
-        for (let k = 2; k < entry.item.path.length; k++) {
-          const ancestor = byKey.get(entry.item.path.slice(0, k).join("/"));
-          if (ancestor === undefined || ancestor.type !== "group" || placedGroups.has(ancestor.uid)) continue;
-          placedGroups.add(ancestor.uid);
-          items.push({ ...ancestor, path: [P, E, ...ancestor.path.slice(1)] } as PurchaseDocumentRow);
-        }
-        const line = projectPurchaseLineToBillLine(entry.item, {
-          uid_purchase: P,
-          quantity: entry.quantity,
-          from: 0,
-          counts: [...entry.group.extension_counts],
-        });
-        // An extension bills more days of a leg; it is not an exchange, so it keeps no
-        // take-back list (and its pair's `exchange` is cleared below), as on AR.
-        const { exchanged_for: _notAnExchange, ...extended } = line as PurchaseDocumentItem & { exchanged_for?: unknown };
-        items.push({ ...extended, path: [P, E, ...entry.item.path.slice(1)] } as PurchaseDocumentItem);
-      }
-      const start = chicagoDayAtTimeOf(section.group.billed_end, 1, windows[0].start);
-      const end = windows[windows.length - 1].end;
-      destinations.push({
-        ...purchasePairForBill(pair, P),
-        uid: E,
-        ...("exchange" in pair ? { exchange: null } : {}),
-        dates: { ...pair.dates, charge_windows: [{ start, end }] },
-      });
-    }
-  }
-  return { items, destinations };
-}
 
 /**
  * **The counts a supplier credit of `quantity` units of one TIME purchase line
@@ -355,10 +215,6 @@ export function creditTimeCounts(line: LineAccount, quantity: number): TierCount
   return taken.length === 0 ? null : meanTierCounts(taken);
 }
 
-/** Two window sets name the same dates, in order. */
-function sameWindowDates(a: readonly { start: string; end: string }[], b: readonly { start: string; end: string }[]): boolean {
-  return a.length === b.length && a.every((w, i) => Date.parse(w.start) === Date.parse(b[i].start) && Date.parse(w.end) === Date.parse(b[i].end));
-}
 
 // ── Money ───────────────────────────────────────────────────────
 

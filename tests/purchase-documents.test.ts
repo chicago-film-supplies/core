@@ -8,14 +8,13 @@
  * invoice sync's engine. The unit charge-window readers retired with the
  * windows; a time line is still refused until it meters its pair's windows.
  */
+import { buildRemainder } from "../src/utils/billing-remainder.ts";
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
   PAYABLE_LINE_CLAIMS,
-  billExtensionSections,
   creditTimeCounts,
   purchaseBillingFold,
   purchaseInitiator,
-  splitBillTime,
   type PurchaseBilledDocuments,
   projectPurchaseLineToBillLine,
   purchaseBillIsLive,
@@ -388,16 +387,16 @@ function timeLineAccount(bills: PurchaseBill[], credits: PurchaseCredit[] = [], 
 const fortnightBill = (rows: PurchaseDocumentItem[], over: Partial<PurchaseBill> = {}) =>
   billDoc(1, rows, { destinations: [{ uid_source: PURCHASE, ...chargedPair() }], ...over });
 
-Deno.test("splitBillTime over the account (F5): unbilled units first, a fortnight billed owes nothing, a void bill bills nothing", () => {
+Deno.test("the account's remaining over a time line (F5): unbilled units first, a fortnight billed owes nothing, a void bill bills nothing", () => {
+  // The decision the one remainder builder reads (6e-0d2, ruling 168; it replaced `splitBillTime`).
   const billed = (over: Partial<PurchaseBill> = {}) => fortnightBill([{ ...timeBillLine(WEEK_2), amount_cents: 18000 }], over);
-  assertEquals(splitBillTime(timeLineAccount([]), 2), { own: 2, extensions: [] }, "nothing billed: both units at the line's own path");
-  assertEquals(splitBillTime(timeLineAccount([billed()]), 2), null, "billed in full: nothing unbilled");
-  assertEquals(splitBillTime(timeLineAccount([billed()]), 3)?.own ?? null, null, "past both, still nothing unbilled to start from");
+  const left = (line: ReturnType<typeof timeLineAccount>) => [line.remaining.units, line.remaining.owed.length];
+  assertEquals(left(timeLineAccount([])), [2, 0], "nothing billed: both units left at the line's own path");
+  assertEquals(left(timeLineAccount([billed()])), [0, 0], "billed in full: nothing unbilled, nothing owed");
   const voided = billed({ status: "void", voided_at: mockTimestamp });
-  assertEquals(splitBillTime(timeLineAccount([voided]), 2), { own: 2, extensions: [] }, "a void bill bills nothing");
-  // Over-billing is legal (D5): one unit unbilled, the rest past it at the own path.
+  assertEquals(left(timeLineAccount([voided])), [2, 0], "a void bill bills nothing");
   const one = fortnightBill([{ ...project(visionLine(), 10, 1), price: { ...timeBillLine(WEEK_2).price }, quantity: 1, amount_cents: 9000 } as PurchaseDocumentItem]);
-  assertEquals(splitBillTime(timeLineAccount([one]), 3), { own: 3, extensions: [] }, "1 unbilled, 2 over-billed, all at the own path");
+  assertEquals(left(timeLineAccount([one])), [1, 0], "one unit billed, one left");
 });
 
 
@@ -1455,7 +1454,7 @@ Deno.test("a split's rows bill the line's units ONCE over its pair: nothing owed
   for (const [a, b] of [[2, 2], [3, 1]]) {
     const line = timeLineAccount([split(a, b)], [], item);
     assertEquals(line.billed.quantity, 4, `${a} + ${b}: four units billed`);
-    assertEquals(splitBillTime(line, 1), null, `${a} + ${b}: nothing unbilled`);
+    assertEquals([line.remaining.units, line.remaining.owed.length], [0, 0], `${a} + ${b}: nothing unbilled`);
     // Every unit was billed over the fortnight, so the time a credit takes back is the fortnight's.
     assertEquals(creditTimeCounts(line, 4), WEEK_2, `${a} + ${b}`);
   }
@@ -2037,9 +2036,9 @@ Deno.test("syncPurchaseToBills: a bill's extension section rides a purchase edit
   const first = { ...billDoc(1, [own]), destinations: [{ uid_source: PURCHASE, ...chargedPair() }] };
   const account = accountBilling("payable", purchaseInitiator(purchase), [first], [], { formulas: FORMULAS, holidays: [] });
   const line = account.lines.find((l) => l.path.join("/") === item.path.join("/"))!;
-  const split = splitBillTime(line, 2)!;
-  assertEquals(split.own, 0, "both units were billed: the bill takes only owed time");
-  const sections = billExtensionSections(purchase, [{ item, extensions: split.extensions }], () => "eeeeeeee-0000-4000-8000-000000000001");
+  assertEquals(line.remaining.units, 0, "both units were billed: the remainder takes only owed time");
+  const built = buildRemainder("payable", [{ initiator: { ...purchase, number: 1 } as never, account }], () => "eeeeeeee-0000-4000-8000-000000000001");
+  const sections = { items: built.items.filter((r) => r.type !== "purchase" && r.path[1] !== DIV), destinations: built.destinations.filter((d) => d.uid !== chargedPair().uid) };
   const priced = priceDocument([...SCOPE, ...sections.items], {
     ...billCtx("pushed"),
     time: { formulas: FORMULAS, holidays: [], charge_windows: chargeWindowContext([{ uid_source: PURCHASE, ...threeWeeks() }, ...sections.destinations]) },

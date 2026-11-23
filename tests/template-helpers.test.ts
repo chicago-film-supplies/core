@@ -41,6 +41,7 @@ import * as destinationUtils from "../src/utils/destinations.ts";
 import * as documentDiffUtils from "../src/utils/documentDiff.ts";
 import * as journalUtils from "../src/utils/journal.ts";
 import * as quantityAccountingUtils from "../src/utils/quantityAccounting.ts";
+import * as billingRemainderUtils from "../src/utils/billing-remainder.ts";
 import * as iconUtils from "../src/utils/icons.ts";
 import * as invoiceUtils from "../src/utils/invoices.ts";
 import * as xeroSyncUtils from "../src/utils/xero-sync.ts";
@@ -129,6 +130,9 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // Same exception as `documentDiff`: `utils/quantityAccounting.ts` sums an
   // order's sibling invoices, and a template renders one document.
   quantityAccounting: quantityAccountingUtils,
+  // Same exception: `utils/billing-remainder.ts` builds a remainder from every
+  // source's account over its sibling documents.
+  "billing-remainder": billingRemainderUtils,
   // Same exception again: `utils/replacements.ts` asks what a lost/damaged
   // record has been BILLED — a sum over an order's sibling invoices and its
   // out-of-service records, neither of which a render context holds.

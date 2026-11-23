@@ -21,11 +21,10 @@ import {
   type AccountedCreditNote,
   type AccountedInvoice,
   crmsAuthoredInvoices,
-  type RemainingInvoice,
-  type RemainingInvoiceSource,
   rowCreditedBefore,
   unitsCreditedBefore,
 } from "../src/utils/quantityAccounting.ts";
+import { buildRemainder, type RemainingInvoice, type RemainingInvoiceSource } from "../src/utils/billing-remainder.ts";
 
 import { billedAR, coverageOf, documentOnlyAR, orderAccount, overbillingOf, remainderView, remainingInvoiceOf } from "./helpers/account.ts";
 const O = "order-1";
@@ -1214,4 +1213,44 @@ Deno.test("invoiceOnlyLines: a row under a destination only the invoice has is s
   const inv = invoice("a", [...lightOrder(2), authoredDest, tripodAt(["dest-new", TRIPOD], 1)]);
   const r = documentOnlyAR(O, lightOrder(2), [inv]);
   assertEquals([r.lines, r.skipped.map((s) => [s.path.join("/"), s.reason])], [[], [[`${O}/dest-new/${TRIPOD}`, "authored_destination"]]]);
+});
+
+// ── The one remainder builder over several sources (6e-0d2, rulings 168, 172, 174, 177) ──
+
+Deno.test("buildRemainder: every order's block in source order, each line a PART at where its billing stands (rulings 168, 174)", () => {
+  const O2 = "order-2";
+  const first = { ...orderSource(lightOrder(6)) };
+  const second = { uid: O2, number: 1013, items: lightOrder(3), destinations: pairs() };
+  const built = buildRemainder("receivable", [
+    { initiator: first, account: orderAccount(O, first.items, [invoice("a", lightOrder(4), "issued")], first.destinations, CTX) },
+    { initiator: second, account: orderAccount(O2, second.items, [], second.destinations, CTX) },
+  ], mint);
+  assertEquals(built.refused, []);
+  assertEquals(built.bills, true);
+  assertEquals(built.items.filter((it) => it.type === "order").map((it) => it.uid), [O, O2]);
+  const light = (scope: string) => built.items.find((it) => it.path.join("/") === `${scope}/${lightKey}`) as unknown as { quantity: number; units_from?: number };
+  // Order 1: 4 of 6 billed, so 2 units continuing after the 4th; order 2: all 3, a whole line.
+  assertEquals([light(O).quantity, light(O).units_from], [2, 4]);
+  assertEquals([light(O2).quantity, light(O2).units_from], [3, undefined]);
+  assertEquals(built.destinations.map((d) => d.uid_source), [O, O2]);
+});
+
+Deno.test("buildRemainder: a refused source refuses the whole create and is NAMED (ruling 177); nothing is built", () => {
+  const O2 = "order-2";
+  const first = { ...orderSource(lightOrder(6)) };
+  const second = { uid: O2, number: 1013, items: lightOrder(3), destinations: pairs() };
+  const blocked = [crms(invoice("c", lightOrder(4), "paid"))];
+  const built = buildRemainder("receivable", [
+    { initiator: first, account: orderAccount(O, first.items, blocked, first.destinations, CTX) },
+    { initiator: second, account: orderAccount(O2, second.items, [], second.destinations, CTX) },
+  ], mint);
+  assertEquals(built.refused.map((r) => [r.uid_source, r.crms_authored]), [[O, ["c"]]]);
+  assertEquals([built.items, built.destinations], [[], []]);
+});
+
+Deno.test("buildRemainder: nothing left anywhere is the divider skeleton, and bills nothing (ruling 172)", () => {
+  const order = orderSource(lightOrder(3));
+  const built = buildRemainder("receivable", [{ initiator: order, account: orderAccount(O, order.items, [invoice("a", lightOrder(3), "issued")], order.destinations, CTX) }], mint);
+  assertEquals(built.bills, false);
+  assertEquals(built.items.map((it) => it.type), ["order", "destination", "group"]);
 });

@@ -115,6 +115,7 @@ import {
 } from "./quantityAccounting.ts";
 import { collectSubstitutionAnchors, sliceSubstitutedFor } from "./substitutions.ts";
 import type { PurchaseLineCustody } from "./bookings-inbound.ts";
+import { billableInitiator, type RemainderInitiators } from "./billing-remainder.ts";
 
 export { countsTime, type TimeAmount };
 
@@ -1169,9 +1170,15 @@ export function lineActionKey(action: DocumentActionId, path: readonly string[])
   return `${action}:${pathKey(path)}`;
 }
 
-/** The initiator's billing account: what every offer here reads, never a re-fold. */
+/**
+ * The initiator's billing account: what every offer here reads, never a re-fold.
+ * Built over {@link billableInitiator} at `now`, the SAME clipped initiator the
+ * remainder builder reads (6e-0d2), so `create_remaining_billing` cannot answer
+ * "nothing to bill" for an open hire billed once while the builder bills its time.
+ */
 function initiatorAccount<S extends Side>(side: S, initiator: InitiatorOfferDocuments[S], ctx: InitiatorOfferContext<S>): InitiatorAccount {
-  return accountBilling(side, initiator as unknown as AccountedInitiator, ctx.billing, ctx.credits, ctx.accounting);
+  const billable = billableInitiator(side, initiator as unknown as RemainderInitiators[S], ctx.now);
+  return accountBilling(side, billable as unknown as AccountedInitiator, ctx.billing, ctx.credits, ctx.accounting);
 }
 
 /**
@@ -1181,7 +1188,7 @@ function initiatorAccount<S extends Side>(side: S, initiator: InitiatorOfferDocu
  * - `create_billing` — the initiator is not canceled; `bill_lines` names every
  *   line with something to bill (ruling 114): a flat line's units the account
  *   leaves (`remaining.units`), a TIME line its ordered units (what is left of its
- *   time is the writer's split, `splitBillTime`).
+ *   time is the one remainder builder's, `buildRemainder`).
  * - `create_remaining_billing` — the account finds a line the remainder would bill
  *   ({@link remainingBilling}). An over-billed line is not one: it is `credit_overbilling`'s.
  * - `create_replacement_billing` / `create_service_charge_billing` — their unit counts.
