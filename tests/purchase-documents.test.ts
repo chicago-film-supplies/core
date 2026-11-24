@@ -23,11 +23,10 @@ import {
   purchaseDocumentScope,
   billedPoolCreditMoney,
   billLineCreditMoney,
-  partMoney,
   billLineCredited,
   syncPurchaseToBills,
 } from "../src/utils/purchase-documents.ts";
-import { chargeWindowContext, flatPayablePrice, priceDocument, PriceRefusalError, purchaseTotals } from "../src/utils/price-document.ts";
+import { chargeWindowContext, flatPayablePrice, partOf, priceDocument, PriceRefusalError, purchaseTotals } from "../src/utils/price-document.ts";
 import type { PricingFormulas } from "../src/utils/price-formulas.ts";
 import type { TaxCatalog } from "../src/utils/tax-classes.ts";
 import { asCreditRows, hireDates, payablePrice, purchaseDivider, purchasePair, payableLine, withPayableMoney } from "./helpers/payable.ts";
@@ -259,11 +258,11 @@ Deno.test("priceDocument (payable): the stated amount IS the money, the discount
   const base = project(buyLine(), 10, 1);
   // A line whose stored money is stale: the pricer derives it from the stated gross less the declared cents.
   const stale = { ...base, price: { ...base.price, discount, stated_cents: 46995 + 5222, subtotal_cents: 1, subtotal_discounted_cents: 1, total_cents: 1 } };
-  // A FLAT line stating no gross is refused (core beta B): the gross is its one money input.
+  // A FLAT line stating neither its gross nor its rates is refused (ruling 189: either is its money input).
   assertThrows(
     () => priceDocument([{ ...stale, price: { ...stale.price, stated_cents: null } }], payableCtx("purchase_bill")),
     PriceRefusalError,
-    "states no gross",
+    "states neither its gross",
   );
   const freight = restated(project(buyLine({ uid: lid(5), path: [DIV, lid(5)] }), 11, 1), 1500);
   const priced = priceDocument([stale, freight], payableCtx("purchase_bill"));
@@ -470,7 +469,7 @@ Deno.test("purchaseBillSharedLineFields: price follows as formula ATOM + rates V
   // (W4R): a whole VALUE inside the group, which the classifier now reads.
   // `price.stated_cents` is the gross they derive from (ruling 39), so it moves with them.
   assertEquals(
-    fields.filter((f) => f.group === "flat_money").map((f) => f.path).sort(),
+    fields.filter((f) => f.group === "stated_total").map((f) => f.path).sort(),
     ["amount_cents", "out_of_service", "price.stated_cents", "quantity"],
   );
   assertEquals(kinds["out_of_service"], "propagated");
@@ -899,7 +898,7 @@ Deno.test("D7: every part of a percent-discounted line is closed (net = gross �
     const sum = { gross: 0, cents: 0, net: 0 };
     while (at < q) {
       const n = 1 + next(q - at);
-      const part = partMoney(line, at, at + n);
+      const part = partOf(line, at, at + n);
       assertEquals(part.amount_cents, part.stated_cents - part.discount!.amount_cents, "a part is closed");
       if (applyDiscountTerms(part.stated_cents, n, { rate, type: "percent" }).amount_cents !== part.amount_cents) reDerivedOff++;
       sum.gross += part.stated_cents;
@@ -1948,17 +1947,35 @@ Deno.test("priceDocument (payable): a stated line parses through the stored sche
   assert(bill.success, JSON.stringify(bill.error?.issues));
 });
 
-Deno.test("priceDocument (payable): a FLAT line stating no gross is refused — the absent arm is retired (core beta B)", () => {
+Deno.test("priceDocument (payable): a FLAT line stating no gross is a RATE line (ruling 189) — and one stating neither is refused", () => {
   const discount = { rate: 10, type: "percent" as const, amount_cents: 5222 };
   const base = project(buyLine(), 10, 1);
   for (const stated_cents of [null, undefined]) {
     assertThrows(
       () => priceDocument([{ ...base, price: { ...base.price, discount, stated_cents } }], payableCtx("purchase_bill")),
       PriceRefusalError,
-      "states no gross",
+      "states neither its gross",
     );
   }
-  // Control: the same line stating its gross prices.
+  // A RATE flat line: $10.00 a unit, 3 units, 10% off — priced by its formula,
+  // the AR flat line's shape (ruling 108), its net written back as amount_cents.
+  const rates = [{ rate_key: "flat", amount_cents: 1000 }];
+  const terms = { rate: 10, type: "percent" as const };
+  const rateLine = { ...base, quantity: 3, price: { ...base.price, rates, discount: { ...terms, amount_cents: 0 }, stated_cents: null } };
+  const [whole] = priceDocument([rateLine], payableCtx("purchase_bill")).items as unknown as PurchaseDocumentItem[];
+  assertEquals(whole.price.subtotal_cents, 3000);
+  assertEquals(whole.price.subtotal_discounted_cents, 2700);
+  assertEquals(whole.amount_cents, 2700);
+  assertEquals(whole.price.discount?.amount_cents, 300, "the pricer derives a rate line's discount cents");
+  const ok = PurchaseBillSchema.safeParse(billDoc(1, [whole]));
+  assert(ok.success, JSON.stringify(ok.error?.issues));
+  // The stored refine checks a rate flat line's net against its formula.
+  const lying = PurchaseBillSchema.safeParse(billDoc(1, [{ ...whole, amount_cents: 2701 }]));
+  assert(!lying.success && lying.error.issues.some((i) => i.message.includes("must equal its rates × counts")));
+  // A PART (units 3–4 of the line, ruling 174) prices the formula at its units.
+  const [part] = priceDocument([{ ...rateLine, quantity: 1, units_from: 2 }], payableCtx("purchase_bill")).items as unknown as PurchaseDocumentItem[];
+  assertEquals(part.amount_cents, 900);
+  // Control: the same line stating its gross prices from the gross.
   const [priced] = priceDocument([{ ...base, price: { ...base.price, discount, stated_cents: base.amount_cents + 5222 } }], payableCtx("purchase_bill"))
     .items;
   assertEquals(priced.amount_cents, base.amount_cents);

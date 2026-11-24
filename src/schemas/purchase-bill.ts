@@ -81,7 +81,6 @@ import {
   kitHeaderIssues,
   zeroPricedMoneyIssues,
   PayablePriceMoneyCore,
-  PayableStatedCore,
   payablePostingIssues,
   PURCHASE_PRODUCT_ITEM_TYPES,
   type PurchaseLinePrice,
@@ -92,7 +91,7 @@ import {
   payableInputUidIssue,
   payableLineUidIssue,
 } from "./purchase.ts";
-import { UnitsFromField } from "./_line-money.ts";
+import { StatedCore, UnitsFromField } from "./_line-money.ts";
 import {
   billingExchangedForViolations,
   checkDestinationJoin,
@@ -194,7 +193,7 @@ export const PurchaseDocumentLinePriceSchema: z.ZodType<PurchaseDocumentLinePric
   taxes: z.array(PriceModifier).meta({ label: "Tax", derived: true }),
   taxes_base: z.array(TaxRef).optional().meta({ label: "Base Tax", derived: true }),
   counts: z.array(TierCountSchema).meta({ derived: true }),
-  ...PayableStatedCore,
+  ...StatedCore,
   ...PayablePriceMoneyCore,
 });
 
@@ -529,7 +528,13 @@ function documentLineIssues(
   origin: PurchaseDocumentOriginType,
 ): { path: (string | number)[]; message: string }[] {
   const issues = purchaseLineMoneyIssues(
-    { price: item.price, amount_cents: item.amount_cents, quantity: item.quantity, pointed: item.path_billing_item !== undefined },
+    {
+      price: item.price,
+      amount_cents: item.amount_cents,
+      quantity: item.quantity,
+      units_from: item.units_from ?? null,
+      pointed: item.path_billing_item !== undefined,
+    },
     "document",
   );
   // A bill line and a supplier credit line share this check; the payable credit

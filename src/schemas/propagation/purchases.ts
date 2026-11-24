@@ -455,7 +455,7 @@ const updatePurchaseBillRules: CollectionRule[] = [
         source: ["items"],
         target: ["items"],
         transform:
-          "match each bill line to its purchase line by its path under the purchase's `purchase` divider (or its `path_source_item` move pointer) — the order → invoice sync's own engine (`syncScopedDestinations` with `payableScopedSync`); mergeSharedFields(prev purchase line, next purchase line, bill line) over the classification of (PurchaseSchema, PurchaseBillSchema), each purchase line first projected WHOLE to the bill row's shape, from unit 0 (`projectPurchaseRowForBill`); `quantity`, `amount_cents`, `price.stated_cents` and `out_of_service` merge as ONE `flat_money` group, so a partial bill keeps all four. The changed bill is then priced by `priceDocument` (payable arm), whose stated-total arm states each line's money from that amount and its discount.",
+          "match each bill line to its purchase line by its path under the purchase's `purchase` divider (or its `path_source_item` move pointer) — the order → invoice sync's own engine (`syncScopedDestinations` with `payableScopedSync`); mergeSharedFields(prev purchase line, next purchase line, bill line) over the classification of (PurchaseSchema, PurchaseBillSchema), each purchase line first projected WHOLE to the bill row's shape, from unit 0 (`projectPurchaseRowForBill`); `quantity`, `amount_cents`, `price.stated_cents` and `out_of_service` merge as ONE `stated_total` group, so a partial bill keeps all four. The changed bill is then priced by `priceDocument` (payable arm), whose stated-total arm states each line's money from that amount and its discount.",
       },
       {
         source: ["items"],

@@ -3021,7 +3021,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocItemPriceType",
-          "declaration": "interface InvoiceDocItemPriceType {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n}",
+          "declaration": "interface InvoiceDocItemPriceType {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n  stated_cents?: number | null;\n}",
           "doc": "Pricing breakdown for a single invoice line item."
         },
         {
@@ -3183,7 +3183,7 @@
         {
           "kind": "interface",
           "name": "ItemPriceType",
-          "declaration": "interface ItemPriceType {\n  uid_price_formula?: string;\n  price_formula?: PriceFormulaRef | null;\n  rates?: RateSnapshotType[];\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  subtotal_cents?: number;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n  total_cents?: number;\n}",
+          "declaration": "interface ItemPriceType {\n  uid_price_formula?: string;\n  price_formula?: PriceFormulaRef | null;\n  rates?: RateSnapshotType[];\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  subtotal_cents?: number;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n  total_cents?: number;\n  stated_cents?: number | null;\n}",
           "doc": "Price breakdown for an order item (input — client sends partial data, server computes the rest)."
         },
         {
@@ -4095,7 +4095,7 @@
         {
           "kind": "interface",
           "name": "OrderDocItemPriceType",
-          "declaration": "interface OrderDocItemPriceType {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n}",
+          "declaration": "interface OrderDocItemPriceType {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n  stated_cents?: number | null;\n}",
           "doc": "Line item price in the full order document (all fields required after server compute).\n\n- subtotal = `priceFromFormula(rates, counts, quantity)` — Σ tier\n  `rate × quantity × num ÷ den`, each tier rounded once (purchases-as-documents\n  Phase 2 ruling 8).\n- subtotal_discounted = post-discount.\n- total = subtotal_discounted + sum(taxes[].amount).\n\nA percent-of-total fee line states `base_percent` instead of a formula\n({@link checkLinePrice})."
         },
         {
@@ -8919,7 +8919,7 @@
           "kind": "function",
           "name": "purchaseLineMoneyIssues",
           "signature": "purchaseLineMoneyIssues(item: typeLiteral, _: unknown): typeLiteral[]",
-          "doc": "The single-document money rule (ruling 1), shared by every arm and by the\nbill line. A refine rather than a union arm because it cuts across all four\nline types.\n\n- **flat** — states its GROSS (`price.stated_cents`, required since core\n  beta B) and no rates; its `amount_cents` and computed money are what\n  `priceDocument`'s stated-total arm derives from it.\n- **time** (one-document-model Phase 3) — carries its formula's `rates`.\n  On a PURCHASE (`grain: \"purchase\"`) it commits nothing: `amount_cents` is\n  null and its money is zero. On a BILL or CREDIT line\n  (`grain: \"document\"`) it states its amount — `rates × counts` metered from\n  its pair's windows on a pushed document, Xero's on a linked one — and its\n  money follows from that amount as a flat line's does.",
+          "doc": "The single-document money rule (ruling 1), shared by every arm and by the\nbill line. A refine rather than a union arm because it cuts across all four\nline types.\n\n- **flat, STATED** — states its GROSS (`price.stated_cents`) and no rates;\n  its `amount_cents` and computed money are what `priceDocument`'s\n  stated-total arm derives from it.\n- **flat, RATE** (one-document-model ruling 189, which retired core beta B's\n  \"a flat line states its gross\") — carries its formula's `rates`, and its\n  `amount_cents` is exactly what `rates × counts` give at its units (a part's\n  from `units_from`, ruling 174), the AR flat line's money (ruling 108).\n- **time** (one-document-model Phase 3) — carries its formula's `rates`.\n  On a PURCHASE (`grain: \"purchase\"`) it commits nothing: `amount_cents` is\n  null and its money is zero. On a BILL or CREDIT line\n  (`grain: \"document\"`) it states its amount — `rates × counts` metered from\n  its pair's windows on a pushed document, Xero's on a linked one — and its\n  money follows from that amount as a flat line's does.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -11769,7 +11769,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocItemPriceType",
-          "declaration": "interface InvoiceDocItemPriceType {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n}",
+          "declaration": "interface InvoiceDocItemPriceType {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n  stated_cents?: number | null;\n}",
           "doc": "Pricing breakdown for a single invoice line item."
         },
         {
@@ -11871,7 +11871,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputPriceType",
-          "declaration": "interface InvoiceItemInputPriceType {\n  uid_price_formula?: string;\n  price_formula?: PriceFormulaRef | null;\n  rates?: RateSnapshotType[];\n  base_percent?: number | null;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n}",
+          "declaration": "interface InvoiceItemInputPriceType {\n  uid_price_formula?: string;\n  price_formula?: PriceFormulaRef | null;\n  rates?: RateSnapshotType[];\n  base_percent?: number | null;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n  stated_cents?: number | null;\n}",
           "doc": "Item price input — partial, server computes the rest."
         },
         {
@@ -12419,7 +12419,7 @@
         {
           "kind": "interface",
           "name": "ItemPriceType",
-          "declaration": "interface ItemPriceType {\n  uid_price_formula?: string;\n  price_formula?: PriceFormulaRef | null;\n  rates?: RateSnapshotType[];\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  subtotal_cents?: number;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n  total_cents?: number;\n}",
+          "declaration": "interface ItemPriceType {\n  uid_price_formula?: string;\n  price_formula?: PriceFormulaRef | null;\n  rates?: RateSnapshotType[];\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  subtotal_cents?: number;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n  total_cents?: number;\n  stated_cents?: number | null;\n}",
           "doc": "Price breakdown for an order item (input — client sends partial data, server computes the rest)."
         },
         {
@@ -12551,7 +12551,7 @@
         {
           "kind": "interface",
           "name": "OrderDocItemPriceType",
-          "declaration": "interface OrderDocItemPriceType {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n}",
+          "declaration": "interface OrderDocItemPriceType {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n  stated_cents?: number | null;\n}",
           "doc": "Line item price in the full order document (all fields required after server compute).\n\n- subtotal = `priceFromFormula(rates, counts, quantity)` — Σ tier\n  `rate × quantity × num ÷ den`, each tier rounded once (purchases-as-documents\n  Phase 2 ruling 8).\n- subtotal_discounted = post-discount.\n- total = subtotal_discounted + sum(taxes[].amount).\n\nA percent-of-total fee line states `base_percent` instead of a formula\n({@link checkLinePrice})."
         },
         {
@@ -13946,12 +13946,6 @@
           "doc": "The computed money keys every payable line price carries — ONE instance per\nkey, spread by the purchase line and the bill/credit line alike, so the two\ncannot drift (`tests/item-shape-parity.test.ts` asserts the identity).\nDerived, so the purchase → bill merge never carries them: the pricer\nre-derives them on every grain.\n\n⚠️ Not on the `@cfs/core/schemas` barrel, like `TotalsCore`: no consumer\nassembles a price from parts."
         },
         {
-          "kind": "variable",
-          "name": "PayableStatedCore",
-          "declaration": "const PayableStatedCore: typeLiteral;",
-          "doc": "**`price.stated_cents` — a payable line's stated GROSS, the input its money is\nderived from** (one-document-model ruling 39, 6e-0b1 S2). ONE instance, spread\nby the purchase line and the bill/credit line alike, like\n{@link PayablePriceMoneyCore}, which it is deliberately not part of: every key\nthere is derived, and this one is the input.\n\nSet, `subtotal_cents` is `stated_cents` and the line's `amount_cents` (the\nnet) is `stated_cents − discount.amount_cents`, on every line, whole or part\n(D7). The discount's CENTS are the money: an operator's stated price turns the\nrate into cents once (`applyDiscountTerms`), and a part of a line takes its\nslice of the line's stated gross and cents (`sliceStoredMoney`), so nothing\nre-applies a rate to a part. A stated total governs a line that also carries\nrates (a LINKED time line: Xero's money).\n\nIn the `flat_money` merge group with `quantity` and `amount_cents`: it is\nwhat they are derived from, so it follows or is kept with them as one unit.\n\n⚠️ **Required on a FLAT line by the money refine, not by the key**\n({@link purchaseLineMoneyIssues}, core beta B, after the 2026-11-14 backfill:\nprod 976 flat lines, `test` 808). The key stays nullable and optional because\nthe price schema is shared with time lines, which state none.\n\n⚠️ On the receivable side only a CREDIT-NOTE line carries it, and only one a\nXero import wrote (one-document-model ruling 145, `schemas/credit-note.ts`);\nan invoice line, and every credit line CFS prices, is priced from its rates.\n\nNot on the `@cfs/core/schemas` barrel, like {@link PayablePriceMoneyCore}."
-        },
-        {
           "kind": "interface",
           "name": "Purchase",
           "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  uid_store: string;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  items: PurchaseRow[];\n  destinations: PurchaseDestination[];\n  totals: InitiatorTotalsType;\n  query_by_products: string[];\n  query_by_orders: string[];\n  query_by_item_types: PurchaseItemTypeType[];\n  query_by_bills: string[];\n  bills: Array<typeLiteral>;\n  credits: Array<typeLiteral>;\n  query_by_credits: string[];\n  bookings_breakdown: InboundBreakdown;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
@@ -14299,7 +14293,7 @@
           "kind": "function",
           "name": "payableInputStatedIssues",
           "signature": "payableInputStatedIssues(item: typeLiteral): typeLiteral[]",
-          "doc": "A purchase line input's gross (ruling 39, core beta B): `price.stated_cents`,\nthe one money input. A Buy line states it, since a sale is always flat; the\nother arms may state `null` (a time line) or omit it (an amend keeps the\nstored gross).",
+          "doc": "A purchase line input's money (ruling 39; ruling 189 retired core beta B's\n\"a Buy line states its gross\"): a Buy line is always flat, so it states its\ngross (`price.stated_cents`, a STATED line) or the rates it prices from (a\nRATE line, the AR flat line's shape). The other arms may state `null` (a time\nline) or omit it.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -14371,7 +14365,7 @@
           "kind": "function",
           "name": "purchaseLineMoneyIssues",
           "signature": "purchaseLineMoneyIssues(item: typeLiteral, _: unknown): typeLiteral[]",
-          "doc": "The single-document money rule (ruling 1), shared by every arm and by the\nbill line. A refine rather than a union arm because it cuts across all four\nline types.\n\n- **flat** — states its GROSS (`price.stated_cents`, required since core\n  beta B) and no rates; its `amount_cents` and computed money are what\n  `priceDocument`'s stated-total arm derives from it.\n- **time** (one-document-model Phase 3) — carries its formula's `rates`.\n  On a PURCHASE (`grain: \"purchase\"`) it commits nothing: `amount_cents` is\n  null and its money is zero. On a BILL or CREDIT line\n  (`grain: \"document\"`) it states its amount — `rates × counts` metered from\n  its pair's windows on a pushed document, Xero's on a linked one — and its\n  money follows from that amount as a flat line's does.",
+          "doc": "The single-document money rule (ruling 1), shared by every arm and by the\nbill line. A refine rather than a union arm because it cuts across all four\nline types.\n\n- **flat, STATED** — states its GROSS (`price.stated_cents`) and no rates;\n  its `amount_cents` and computed money are what `priceDocument`'s\n  stated-total arm derives from it.\n- **flat, RATE** (one-document-model ruling 189, which retired core beta B's\n  \"a flat line states its gross\") — carries its formula's `rates`, and its\n  `amount_cents` is exactly what `rates × counts` give at its units (a part's\n  from `units_from`, ruling 174), the AR flat line's money (ruling 108).\n- **time** (one-document-model Phase 3) — carries its formula's `rates`.\n  On a PURCHASE (`grain: \"purchase\"`) it commits nothing: `amount_cents` is\n  null and its money is zero. On a BILL or CREDIT line\n  (`grain: \"document\"`) it states its amount — `rates × counts` metered from\n  its pair's windows on a pushed document, Xero's on a linked one — and its\n  money follows from that amount as a flat line's does.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -21069,7 +21063,7 @@
         {
           "kind": "interface",
           "name": "PricingPrice",
-          "declaration": "interface PricingPrice {\n  price_formula?: typeLiteral | null;\n  rates?: readonly RateSnapshot[];\n  counts?: readonly TierCount[];\n  base_percent?: number | null;\n  discount?: typeLiteral | null;\n  taxes?: readonly typeLiteral[];\n}",
+          "declaration": "interface PricingPrice {\n  price_formula?: typeLiteral | null;\n  rates?: readonly RateSnapshot[];\n  counts?: readonly TierCount[];\n  base_percent?: number | null;\n  discount?: typeLiteral | null;\n  taxes?: readonly typeLiteral[];\n  stated_cents?: number | null;\n}",
           "doc": "The price fields the pricing pipeline actually READS — deliberately narrower\nthan the stored {@link PriceObject}.\n\n`taxes` needs only a `uid`, because the name/rate/type/amount_cents are what\n`calculateItemTax` resolves and computes; `subtotal_cents`,\n`subtotal_discounted_cents`, `total_cents` and `taxes_base` are pricing's\nOUTPUT and are never read as input.\n\nThat is not a convenience: it is the shape an order-input item genuinely\narrives in (`ItemPriceType` in `@cfs/core/schemas`, whose `taxes` is\n`{ uid }[]`). Typing the pricing entry points here is what lets a writer price\nan item it has not built yet, instead of casting the input through\n`as unknown as LineItem` and claiming a stored price it does not have —\nwhich is what `api-cloudrun`'s `buildLineItem` did, twice, on the money path."
         },
         {
@@ -21221,7 +21215,7 @@
           "kind": "function",
           "name": "calculateItemSubtotal",
           "signature": "calculateItemSubtotal(item: PricingItem): typeLiteral",
-          "doc": "Calculate the pre-discount and post-discount subtotals for a single line item:\n`priceFromFormula(rates, counts, quantity, discount)` — Σ tier\n`rate × quantity × num ÷ den`, each tier rounded once, then the discount\n(purchases-as-documents Phase 2 ruling 8). Five-day week's one-week minimum\nand an extension's skipped minimum are already in the counts.",
+          "doc": "Calculate the pre-discount and post-discount subtotals for a single line item,\nby how the LINE states its money (one-document-model ruling 189, `lineKindOf`):\n\n- **rate:** `priceFromFormula(rates, counts, quantity, discount)` — Σ tier\n  `rate × quantity × num ÷ den`, rounded once, then the discount\n  (purchases-as-documents Phase 2 ruling 8). Five-day week's one-week minimum\n  and an extension's skipped minimum are already in the counts.\n- **stated:** the stated gross less its discount cents, by the one stated\n  pricer (`statedLineSubtotals`, D7): a rate is never re-applied to cents a\n  line already stores.\n\nEvery receivable reader reaches a line's money through here (the pricer, the\ntax amounts, the #575 audit oracle, the per-line account), so none can price\na stated line as a rate line.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -24497,8 +24491,8 @@
         {
           "kind": "interface",
           "name": "OrderDeclaredPrice",
-          "declaration": "interface OrderDeclaredPrice {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshot[];\n  counts: TierCount[];\n  base_percent: number | null;\n  replacement_cents: number | null;\n}",
-          "doc": "An order line's declared price half, every nullable key present."
+          "declaration": "interface OrderDeclaredPrice {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshot[];\n  counts: TierCount[];\n  base_percent: number | null;\n  replacement_cents: number | null;\n  stated_cents?: number;\n}",
+          "doc": "An order line's declared price half, every nullable key present — except\n`stated_cents`, present only on a STATED line (`DECLARED_ONLY_WHEN_SET`)."
         },
         {
           "kind": "typeAlias",
@@ -24537,6 +24531,12 @@
           "doc": ""
         },
         {
+          "kind": "other",
+          "name": "PriceRefusalError",
+          "declaredKind": "class",
+          "doc": "A pricer refusal caused by the document it was handed — a time-formula line\nunder no pair, a percent fee line of quantity ≠ 1, a line under two extension\nsections, a stated line in an extension, a formula the context does not\ncarry, a bad credit request — rather than by a fault in the pricer. The API\nmaps it to a 400; every other throw stays a 500. Declared here, below\n`price-document.ts`, so the line pricer can raise it; that module re-exports it."
+        },
+        {
           "kind": "typeAlias",
           "name": "PriceableLineItem",
           "declaration": "type PriceableLineItem = PreTaxLineItem | TransactionFeeLineItem;",
@@ -24551,7 +24551,7 @@
         {
           "kind": "interface",
           "name": "PricingPrice",
-          "declaration": "interface PricingPrice {\n  price_formula?: typeLiteral | null;\n  rates?: readonly RateSnapshot[];\n  counts?: readonly TierCount[];\n  base_percent?: number | null;\n  discount?: typeLiteral | null;\n  taxes?: readonly typeLiteral[];\n}",
+          "declaration": "interface PricingPrice {\n  price_formula?: typeLiteral | null;\n  rates?: readonly RateSnapshot[];\n  counts?: readonly TierCount[];\n  base_percent?: number | null;\n  discount?: typeLiteral | null;\n  taxes?: readonly typeLiteral[];\n  stated_cents?: number | null;\n}",
           "doc": "The price fields the pricing pipeline actually READS — deliberately narrower\nthan the stored {@link PriceObject}.\n\n`taxes` needs only a `uid`, because the name/rate/type/amount_cents are what\n`calculateItemTax` resolves and computes; `subtotal_cents`,\n`subtotal_discounted_cents`, `total_cents` and `taxes_base` are pricing's\nOUTPUT and are never read as input.\n\nThat is not a convenience: it is the shape an order-input item genuinely\narrives in (`ItemPriceType` in `@cfs/core/schemas`, whose `taxes` is\n`{ uid }[]`). Typing the pricing entry points here is what lets a writer price\nan item it has not built yet, instead of casting the input through\n`as unknown as LineItem` and claiming a stored price it does not have —\nwhich is what `api-cloudrun`'s `buildLineItem` did, twice, on the money path."
         },
         {
@@ -24714,7 +24714,7 @@
           "kind": "function",
           "name": "calculateItemSubtotal",
           "signature": "calculateItemSubtotal(item: PricingItem): typeLiteral",
-          "doc": "Calculate the pre-discount and post-discount subtotals for a single line item:\n`priceFromFormula(rates, counts, quantity, discount)` — Σ tier\n`rate × quantity × num ÷ den`, each tier rounded once, then the discount\n(purchases-as-documents Phase 2 ruling 8). Five-day week's one-week minimum\nand an extension's skipped minimum are already in the counts.",
+          "doc": "Calculate the pre-discount and post-discount subtotals for a single line item,\nby how the LINE states its money (one-document-model ruling 189, `lineKindOf`):\n\n- **rate:** `priceFromFormula(rates, counts, quantity, discount)` — Σ tier\n  `rate × quantity × num ÷ den`, rounded once, then the discount\n  (purchases-as-documents Phase 2 ruling 8). Five-day week's one-week minimum\n  and an extension's skipped minimum are already in the counts.\n- **stated:** the stated gross less its discount cents, by the one stated\n  pricer (`statedLineSubtotals`, D7): a rate is never re-applied to cents a\n  line already stores.\n\nEvery receivable reader reaches a line's money through here (the pricer, the\ntax amounts, the #575 audit oracle, the per-line account), so none can price\na stated line as a rate line.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25267,6 +25267,12 @@
         },
         {
           "kind": "typeAlias",
+          "name": "PartSourceLike",
+          "declaration": "type PartSourceLike = BillingRowMoneyLike & typeLiteral;",
+          "doc": "A source line a part is cut from: either side's, rate or stated."
+        },
+        {
+          "kind": "typeAlias",
           "name": "PayableDocumentKind",
           "declaration": "type PayableDocumentKind = typeLiteral | typeLiteral;",
           "doc": "A payable document. No arm carries a refusal: a payable line's money is its\nstated `amount_cents`, so pricing reproduces it rather than moving it — a\nLINKED document's amount is Xero's, stamped by the link writer, and prices to\nexactly that. What may be EDITED on a settled bill is the freeze table's\nquestion (`PURCHASE_BILL_FIELD_FREEZE`), asked by the writer."
@@ -25305,7 +25311,7 @@
           "kind": "other",
           "name": "PriceRefusalError",
           "declaredKind": "class",
-          "doc": "A pricer refusal caused by the document it was handed — a time-formula line\nunder no pair, a percent fee line of quantity ≠ 1, a line under two extension\nsections, a formula the context does not carry, a bad credit request — rather\nthan by a fault in the pricer. The API maps it to a 400; every other throw\nfrom this module stays a 500."
+          "doc": "A pricer refusal caused by the document it was handed — a time-formula line\nunder no pair, a percent fee line of quantity ≠ 1, a line under two extension\nsections, a stated line in an extension, a formula the context does not\ncarry, a bad credit request — rather than by a fault in the pricer. The API\nmaps it to a 400; every other throw stays a 500. Declared here, below\n`price-document.ts`, so the line pricer can raise it; that module re-exports it."
         },
         {
           "kind": "interface",
@@ -25399,6 +25405,22 @@
         },
         {
           "kind": "function",
+          "name": "followStatedPart",
+          "signature": "followStatedPart(row: R, was: R, prev: PartSourceLike, next: PartSourceLike): R",
+          "doc": "**The merge rule applied to a PART, both sides** (D7; spec S2, C4): the\nengine cannot do it, because a part never equals the whole-line projection and\nits discount cents are derived. Per row, against `was` (the stored row), `prev`\nand `next` (the initiator line it bills, before and after the edit):\n\n- `was` exactly its slice of `prev` — money AND discount terms — is untouched,\n  so it becomes its slice of `next` at the same units: re-sliced when `next` is\n  stated, a rate part when `next` is a rate line (the pricer prices it at\n  `units_from`).\n- Anything else is the operator's and stays, except that terms the merge moved\n  onto a STATED row whose money is its own are applied to that row's own gross,\n  the one rate event (`applyDiscountTerms`). A rate row needs nothing: the\n  pricer applies its terms.\n\n`units_from` absent reads as 0: a whole line, as every row stored before D7.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "followStatedParts",
+          "signature": "followStatedParts(args: typeLiteral): R[]",
+          "doc": "{@link followStatedPart} over a synced block, both sides. `keyOf` names the\ninitiator line a row bills (`null` outside one), and `prevLines` / `nextLines`\nhold the initiator's lines by that key. A row with no stored twin (`scoped`, by\npath), or whose line is absent from either revision, is left as the merge made\nit, as is every row `skip` names (a payable time row, priced by its counts).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "formulaUidsOf",
           "signature": "formulaUidsOf(items: readonly typeLiteral[]): string[]",
           "doc": "The formula uids a set of lines name — what a caller must load into {@link PricingFormulas}.",
@@ -25423,6 +25445,14 @@
         },
         {
           "kind": "function",
+          "name": "isExactPart",
+          "signature": "isExactPart(row: PartSourceLike, part: PartMoney): boolean",
+          "doc": "**Is a stored row's money exactly `part`?** — the one untouched-part\npredicate, both sides: the row's own gross and discount cents (read through\n{@link billingRowPart} over its whole quantity, so a rate row and a stated row\nanswer alike) equal the part's. The net follows from the two.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "lineCounts",
           "signature": "lineCounts(item: LineItem, ctx: Pick<PriceDocumentContext, \"charge_windows\" | \"formulas\" | \"holidays\"> & typeLiteral, carried: ReadonlyMap<LineItem, readonly TierCount[]>): TierCount[]",
           "doc": "**A line's `counts`, the one derivation of them** (ruling 8).\n\n| line | `counts` |\n|---|---|\n| percent-of-total fee (no formula) | `[]` |\n| in an extension section | its OWN stated counts — the days the section adds |\n| in `carried` (a line a `complete`/`canceled` order already had) | its STORED row's counts |\n| on a flat formula | `[{ flat, 1, 1 }]` |\n| on a time formula under a pair with windows | what the formula meters from them |\n| on a time formula under no such pair | refused |\n\nFive-day week's per-window minimum is the formula's own (`minimum.scope:\n\"window\"`), so a 2+ window line stores Σ `max(days, 5)` business days ÷ 5 and\nits own numbers multiply out to its subtotal.",
@@ -25434,6 +25464,14 @@
           "name": "meteredLineCounts",
           "signature": "meteredLineCounts(item: LineItem | PayableLine, ctx: Pick<PriceDocumentContext, \"charge_windows\" | \"formulas\" | \"holidays\">, _: unknown): TierCount[] | null",
           "doc": "**What a line's formula meters from its pair's windows** — `null` when the\nline hangs under no pair with windows. A flat formula meters no time and\nanswers `[{ flat, 1, 1 }]` wherever the line sits.\n\n⚠️ **It knows nothing about extension sections or carried lines**, which keep\ncounts they STATE. {@link lineCounts} owns that; this is the window half,\nsplit out so the invoice sync comparator can ask the same question\n(core#112).\n\n`opts.minimum: false` meters without the formula's minimum: a bill edit\nre-metering an extension row over its own (extension) pair (6e-0b2 F5).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "partOf",
+          "signature": "partOf(line: PartSourceLike, from: number, to: number): PartMoney",
+          "doc": "**Units `(from, to]` of a source line, as a part stores them** (D7), on both\nsides: the part's gross and discount cents through the one part door\n({@link billingRowPart}), its net their difference, and the source's discount\nTERMS carrying the part's cents. A part never re-applies a rate, so the parts\nof a line sum to it exactly on every figure.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25489,7 +25527,7 @@
           "kind": "function",
           "name": "priceStatedTotalLine",
           "signature": "priceStatedTotalLine(line: StatedTotalLine): LinePriceMoney",
-          "doc": "**The stated-total arm: a payable line's money is its stated amount.**\n\nTwo inputs, by what the line states:\n\n- **`price.stated_cents` set** (one-document-model ruling 39, D7): the GROSS.\n  `subtotal_cents` = `stated_cents`; the net is `stated_cents −\n  discount.amount_cents`, the declared discount CENTS, so a rate is never\n  re-applied to a line — a part's cents are its slice of its source's.\n  `amount_cents` is ignored here and re-derived by the caller.\n- **absent or `null`**, on a TIME line only (a linked bill's time line, whose\n  `amount_cents` is Xero's net): `subtotal_cents` = net +\n  `discount.amount_cents`, the discount record being DECLARED (what came off).\n  A FLAT line that states no gross is refused (core beta B): its gross is its\n  one money input.\n\nEither way:\n\n- `subtotal_discounted_cents` = the net CFS pays;\n- `taxes` re-amounted on the net from each tax's own rate and type\n  (`computeItemTaxAmountCents`, the one tax-amount author) — `[]` on an exempt\n  side;\n- `total_cents` = net + Σ taxes.\n\nThe twin of stage 4's fee arm: a declared amount stored as the line's money,\nnot re-derived from rates. Exported for the projectors that default a bill\nor credit line from its purchase line before the writer prices the document.\n\nBasis-blind: a LINKED time line's stated amount is Xero's money and prices\nthrough here too.",
+          "doc": "**The stated-total arm: a payable line's money is its stated amount.**\n\nTwo inputs, by what the line states:\n\n- **`price.stated_cents` set** (one-document-model ruling 39, D7): the GROSS,\n  priced by THE stated pricer both sides share (`statedLineSubtotals`, ruling\n  189): the net is `stated_cents − discount.amount_cents`, the declared\n  discount CENTS, so a rate is never re-applied to a line — a part's cents are\n  its slice of its source's. `amount_cents` is ignored here and re-derived by\n  the caller.\n- **absent or `null`**, on a TIME line only (a linked bill's time line, whose\n  `amount_cents` is Xero's net): `subtotal_cents` = net +\n  `discount.amount_cents`, the discount record being DECLARED (what came off).\n  A FLAT line stating no gross is a RATE line since ruling 189 (spec S4): it\n  prices from its rates through `computeLineMoney`, never here.\n\nEither way:\n\n- `subtotal_discounted_cents` = the net CFS pays;\n- `taxes` re-amounted on the net from each tax's own rate and type\n  (`computeItemTaxAmountCents`, the one tax-amount author) — `[]` on an exempt\n  side;\n- `total_cents` = net + Σ taxes.\n\nThe twin of stage 4's fee arm: a declared amount stored as the line's money,\nnot re-derived from rates. Exported for the projectors that default a bill\nor credit line from its purchase line before the writer prices the document.\n\nBasis-blind: a LINKED time line's stated amount is Xero's money and prices\nthrough here too.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25498,6 +25536,14 @@
           "name": "purchaseTotals",
           "signature": "purchaseTotals(items: readonly PurchaseRow[]): InitiatorTotalsType",
           "doc": "**Stage 5 for a PURCHASE, on its own: its `totals`** (one-document-model D5,\nruling 62) — the initiator's shape, folded from the STORED lines and never a\nre-price, as {@link sumPricedLines} folds an order's. The purchase writers call\nit on the lines `priceDocument` has just priced.\n\nOver `purchaseLines` (a kit header carries no money of its own, ruling 3), as\nthe document refine sums them, so the stored totals satisfy it by\nconstruction. `replacement_total_cents` is the subrent lines' replacements,\nuntaxed: the payable side charges no tax.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "requantifyPart",
+          "signature": "requantifyPart(row: R, quantity: number, source: PartSourceLike | undefined, scaleFrom?: number): R",
+          "doc": "**A billing row at a new `quantity` with its money to match** — the\nsubstitution offset's `requantify` (D2), both sides (spec C4). A RATE row is\nquantity alone: the pricer derives its money. A STATED row still exactly its\nslice of `source` (the initiator line) becomes its slice at the new count; one\nwhose own money is its own and lost units (`scaleFrom`, a spent entry) has its\nstored money rescaled over the new count; anything else keeps its money.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25522,6 +25568,14 @@
           "name": "sumPricedLines",
           "signature": "sumPricedLines(items: readonly LineItem[]): DocumentTotalsCore",
           "doc": "**Stage 5 on its own: a document's totals as the SUM of its stored line\nmoney.** Nothing is re-priced.\n\n`priceDocument` calls it after pricing. It is exported for the reader that\nmust total a document without pricing it — the manager when no tax catalog is\nloaded, where the contract is \"fold the stored lines, never re-price\".\n\n- `subtotal_cents`, `subtotal_discounted_cents` and the discount are summed\n  over PRE-TAX lines only, as the totals always have been.\n- `taxes` aggregates each pre-tax line's stored taxes by NAME, in first-seen\n  order, dropping zero amounts.\n- `transaction_fees` aggregates fee lines' stored `total_cents`.\n- `total_cents` = `subtotal_discounted` + Σ tax + Σ fees.\n\n⚠️ A percent fee line stored before D6 carries `total_cents: 0`, so a document\nnot yet re-priced by `priceDocument` folds with no fee. Re-pricing it stores\nthe amount (api-cloudrun#997 step 7 re-prices the two live ones).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "withPart",
+          "signature": "withPart(row: R, quantity: number, part: PartMoney, from: number | null): R",
+          "doc": "A row at `quantity` units carrying `part` as a STATED part (D7): its gross,\nits discount cents, `units_from` when given, and — on a payable row, which\nstores it — its net as `amount_cents`.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25616,6 +25670,12 @@
           "name": "RateSnapshot",
           "declaration": "interface RateSnapshot {\n  rate_key: string;\n  amount_cents: number;\n}",
           "doc": "A rate the line priced with — the snapshot a line owns (`price.rates`)."
+        },
+        {
+          "kind": "interface",
+          "name": "StatedPricedLineLike",
+          "declaration": "interface StatedPricedLineLike {\n  quantity: number;\n  price: typeLiteral;\n}",
+          "doc": "The line surface {@link statedLineSubtotals} reads: a stated gross and its discount."
         },
         {
           "kind": "interface",
@@ -25745,7 +25805,7 @@
           "kind": "function",
           "name": "payableStoredMoney",
           "signature": "payableStoredMoney(line: PayableMoneyLineLike): StoredLineMoney",
-          "doc": "A stored payable line's money as a part slices it (D7): its stated GROSS\n(`price.stated_cents`, required on a flat line since core beta B) and its\ndiscount in cents. A TIME line slices its stored net with no discount: its\nmoney is its counts priced (or Xero's, linked), so what a part takes of it is\na share of that.",
+          "doc": "A stored payable line's money as a part slices it (D7): its stated GROSS\n(`price.stated_cents`) and its discount in cents. A TIME line slices its\nstored net with no discount: its money is its counts priced (or Xero's,\nlinked), so what a part takes of it is a share of that.\n\n⚠️ **A STATED line only** since ruling 189: a flat line may be a RATE line,\nwhose parts price by the formula at `units_from` (ruling 174), never by a\nslice. Ask the one part door, `billingRowPart`\n(`@cfs/core/utils/price-document`), which dispatches on the line's kind.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25802,6 +25862,14 @@
           "name": "statedLine",
           "signature": "statedLine(statedCents: number, quantity: number): LineMoneyLike",
           "doc": "**A PSEUDO-line: `statedCents` over `quantity` units, undiscounted** — for a\npartition of an amount that is not one line's money (one-document-model 6e-0b1\nS3): a landed cost over its units, a bill split's leftover over its group, a\nbilled POOL over its units, a row's money rescaled to a new count. Named so a\nreader can tell it from a real line. `lineUnitsCents(statedLine(a, q), b, k)`\nis `round(a·k ÷ q) − round(a·b ÷ q)`, defined past `q`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "statedLineSubtotals",
+          "signature": "statedLineSubtotals(line: StatedPricedLineLike): typeLiteral",
+          "doc": "**THE stated pricer — one for both sides** (one-document-model ruling 189,\nspec S3): a STATED line's two subtotals from its gross and its discount CENTS.\n\n- `subtotal_cents` = `price.stated_cents`, the gross;\n- `subtotal_discounted_cents` = gross − `discount.amount_cents` (D7): a\n  subtraction, so a rate is never re-applied to a line whose cents are stored\n  (a part's cents are its slice of its source's, `sliceStoredMoney`);\n- a discount carrying no cents is the RATE EVENT itself (a line just stated,\n  or a client's input, which carries terms only): the terms become cents once,\n  by {@link applyDiscountTerms}.\n\nA discount larger than the gross prices to a negative net: refusing it is the\nline-edit module's (ruling 195), and a stored one (2 paid prod invoice lines)\nmust still price. Reached by `calculateItemSubtotal` (every receivable reader)\nand the payable `priceStatedTotalLine`; Ratchet E counts its call sites.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -25966,14 +26034,6 @@
         },
         {
           "kind": "function",
-          "name": "partMoney",
-          "signature": "partMoney(line: PayableMoneyLineLike & typeLiteral, from: number, to: number): PartMoney",
-          "doc": "**Units `(from, to]` of a source line, as a part stores them** (D7): its\nslices of the source's stored gross and discount cents, and the net as their\ndifference — the one part door ({@link billingRowPart}). A part never\nre-applies a rate, so the parts of a line sum to it exactly on every figure\nand each part's own `net = gross − discount` holds.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
           "name": "payableScopedSync",
           "signature": "payableScopedSync(prev: Purchase, next: Purchase): typeLiteral",
           "doc": "**The payable side of the scoped initiator → billing sync**\n(`syncScopedDestinations`, `@cfs/core/utils/invoices`): the purchase → bill\nsync IS the order → invoice sync, with a `purchase` scope divider, the\n`path_source_item` move pointer, {@link projectPurchaseRowForBill} and the\npurchase ↔ bill field set (one-document-model Phase 3).\n\nBuilt per sync over the two purchase revisions it converts\n({@link asEngineSource}): the engine hands its projector the converted rows,\nand the side maps each back to the purchase row it came from. A line closed to\n0 is removed (ruling 47), so an overridden bill row that billed it keeps no\npointer, as an invoice row whose order line was removed keeps none.",
@@ -25984,7 +26044,7 @@
           "kind": "function",
           "name": "projectPurchaseLineForBill",
           "signature": "projectPurchaseLineForBill(item: PurchaseItem, quantity: number): Record<string, unknown>",
-          "doc": "**A purchase line in a BILL line's shape, over the shared keys only, fitted\nto a bill row's quantity** — the purchase ↔ bill DIFF's projection\n(`DIFF_SIDES.payable.line.projectLine`, `utils/documentDiff.ts`).\n\n⚠️ Not the sync's: the sync projects the whole line from unit 0\n({@link projectPurchaseRowForBill}) and merges `quantity`, the money and\n`out_of_service` as one `flat_money` group, so a partial bill keeps all of\nthem. The diff ignores groups, so it fits the projection to the row's\nquantity instead: the discount record becomes that quantity's share and\n`out_of_service` that quantity's records, and only a row naming different\nrecords from its purchase line reports.",
+          "doc": "**A purchase line in a BILL line's shape, over the shared keys only, fitted\nto a bill row's quantity** — the purchase ↔ bill DIFF's projection\n(`DIFF_SIDES.payable.line.projectLine`, `utils/documentDiff.ts`).\n\n⚠️ Not the sync's: the sync projects the whole line from unit 0\n({@link projectPurchaseRowForBill}) and merges `quantity`, the money and\n`out_of_service` as one `stated_total` group, so a partial bill keeps all of\nthem. The diff ignores groups, so it fits the projection to the row's\nquantity instead: the discount record becomes that quantity's share and\n`out_of_service` that quantity's records, and only a row naming different\nrecords from its purchase line reports.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -26000,7 +26060,7 @@
           "kind": "function",
           "name": "projectPurchaseRowForBill",
           "signature": "projectPurchaseRowForBill(row: PurchaseRow, uidPurchase: string): PurchaseDocumentRow",
-          "doc": "**A purchase row in a BILL's shape, under its purchase divider** — the\npayable `ScopedSyncSide.project`. A divider is the purchase's own, re-pathed;\na line is the WHOLE line as a bill would bill it from nothing\n({@link projectPurchaseLineToBillLine} at its full quantity, from unit 0), so\nan untouched bill line compares equal to it and follows it, exactly as an\nuntouched invoice line follows its order line. A partial bill differs on\n`{quantity, amount_cents}` and keeps both (`shared_group: \"flat_money\"`).",
+          "doc": "**A purchase row in a BILL's shape, under its purchase divider** — the\npayable `ScopedSyncSide.project`. A divider is the purchase's own, re-pathed;\na line is the WHOLE line as a bill would bill it from nothing\n({@link projectPurchaseLineToBillLine} at its full quantity, from unit 0), so\nan untouched bill line compares equal to it and follows it, exactly as an\nuntouched invoice line follows its order line. A partial bill differs on\n`{quantity, amount_cents}` and keeps both (`shared_group: \"stated_total\"`).",
           "paramTags": [],
           "returnsTag": null
         },
@@ -26353,7 +26413,7 @@
           "kind": "function",
           "name": "landedCostWeightCents",
           "signature": "landedCostWeightCents(line: Pick<PurchaseSaleItem, \"amount_cents\" | \"quantity\" | \"price\">, received: number): number",
-          "doc": "A line's weight when one landed amount is spread over several lines: the\nvalue still to arrive, the net slice of `(received, quantity]` (`sliceStoredMoney`). Units\nalready received carry none of it, because the entry only ever prices units\nreceived after it.",
+          "doc": "A line's weight when one landed amount is spread over several lines: the\nvalue still to arrive, the net of `(received, quantity]` (`billingRowPart`). Units\nalready received carry none of it, because the entry only ever prices units\nreceived after it.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -27197,7 +27257,7 @@
           "kind": "variable",
           "name": "SHARED_GROUP_META_KEY",
           "declaration": "const SHARED_GROUP_META_KEY: \"shared_group\";",
-          "doc": "The meta key that puts a shared scalar — or a `shared: \"value\"` field — in a\nmerge GROUP: `.meta({ propagate: true, shared_group: \"flat_money\" })`. Every\nmember of a group sits in the same row; see {@link SharedField.group}."
+          "doc": "The meta key that puts a shared scalar — or a `shared: \"value\"` field — in a\nmerge GROUP: `.meta({ propagate: true, shared_group: \"stated_total\" })`. Every\nmember of a group sits in the same row; see {@link SharedField.group}."
         },
         {
           "kind": "variable",
@@ -27286,7 +27346,7 @@
           "kind": "function",
           "name": "purchaseReceiptSharedFields",
           "signature": "purchaseReceiptSharedFields(): PurchaseReceiptSharedFields",
-          "doc": "{@link PurchaseReceiptSharedFields}, classified once per process, over\n`classifySharedFields(PurchaseSchema, PurchaseReceiptSchema)`.\n\nAs on the fulfillment, `PurchaseReceipt.destinations` is the purchase's own\npair schema, so the three arguments to {@link mergeSharedFields} are already in\nthe receipt's shape and pairs match on `pair.uid` alone.\n\n⚠️ **`quantity` keeps the purchase's `flat_money` group, and on this pair the\ngroup has ONE member.** The receipt carries no `amount_cents` or\n`out_of_service`, so the group decides the physical quantity alone, which is\nexactly the per-field rule: an untouched row follows the purchase, a row the\nreceiver edited keeps its count.\n\n⚠️ **`number`, `status` and `reference` are homonyms here and the merge skips\nthem**: the purchase tags them `propagate: false` for its bills, and a tag on\neither schema decides. On a receipt they are copies of the purchase's, so the\nwriter sets them unconditionally, as it does a fulfillment's `number` and\n`status`.",
+          "doc": "{@link PurchaseReceiptSharedFields}, classified once per process, over\n`classifySharedFields(PurchaseSchema, PurchaseReceiptSchema)`.\n\nAs on the fulfillment, `PurchaseReceipt.destinations` is the purchase's own\npair schema, so the three arguments to {@link mergeSharedFields} are already in\nthe receipt's shape and pairs match on `pair.uid` alone.\n\n⚠️ **`quantity` keeps the purchase's `stated_total` group, and on this pair the\ngroup has ONE member.** The receipt carries no `amount_cents` or\n`out_of_service`, so the group decides the physical quantity alone, which is\nexactly the per-field rule: an untouched row follows the purchase, a row the\nreceiver edited keeps its count.\n\n⚠️ **`number`, `status` and `reference` are homonyms here and the merge skips\nthem**: the purchase tags them `propagate: false` for its bills, and a tag on\neither schema decides. On a receipt they are copies of the purchase's, so the\nwriter sets them unconditionally, as it does a fulfillment's `number` and\n`status`.",
           "paramTags": [],
           "returnsTag": null
         },

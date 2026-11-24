@@ -769,7 +769,7 @@ function lineFields(
  * judged. Side-blind: a path the side's classification lacks never occurs (an
  * order line has neither money key).
  *
- * ⚠️ `amount_cents` is `propagated` in the payable `flat_money` group, not
+ * ⚠️ `amount_cents` is `propagated` in the payable `stated_total` group, not
  * `derived` (`schemas/purchase.ts`): the sync merges the group as one unit and
  * a linked line's amount is Xero's. So naming it here is load-bearing. It is
  * also why one field list per side reproduces the sync's per-LINE list, which
@@ -800,7 +800,7 @@ const ACCOUNT_LINE_FIELDS: ReadonlySet<string> = new Set(["quantity", "amount_ce
  * - append the side's own-money check (ruling 33's second domain fact).
  *
  * It ignores `shared_group` deliberately, a named difference from the merge:
- * the payable `flat_money` group's `out_of_service` IS compared (the projection
+ * the payable `stated_total` group's `out_of_service` IS compared (the projection
  * fits it to the row's quantity, so only a row naming different records
  * reports), while `quantity` and the money are the account's.
  */
@@ -1257,7 +1257,7 @@ const DIFF_SIDES: Readonly<Record<Side, DiffSideData>> = {
         : purchaseOutOfServiceInputs(initiator as Purchase, custodyDoc as PurchaseReceipt | undefined, s.outOfService, s.bills ?? []),
     line: {
       // Fitted to the bill row's quantity, unlike the sync's whole-line
-      // projection: the diff ignores the `flat_money` group, so a partial
+      // projection: the diff ignores the `stated_total` group, so a partial
       // replacement bill would otherwise report `out_of_service` on every row.
       projectLine: (initiatorLine, billingLine) =>
         projectPurchaseLineForBill(initiatorLine as unknown as PurchaseItem, billingLine.quantity ?? 0) as unknown as LineItem,

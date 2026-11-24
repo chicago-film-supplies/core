@@ -67,7 +67,7 @@ import {
   TierCountSchema,
   type TierCountType,
 } from "./price-formula.ts";
-import { checkFormulaLineMoney } from "./_line-money.ts";
+import { checkFormulaLineMoney, StatedCore } from "./_line-money.ts";
 
 export const ORDER_STATUSES = [
   "draft", "quoted", "reserved", "active", "complete", "canceled",
@@ -1975,6 +1975,13 @@ export interface ItemPriceType {
   discount?: DiscountInputType | null;
   taxes?: Array<{ uid: string }>;
   total_cents?: number;
+  /**
+   * The line's stated GROSS over its quantity (ruling 189) — set makes a STATED
+   * line, omitted or `null` a RATE line priced from `rates` (ruling 190: a
+   * submitted row is the row). The writer turns the discount terms into cents
+   * once against it (`applyDiscountTerms`, D7).
+   */
+  stated_cents?: number | null;
 }
 
 /** Zod schema for item price breakdown (input). */
@@ -1991,6 +1998,9 @@ export const ItemPrice: z.ZodType<ItemPriceType> = z.object({
   discount: DiscountInput.nullable().optional(),
   taxes: z.array(z.object({ uid: FirestoreId })).optional(),
   total_cents: z.int().optional(),
+  // Untagged: an input declares its own twin of `StatedCore` (the payable
+  // inputs' precedent); the merge and the Xero hash read the stored schema.
+  stated_cents: z.int().min(0).nullable().optional(),
 }).superRefine(checkLinePriceInput);
 
 /**
@@ -2439,6 +2449,14 @@ export interface OrderDocItemPriceType {
    */
   taxes_base?: TaxRefType[];
   total_cents: number;
+  /**
+   * The line's stated GROSS over its `quantity`, before `discount` — a STATED
+   * line (one-document-model ruling 189; `StatedCore`, `schemas/_line-money.ts`).
+   * Absent or `null` is a RATE line, priced from `rates × counts`: every line
+   * stored before ruling 189. Set, `subtotal_cents` is this total and the net is
+   * it less `discount.amount_cents` (D7), and a quantity edit keeps the total.
+   */
+  stated_cents?: number | null;
 }
 
 export const OrderDocItemPrice: z.ZodType<OrderDocItemPriceType> = z.strictObject({
@@ -2463,6 +2481,8 @@ export const OrderDocItemPrice: z.ZodType<OrderDocItemPriceType> = z.strictObjec
   // this the pre-override snapshot would collide with the live `taxes`.
   taxes_base: z.array(TaxRef).optional().meta({ label: "Base Tax", derived: true }),
   total_cents: z.int().meta({ column: true, label: "Total", derived: true }),
+  // Appended LAST so no existing column moves (core CLAUDE.md § Display columns).
+  ...StatedCore,
 }).superRefine((price, ctx) => checkLinePrice(price, ctx));
 
 /**

@@ -50,6 +50,8 @@ import type { LineItem } from "./orders.ts";
 import type { TierCount } from "./price-formulas.ts";
 import { chicagoDayAtTimeOf } from "./dates.ts";
 import { projectOrderItemToInvoiceItem, toInvoiceDestinationPair } from "./invoices.ts";
+import { lineKindOf } from "../schemas/_line-money.ts";
+import { partOf, type PartSourceLike, withPart } from "./price-document.ts";
 import { projectPurchaseLineToBillLine, purchaseScopeDivider } from "./purchase-documents.ts";
 import {
   type AccountedInvoice,
@@ -104,10 +106,18 @@ const RECEIVABLE_REMAINDER: RemainderSide<"receivable"> = {
   scopeDivider: (order) =>
     ({ uid: order.uid, type: "order", name: `Order #${order.number}`, description: "", path: [order.uid] }) as InvoiceDocItemType,
   projectDivider: (item, scope) => projectOrderItemToInvoiceItem(item, scope),
-  projectLine: (item, scope, quantity, from) => ({
-    ...projectOrderItemToInvoiceItem({ ...item, quantity } as LineItem, scope),
-    ...(from > 0 ? { units_from: from } : {}),
-  }) as InvoiceDocItemType,
+  projectLine: (item, scope, quantity, from) => {
+    const line = {
+      ...projectOrderItemToInvoiceItem({ ...item, quantity } as LineItem, scope),
+      ...(from > 0 ? { units_from: from } : {}),
+    } as InvoiceDocItemType;
+    // A STATED order line's part carries its slice of the line's stored gross and
+    // cents through the one part door (D7, spec C5), never the whole gross. A
+    // rate part needs nothing: the pricer prices its formula at `units_from`.
+    if (item.price == null || lineKindOf(item as { price: { stated_cents?: number | null } }) === "rate") return line;
+    const part = partOf(item as unknown as PartSourceLike, from, from + quantity);
+    return withPart(line as unknown as PartSourceLike, quantity, part, from > 0 ? from : null) as unknown as InvoiceDocItemType;
+  },
   extensionLine: (billed, item, scope, path, quantity, counts) => {
     const projected = projectOrderItemToInvoiceItem({
       ...billed,

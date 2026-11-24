@@ -821,8 +821,6 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "purchaseBillingFold",
     "purchaseInitiator",
     "billedPoolCreditMoney",
-    // A part's money is a writer's step (D7): a render reads the stored line.
-    "partMoney",
     "billLineCredited",
     "billLineCreditMoney",
     "purchaseLineCovers",
@@ -930,6 +928,14 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "sumPricedLines",
     // Stage 5 for a purchase (D5), the same fold: a template holds the stored `totals`.
     "purchaseTotals",
+    // A part's money, and the sync's part follow (D7, ruling 189): writer steps.
+    // A render reads the stored line.
+    "partOf",
+    "isExactPart",
+    "withPart",
+    "followStatedPart",
+    "followStatedParts",
+    "requantifyPart",
   ],
   "tax-classes": [
     "deriveLineTaxClass",
@@ -1092,6 +1098,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "priceFormulaRefOf",
     "meterUnits",
     "priceFromFormula",
+    // The one stated pricer (ruling 189): a render prints the stored money it wrote.
+    "statedLineSubtotals",
     "rateInForce",
     "snapshotRates",
     "statedUnits",

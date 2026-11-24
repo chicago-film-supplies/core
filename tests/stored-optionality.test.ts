@@ -93,20 +93,20 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   //    null = a bill with no due date, a value = the mirror. Tighten to bare
   //    `.nullable()` once the dev and prod backfills have run.
   ["purchase-bills.due_date_fs", "mid-expand"],
-  // ── mid-expand — one-document-model 6e-0b1 S2 (core beta A). Absent = a line
-  //    written before the backfill; null = a time line or one stating no total;
-  //    a value = the line's stated gross. The backfill stamps the key on every
-  //    payable line (a full scan, not `orderBy`: these are array members); then
-  //    tighten to bare `.nullable()` in beta B.
-  ["purchases.items[].price.stated_cents", "mid-expand"],
-  ["purchase-bills.items[].price.stated_cents", "mid-expand"],
-  ["purchase-credits.items[].price.stated_cents", "mid-expand"],
-  // ── mid-expand — one-document-model ruling 145 (6e-0b3 J9). The receivable
-  //    credit line's twin of the three above: a value = the stated gross a Xero
-  //    import wrote; absent = every line written before it. The 6e-0b3 window's
-  //    migration stamps `null` on every stored credit-note line (it rewrites each
-  //    note anyway), then tighten to bare `.nullable()`.
-  ["credit-notes.items[].price.stated_cents", "mid-expand"],
+  // ── `price.stated_cents` — ONE declaration on every priced line of every grain
+  //    (`StatedCore`, `schemas/_line-money.ts`; one-document-model rulings 39,
+  //    145, 189). Absent and null are the same fact, a RATE line: the receivable
+  //    writers omit the key on a rate line rather than stamp `null` (spec S1: no
+  //    stored line changes, nothing is backfilled), so the instance shared with the
+  //    payable lines cannot be bare `.nullable()`. Array members, so no `orderBy`
+  //    census reaches them; `api-cloudrun/scripts/census-line-echo.ts` counted
+  //    them by a full scan (2026-11-24: 0 flat payable lines without a value).
+  ["purchases.items[].price.stated_cents", "array-member-uncensusable"],
+  ["purchase-bills.items[].price.stated_cents", "array-member-uncensusable"],
+  ["purchase-credits.items[].price.stated_cents", "array-member-uncensusable"],
+  ["credit-notes.items[].price.stated_cents", "array-member-uncensusable"],
+  ["orders.items[].price.stated_cents", "array-member-uncensusable"],
+  ["invoices.items[].price.stated_cents", "array-member-uncensusable"],
   // The note's `destinations` carry the invoice pair's shape, so its array
   // members' nullable-optional leaves come with it.
   ["credit-notes.destinations[].collection.address.address_coordinates", "array-member-uncensusable"],

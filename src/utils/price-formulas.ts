@@ -630,6 +630,8 @@ export {
   priceFromFormula,
   type RateSnapshot,
   statedLine,
+  statedLineSubtotals,
+  type StatedPricedLineLike,
   statedOf,
 } from "../schemas/_line-money.ts";
 import type { RateSnapshot } from "../schemas/_line-money.ts";

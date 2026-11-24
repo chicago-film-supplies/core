@@ -140,8 +140,8 @@ Deno.test("purchaseReceiptSharedFields: classified once, grouped by merge unit",
     "propagated type",
     "propagated name",
     "propagated description",
-    // The purchase's `flat_money` group, with one member on this pair.
-    "propagated quantity [flat_money]",
+    // The purchase's `stated_total` group, with one member on this pair.
+    "propagated quantity [stated_total]",
     "propagated zero_priced",
     "propagated quantity_per_parent",
     // An exchange line's take-back list (ruling 81): merged WHOLE, three-way,

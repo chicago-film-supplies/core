@@ -219,6 +219,50 @@ export function formulaPartMoney(
  */
 export const UnitsFromField: z.ZodType<number | null | undefined> = z.int().min(0).nullable().optional().meta({ seed: false });
 
+/**
+ * **The merge group a line's stated money moves in** (one-document-model rulings
+ * 189, 198): `quantity` and `price.stated_cents` on every grain, plus the payable
+ * `amount_cents` and a replacement line's `out_of_service`. A stated total is a
+ * TOTAL, so a quantity that followed its source beside a total that stayed (or the
+ * reverse) would bill the whole line's money for part of its units: the members
+ * follow the source together, or are kept together. On a rate line `stated_cents`
+ * is `null` on both documents, so the group decides exactly what `quantity` alone
+ * did. Named `flat_money` until ruling 198, when the receivable side joined it.
+ */
+export const STATED_TOTAL_GROUP = "stated_total";
+
+/**
+ * **`price.stated_cents` — a line's stated GROSS over its quantity, before
+ * `discount`** (one-document-model rulings 39, 189). ONE instance on every
+ * priced line of every grain: order, invoice, credit note, purchase, bill and
+ * supplier credit (`tests/item-shape-parity.test.ts` asserts the identity).
+ *
+ * - **Absent or `null`:** a RATE line, priced from `rates × counts`.
+ * - **Set:** a STATED line ({@link lineKindOf}). `subtotal_cents` is the stated
+ *   gross and the net is `stated_cents − discount.amount_cents` (D7): the
+ *   discount's CENTS are the money, turned from the rate once at the operator's
+ *   edit (`applyDiscountTerms`), and a part of the line slices the stored gross
+ *   and cents (`sliceStoredMoney`). A stated total governs a line that also
+ *   carries rates (a LINKED time line: Xero's money).
+ *
+ * In the {@link STATED_TOTAL_GROUP} merge group with `quantity`: it is a total,
+ * so it follows or is kept with the quantity it is over. `xero: true` because a
+ * rate ↔ stated flip with an unchanged net changes the Xero body
+ * (`unit_amount` → `exact_split`) while moving no other tagged key.
+ *
+ * ⚠️ Not on the `@cfs/core/schemas` barrel: no consumer assembles a price from
+ * parts. An INPUT schema declares its own untagged twin.
+ */
+export const StatedCore: { stated_cents: z.ZodType<number | null | undefined> } = {
+  stated_cents: z.int().min(0).nullable().optional().meta({
+    column: true,
+    label: "Stated",
+    propagate: true,
+    shared_group: STATED_TOTAL_GROUP,
+    xero: true,
+  }),
+};
+
 function moneyAt(line: LineMoneyLike, k: number): { gross: bigint; net: bigint } {
   assertUnits(k);
   const stated = statedOf(line);
@@ -326,20 +370,24 @@ export interface MoneySlice {
 
 /**
  * A stored payable line's money as a part slices it (D7): its stated GROSS
- * (`price.stated_cents`, required on a flat line since core beta B) and its
- * discount in cents. A TIME line slices its stored net with no discount: its
- * money is its counts priced (or Xero's, linked), so what a part takes of it is
- * a share of that.
+ * (`price.stated_cents`) and its discount in cents. A TIME line slices its
+ * stored net with no discount: its money is its counts priced (or Xero's,
+ * linked), so what a part takes of it is a share of that.
  *
- * @throws Error on a flat line that states no gross: there is nothing to slice,
- * and reading its net as the gross would slice a discounted line's money wrong.
+ * ⚠️ **A STATED line only** since ruling 189: a flat line may be a RATE line,
+ * whose parts price by the formula at `units_from` (ruling 174), never by a
+ * slice. Ask the one part door, `billingRowPart`
+ * (`@cfs/core/utils/price-document`), which dispatches on the line's kind.
+ *
+ * @throws Error on a flat line that states no gross (a rate line): there is
+ * nothing to slice, and reading its net as the gross would be wrong.
  */
 export function payableStoredMoney(line: PayableMoneyLineLike): StoredLineMoney {
   if (line.price.price_formula?.basis === "time") {
     return { quantity: line.quantity, gross_cents: line.amount_cents ?? 0, discount_cents: 0 };
   }
   const gross = line.price.stated_cents ?? null;
-  if (gross === null) throw new Error("a flat payable line states its gross (price.stated_cents)");
+  if (gross === null) throw new Error("payableStoredMoney: a flat RATE line has no stated gross to slice; use billingRowPart");
   return { quantity: line.quantity, gross_cents: gross, discount_cents: line.price.discount?.amount_cents ?? 0 };
 }
 
@@ -385,6 +433,50 @@ export function applyDiscountTerms(
   return { amount_cents: grossCents - off, discount: { rate: terms.rate, type: terms.type, amount_cents: off } };
 }
 
+/** The line surface {@link statedLineSubtotals} reads: a stated gross and its discount. */
+export interface StatedPricedLineLike {
+  quantity: number;
+  price: {
+    stated_cents?: number | null;
+    /** `amount_cents` set is the STORED cents (D7); absent, the terms are applied once. */
+    discount?: (FormulaDiscount & { amount_cents?: number }) | null;
+  };
+}
+
+/**
+ * **THE stated pricer — one for both sides** (one-document-model ruling 189,
+ * spec S3): a STATED line's two subtotals from its gross and its discount CENTS.
+ *
+ * - `subtotal_cents` = `price.stated_cents`, the gross;
+ * - `subtotal_discounted_cents` = gross − `discount.amount_cents` (D7): a
+ *   subtraction, so a rate is never re-applied to a line whose cents are stored
+ *   (a part's cents are its slice of its source's, `sliceStoredMoney`);
+ * - a discount carrying no cents is the RATE EVENT itself (a line just stated,
+ *   or a client's input, which carries terms only): the terms become cents once,
+ *   by {@link applyDiscountTerms}.
+ *
+ * A discount larger than the gross prices to a negative net: refusing it is the
+ * line-edit module's (ruling 195), and a stored one (2 paid prod invoice lines)
+ * must still price. Reached by `calculateItemSubtotal` (every receivable reader)
+ * and the payable `priceStatedTotalLine`; Ratchet E counts its call sites.
+ *
+ * @throws Error on a rate line (no `stated_cents`) or a non-integer gross.
+ */
+export function statedLineSubtotals(line: StatedPricedLineLike): {
+  subtotal_cents: number;
+  subtotal_discounted_cents: number;
+} {
+  const gross = line.price.stated_cents ?? null;
+  if (gross === null) throw new Error("statedLineSubtotals: a rate line states no gross (price.stated_cents)");
+  if (!Number.isInteger(gross)) throw new Error(`price.stated_cents is integer cents, got ${gross}`);
+  const discount = line.price.discount ?? null;
+  if (discount === null) return { subtotal_cents: gross, subtotal_discounted_cents: gross };
+  const off = typeof discount.amount_cents === "number"
+    ? discount.amount_cents
+    : applyDiscountTerms(gross, line.quantity, { rate: discount.rate, type: discount.type }).discount!.amount_cents;
+  return { subtotal_cents: gross, subtotal_discounted_cents: gross - off };
+}
+
 /**
  * Does a line's stored money equal what its own snapshot reproduces? The
  * single-document check every formula-priced line runs (ruling 8): `rates`,
@@ -417,7 +509,7 @@ export interface FormulaPricedLineLike {
     price_formula?: unknown;
     rates?: readonly RateSnapshot[];
     counts?: readonly TierCountLike[];
-    discount?: FormulaDiscount | null;
+    discount?: (FormulaDiscount & { amount_cents?: number }) | null;
     stated_cents?: number | null;
     subtotal_cents?: number;
     subtotal_discounted_cents?: number;
@@ -444,18 +536,13 @@ export function checkFormulaLineMoney(
   let expected: { subtotal_cents: number; subtotal_discounted_cents: number };
   try {
     // A stated total governs a line that carries one (`statedOf`): its money is
-    // the stated gross and the net `lineMoneyAtCents` derives from it.
+    // the stated gross less its discount CENTS (D7, `statedLineSubtotals`), so a
+    // part holding its slice of its source's cents is not re-derived from a rate.
     const quantity = item.quantity;
     const stated = price.stated_cents ?? null;
     expected = stated === null
       ? formulaPartMoney(price.rates, price.counts, item.units_from ?? 0, quantity, price.discount ?? null)
-      : {
-        subtotal_cents: stated,
-        subtotal_discounted_cents: lineMoneyAtCents(
-          { quantity, price: { rates: price.rates, counts: price.counts, discount: price.discount ?? null, stated_cents: stated } },
-          quantity,
-        ),
-      };
+      : statedLineSubtotals({ quantity, price: { stated_cents: stated, discount: price.discount ?? null } });
   } catch (e) {
     ctx.addIssue({ code: "custom", path: ["price", "counts"], message: (e as Error).message });
     return;

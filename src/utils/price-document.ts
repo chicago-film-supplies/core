@@ -91,6 +91,7 @@ import {
   type LinePricingOptions,
   type PriceModifier,
   type PriceObject,
+  PriceRefusalError,
   type StructuralItem,
   type Tax,
 } from "./orders.ts";
@@ -105,12 +106,15 @@ import {
 } from "./price-formulas.ts";
 import { isPaidUp } from "../schemas/_invoice-freeze.ts";
 import {
+  applyDiscountTerms,
   type FormulaDiscount,
   lineDiscountAtCents,
+  lineKindOf,
   type LineMoneyLike,
   lineUnitsCents,
   type MoneySlice,
   sliceStoredMoney,
+  statedLineSubtotals,
 } from "../schemas/_line-money.ts";
 import { pairItemsAcrossRebuild, type PathedItem } from "./item-pairing.ts";
 import { assignLineTaxes, type DocumentTaxContext, type UnreviewedTaxWarning } from "./taxes.ts";
@@ -245,19 +249,8 @@ export function statedChargeWindows(destinations: readonly ChargeWindowPair[]): 
   return out;
 }
 
-/**
- * A pricer refusal caused by the document it was handed — a time-formula line
- * under no pair, a percent fee line of quantity ≠ 1, a line under two extension
- * sections, a formula the context does not carry, a bad credit request — rather
- * than by a fault in the pricer. The API maps it to a 400; every other throw
- * from this module stays a 500.
- */
-export class PriceRefusalError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "PriceRefusalError";
-  }
-}
+/** Re-exported from `./orders.ts`, which declares it below the line pricer. */
+export { PriceRefusalError };
 
 /**
  * A date-extension section (#680, D7): every line whose `path` starts with
@@ -689,16 +682,17 @@ export interface StatedTotalLine {
  *
  * Two inputs, by what the line states:
  *
- * - **`price.stated_cents` set** (one-document-model ruling 39, D7): the GROSS.
- *   `subtotal_cents` = `stated_cents`; the net is `stated_cents −
- *   discount.amount_cents`, the declared discount CENTS, so a rate is never
- *   re-applied to a line — a part's cents are its slice of its source's.
- *   `amount_cents` is ignored here and re-derived by the caller.
+ * - **`price.stated_cents` set** (one-document-model ruling 39, D7): the GROSS,
+ *   priced by THE stated pricer both sides share (`statedLineSubtotals`, ruling
+ *   189): the net is `stated_cents − discount.amount_cents`, the declared
+ *   discount CENTS, so a rate is never re-applied to a line — a part's cents are
+ *   its slice of its source's. `amount_cents` is ignored here and re-derived by
+ *   the caller.
  * - **absent or `null`**, on a TIME line only (a linked bill's time line, whose
  *   `amount_cents` is Xero's net): `subtotal_cents` = net +
  *   `discount.amount_cents`, the discount record being DECLARED (what came off).
- *   A FLAT line that states no gross is refused (core beta B): its gross is its
- *   one money input.
+ *   A FLAT line stating no gross is a RATE line since ruling 189 (spec S4): it
+ *   prices from its rates through `computeLineMoney`, never here.
  *
  * Either way:
  *
@@ -715,23 +709,25 @@ export interface StatedTotalLine {
  * Basis-blind: a LINKED time line's stated amount is Xero's money and prices
  * through here too.
  *
- * @throws PriceRefusalError on a flat line that states no gross, and on a time
- * line that states neither a total nor an amount.
+ * @throws PriceRefusalError on a flat RATE line (it prices from its rates), and
+ * on a time line that states neither a total nor an amount.
  */
 export function priceStatedTotalLine(line: StatedTotalLine): LinePriceMoney {
   const stated = line.price.stated_cents ?? null;
   if (stated === null && line.price.price_formula.basis !== "time") {
-    throw new PriceRefusalError(`Line ${line.uid} is flat and states no gross (price.stated_cents)`);
+    throw new PriceRefusalError(`Line ${line.uid} is a flat RATE line (no price.stated_cents): it prices from its rates`);
   }
   let amount = line.amount_cents;
-  const discount = line.price.discount === null ? null : { ...line.price.discount };
+  let discount = line.price.discount === null ? null : { ...line.price.discount };
   let gross: number | null = null;
   if (stated !== null) {
-    // D7: the stated GROSS less its discount CENTS. A rate is never re-applied
-    // here: it became cents when the price was stated (`applyDiscountTerms`),
-    // and a part's cents are its slice of its source's (`sliceStoredMoney`).
-    amount = stated - (discount?.amount_cents ?? 0);
+    // D7: the stated GROSS less its discount CENTS, by the one stated pricer. A
+    // rate is never re-applied here: it became cents when the price was stated
+    // (`applyDiscountTerms`), and a part's cents are its slice of its source's.
+    const money = statedLineSubtotals({ quantity: line.quantity, price: { stated_cents: stated, discount } });
+    amount = money.subtotal_discounted_cents;
     gross = stated;
+    if (discount !== null) discount = { ...discount, amount_cents: gross - amount };
   }
   if (amount === null) throw new PriceRefusalError(`Line ${line.uid} states no amount`);
   const taxes = line.price.taxes.map((t) => ({
@@ -873,7 +869,20 @@ export interface FlatPayablePrice {
  */
 function payableLineMoney(item: LineItem, ctx: PayablePriceDocumentContext, pricing: Tax[], extension: boolean): LinePriceMoney {
   const price = item.price;
-  if (!price || price.price_formula?.basis !== "time") return statedLineMoney(item);
+  if (!price || price.price_formula?.basis !== "time") {
+    // A flat line stating no gross is a RATE line (ruling 189, spec S4): its
+    // `rates × counts` through the one line pricer, the AR flat line's shape
+    // (ruling 108), its net written back as the line's `amount_cents`.
+    if (price && lineKindOf({ price }) === "rate") {
+      if ((price.rates ?? []).length === 0) {
+        throw new PriceRefusalError(`Line ${item.uid} is flat and states neither its gross (price.stated_cents) nor its rates`);
+      }
+      const money = priceLine(item, pricing, extension);
+      item.amount_cents = money.subtotal_discounted_cents;
+      return money;
+    }
+    return statedLineMoney(item);
+  }
   if (ctx.document.kind === "purchase") {
     const discount = price.discount ? { ...price.discount, amount_cents: 0 } : null;
     return { subtotal_cents: 0, subtotal_discounted_cents: 0, discount, taxes: [], total_cents: 0 };
@@ -1161,6 +1170,165 @@ export interface PartMoney {
   stated_cents: number;
   /** The source's discount TERMS, with the part's slice of its discount cents; `null` when it has none. */
   discount: DiscountType | null;
+}
+
+// ── A part of an initiator line, both sides (ruling 189, spec S2 / C4 / C5) ──
+
+/** A source line a part is cut from: either side's, rate or stated. */
+export type PartSourceLike = BillingRowMoneyLike & { price: { discount: DiscountType | null } };
+
+/**
+ * **Units `(from, to]` of a source line, as a part stores them** (D7), on both
+ * sides: the part's gross and discount cents through the one part door
+ * ({@link billingRowPart}), its net their difference, and the source's discount
+ * TERMS carrying the part's cents. A part never re-applies a rate, so the parts
+ * of a line sum to it exactly on every figure.
+ */
+export function partOf(line: PartSourceLike, from: number, to: number): PartMoney {
+  const slice = billingRowPart(line, from, to);
+  const terms = line.price.discount;
+  return {
+    amount_cents: slice.net_cents,
+    stated_cents: slice.gross_cents,
+    discount: terms === null ? null : { ...terms, amount_cents: slice.discount_cents },
+  };
+}
+
+/**
+ * **Is a stored row's money exactly `part`?** — the one untouched-part
+ * predicate, both sides: the row's own gross and discount cents (read through
+ * {@link billingRowPart} over its whole quantity, so a rate row and a stated row
+ * answer alike) equal the part's. The net follows from the two.
+ */
+export function isExactPart(row: PartSourceLike, part: PartMoney): boolean {
+  const own = billingRowPart(row, 0, row.quantity);
+  return own.gross_cents === part.stated_cents && own.discount_cents === (part.discount?.amount_cents ?? 0);
+}
+
+/** A row a part is written onto: a billing row of either side. */
+type PartRow = PartSourceLike & { units_from?: number | null; amount_cents?: number | null };
+
+/**
+ * A row at `quantity` units carrying `part` as a STATED part (D7): its gross,
+ * its discount cents, `units_from` when given, and — on a payable row, which
+ * stores it — its net as `amount_cents`.
+ */
+export function withPart<R extends PartRow>(row: R, quantity: number, part: PartMoney, from: number | null): R {
+  return {
+    ...row,
+    quantity,
+    ...("amount_cents" in row ? { amount_cents: part.amount_cents } : {}),
+    ...(from !== null ? { units_from: from } : {}),
+    price: { ...row.price, stated_cents: part.stated_cents, discount: part.discount },
+  };
+}
+
+/**
+ * A stated part turned into a RATE part of a source that is now a rate line:
+ * the gross key goes, the terms stay without cents (the pricer derives them at
+ * `units_from`, ruling 174), and the money is the pricer's to restate.
+ */
+function asRatePart<R extends PartRow>(row: R): R {
+  if (lineKindOf(row) === "rate") return row;
+  const { stated_cents: _gross, ...price } = row.price as R["price"] & { stated_cents?: number | null };
+  const terms = price.discount;
+  return {
+    ...row,
+    price: { ...price, discount: terms === null ? null : { rate: terms.rate, type: terms.type, amount_cents: 0 } },
+  };
+}
+
+const termsKey = (d: FormulaDiscount | null | undefined) => (d == null ? null : `${d.type}:${d.rate}`);
+
+/**
+ * **The merge rule applied to a PART, both sides** (D7; spec S2, C4): the
+ * engine cannot do it, because a part never equals the whole-line projection and
+ * its discount cents are derived. Per row, against `was` (the stored row), `prev`
+ * and `next` (the initiator line it bills, before and after the edit):
+ *
+ * - `was` exactly its slice of `prev` — money AND discount terms — is untouched,
+ *   so it becomes its slice of `next` at the same units: re-sliced when `next` is
+ *   stated, a rate part when `next` is a rate line (the pricer prices it at
+ *   `units_from`).
+ * - Anything else is the operator's and stays, except that terms the merge moved
+ *   onto a STATED row whose money is its own are applied to that row's own gross,
+ *   the one rate event (`applyDiscountTerms`). A rate row needs nothing: the
+ *   pricer applies its terms.
+ *
+ * `units_from` absent reads as 0: a whole line, as every row stored before D7.
+ */
+export function followStatedPart<R extends PartRow>(row: R, was: R, prev: PartSourceLike, next: PartSourceLike): R {
+  const from = was.units_from ?? 0;
+  const sameTerms = termsKey(was.price.discount) === termsKey(prev.price.discount);
+  if (!sameTerms || !isExactPart(was, partOf(prev, from, from + was.quantity))) {
+    const terms = row.price.discount;
+    if (termsKey(terms) === termsKey(was.price.discount) || lineKindOf(was) === "rate") return row;
+    const gross = billingRowPart(was, 0, was.quantity).gross_cents;
+    const applied = applyDiscountTerms(gross, row.quantity, terms === null ? null : { rate: terms.rate, type: terms.type });
+    return withPart(row, row.quantity, { ...applied, stated_cents: gross }, null);
+  }
+  if (lineKindOf(next) === "rate") return asRatePart(row);
+  const part = partOf(next, from, from + row.quantity);
+  if (lineKindOf(row) === "stated" && isExactPart(row, part) && termsKey(row.price.discount) === termsKey(next.price.discount)) {
+    return row;
+  }
+  return withPart(row, row.quantity, part, from);
+}
+
+/**
+ * {@link followStatedPart} over a synced block, both sides. `keyOf` names the
+ * initiator line a row bills (`null` outside one), and `prevLines` / `nextLines`
+ * hold the initiator's lines by that key. A row with no stored twin (`scoped`, by
+ * path), or whose line is absent from either revision, is left as the merge made
+ * it, as is every row `skip` names (a payable time row, priced by its counts).
+ */
+export function followStatedParts<R extends PartRow & { path: readonly string[] }>(args: {
+  synced: readonly R[];
+  scoped: readonly R[];
+  keyOf: (row: R) => string | null;
+  prevLines: ReadonlyMap<string, PartSourceLike>;
+  nextLines: ReadonlyMap<string, PartSourceLike>;
+  isLine: (row: R) => boolean;
+  skip?: (row: R) => boolean;
+}): R[] {
+  const held = new Map(args.scoped.filter(args.isLine).map((r) => [r.path.join("/"), r]));
+  return args.synced.map((row) => {
+    if (!args.isLine(row) || args.skip?.(row)) return row;
+    const key = args.keyOf(row);
+    const was = held.get(row.path.join("/"));
+    const p = key === null ? undefined : args.prevLines.get(key);
+    const n = key === null ? undefined : args.nextLines.get(key);
+    if (!was || !p || !n) return row;
+    return followStatedPart(row, was, p, n);
+  });
+}
+
+/**
+ * **A billing row at a new `quantity` with its money to match** — the
+ * substitution offset's `requantify` (D2), both sides (spec C4). A RATE row is
+ * quantity alone: the pricer derives its money. A STATED row still exactly its
+ * slice of `source` (the initiator line) becomes its slice at the new count; one
+ * whose own money is its own and lost units (`scaleFrom`, a spent entry) has its
+ * stored money rescaled over the new count; anything else keeps its money.
+ */
+export function requantifyPart<R extends PartRow>(
+  row: R,
+  quantity: number,
+  source: PartSourceLike | undefined,
+  scaleFrom?: number,
+): R {
+  if (lineKindOf(row) === "rate") return { ...row, quantity };
+  if (source !== undefined && source.quantity > 0) {
+    const from = row.units_from ?? 0;
+    if (isExactPart(row, partOf(source, from, from + row.quantity))) {
+      return withPart(row, quantity, partOf(source, from, from + quantity), from);
+    }
+  }
+  if (scaleFrom !== undefined && scaleFrom > 0 && scaleFrom !== quantity) {
+    // A pseudo-source: the row's own stored money over the count it had, rescaled.
+    return withPart(row, quantity, partOf({ ...row, quantity: scaleFrom }, 0, quantity), row.units_from ?? null);
+  }
+  return { ...row, quantity };
 }
 
 /**

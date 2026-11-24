@@ -176,6 +176,7 @@ import {
   type PairCoreType,
 } from "./order.ts";
 import { LedgerPostingCore, LineItemCore, LineTaxCore, PayableKitLedgerAccount } from "./_items.ts";
+import { formulaMoneyMismatch, STATED_TOTAL_GROUP, StatedCore } from "./_line-money.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import { type InboundBreakdown, InboundBreakdownSchema } from "./_inbound-breakdown.ts";
 import { type PostingRole, SIDE_CONTRACTS, type SharedLineType } from "./side.ts";
@@ -305,13 +306,13 @@ export const PurchaseItemDatesSchema: z.ZodType<PurchaseItemDates> = z.strictObj
 
 // `quantity`, `amount_cents` and `price.stated_cents` follow the purchase onto
 // its bills by the full three-way rule, as an order line's do onto its invoices
-// (owner, 2026-11-07), and as ONE unit (`shared_group`): a flat line's amount is
-// a stated TOTAL, so an untouched bill line follows them all, and a line where
-// any was edited keeps them all (one-document-model Phase 3). A partial bill
-// differs from its purchase line on them, so it keeps them and a purchase edit
-// never re-bills it. Declared here, above the price schema, because
-// {@link PayableStatedCore} spreads it at module evaluation.
-const flatMoney = { propagate: true, shared_group: "flat_money" } as const;
+// (owner, 2026-11-07), and as ONE unit: the `stated_total` group
+// (`STATED_TOTAL_GROUP`, `schemas/_line-money.ts`). A flat line's amount is a
+// stated TOTAL, so an untouched bill line follows them all, and a line where any
+// was edited keeps them all (one-document-model Phase 3). A partial bill differs
+// from its purchase line on them, so it keeps them and a purchase edit never
+// re-bills it.
+const statedTotal = { propagate: true, shared_group: STATED_TOTAL_GROUP } as const;
 
 /**
  * How a purchase line is priced (purchases-as-documents Phase 2 rulings 1, 2,
@@ -359,7 +360,7 @@ export interface PurchaseLinePrice {
   replacement_cents?: number | null;
   /**
    * The line's stated GROSS over its `quantity`, before `discount` — the input
-   * its money is derived from (one-document-model ruling 39, {@link PayableStatedCore}).
+   * its money is derived from (one-document-model ruling 39, `StatedCore`, `schemas/_line-money.ts`).
    * REQUIRED on a flat line ({@link purchaseLineMoneyIssues}, core beta B);
    * absent or `null` on a time line, whose money its rates and counts decide.
    */
@@ -409,38 +410,6 @@ export const PayablePriceMoneyCore: {
   total_cents: z.int().meta({ derived: true }),
 };
 
-/**
- * **`price.stated_cents` — a payable line's stated GROSS, the input its money is
- * derived from** (one-document-model ruling 39, 6e-0b1 S2). ONE instance, spread
- * by the purchase line and the bill/credit line alike, like
- * {@link PayablePriceMoneyCore}, which it is deliberately not part of: every key
- * there is derived, and this one is the input.
- *
- * Set, `subtotal_cents` is `stated_cents` and the line's `amount_cents` (the
- * net) is `stated_cents − discount.amount_cents`, on every line, whole or part
- * (D7). The discount's CENTS are the money: an operator's stated price turns the
- * rate into cents once (`applyDiscountTerms`), and a part of a line takes its
- * slice of the line's stated gross and cents (`sliceStoredMoney`), so nothing
- * re-applies a rate to a part. A stated total governs a line that also carries
- * rates (a LINKED time line: Xero's money).
- *
- * In the `flat_money` merge group with `quantity` and `amount_cents`: it is
- * what they are derived from, so it follows or is kept with them as one unit.
- *
- * ⚠️ **Required on a FLAT line by the money refine, not by the key**
- * ({@link purchaseLineMoneyIssues}, core beta B, after the 2026-11-14 backfill:
- * prod 976 flat lines, `test` 808). The key stays nullable and optional because
- * the price schema is shared with time lines, which state none.
- *
- * ⚠️ On the receivable side only a CREDIT-NOTE line carries it, and only one a
- * Xero import wrote (one-document-model ruling 145, `schemas/credit-note.ts`);
- * an invoice line, and every credit line CFS prices, is priced from its rates.
- *
- * Not on the `@cfs/core/schemas` barrel, like {@link PayablePriceMoneyCore}.
- */
-export const PayableStatedCore: { stated_cents: z.ZodType<number | null | undefined> } = {
-  stated_cents: z.int().min(0).nullable().optional().meta({ column: true, label: "Stated", ...flatMoney }),
-};
 
 /** Zod schema for {@link PurchaseLinePrice}. */
 export const PurchaseLinePriceSchema: z.ZodType<PurchaseLinePrice> = z.strictObject({
@@ -457,7 +426,7 @@ export const PurchaseLinePriceSchema: z.ZodType<PurchaseLinePrice> = z.strictObj
   // order line's declaration (`schemas/order.ts`, `ItemPrice`). A bill's price
   // has none, as an invoice's has none.
   replacement_cents: z.int().nullable().optional().meta({ column: true, label: "Replacement" }),
-  ...PayableStatedCore,
+  ...StatedCore,
   ...PayablePriceMoneyCore,
   // Derived by the meter, never merged (the interface docblock).
   counts: z.array(TierCountSchema).meta({ derived: true }),
@@ -468,9 +437,13 @@ export const PurchaseLinePriceSchema: z.ZodType<PurchaseLinePrice> = z.strictObj
  * bill line. A refine rather than a union arm because it cuts across all four
  * line types.
  *
- * - **flat** — states its GROSS (`price.stated_cents`, required since core
- *   beta B) and no rates; its `amount_cents` and computed money are what
- *   `priceDocument`'s stated-total arm derives from it.
+ * - **flat, STATED** — states its GROSS (`price.stated_cents`) and no rates;
+ *   its `amount_cents` and computed money are what `priceDocument`'s
+ *   stated-total arm derives from it.
+ * - **flat, RATE** (one-document-model ruling 189, which retired core beta B's
+ *   "a flat line states its gross") — carries its formula's `rates`, and its
+ *   `amount_cents` is exactly what `rates × counts` give at its units (a part's
+ *   from `units_from`, ruling 174), the AR flat line's money (ruling 108).
  * - **time** (one-document-model Phase 3) — carries its formula's `rates`.
  *   On a PURCHASE (`grain: "purchase"`) it commits nothing: `amount_cents` is
  *   null and its money is zero. On a BILL or CREDIT line
@@ -484,6 +457,8 @@ export function purchaseLineMoneyIssues(
     amount_cents: number | null;
     /** The line's quantity, which a stated line's money is derived over. */
     quantity?: number;
+    /** A part's first source unit (ruling 174): where a rate part's formula money starts. */
+    units_from?: number | null;
     /**
      * A credit line naming a billing row (ruling 106): it states only the time it
      * takes back, so a units credit of a flat row states `[]`, not the meter's tier.
@@ -514,10 +489,23 @@ export function purchaseLineMoneyIssues(
     return issues;
   }
   if (item.amount_cents === null) issues.push({ path: ["amount_cents"], message: "a flat line states its amount" });
-  if (item.price && stated === null) {
-    issues.push({ path: ["price", "stated_cents"], message: "a flat line states its gross" });
+  if (stated !== null && rates.length > 0) {
+    issues.push({ path: ["price", "rates"], message: "a stated flat line carries no rates; its gross is its money" });
   }
-  if (rates.length > 0) issues.push({ path: ["price", "rates"], message: "a flat line carries no rates" });
+  if (item.price && stated === null) {
+    // A flat RATE line (ruling 189): its rates price it, at its units.
+    if (rates.length === 0) {
+      issues.push({ path: ["price", "rates"], message: "a flat line states its gross (price.stated_cents) or carries its rates" });
+    } else if (item.amount_cents !== null && typeof item.quantity === "number") {
+      const expected = formulaMoneyMismatch(item.price, item.quantity, item.amount_cents, item.units_from ?? null);
+      if (expected !== null) {
+        issues.push({
+          path: ["amount_cents"],
+          message: `a flat rate line's amount_cents ${item.amount_cents} must equal its rates × counts: ${expected}`,
+        });
+      }
+    }
+  }
   // Ruling 108: a flat line's counts are the meter's own output, `[flat 1/1]`.
   // A pointed credit line states only what it takes back (`creditLineShapeIssues`).
   const counts = item.price?.counts;
@@ -543,8 +531,9 @@ export function purchaseLineMoneyIssues(
  *   a part of a percent-discounted line is not 1¢ off its own re-derivation.
  * - **absent or `null`** (a TIME line, which states no gross: its money is its
  *   rates and counts, or Xero's on a linked bill): the gross is `amountCents +
- *   discount.amount_cents`, the priced discount record. A flat line reaches here
- *   only to report its own absent gross ({@link purchaseLineMoneyIssues}).
+ *   discount.amount_cents`, the priced discount record. A flat RATE line too
+ *   (ruling 189), whose net {@link purchaseLineMoneyIssues} checks against its
+ *   formula.
  */
 function statedTotalMoneyIssues(
   price: PurchaseLinePrice,
@@ -799,7 +788,7 @@ export interface PurchaseReplacementItem extends Omit<PurchaseServiceItem, "type
    * The records this line bills (a `mark_lost` record's id is a MovementId, so
    * `OutOfServiceId`), each with its share of `quantity` (ruling 16):
    * two records of one twin under one parent merge into one line. Follows the
-   * purchase onto its bills in the `flat_money` group with `quantity` and
+   * purchase onto its bills in the `stated_total` group with `quantity` and
    * `amount_cents`, so a bill line either holds all three as the purchase does
    * or keeps all three of its own, and its shares always sum to its quantity.
    * A close that lowers `quantity` re-shares it (`fitOutOfServiceEntries`).
@@ -850,7 +839,7 @@ export function purchaseLines(rows: readonly PurchaseRow[]): PurchasePostedItem[
 
 // The shared head (one instance per key, `schemas/_items.ts`) — every key but
 // `quantity`, which this side declares itself because it carries the payable
-// `flat_money` merge group (see `quantityKey` below). Key ORDER is the column order: `type` stays first.
+// `stated_total` merge group (see `quantityKey` below). Key ORDER is the column order: `type` stays first.
 const itemHead = {
   uid: LineItemCore.uid,
   name: LineItemCore.name,
@@ -864,11 +853,11 @@ const itemShape = {
   ...LineTaxCore,
 } as const;
 
-// `quantity`, `amount_cents` and `price.stated_cents` are the `flat_money`
-// group ({@link flatMoney}, declared above the price schema that spreads it).
+// `quantity`, `amount_cents` and `price.stated_cents` are the `stated_total`
+// group (`statedTotal`, declared above the price schema).
 // `≥ 1`: a line closed to 0 is removed (ruling 47), never stored at 0.
-const quantityKey = z.int().min(1).meta({ column: true, label: "Quantity", ...flatMoney });
-const amountKey = z.int().min(0).meta({ column: true, label: "Amount", ...flatMoney });
+const quantityKey = z.int().min(1).meta({ column: true, label: "Quantity", ...statedTotal });
+const amountKey = z.int().min(0).meta({ column: true, label: "Amount", ...statedTotal });
 
 /**
  * May a payable line of `type`, on a document of posting `role`, post to
@@ -1041,10 +1030,10 @@ const ReplacementItemInner = z.strictObject({
   type: z.literal("replacement").meta({ column: true, label: "Type", propagate: true }),
   ...itemHead,
   ...noCustodyShape,
-  // A whole value in the `flat_money` group: it follows with `quantity` and
+  // A whole value in the `stated_total` group: it follows with `quantity` and
   // `amount_cents` as one unit, so a bill line's shares stay its quantity's.
   // Required since W4K's contract publish (it replaced `uid_out_of_service`).
-  out_of_service: OutOfServiceList.meta({ seed: false, shared: "value", ...flatMoney }),
+  out_of_service: OutOfServiceList.meta({ seed: false, shared: "value", ...statedTotal }),
 }).superRefine((item, ctx) => noCustodyIssues(item, ctx));
 
 /** Zod schema for PurchaseSaleItem. */
@@ -1754,16 +1743,17 @@ const inputHead = {
 };
 
 /**
- * A purchase line input's gross (ruling 39, core beta B): `price.stated_cents`,
- * the one money input. A Buy line states it, since a sale is always flat; the
- * other arms may state `null` (a time line) or omit it (an amend keeps the
- * stored gross).
+ * A purchase line input's money (ruling 39; ruling 189 retired core beta B's
+ * "a Buy line states its gross"): a Buy line is always flat, so it states its
+ * gross (`price.stated_cents`, a STATED line) or the rates it prices from (a
+ * RATE line, the AR flat line's shape). The other arms may state `null` (a time
+ * line) or omit it.
  */
 export function payableInputStatedIssues(
-  item: { type: string; price?: { stated_cents?: number | null } },
+  item: { type: string; price?: { stated_cents?: number | null; rates?: readonly unknown[] } },
 ): { path: (string | number)[]; message: string }[] {
-  if (item.type === "sale" && (item.price?.stated_cents ?? null) === null) {
-    return [{ path: ["price", "stated_cents"], message: "a Buy line states its gross" }];
+  if (item.type === "sale" && (item.price?.stated_cents ?? null) === null && (item.price?.rates?.length ?? 0) === 0) {
+    return [{ path: ["price", "stated_cents"], message: "a Buy line states its gross or the rates it prices from" }];
   }
   return [];
 }

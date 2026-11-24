@@ -1262,8 +1262,8 @@ Deno.test("classifySharedFields(PurchaseSchema, bill/credit) is fail-closed — 
   const group = (path: string) => fields.find((f) => f.path === path)?.group;
   assertEquals(kinds["items[].quantity"], "propagated");
   assertEquals(kinds["items[].amount_cents"], "propagated");
-  assertEquals(group("items[].quantity"), "flat_money");
-  assertEquals(group("items[].amount_cents"), "flat_money");
+  assertEquals(group("items[].quantity"), "stated_total");
+  assertEquals(group("items[].amount_cents"), "stated_total");
   assertEquals(kinds["items[].dates"], undefined);
   assertEquals(kinds["items[].units"], undefined);
   // The meter's output on every grain since ruling 108 (Q6): shared, derived, never merged.

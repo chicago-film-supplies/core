@@ -63,13 +63,7 @@ import {
   payableLineUid,
   withRowSourcePath,
 } from "../schemas/mod.ts";
-import {
-  lineUnitsCents,
-  type PayableMoneyLineLike,
-  applyDiscountTerms,
-  payableStoredMoney,
-  statedLine,
-} from "../schemas/_line-money.ts";
+import { lineKindOf, lineUnitsCents, type PayableMoneyLineLike, statedLine } from "../schemas/_line-money.ts";
 import { fitOutOfServiceEntries } from "./replacements.ts";
 import type { ExchangedForEntryType, OutOfServiceEntryType } from "../schemas/mod.ts";
 import {
@@ -91,15 +85,16 @@ import {
 } from "./invoices.ts";
 import type { DocumentTotalsCore, LineItem } from "./orders.ts";
 import {
-  billingRowPart,
   billingRowCreditMoney,
   chargeWindowContext,
   type CreditMoney,
   flatPayablePrice,
-  type PartMoney,
+  followStatedParts,
+  partOf,
   type PayablePriceDocumentContext,
   priceDocument,
   type PricingFormulas,
+  requantifyPart,
 } from "./price-document.ts";
 import { meanTierCounts, type TierCount } from "./price-formulas.ts";
 import {
@@ -219,34 +214,6 @@ export function creditTimeCounts(line: LineAccount, quantity: number): TierCount
 // ── Money ───────────────────────────────────────────────────────
 
 export type { CreditMoney, PartMoney } from "./price-document.ts";
-
-/**
- * **Units `(from, to]` of a source line, as a part stores them** (D7): its
- * slices of the source's stored gross and discount cents, and the net as their
- * difference — the one part door ({@link billingRowPart}). A part never
- * re-applies a rate, so the parts of a line sum to it exactly on every figure
- * and each part's own `net = gross − discount` holds.
- */
-export function partMoney(
-  line: PayableMoneyLineLike & { price: { discount: DiscountType | null } },
-  from: number,
-  to: number,
-): PartMoney {
-  const slice = billingRowPart(line, from, to);
-  const terms = line.price.discount;
-  return {
-    amount_cents: slice.net_cents,
-    stated_cents: slice.gross_cents,
-    discount: terms === null ? null : { ...terms, amount_cents: slice.discount_cents },
-  };
-}
-
-/** Is a stored row's money exactly `part`? Gross (stated, or net + cents), cents and net. */
-function moneyIs(row: PayableMoneyLineLike & { price: { discount: DiscountType | null } }, part: PartMoney): boolean {
-  const own = payableStoredMoney(row);
-  return row.amount_cents === part.amount_cents && own.gross_cents === part.stated_cents &&
-    own.discount_cents === (part.discount?.amount_cents ?? 0);
-}
 
 /**
  * **What a supplier credit of `n` flat units is worth, when it names no bill
@@ -591,8 +558,11 @@ export function projectPurchaseLineToBillLine(
   opts: ProjectBillLineOptions,
 ): PurchaseDocumentItem {
   if (item.price.price_formula.basis === "time") return projectTimeLine(item, opts);
+  // A flat RATE line (ruling 189): a rate part at its source's units, priced by
+  // the pricer's formula at `units_from` (ruling 174), the time line's shape.
+  if (lineKindOf(item) === "rate") return projectTimeLine(item, { ...opts, counts: item.price.counts }, opts.from);
   const before = opts.from;
-  const part = partMoney(item, before, before + opts.quantity);
+  const part = partOf(item, before, before + opts.quantity);
   const amount_cents = part.amount_cents;
   const price: PurchaseDocumentLinePrice = flatPayablePrice({
     uid: item.uid,
@@ -615,13 +585,15 @@ export function projectPurchaseLineToBillLine(
 }
 
 /**
- * A TIME purchase line's bill line, UNPRICED: the purchase line's formula,
+ * A RATE purchase line's bill line, UNPRICED — a TIME line, or a flat line
+ * priced from its rates (ruling 189, given `unitsFrom`, its part's first unit):
+ * the purchase line's formula,
  * rates and discount terms, the seeded `counts` (or `[]`), and zero money. The
  * writer prices the bill with `priceDocument` (`origin: "pushed"` and its
  * `time` context), whose time arm meters an empty `counts` from the bill's pair
  * and writes the line's money and `amount_cents` (one-document-model Phase 3).
  */
-function projectTimeLine(item: PurchaseItem, opts: ProjectBillLineOptions): PurchaseDocumentItem {
+function projectTimeLine(item: PurchaseItem, opts: ProjectBillLineOptions, unitsFrom?: number): PurchaseDocumentItem {
   const price: PurchaseDocumentLinePrice = {
     price_formula: { ...item.price.price_formula },
     rates: item.price.rates.map((r) => ({ ...r })),
@@ -633,7 +605,14 @@ function projectTimeLine(item: PurchaseItem, opts: ProjectBillLineOptions): Purc
     subtotal_discounted_cents: 0,
     total_cents: 0,
   };
-  const head = { ...projectedLineHead(item, opts.uid_purchase), ...attributionOf(item, opts.quantity), quantity: opts.quantity, amount_cents: 0, price };
+  const head = {
+    ...projectedLineHead(item, opts.uid_purchase),
+    ...attributionOf(item, opts.quantity),
+    quantity: opts.quantity,
+    amount_cents: 0,
+    ...(unitsFrom !== undefined ? { units_from: unitsFrom } : {}),
+    price,
+  };
   switch (item.type) {
     case "sale":
     case "rental":
@@ -895,7 +874,7 @@ let timeFields: readonly SharedField[] | null = null;
  * line's amount is DERIVED from its counts (`priceDocument`'s pushed time arm),
  * as an order line's money is, so it is re-priced rather than compared.
  *
- * The rest of the `flat_money` group stays a group: `quantity` and a
+ * The rest of the `stated_total` group stays a group: `quantity` and a
  * replacement line's `out_of_service` (W4R), whose shares sum to the quantity,
  * so they follow or stay together. On every other line `out_of_service` is
  * absent from all three sides and the group decides exactly as `quantity`
@@ -914,7 +893,7 @@ function timeLineFields(): readonly SharedField[] {
  *
  * ⚠️ Not the sync's: the sync projects the whole line from unit 0
  * ({@link projectPurchaseRowForBill}) and merges `quantity`, the money and
- * `out_of_service` as one `flat_money` group, so a partial bill keeps all of
+ * `out_of_service` as one `stated_total` group, so a partial bill keeps all of
  * them. The diff ignores groups, so it fits the projection to the row's
  * quantity instead: the discount record becomes that quantity's share and
  * `out_of_service` that quantity's records, and only a row naming different
@@ -934,7 +913,7 @@ export function projectPurchaseLineForBill(item: PurchaseItem, quantity: number)
     price: {
       price_formula: item.price.price_formula,
       rates: item.price.rates,
-      discount: partMoney(item, 0, quantity).discount,
+      discount: partOf(item, 0, quantity).discount,
     },
     ...attributionOf(item, quantity),
     ...exchangedForProjection(item),
@@ -948,7 +927,7 @@ export function projectPurchaseLineForBill(item: PurchaseItem, quantity: number)
  * ({@link projectPurchaseLineToBillLine} at its full quantity, from unit 0), so
  * an untouched bill line compares equal to it and follows it, exactly as an
  * untouched invoice line follows its order line. A partial bill differs on
- * `{quantity, amount_cents}` and keeps both (`shared_group: "flat_money"`).
+ * `{quantity, amount_cents}` and keeps both (`shared_group: "stated_total"`).
  */
 export function projectPurchaseRowForBill(row: PurchaseRow, uidPurchase: string): PurchaseDocumentRow {
   if (row.type === "destination" || row.type === "group") return { ...row, path: [uidPurchase, ...row.path] };
@@ -1011,29 +990,22 @@ export function payableScopedSync(prev: Purchase, next: Purchase): {
     requantify: (row, quantity, { source, scaleFrom }) => {
       if (!isPurchaseLine(row) || row.price.price_formula.basis === "time") return { ...row, quantity };
       const line = source === undefined ? undefined : original.get(source);
-      if (line !== undefined && isPurchaseLine(line) && line.quantity > 0 && purchaseItemBasis(line) === "flat") {
-        // Still exactly its slice of the line at its own units (D7)? Then the slice at the new count.
-        const from = row.units_from ?? 0;
-        if (moneyIs(row, partMoney(line, from, from + row.quantity))) {
-          return withPart(row, quantity, partMoney(line, from, from + quantity), from);
-        }
-      }
-      if (scaleFrom !== undefined && scaleFrom > 0 && scaleFrom !== quantity) {
-        // A pseudo-source: the row's own stored money over the count it had, rescaled.
-        const own = { ...row, quantity: scaleFrom };
-        return withPart(row, quantity, partMoney(own, 0, quantity), row.units_from ?? null);
-      }
-      return { ...row, quantity };
+      const src = line !== undefined && isPurchaseLine(line) && purchaseItemBasis(line) === "flat" ? line : undefined;
+      // The one requantify both sides share (`requantifyPart`): a stated row
+      // still exactly its slice follows the slice, a rate row is quantity alone.
+      return requantifyPart(row as PurchaseDocumentItem, quantity, src, scaleFrom) as typeof row;
     },
     project: (item, scopeUid) => {
       const row = original.get(item);
       if (row === undefined) throw new Error(`payableScopedSync: row ${item.uid} is not one of the purchase's`);
       return projectPurchaseRowForBill(row, scopeUid);
     },
+    // A RATE line's amount is derived from its counts (a time line, or a flat
+    // line priced from its rates since ruling 189), so it is no shared field.
     lineFields: (item) => {
       const row = original.get(item);
       return row !== undefined && row.type !== "destination" && row.type !== "group" &&
-          row.price.price_formula.basis === "time"
+          (row.price.price_formula.basis === "time" || lineKindOf(row) === "rate")
         ? timeLineFields()
         : purchaseBillSharedLineFields();
     },
@@ -1110,64 +1082,29 @@ export const PAYABLE_LINE_CLAIMS: LineClaimSide<PurchaseRow> = {
   scopeType: "purchase",
 };
 
-/** A row at `quantity` units carrying `part` (D7). */
-function withPart<R extends PurchaseDocumentItem>(row: R, quantity: number, part: PartMoney, from: number | null): R {
-  return {
-    ...row,
-    quantity,
-    amount_cents: part.amount_cents,
-    ...(from !== null ? { units_from: from } : {}),
-    price: { ...row.price, stated_cents: part.stated_cents, discount: part.discount },
-  };
-}
-
 /**
- * **The merge rule, applied to a PART** (one-document-model D7): a bill line
- * that was exactly its slice of the PREVIOUS purchase line — money and discount
- * terms — becomes its slice of the NEXT one at the same units; anything else is
- * the operator's and stays — except that terms the merge moved onto a line whose
- * money is its own are applied to that line's own gross, the one rate event
- * (`applyDiscountTerms`). The engine cannot do this itself: a part never
- * equals the whole-line projection, and its discount cents are derived, so the
- * engine keeps a part's money whatever the purchase did. A discount that newly
- * reaches a part thus lands as the part's slice, and a price or terms edit on the
- * purchase reaches every untouched bill of it.
- *
- * `units_from` absent reads as 0: a bill written before D7 behaves as it did.
+ * **The merge rule applied to a PART** — the side-neutral `followStatedParts`
+ * (`./price-document.ts`) on one bill's block for this purchase, keyed by
+ * `purchaseLineKeyOf`. A TIME row is skipped: its money is its counts priced.
  */
-function followPurchaseSlices(
+function followPurchaseParts(
   synced: readonly PurchaseDocumentRow[],
   scoped: readonly PurchaseDocumentRow[],
   prev: Purchase,
   next: Purchase,
 ): PurchaseDocumentRow[] {
-  const lineAt = (p: Purchase) => new Map(purchaseLines(p.items).map((i) => [purchaseLineKey(p.uid, i.path), i]));
-  const before = lineAt(prev);
-  const after = lineAt(next);
-  const held = new Map(scoped.filter(isPurchaseLine).map((r) => [r.path.join("/"), r as PurchaseDocumentItem]));
-  return synced.map((row) => {
-    if (!isPurchaseLine(row) || row.price.price_formula.basis === "time") return row;
-    const key = purchaseLineKeyOf(row);
-    const was = held.get(row.path.join("/"));
-    const p = key === null ? undefined : before.get(key);
-    const n = key === null ? undefined : after.get(key);
-    if (!was || !p || !n || purchaseItemBasis(p) !== "flat" || purchaseItemBasis(n) !== "flat") return row;
-    const from = was.units_from ?? 0;
-    const termsOf = (d: DiscountType | null) => (d === null ? null : `${d.type}:${d.rate}`);
-    const sameTerms = termsOf(was.price.discount) === termsOf(p.price.discount);
-    if (!sameTerms || !moneyIs(was, partMoney(p, from, from + was.quantity))) {
-      // The line's money is its own. If the merge moved its terms (they were
-      // untouched), that is a rate event on the line's OWN gross (D7).
-      const terms = row.price.discount;
-      if (termsOf(terms) === termsOf(was.price.discount)) return row;
-      const gross = payableStoredMoney(was).gross_cents;
-      const applied = applyDiscountTerms(gross, row.quantity, terms === null ? null : { rate: terms.rate, type: terms.type });
-      return withPart(row as PurchaseDocumentItem, row.quantity, { ...applied, stated_cents: gross }, null);
-    }
-    const part = partMoney(n, from, from + row.quantity);
-    if (moneyIs(row, part) && (row.price.discount?.rate ?? null) === (n.price.discount?.rate ?? null)) return row;
-    return withPart(row as PurchaseDocumentItem, row.quantity, part, from);
-  });
+  // Flat lines only: a line whose formula moved to or from time is re-priced, not sliced.
+  const lineAt = (p: Purchase) =>
+    new Map(purchaseLines(p.items).filter((i) => purchaseItemBasis(i) === "flat").map((i) => [purchaseLineKey(p.uid, i.path), i]));
+  return followStatedParts({
+    synced: synced as PurchaseDocumentItem[],
+    scoped: scoped as PurchaseDocumentItem[],
+    keyOf: purchaseLineKeyOf,
+    prevLines: lineAt(prev),
+    nextLines: lineAt(next),
+    isLine: (row) => isPurchaseLine(row),
+    skip: (row) => row.price.price_formula.basis === "time",
+  }) as PurchaseDocumentRow[];
 }
 
 /**
@@ -1214,7 +1151,7 @@ export function syncPurchaseToBills(args: SyncPurchaseToBillsArgs): PurchaseBill
     );
     const rows = computePurchaseDocumentItemPaths([
       ...bill.items.slice(0, start + 1),
-      ...followPurchaseSlices(synced, scoped, args.prev, args.next),
+      ...followPurchaseParts(synced, scoped, args.prev, args.next),
       ...bill.items.slice(end),
     ]);
     if (purchaseDocumentLines(rows).length === 0 && purchaseDocumentLines(bill.items).length > 0) {

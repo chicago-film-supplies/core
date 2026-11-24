@@ -47,6 +47,7 @@ Deno.test("xeroTaggedPaths: the invoice's set", () => {
       "items[].description",
       "items[].name",
       ...DISCOUNT_LEAVES,
+      "items[].price.stated_cents",
       "items[].price.subtotal_cents",
       ...TAX_LEAVES,
       "items[].quantity",
@@ -68,6 +69,7 @@ Deno.test("xeroTaggedPaths: the bill's set", () => {
     "items[].description",
     "items[].ledger_account",
     "items[].name",
+    "items[].price.stated_cents",
     "items[].quantity",
     "items[].type",
     "items[].uid",
@@ -85,6 +87,7 @@ Deno.test("xeroTaggedPaths: the order's (quote's) set", () => {
       "items[].description",
       "items[].name",
       ...DISCOUNT_LEAVES,
+      "items[].price.stated_cents",
       "items[].price.subtotal_cents",
       ...TAX_LEAVES,
       "items[].quantity",
@@ -153,7 +156,7 @@ Deno.test("xeroProjection: tagged leaves only, absent reads null, and a divider 
     items: [{
       uid: "tent", name: "tent", description: null, quantity: 1, zero_priced: null, coa_revenue: 4000,
       uid_tracking_category: null,
-      price: { subtotal_cents: 5000, discount: null, taxes: [{ uid: "t", amount_cents: 10, name: null, rate: null, type: null }] },
+      price: { subtotal_cents: 5000, discount: null, taxes: [{ uid: "t", amount_cents: 10, name: null, rate: null, type: null }], stated_cents: null },
     }],
   });
 });
@@ -173,11 +176,29 @@ Deno.test("collectXeroProjection: an element no arm claims is unhandled, and the
 Deno.test("xeroProjectionHash: the stored form is byte-stable", () => {
   // What `pushed_hash` records. A change here reads every stored watermark as an
   // edit and enqueues a push for every live document, so it needs a re-stamp
-  // window (F16 Rollout; moved again by 6e-0b4 tagging `description`). FNV-1a 48
-  // of the canonical projection.
+  // window (F16 Rollout; moved again by 6e-0b4 tagging `description`, and by
+  // ruling 189 tagging `price.stated_cents`, spec C1: an absent tagged leaf
+  // projects as `null`, so every stored invoice, bill and quote hash moves and
+  // api-cloudrun re-stamps the watermarks with no Xero write). FNV-1a 48 of the
+  // canonical projection.
   assertEquals(inv(), hash48(canonicalJson(xeroProjection(InvoiceSchema, invoice()))));
-  assertEquals(inv(), "1df85glx1o");
-  assertEquals(billingXeroProjectionHash("payable", bill()), "zh9chajf2");
+  assertEquals(inv(), "p7cpzc1sw");
+  assertEquals(billingXeroProjectionHash("payable", bill()), "2crghrk5q8");
+});
+
+Deno.test("xeroProjectionHash: a rate ↔ stated flip with the SAME net moves the hash (why stated_cents is tagged, ruling 189)", () => {
+  // The Xero body changes (`unit_amount` → `exact_split`) while every other
+  // tagged leaf stays: subtotal, discount and taxes are the same money.
+  const rate = inv();
+  const stated = inv({
+    items: [{ uid: "o", type: "order", path: ["o"] }, { ...line("tent", 5000), price: { ...line("tent", 5000).price, stated_cents: 5000 } }],
+  });
+  assertNotEquals(stated, rate, "stating the same gross must move the watermark");
+  // Absent and null are one fact (a rate line), so they hash alike.
+  const nulled = inv({
+    items: [{ uid: "o", type: "order", path: ["o"] }, { ...line("tent", 5000), price: { ...line("tent", 5000).price, stated_cents: null } }],
+  });
+  assertEquals(nulled, rate);
 });
 
 // ── the receivable side (ported from invoice-xero-sync) ─────────────

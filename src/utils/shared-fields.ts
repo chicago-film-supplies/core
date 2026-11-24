@@ -112,7 +112,7 @@ export interface SharedField {
    * would change the implied unit price silently (one-document-model Phase 3).
    *
    * A member may be a whole value (`shared: "value"`), compared as one value:
-   * a payable replacement line's `out_of_service` list sits in `flat_money`
+   * a payable replacement line's `out_of_service` list sits in `stated_total`
    * too, because its shares sum to the line's quantity and must move with it
    * (W4R, 2026-11-10).
    */
@@ -159,7 +159,7 @@ export const PROPAGATE_META_KEY = "propagate";
 export const SHARED_META_KEY = "shared";
 /**
  * The meta key that puts a shared scalar — or a `shared: "value"` field — in a
- * merge GROUP: `.meta({ propagate: true, shared_group: "flat_money" })`. Every
+ * merge GROUP: `.meta({ propagate: true, shared_group: "stated_total" })`. Every
  * member of a group sits in the same row; see {@link SharedField.group}.
  */
 export const SHARED_GROUP_META_KEY = "shared_group";
@@ -917,7 +917,7 @@ let purchaseReceiptSharedFieldsMemo: PurchaseReceiptSharedFields | undefined;
  * pair schema, so the three arguments to {@link mergeSharedFields} are already in
  * the receipt's shape and pairs match on `pair.uid` alone.
  *
- * ⚠️ **`quantity` keeps the purchase's `flat_money` group, and on this pair the
+ * ⚠️ **`quantity` keeps the purchase's `stated_total` group, and on this pair the
  * group has ONE member.** The receipt carries no `amount_cents` or
  * `out_of_service`, so the group decides the physical quantity alone, which is
  * exactly the per-field rule: an untouched row follows the purchase, a row the

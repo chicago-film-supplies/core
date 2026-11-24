@@ -49,7 +49,7 @@ import {
 import { componentSignatureHash } from "./booking-id.ts";
 import { closestAncestor } from "./item-pairing.ts";
 import { applyDateEdit, type ChargeDates, chargeWindowBusinessDays, chargeWindowsOf, toChicagoYmd } from "./dates.ts";
-import { formulaPartMoney, type RateSnapshot, type TierCount } from "./price-formulas.ts";
+import { formulaPartMoney, lineKindOf, type RateSnapshot, statedLineSubtotals, type TierCount } from "./price-formulas.ts";
 import {
   fromCents,
   roundDivHalfAwayFromZero,
@@ -238,9 +238,19 @@ export interface PricingPrice {
   counts?: readonly TierCount[];
   /** The percent-of-total percentage at 4dp — see {@link checkLinePrice}. */
   base_percent?: number | null;
-  /** `rate` is 4dp DOLLARS on the `flat` arm and a percentage on `percent`. */
-  discount?: { rate: number; type: RateType } | null;
+  /**
+   * `rate` is 4dp DOLLARS on the `flat` arm and a percentage on `percent`.
+   * `amount_cents` is read only on a STATED line, where it is the stored money
+   * (D7, `statedLineSubtotals`); a rate line re-derives it.
+   */
+  discount?: { rate: number; type: RateType; amount_cents?: number } | null;
   taxes?: readonly { uid: string }[];
+  /**
+   * The line's stated GROSS (one-document-model ruling 189): set, the line is
+   * STATED and prices as `stated_cents − discount.amount_cents`; absent or
+   * `null`, it prices from `rates × counts`.
+   */
+  stated_cents?: number | null;
 }
 
 /**
@@ -874,11 +884,20 @@ const RATE_SCALE = 1_000_000n;
 // ── Item-level calculations ──────────────────────────────────────
 
 /**
- * Calculate the pre-discount and post-discount subtotals for a single line item:
- * `priceFromFormula(rates, counts, quantity, discount)` — Σ tier
- * `rate × quantity × num ÷ den`, each tier rounded once, then the discount
- * (purchases-as-documents Phase 2 ruling 8). Five-day week's one-week minimum
- * and an extension's skipped minimum are already in the counts.
+ * Calculate the pre-discount and post-discount subtotals for a single line item,
+ * by how the LINE states its money (one-document-model ruling 189, `lineKindOf`):
+ *
+ * - **rate:** `priceFromFormula(rates, counts, quantity, discount)` — Σ tier
+ *   `rate × quantity × num ÷ den`, rounded once, then the discount
+ *   (purchases-as-documents Phase 2 ruling 8). Five-day week's one-week minimum
+ *   and an extension's skipped minimum are already in the counts.
+ * - **stated:** the stated gross less its discount cents, by the one stated
+ *   pricer (`statedLineSubtotals`, D7): a rate is never re-applied to cents a
+ *   line already stores.
+ *
+ * Every receivable reader reaches a line's money through here (the pricer, the
+ * tax amounts, the #575 audit oracle, the per-line account), so none can price
+ * a stated line as a rate line.
  */
 export function calculateItemSubtotal(
   item: PricingItem,
@@ -888,7 +907,25 @@ export function calculateItemSubtotal(
       "Item is not priceable: missing price object or is a destination/group/transaction_fee",
     );
   }
+  if (lineKindOf(item) === "stated") {
+    return statedLineSubtotals({ quantity: item.quantity, price: item.price });
+  }
   return perUnitSubtotal(item.price, item.quantity, item.units_from ?? 0);
+}
+
+/**
+ * A pricer refusal caused by the document it was handed — a time-formula line
+ * under no pair, a percent fee line of quantity ≠ 1, a line under two extension
+ * sections, a stated line in an extension, a formula the context does not
+ * carry, a bad credit request — rather than by a fault in the pricer. The API
+ * maps it to a 400; every other throw stays a 500. Declared here, below
+ * `price-document.ts`, so the line pricer can raise it; that module re-exports it.
+ */
+export class PriceRefusalError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PriceRefusalError";
+  }
 }
 
 /**
@@ -1169,6 +1206,11 @@ export function calculateItemTax(
     );
   }
 
+  if (opts.extension && lineKindOf(item) === "stated") {
+    // An extension states the DAYS it adds; a total over the line's units cannot
+    // say that (spec S3), as a per-unit flat tax cannot either (below).
+    throw new PriceRefusalError("A stated line cannot sit in an extension section: an extension bills added days, not a total");
+  }
   const { subtotal_discounted_cents } = calculateItemSubtotal(item);
   const quantity = item.quantity;
 
@@ -1470,7 +1512,12 @@ export function computeLineMoney(
   opts: LinePricingOptions = {},
 ): LinePriceMoney {
   if (isPreTaxPricingItem(item)) return calculateItemPrice(item, taxes, opts);
-  if (isTransactionFeePricingItem(item)) return priceTransactionFeeLine(item);
+  if (isTransactionFeePricingItem(item)) {
+    if ((item.price.stated_cents ?? null) !== null) {
+      throw new PriceRefusalError(`Line ${label ?? "(unidentified)"} is a transaction fee: its money is the document's, so it states no total`);
+    }
+    return priceTransactionFeeLine(item);
+  }
   throw new Error(
     `Line ${label ?? "(unidentified)"} has type "${item.type}", which has no ` +
       `pricing rule — it is neither a pre-tax line nor a transaction fee`,
@@ -1592,6 +1639,7 @@ export const ORDER_DECLARED_PRICE_KEYS: Record<DeclaredPriceKey<OrderDocItemPric
   counts: true,
   base_percent: true,
   replacement_cents: true,
+  stated_cents: true,
 };
 
 /** The declared half of a stored INVOICE line price — see {@link ORDER_DECLARED_PRICE_KEYS}. */
@@ -1600,7 +1648,16 @@ export const INVOICE_DECLARED_PRICE_KEYS: Record<DeclaredPriceKey<InvoiceDocItem
   rates: true,
   counts: true,
   base_percent: true,
+  stated_cents: true,
 };
+
+/**
+ * Declared keys written only when SET: absent and `null` are one fact for each
+ * (a rate line), and normalizing to `null` would widen the key set of every
+ * line a writer re-prices. So a line stored before ruling 189 keeps its exact
+ * key set, and a stated line drops the key when it turns back into a rate line.
+ */
+const DECLARED_ONLY_WHEN_SET: ReadonlySet<string> = new Set(["stated_cents"]);
 
 /** What a writer must have resolved before it can declare a price. */
 interface DeclaredPriceInput {
@@ -1610,15 +1667,21 @@ interface DeclaredPriceInput {
   counts?: TierCount[];
   base_percent?: number | null;
   replacement_cents?: number | null;
+  /** The stated gross (ruling 189); absent or `null` on a rate line. */
+  stated_cents?: number | null;
 }
 
-/** An order line's declared price half, every nullable key present. */
+/**
+ * An order line's declared price half, every nullable key present — except
+ * `stated_cents`, present only on a STATED line (`DECLARED_ONLY_WHEN_SET`).
+ */
 export interface OrderDeclaredPrice {
   price_formula: PriceFormulaRef | null;
   rates: RateSnapshot[];
   counts: TierCount[];
   base_percent: number | null;
   replacement_cents: number | null;
+  stated_cents?: number;
 }
 
 /** An invoice line's declared price half, every nullable key present. */
@@ -1629,7 +1692,13 @@ function pickDeclared(keys: Record<string, true>, price: DeclaredPriceInput): Re
   const out: Record<string, unknown> = {};
   // `?? null` on every nullable key: absent and `null` mean the same thing for
   // each. `counts` is an array, so an unmetered line declares `[]`.
-  for (const k of Object.keys(keys)) out[k] = src[k] ?? (k === "counts" ? [] : null);
+  for (const k of Object.keys(keys)) {
+    if (DECLARED_ONLY_WHEN_SET.has(k)) {
+      if (src[k] != null) out[k] = src[k];
+      continue;
+    }
+    out[k] = src[k] ?? (k === "counts" ? [] : null);
+  }
   return out;
 }
 

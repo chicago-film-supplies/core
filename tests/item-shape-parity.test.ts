@@ -49,6 +49,7 @@ import { classifySharedFields } from "../src/utils/shared-fields.ts";
 import { pickLinePostingFields, pickLineTaxFields } from "../src/utils/invoices.ts";
 import { InvoiceDocItem, schemas } from "../src/schemas/mod.ts";
 import { PayablePriceMoneyCore } from "../src/schemas/purchase.ts";
+import { STATED_TOTAL_GROUP, StatedCore } from "../src/schemas/_line-money.ts";
 
 const GRAINS = ["orders", "invoices", "fulfillments"] as const;
 
@@ -342,14 +343,13 @@ Deno.test("pickLinePostingFields: both keys are always stated, `null` included",
 const PAYABLE_GRAINS = ["purchases", "purchase-bills", "purchase-credits"] as const;
 
 /**
- * 🔴 The one shared key a payable line still declares for itself — and since
- * Phase 3 for a different reason than before. It used to be a homonym (ordered
- * vs billed). Now it PROPAGATES, but as one member of the `flat_money` merge
- * group with `amount_cents` (`shared_group`, `utils/shared-fields.ts`): a flat
- * payable line's amount is a stated total, so the two follow or stay together.
- * `LineItemCore.quantity` serves the receivable grains too, so it cannot carry
- * that payable-only group; the payable declaration does. Asserted below to be
- * the group member, so the exemption cannot outlive its reason.
+ * 🔴 The one shared key a payable line still declares for itself. It used to be
+ * a homonym (ordered vs billed), then the payable-only member of the merge group
+ * `LineItemCore.quantity` could not carry. Since ruling 198 both quantities are
+ * in the one `stated_total` group, so the reason now is its BOUND: a payable
+ * line's quantity is `≥ 1` (a line closed to 0 is removed, ruling 47) while a
+ * receivable line's is `≥ 0`. Asserted below to be the group member, so the
+ * exemption cannot outlive the group either.
  */
 const PAYABLE_OWN_QUANTITY = "quantity";
 
@@ -440,13 +440,13 @@ Deno.test("payable grains: the posting key is `ledger_account`, and neither reti
   assert(LedgerPostingCore.uid_tracking_category === LinePostingCore.uid_tracking_category);
 });
 
-Deno.test("payable grains: the PURCHASE ↔ BILL `quantity` is the `flat_money` group member, so the exemption is still owed", () => {
+Deno.test("payable grains: the PURCHASE ↔ BILL `quantity` is the `stated_total` group member, as the receivable one is", () => {
   // If the group goes, PAYABLE_OWN_QUANTITY must go too — spread the shared instance instead.
   const fields = classifySharedFields(schemas.purchases, schemas["purchase-bills"]).fields;
   const kinds = Object.fromEntries(fields.map((f) => [f.path, f.kind]));
   assertEquals(kinds["items[].quantity"], "propagated");
-  assertEquals(fields.find((f) => f.path === "items[].quantity")?.group, "flat_money");
-  assertEquals(fields.find((f) => f.path === "items[].amount_cents")?.group, "flat_money");
+  assertEquals(fields.find((f) => f.path === "items[].quantity")?.group, "stated_total");
+  assertEquals(fields.find((f) => f.path === "items[].amount_cents")?.group, "stated_total");
   // And the shared head the payable lines DO spread is followed by the merge.
   for (const key of ["name", "description", "ledger_account", "uid_tracking_category", "uid_tax_class"]) {
     assertEquals(kinds[`items[].${key}`], "propagated", key);
@@ -459,5 +459,63 @@ Deno.test("payable grains: `type`, then the head, then posting, then tax — one
     for (const shape of payableArmShapes(grain)) {
       assertEquals(Object.keys(shape).slice(0, HEAD.length), HEAD, `${grain}: line head order`);
     }
+  }
+});
+
+// ── `price.stated_cents`: one instance on every priced line (ruling 189, spec C2) ──
+
+const PRICED_GRAINS = ["orders", "invoices", "credit-notes", "purchases", "purchase-bills", "purchase-credits"] as const;
+
+/** Every line arm's `price` object shape on a grain, unwrapped past annotations and pipes. */
+// deno-lint-ignore no-explicit-any
+function priceShapes(collection: (typeof PRICED_GRAINS)[number]): Record<string, any>[] {
+  // deno-lint-ignore no-explicit-any
+  const unwrap = (node: any): any => {
+    let n = node;
+    while (n && !n._zod.def.shape) n = n._zod.def.innerType ?? n._zod.def.in ?? n._zod.def.schema;
+    return n;
+  };
+  // deno-lint-ignore no-explicit-any
+  const root = unwrap((schemas as any)[collection]);
+  const itemsField = root._zod.def.shape.items;
+  const arr = itemsField._zod.def.innerType ?? itemsField;
+  // deno-lint-ignore no-explicit-any
+  const options: any[] = arr._zod.def.element._zod.def.options ?? [arr._zod.def.element];
+  return options.map(unwrap).filter((o) => o?._zod.def.shape.price !== undefined).map((o) => unwrap(o._zod.def.shape.price)._zod.def.shape);
+}
+
+Deno.test("price.stated_cents is the SAME INSTANCE on every priced line of every grain (one-document-model ruling 189)", () => {
+  const drifted: string[] = [];
+  let prices = 0;
+  for (const grain of PRICED_GRAINS) {
+    const shapes = priceShapes(grain);
+    assert(shapes.length > 0, `${grain}: no priced line arm reached`);
+    for (const shape of shapes) {
+      prices++;
+      if (shape.stated_cents !== StatedCore.stated_cents) drifted.push(`${grain}.items[].price.stated_cents`);
+    }
+  }
+  // Non-vacuity: the walk reached a priced arm on all six grains (several arms on some).
+  assert(prices >= PRICED_GRAINS.length, `the price walk stopped reaching every grain (${prices})`);
+  assertEquals(drifted, [], "a grain re-declared stated_cents instead of spreading StatedCore:\n" + drifted.join("\n"));
+});
+
+Deno.test("`quantity` and `price.stated_cents` merge as ONE `stated_total` group on both sides (rulings 189, 198)", () => {
+  const groupOf = (src: (typeof PRICED_GRAINS)[number] | "fulfillments", dst: string) => {
+    // deno-lint-ignore no-explicit-any
+    const fields = classifySharedFields((schemas as any)[src], (schemas as any)[dst]).fields;
+    return Object.fromEntries(fields.filter((f) => f.group !== undefined).map((f) => [f.path, f.group]));
+  };
+  assertEquals(STATED_TOTAL_GROUP, "stated_total");
+  assertEquals(groupOf("orders", "invoices"), {
+    "items[].quantity": "stated_total",
+    "items[].price.stated_cents": "stated_total",
+  });
+  // The fulfillment carries no price: the group has ONE member there, so the
+  // order → fulfillment merge decides exactly as `quantity` alone did.
+  assertEquals(groupOf("orders", "fulfillments"), { "items[].quantity": "stated_total" });
+  const payable = groupOf("purchases", "purchase-bills");
+  for (const path of ["items[].quantity", "items[].amount_cents", "items[].price.stated_cents"]) {
+    assertEquals(payable[path], "stated_total", path);
   }
 });

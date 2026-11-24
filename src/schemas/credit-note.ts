@@ -65,7 +65,7 @@ import {
   TierCountSchema,
   type TierCountType,
 } from "./price-formula.ts";
-import { checkItemsLineMoney, UnitsFromField } from "./_line-money.ts";
+import { checkItemsLineMoney, StatedCore, UnitsFromField } from "./_line-money.ts";
 import {
   Discount,
   type DiscountType,
@@ -225,8 +225,8 @@ export interface CreditNoteDocItemPrice {
   /** See {@link OrderDocItemPriceType.base_percent} — same biconditional. */
   base_percent?: number | null;
   /**
-   * A stated GROSS total over the line's quantity, the payable side's field
-   * (`PayableStatedCore`, `schemas/purchase.ts`). It governs the line's money
+   * A stated GROSS total over the line's quantity, the one declaration every
+   * priced line carries (`StatedCore`, `schemas/_line-money.ts`). It governs the line's money
    * when present (`lineMoneyAtCents`), and the rates are then kept for the
    * record only. Written by the import of a credit note Xero holds and CFS does
    * not (one-document-model ruling 145): Xero prices its lines to 4dp per unit,
@@ -245,7 +245,7 @@ const CreditNoteDocItemPriceSchema: z.ZodType<CreditNoteDocItemPrice> = z.strict
   rates: z.array(RateSnapshotSchema).meta({ label: "Rate" }),
   counts: z.array(TierCountSchema),
   base_percent: z.number().nullable().optional(),
-  stated_cents: z.int().min(0).nullable().optional().meta({ column: true, label: "Stated" }),
+  ...StatedCore,
   subtotal_cents: z.int().meta({ column: true, label: "Subtotal" }),
   subtotal_discounted_cents: z.int().meta({ column: true, label: "Discounted Subtotal" }),
   discount: Discount.nullable().meta({ label: "Discount" }),

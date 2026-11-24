@@ -28,7 +28,8 @@ import {
   isPurchaseLine,
 } from "../schemas/mod.ts";
 import { apportionCents } from "./money.ts";
-import { lineMoneyAtCents, payableStoredMoney, sliceStoredMoney, statedLine } from "../schemas/_line-money.ts";
+import { lineMoneyAtCents, statedLine } from "../schemas/_line-money.ts";
+import { billingRowPart } from "./price-document.ts";
 import { componentQuantities, type ComponentRowForWalk } from "./order-lines.ts";
 import { productCountsStock } from "./products.ts";
 import {
@@ -113,7 +114,9 @@ export function purchaseLineReceiptTargetCents(
   }
   return line.landed_costs.reduce(
     (sum, entry) => sum + landedPricedCents(entry, quantityReceived),
-    sliceStoredMoney(payableStoredMoney(line), 0, quantityReceived).net_cents,
+    // The one part door (ruling 178): a stated line slices its stored gross and
+    // cents, a flat RATE line (ruling 189) prices its formula at the count.
+    billingRowPart(line, 0, quantityReceived).net_cents,
   );
 }
 
@@ -151,7 +154,7 @@ export function strandedLandedCents(
 
 /**
  * A line's weight when one landed amount is spread over several lines: the
- * value still to arrive, the net slice of `(received, quantity]` (`sliceStoredMoney`). Units
+ * value still to arrive, the net of `(received, quantity]` (`billingRowPart`). Units
  * already received carry none of it, because the entry only ever prices units
  * received after it.
  */
@@ -160,7 +163,7 @@ export function landedCostWeightCents(
   received: number,
 ): number {
   if (received >= line.quantity) return 0; // Nothing still to arrive; an over-receipt prices nothing either.
-  return sliceStoredMoney(payableStoredMoney(line), received, line.quantity).net_cents;
+  return billingRowPart(line, received, line.quantity).net_cents;
 }
 
 /** One buy line as {@link allocateLandedCostCents} weighs it: the line and its row's received count. */

@@ -96,6 +96,7 @@ import { z } from "zod";
 import { FirestoreId, ItemUid } from "./_uid.ts";
 import { COARevenueEnum, type COARevenueType } from "./common.ts";
 import { COACode, type COACodeType } from "./chart-of-accounts.ts";
+import { STATED_TOTAL_GROUP } from "./_line-money.ts";
 
 /**
  * The six fields an order line, an invoice line and a fulfillment line all
@@ -191,10 +192,18 @@ export const LineItemCore: {
   // quantity, in both projects**, which is a statement about every writer that
   // has ever built a line. ⚠️ `0` remains a legal stored value —
   // `.min(0)` admits it — so requiring the KEY makes no claim about the VALUE.
+  //
+  // **In the `stated_total` merge group with `price.stated_cents`**
+  // (one-document-model rulings 189, 198; `STATED_TOTAL_GROUP`,
+  // `schemas/_line-money.ts`): a stated line's total is over its quantity, so the
+  // two follow the order or stay together. On a rate line `stated_cents` is null
+  // on both documents, and on the fulfillment (no price) the group has this one
+  // member, so neither merge changes for any line stored before ruling 189.
   quantity: z.number().int().min(0).meta({
     column: true,
     label: "Quantity",
     propagate: true,
+    shared_group: STATED_TOTAL_GROUP,
     xero: true,
   }),
 

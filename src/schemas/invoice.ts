@@ -52,7 +52,7 @@ import {
   TierCountSchema,
   type TierCountType,
 } from "./price-formula.ts";
-import { checkItemsLineMoney, UnitsFromField } from "./_line-money.ts";
+import { checkItemsLineMoney, StatedCore, UnitsFromField } from "./_line-money.ts";
 import { deriveInvoiceStatus, invoiceIsFrozen } from "./_invoice-freeze.ts";
 import type {
   PurchaseBill,
@@ -481,6 +481,14 @@ export interface InvoiceDocItemPriceType {
    */
   taxes_base?: TaxRefType[];
   total_cents: number;
+  /**
+   * The line's stated GROSS over its `quantity`, before `discount` — a STATED
+   * line, as on its order line (one-document-model ruling 189; `StatedCore`, `schemas/_line-money.ts`).
+   * Absent or `null` is a RATE line, priced from `rates × counts`: every line
+   * stored before ruling 189. Set, `subtotal_cents` is this total and the net is
+   * it less `discount.amount_cents` (D7), and a quantity edit keeps the total.
+   */
+  stated_cents?: number | null;
 }
 
 const InvoiceDocItemPrice: z.ZodType<InvoiceDocItemPriceType> = z.strictObject({
@@ -504,6 +512,8 @@ const InvoiceDocItemPrice: z.ZodType<InvoiceDocItemPriceType> = z.strictObject({
   // to name them, or the pre-override snapshot collides with the live `taxes`.
   taxes_base: z.array(TaxRef).optional().meta({ label: "Base Tax" }),
   total_cents: z.int().meta({ column: true, label: "Total" }),
+  // Appended LAST so no existing column moves.
+  ...StatedCore,
 }).superRefine((price, ctx) => checkLinePrice(price, ctx));
 
 // ── Line items ───────────────────────────────────────────────────
@@ -1523,6 +1533,13 @@ export interface InvoiceItemInputPriceType {
   base_percent?: number | null;
   discount?: DiscountInputType | null;
   taxes?: Array<{ uid: string }>;
+  /**
+   * The line's stated GROSS over its quantity (ruling 189) — set makes a STATED
+   * line, omitted or `null` a RATE line priced from `rates` (ruling 190: a
+   * submitted row is the row). The writer turns the discount terms into cents
+   * once against it (`applyDiscountTerms`, D7).
+   */
+  stated_cents?: number | null;
 }
 
 const InvoiceItemInputPrice: z.ZodType<InvoiceItemInputPriceType> = z.object({
@@ -1534,6 +1551,9 @@ const InvoiceItemInputPrice: z.ZodType<InvoiceItemInputPriceType> = z.object({
   // (Phase 2 ruling 8), and stripped if sent.
   discount: DiscountInput.nullable().optional(),
   taxes: z.array(z.object({ uid: FirestoreId })).optional(),
+  // Untagged: an input declares its own twin of `StatedCore` (the payable
+  // inputs' precedent); the merge and the Xero hash read the stored schema.
+  stated_cents: z.int().min(0).nullable().optional(),
 }).superRefine(checkLinePriceInput);
 
 /**

@@ -1736,6 +1736,7 @@ export function checkLinePrice(
     rates?: readonly unknown[];
     counts?: readonly unknown[];
     base_percent?: number | null;
+    stated_cents?: number | null;
   } | null | undefined,
   ctx: z.RefinementCtx,
   requireFormula = true,
@@ -1757,6 +1758,13 @@ export function checkLinePrice(
           message: `A percent-of-total price (base_percent) carries no ${key}`,
         });
       }
+    }
+    if (price.stated_cents != null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["stated_cents"],
+        message: "A percent-of-total price (base_percent) states no total; its money is the document's",
+      });
     }
     return;
   }

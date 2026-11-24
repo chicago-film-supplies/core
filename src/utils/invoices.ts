@@ -86,6 +86,7 @@ import {
 } from "./substitutions.ts";
 import { closestAncestor, mapPathsAcrossRebuild, pairItemsAcrossRebuild } from "./item-pairing.ts";
 import { interleaveStoredOnlyRows } from "./stored-only-rows.ts";
+import { followStatedParts, type PartSourceLike, requantifyPart } from "./price-document.ts";
 import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDatesType, OrderDocDestinationItemType, SettlementReasonType, SettlementTypeType, SubstitutedForEntryType, PurchaseCreditStatusType } from "../schemas/mod.ts";
 import { fitOutOfServiceEntries } from "./replacements.ts";
 import type { InitiatorAccount } from "./quantityAccounting.ts";
@@ -120,6 +121,7 @@ import {
 import { agingBucketOf, type InvoiceAging } from "../schemas/mod.ts";
 import {
   computeItemPaths,
+  isPreTaxItem,
   type ItemPathIssue,
   type ItemUniquenessIssue,
   type LineItem,
@@ -890,6 +892,11 @@ export function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: s
       // invoice line on a field neither it nor its order line ever set.
       ...(p.taxes_base !== undefined ? { taxes_base: p.taxes_base } : {}),
       total_cents: p.total_cents ?? 0,
+      // A STATED line's gross (ruling 189), carried WHOLE: this projects the whole
+      // line, and a part's slice is `partOf`'s (`./price-document.ts`), applied by
+      // the remainder builder and the sync's part follow. Conditional, so a rate
+      // line keeps the key set every stored invoice line has.
+      ...(p.stated_cents != null ? { stated_cents: p.stated_cents } : {}),
     },
     // Mirrored from the order line so the invoice carries the same answer as the
     // line it was projected from. UNCONDITIONAL — see the docblock: this is the
@@ -1166,8 +1173,9 @@ export interface ScopedSyncSide<R extends InvoiceItem = InvoiceDocItemType> {
   /**
    * The row at a new `quantity`, moved by the substitution offset (D2), with its
    * money to match. Absent means quantity alone, which is right where money is
-   * derived from quantity by the pricer, as on an invoice. A payable flat line
-   * STATES its money, so its side says what the units cost.
+   * derived from quantity by the pricer (a RATE line). A STATED line (either side,
+   * ruling 189) carries its money, so its side says what the units cost — both
+   * sides through `requantifyPart` (`./price-document.ts`).
    *
    * Called twice per substituted row: once to read it at its initiator-equivalent
    * quantity, with `source` the PREVIOUS initiator line at its path, and once
@@ -1182,7 +1190,44 @@ export const RECEIVABLE_SCOPED_SYNC: ScopedSyncSide = {
   scopeType: "order",
   project: (item, scopeUid) => projectOrderItemToInvoiceItem(item, scopeUid),
   lineFields: (_item) => orderInvoiceSharedFields().line,
+  // A STATED invoice line carries its money (ruling 189, spec C4); a rate line is
+  // quantity alone, the behaviour every line had before.
+  requantify: (row, quantity, { source, scaleFrom }) =>
+    isPreTaxItem(row as LineItem) && (source === undefined || isPreTaxItem(source))
+      ? requantifyPart(row as unknown as PartSourceLike & { units_from?: number | null }, quantity, source as unknown as PartSourceLike | undefined, scaleFrom) as unknown as typeof row
+      : { ...row, quantity },
 };
+
+/**
+ * **The part follow on one invoice's block for this order** (spec C4) — the
+ * side-neutral `followStatedParts` keyed by the order line a row bills: its move
+ * pointer when it has one (`path_source_item`), else its path under the order
+ * divider. A rate row is the pricer's; a stated part follows its slice.
+ */
+function followOrderParts(
+  synced: readonly InvoiceDocItemType[],
+  scoped: readonly InvoiceDocItemType[],
+  prevItems: readonly LineItem[],
+  nextItems: readonly LineItem[],
+  orderUid: string,
+): InvoiceDocItemType[] {
+  const linesOf = (items: readonly LineItem[]) =>
+    new Map(items.filter(isPreTaxItem).map((i) => [(i.path ?? []).join("/"), i as unknown as PartSourceLike]));
+  const keyOf = (row: InvoiceDocItemType): string | null => {
+    const path = row.path ?? [];
+    if (path[0] !== orderUid) return null;
+    const pointer = (row as { path_source_item?: string[] | null }).path_source_item;
+    return (pointer?.length ? pointer : path.slice(1)).join("/");
+  };
+  return followStatedParts({
+    synced: synced as unknown as (PartSourceLike & { path: string[] })[],
+    scoped: scoped as unknown as (PartSourceLike & { path: string[] })[],
+    keyOf: keyOf as unknown as (row: PartSourceLike & { path: string[] }) => string | null,
+    prevLines: linesOf(prevItems),
+    nextLines: linesOf(nextItems),
+    isLine: (row) => isPreTaxItem(row as unknown as LineItem),
+  }) as unknown as InvoiceDocItemType[];
+}
 
 function scopedLineOverridden<R extends InvoiceItem>(side: ScopedSyncSide<R>, prev: LineItem, row: R, scopeUid: string): boolean {
   const p = side.project(prev, scopeUid);
@@ -1414,7 +1459,8 @@ export function syncOrderToInvoiceSelective(
   currentInvoiceItems: InvoiceDocItemType[],
   orderDividerUid: string,
 ): InvoiceDocItemType[] {
-  return syncScopedItems(prevOrderItems, newOrderItems, currentInvoiceItems, orderDividerUid, RECEIVABLE_SCOPED_SYNC).items;
+  const synced = syncScopedItems(prevOrderItems, newOrderItems, currentInvoiceItems, orderDividerUid, RECEIVABLE_SCOPED_SYNC).items;
+  return followOrderParts(synced, currentInvoiceItems, prevOrderItems, newOrderItems, orderDividerUid);
 }
 
 /** {@link syncOrderToInvoiceSelective}'s body. */
@@ -3174,7 +3220,7 @@ export function syncOrderDestinationScope(
     mode.holidays,
   );
   return {
-    scopedItems: items,
+    scopedItems: followOrderParts(items, currentScopedItems, prevOrder.items, nextOrder.items, orderUid),
     destinations,
     dropped: dropped.map(({ pair: inv, reason }) => ({
       uid_order: orderUid,
