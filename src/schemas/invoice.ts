@@ -1998,3 +1998,25 @@ export const UpdateInvoiceInput: z.ZodType<UpdateInvoiceInputType> = z.object({
   notes: z.string().meta({ pii: "mask" }).nullable().optional(),
   version: z.int().min(0),
 });
+
+/**
+ * Input for an operator's void of a billing document, on EITHER side: an
+ * invoice (`POST /invoices/{uid}/void`) or a supplier bill
+ * (`POST /purchase-bills/{uid}/void`). One shape because it is one action,
+ * `void` in `utils/document-actions.ts` (one-document-model rulings 33 and 188,
+ * the billing twin of {@link VoidCreditInputType}'s ruling 182). `version` is
+ * the billing document's, and a stale one is refused (409).
+ *
+ * Refused (the catalog's `voidRefusal`) while anything is paid or credited on
+ * the document or a live credit names it. The route voids in Xero FIRST and
+ * answers `VoidResponse`: 202 `queued` when Xero's limit held it. It replaced
+ * `VoidPurchaseBillInput`.
+ */
+export interface VoidBillingInputType {
+  version: number;
+}
+
+/** Zod schema for {@link VoidBillingInputType}. */
+export const VoidBillingInput: z.ZodType<VoidBillingInputType> = z.object({
+  version: z.int().min(0),
+});

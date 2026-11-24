@@ -7456,7 +7456,7 @@
           "kind": "interface",
           "name": "UpdatePurchaseBillInputType",
           "declaration": "interface UpdatePurchaseBillInputType {\n  version: number;\n  status?: \"issued\";\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  items?: PurchaseBillRowInputType[];\n  destinations?: PurchaseBillDestinationInputType[];\n}",
-          "doc": "Input for editing a bill (`PUT /purchase-bills/{uid}`). `items`, when present,\nis the WHOLE array in its new order, the invoice's shape (one-document-model\nPhase 5): a row it omits is removed. Refused per field class once the bill is\nsettled (`INVOICE_FIELD_FREEZE`); a settled linked bill takes a tracking edit\nalone. An accepted edit is pushed to Xero through the ACCPAY edit push (D5).\n\n`destinations`, when present, edits the pairs it names, each stated whole; a\npair it leaves out is unchanged. A pair's membership follows its divider in\n`items`, as on an invoice.\n\n`status: \"issued\"` ISSUES a draft bill, the invoice's twin (one-document-model\nruling 160): the writer asserts the catalog's `issue` and enqueues the bill's\nfirst Xero post. It is the only status this input takes: a bill is voided\nthrough its own route (`VoidPurchaseBillInput`), and every other status is\nderived from the settlement fold."
+          "doc": "Input for editing a bill (`PUT /purchase-bills/{uid}`). `items`, when present,\nis the WHOLE array in its new order, the invoice's shape (one-document-model\nPhase 5): a row it omits is removed. Refused per field class once the bill is\nsettled (`INVOICE_FIELD_FREEZE`); a settled linked bill takes a tracking edit\nalone. An accepted edit is pushed to Xero through the ACCPAY edit push (D5).\n\n`destinations`, when present, edits the pairs it names, each stated whole; a\npair it leaves out is unchanged. A pair's membership follows its divider in\n`items`, as on an invoice.\n\n`status: \"issued\"` ISSUES a draft bill, the invoice's twin (one-document-model\nruling 160): the writer asserts the catalog's `issue` and enqueues the bill's\nfirst Xero post. It is the only status this input takes: a bill is voided\nthrough its own route (`VoidBillingInput`, the invoice's too), and every other status is\nderived from the settlement fold."
         },
         {
           "kind": "variable",
@@ -7712,6 +7712,18 @@
         },
         {
           "kind": "variable",
+          "name": "VoidBillingInput",
+          "declaration": "const VoidBillingInput: z.ZodType<VoidBillingInputType>;",
+          "doc": "Zod schema for {@link VoidBillingInputType}."
+        },
+        {
+          "kind": "interface",
+          "name": "VoidBillingInputType",
+          "declaration": "interface VoidBillingInputType {\n  version: number;\n}",
+          "doc": "Input for an operator's void of a billing document, on EITHER side: an\ninvoice (`POST /invoices/{uid}/void`) or a supplier bill\n(`POST /purchase-bills/{uid}/void`). One shape because it is one action,\n`void` in `utils/document-actions.ts` (one-document-model rulings 33 and 188,\nthe billing twin of {@link VoidCreditInputType}'s ruling 182). `version` is\nthe billing document's, and a stale one is refused (409).\n\nRefused (the catalog's `voidRefusal`) while anything is paid or credited on\nthe document or a live credit names it. The route voids in Xero FIRST and\nanswers `VoidResponse`: 202 `queued` when Xero's limit held it. It replaced\n`VoidPurchaseBillInput`."
+        },
+        {
+          "kind": "variable",
           "name": "VoidCreditInput",
           "declaration": "const VoidCreditInput: z.ZodType<VoidCreditInputType>;",
           "doc": "Zod schema for {@link VoidCreditInputType}."
@@ -7721,18 +7733,6 @@
           "name": "VoidCreditInputType",
           "declaration": "interface VoidCreditInputType {\n  version: number;\n}",
           "doc": "Input for an operator's void of a credit, on EITHER side: a customer credit\nnote (`POST /credit-notes/{uid}/void`) or a supplier credit\n(`POST /purchase-credits/{uid}/void`). One shape because it is one action,\n`void_credit` in `utils/document-actions.ts` (one-document-model rulings 33,\n43, 44). `version` is the credit's, and a stale one is refused (409), so an\noperator cannot void a credit someone else has just allocated from.\n\nRefused (`void_credit`'s refusal) while any allocation or refund draws on the\ncredit: Xero refuses to void such a note, and CFS adopts its rule rather than\nworking around it. It replaced `VoidPurchaseCreditInput`."
-        },
-        {
-          "kind": "variable",
-          "name": "VoidPurchaseBillInput",
-          "declaration": "const VoidPurchaseBillInput: z.ZodType<VoidPurchaseBillInputType>;",
-          "doc": "Zod schema for VoidPurchaseBillInputType."
-        },
-        {
-          "kind": "interface",
-          "name": "VoidPurchaseBillInputType",
-          "declaration": "interface VoidPurchaseBillInputType {\n  version: number;\n}",
-          "doc": "Input for voiding a supplier bill from CFS. `version` is the bill's. A pushed\nbill only: a linked one is Xero's. The refusals are\n`voidRefusal` (`utils/document-actions.ts`)."
         },
         {
           "kind": "variable",
@@ -11929,6 +11929,18 @@
           "doc": "Input schema for PUT /invoices/:uid — partial update."
         },
         {
+          "kind": "variable",
+          "name": "VoidBillingInput",
+          "declaration": "const VoidBillingInput: z.ZodType<VoidBillingInputType>;",
+          "doc": "Zod schema for {@link VoidBillingInputType}."
+        },
+        {
+          "kind": "interface",
+          "name": "VoidBillingInputType",
+          "declaration": "interface VoidBillingInputType {\n  version: number;\n}",
+          "doc": "Input for an operator's void of a billing document, on EITHER side: an\ninvoice (`POST /invoices/{uid}/void`) or a supplier bill\n(`POST /purchase-bills/{uid}/void`). One shape because it is one action,\n`void` in `utils/document-actions.ts` (one-document-model rulings 33 and 188,\nthe billing twin of {@link VoidCreditInputType}'s ruling 182). `version` is\nthe billing document's, and a stale one is refused (409).\n\nRefused (the catalog's `voidRefusal`) while anything is paid or credited on\nthe document or a live credit names it. The route voids in Xero FIRST and\nanswers `VoidResponse`: 202 `queued` when Xero's limit held it. It replaced\n`VoidPurchaseBillInput`."
+        },
+        {
           "kind": "function",
           "name": "billingInCreditPool",
           "signature": "billingInCreditPool(billing: typeLiteral): boolean",
@@ -14705,19 +14717,7 @@
           "kind": "interface",
           "name": "UpdatePurchaseBillInputType",
           "declaration": "interface UpdatePurchaseBillInputType {\n  version: number;\n  status?: \"issued\";\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  items?: PurchaseBillRowInputType[];\n  destinations?: PurchaseBillDestinationInputType[];\n}",
-          "doc": "Input for editing a bill (`PUT /purchase-bills/{uid}`). `items`, when present,\nis the WHOLE array in its new order, the invoice's shape (one-document-model\nPhase 5): a row it omits is removed. Refused per field class once the bill is\nsettled (`INVOICE_FIELD_FREEZE`); a settled linked bill takes a tracking edit\nalone. An accepted edit is pushed to Xero through the ACCPAY edit push (D5).\n\n`destinations`, when present, edits the pairs it names, each stated whole; a\npair it leaves out is unchanged. A pair's membership follows its divider in\n`items`, as on an invoice.\n\n`status: \"issued\"` ISSUES a draft bill, the invoice's twin (one-document-model\nruling 160): the writer asserts the catalog's `issue` and enqueues the bill's\nfirst Xero post. It is the only status this input takes: a bill is voided\nthrough its own route (`VoidPurchaseBillInput`), and every other status is\nderived from the settlement fold."
-        },
-        {
-          "kind": "variable",
-          "name": "VoidPurchaseBillInput",
-          "declaration": "const VoidPurchaseBillInput: z.ZodType<VoidPurchaseBillInputType>;",
-          "doc": "Zod schema for VoidPurchaseBillInputType."
-        },
-        {
-          "kind": "interface",
-          "name": "VoidPurchaseBillInputType",
-          "declaration": "interface VoidPurchaseBillInputType {\n  version: number;\n}",
-          "doc": "Input for voiding a supplier bill from CFS. `version` is the bill's. A pushed\nbill only: a linked one is Xero's. The refusals are\n`voidRefusal` (`utils/document-actions.ts`)."
+          "doc": "Input for editing a bill (`PUT /purchase-bills/{uid}`). `items`, when present,\nis the WHOLE array in its new order, the invoice's shape (one-document-model\nPhase 5): a row it omits is removed. Refused per field class once the bill is\nsettled (`INVOICE_FIELD_FREEZE`); a settled linked bill takes a tracking edit\nalone. An accepted edit is pushed to Xero through the ACCPAY edit push (D5).\n\n`destinations`, when present, edits the pairs it names, each stated whole; a\npair it leaves out is unchanged. A pair's membership follows its divider in\n`items`, as on an invoice.\n\n`status: \"issued\"` ISSUES a draft bill, the invoice's twin (one-document-model\nruling 160): the writer asserts the catalog's `issue` and enqueues the bill's\nfirst Xero post. It is the only status this input takes: a bill is voided\nthrough its own route (`VoidBillingInput`, the invoice's too), and every other status is\nderived from the settlement fold."
         },
         {
           "kind": "function",

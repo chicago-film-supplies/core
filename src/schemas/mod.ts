@@ -865,7 +865,6 @@ export {
   PurchaseDocumentItemInput,
   CreatePurchaseBillInput,
   CreatePurchaseCreditInput,
-  VoidPurchaseBillInput,
   type PurchaseDocumentOriginType,
   type PurchaseBillXeroDocumentType,
   type PurchaseDocumentProductItem,
@@ -892,7 +891,6 @@ export {
   type PurchaseDocumentChargeItemInputType,
   type CreatePurchaseBillInputType,
   type CreatePurchaseCreditInputType,
-  type VoidPurchaseBillInputType,
 } from "./purchase-bill.ts";
 
 export {
@@ -1154,6 +1152,7 @@ export {
   InvoiceSchema,
   isInvoiceLineItem,
   UpdateInvoiceInput,
+  VoidBillingInput,
   type CreateInvoiceInputType,
   type Invoice,
   type InvoiceDocDestinationType,
@@ -1171,6 +1170,7 @@ export {
   type InvoiceItemInputOrderType,
   type InvoiceStatusType,
   type UpdateInvoiceInputType,
+  type VoidBillingInputType,
 } from "./invoice.ts";
 
 

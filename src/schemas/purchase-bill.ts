@@ -1510,7 +1510,7 @@ export type PurchaseBillRowInputType = PurchaseBillDividerInputType | PurchaseBi
  * `status: "issued"` ISSUES a draft bill, the invoice's twin (one-document-model
  * ruling 160): the writer asserts the catalog's `issue` and enqueues the bill's
  * first Xero post. It is the only status this input takes: a bill is voided
- * through its own route (`VoidPurchaseBillInput`), and every other status is
+ * through its own route (`VoidBillingInput`, the invoice's too), and every other status is
  * derived from the settlement fold.
  */
 export interface UpdatePurchaseBillInputType {
@@ -1705,17 +1705,4 @@ export const CreatePurchaseBillInput: z.ZodType<CreatePurchaseBillInputType> = z
   });
 }) as z.ZodType<CreatePurchaseBillInputType>;
 
-/**
- * Input for voiding a supplier bill from CFS. `version` is the bill's. A pushed
- * bill only: a linked one is Xero's. The refusals are
- * `voidRefusal` (`utils/document-actions.ts`).
- */
-export interface VoidPurchaseBillInputType {
-  version: number;
-}
-
-/** Zod schema for VoidPurchaseBillInputType. */
-export const VoidPurchaseBillInput: z.ZodType<VoidPurchaseBillInputType> = z.object({
-  version: z.int().min(0),
-});
 

@@ -16713,7 +16713,7 @@ pair it leaves out is unchanged. A pair's membership follows its divider in
 `status: "issued"` ISSUES a draft bill, the invoice's twin (one-document-model
 ruling 160): the writer asserts the catalog's `issue` and enqueues the bill's
 first Xero post. It is the only status this input takes: a bill is voided
-through its own route (`VoidPurchaseBillInput`), and every other status is
+through its own route (`VoidBillingInput`, the invoice's too), and every other status is
 derived from the settlement fold.
 
 ```ts
@@ -17247,6 +17247,34 @@ interface ValidationIssue {
 }
 ```
 
+### `VoidBillingInput`
+
+Zod schema for {@link VoidBillingInputType}.
+
+```ts
+const VoidBillingInput: z.ZodType<VoidBillingInputType>;
+```
+
+### `VoidBillingInputType`
+
+Input for an operator's void of a billing document, on EITHER side: an
+invoice (`POST /invoices/{uid}/void`) or a supplier bill
+(`POST /purchase-bills/{uid}/void`). One shape because it is one action,
+`void` in `utils/document-actions.ts` (one-document-model rulings 33 and 188,
+the billing twin of {@link VoidCreditInputType}'s ruling 182). `version` is
+the billing document's, and a stale one is refused (409).
+
+Refused (the catalog's `voidRefusal`) while anything is paid or credited on
+the document or a live credit names it. The route voids in Xero FIRST and
+answers `VoidResponse`: 202 `queued` when Xero's limit held it. It replaced
+`VoidPurchaseBillInput`.
+
+```ts
+interface VoidBillingInputType {
+  version: number;
+}
+```
+
 ### `VoidCreditInput`
 
 Zod schema for {@link VoidCreditInputType}.
@@ -17270,26 +17298,6 @@ working around it. It replaced `VoidPurchaseCreditInput`.
 
 ```ts
 interface VoidCreditInputType {
-  version: number;
-}
-```
-
-### `VoidPurchaseBillInput`
-
-Zod schema for VoidPurchaseBillInputType.
-
-```ts
-const VoidPurchaseBillInput: z.ZodType<VoidPurchaseBillInputType>;
-```
-
-### `VoidPurchaseBillInputType`
-
-Input for voiding a supplier bill from CFS. `version` is the bill's. A pushed
-bill only: a linked one is Xero's. The refusals are
-`voidRefusal` (`utils/document-actions.ts`).
-
-```ts
-interface VoidPurchaseBillInputType {
   version: number;
 }
 ```
@@ -25385,6 +25393,34 @@ interface UpdateInvoiceInputType {
 }
 ```
 
+### `VoidBillingInput`
+
+Zod schema for {@link VoidBillingInputType}.
+
+```ts
+const VoidBillingInput: z.ZodType<VoidBillingInputType>;
+```
+
+### `VoidBillingInputType`
+
+Input for an operator's void of a billing document, on EITHER side: an
+invoice (`POST /invoices/{uid}/void`) or a supplier bill
+(`POST /purchase-bills/{uid}/void`). One shape because it is one action,
+`void` in `utils/document-actions.ts` (one-document-model rulings 33 and 188,
+the billing twin of {@link VoidCreditInputType}'s ruling 182). `version` is
+the billing document's, and a stale one is refused (409).
+
+Refused (the catalog's `voidRefusal`) while anything is paid or credited on
+the document or a live credit names it. The route voids in Xero FIRST and
+answers `VoidResponse`: 202 `queued` when Xero's limit held it. It replaced
+`VoidPurchaseBillInput`.
+
+```ts
+interface VoidBillingInputType {
+  version: number;
+}
+```
+
 ### `billingInCreditPool(billing: typeLiteral): boolean`
 
 **Is this billing document in the CREDIT POOL?** — what a credit may draw on:
@@ -31310,7 +31346,7 @@ pair it leaves out is unchanged. A pair's membership follows its divider in
 `status: "issued"` ISSUES a draft bill, the invoice's twin (one-document-model
 ruling 160): the writer asserts the catalog's `issue` and enqueues the bill's
 first Xero post. It is the only status this input takes: a bill is voided
-through its own route (`VoidPurchaseBillInput`), and every other status is
+through its own route (`VoidBillingInput`, the invoice's too), and every other status is
 derived from the settlement fold.
 
 ```ts
@@ -31323,26 +31359,6 @@ interface UpdatePurchaseBillInputType {
   reference?: string | null;
   items?: PurchaseBillRowInputType[];
   destinations?: PurchaseBillDestinationInputType[];
-}
-```
-
-### `VoidPurchaseBillInput`
-
-Zod schema for VoidPurchaseBillInputType.
-
-```ts
-const VoidPurchaseBillInput: z.ZodType<VoidPurchaseBillInputType>;
-```
-
-### `VoidPurchaseBillInputType`
-
-Input for voiding a supplier bill from CFS. `version` is the bill's. A pushed
-bill only: a linked one is Xero's. The refusals are
-`voidRefusal` (`utils/document-actions.ts`).
-
-```ts
-interface VoidPurchaseBillInputType {
-  version: number;
 }
 ```
 
