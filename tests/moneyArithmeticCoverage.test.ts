@@ -351,6 +351,44 @@ Deno.test("moneyArithmeticCoverage — computeLineMoney is the only pre-tax bran
   );
 });
 
+// ── Ratchet E-2: ONE stated pricer (one-document-model ruling 189, spec C7) ──
+//
+// Ratchet E's regex names only the RATE pricers, so it stays at its count when a
+// stated line is priced, and says nothing about "one stated pricer". This arm
+// does: `statedLineSubtotals` (`schemas/_line-money.ts`) is the stated arm for
+// both sides, and every caller is named with an exact count. A second stated
+// pricer comes back as a new caller of the gross-less-cents rule by another
+// route; a new CALL of this one reddens here.
+
+const STATED_PRICER_RE = /\bstatedLineSubtotals\s*\(/;
+const STATED_PRICER_DECL_RE = /^\s*export\s+function\s+statedLineSubtotals\s*\(/;
+
+const STATED_PRICER_SITES = new Map<string, { count: number; why: string }>([
+  ["src/utils/orders.ts", { count: 1, why: "`calculateItemSubtotal`'s stated arm: every receivable reader" }],
+  ["src/utils/price-document.ts", { count: 1, why: "`priceStatedTotalLine`'s stated arm: the payable pricer" }],
+  ["src/schemas/_line-money.ts", { count: 1, why: "`checkFormulaLineMoney`: the stored refine's value assertion" }],
+]);
+
+Deno.test("moneyArithmeticCoverage — statedLineSubtotals is the one stated pricer, called from exactly its catalogued sites", async () => {
+  const hits = (await grep(STATED_PRICER_RE))
+    .filter((h) => h.file !== "src/schemas/template-helpers.generated.ts")
+    .filter((h) => !STATED_PRICER_DECL_RE.test(h.text));
+  const counts = new Map<string, number>();
+  for (const h of hits) counts.set(h.file, (counts.get(h.file) ?? 0) + 1);
+  const found = [...counts.entries()].map(([f, n]) => `${f}: ${n}`).sort();
+  const expected = [...STATED_PRICER_SITES.entries()].map(([f, { count }]) => `${f}: ${count}`).sort();
+  assertEquals(
+    found,
+    expected,
+    "The stated pricer's callers moved. Price a stated line through `calculateItemSubtotal` / " +
+      "`priceStatedTotalLine`, or catalogue the new caller with why and an exact count",
+  );
+  // Floors: the token matches a call, not a longer name, and the declaration is no call.
+  assertEquals(STATED_PRICER_RE.test("const m = statedLineSubtotals({ quantity, price });"), true);
+  assertEquals(STATED_PRICER_RE.test("statedLineSubtotalsish(x)"), false);
+  assertEquals(STATED_PRICER_DECL_RE.test("export function statedLineSubtotals(line: StatedPricedLineLike): {"), true);
+});
+
 // ── Ratchet F: the one line-money function holds the line partitions ───
 //
 // One-document-model 6e-0b1 S4 (ruling 39). Before S3 a payable line was

@@ -217,7 +217,14 @@ export function formulaPartMoney(
  *   stated gross is the money.
  * - Absent or `null` reads as 0: a whole line, as every line written before it.
  */
-export const UnitsFromField: z.ZodType<number | null | undefined> = z.int().min(0).nullable().optional().meta({ seed: false });
+//
+// `server_owned` (ruling 197): only the remainder builder and the sync's part
+// follow author it, so a submitted row may echo it but never change it
+// (`@cfs/core/utils/line-edit`).
+export const UnitsFromField: z.ZodType<number | null | undefined> = z.int().min(0).nullable().optional().meta({
+  seed: false,
+  server_owned: true,
+});
 
 /**
  * **The merge group a line's stated money moves in** (one-document-model rulings

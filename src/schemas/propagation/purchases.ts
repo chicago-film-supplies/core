@@ -498,7 +498,7 @@ const createPurchaseBillRules: CollectionRule[] = [
         source: ["items", "amount_cents"],
         target: ["items", "amount_cents"],
         transform:
-          "lineUnitsCents(line, billed_before, billed_before + quantity) — the one line-money function over the purchase line, read from it, never written to it",
+          "partOf(line, billed_before, billed_before + quantity) — the one part door (billingRowPart) over the purchase line: a STATED line's slice of its stored gross and discount cents (D7), a RATE line's formula at its units (ruling 174); read from the line, never written to it",
       },
     ],
   },

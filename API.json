@@ -22519,6 +22519,148 @@
       ]
     },
     {
+      "entrypoint": "@cfs/core/utils/line-edit",
+      "moduleDoc": "**The one line-edit module, both sides, run twice** (one-document-model rulings\n190, 191, 193, 195–197; spec S6/S7 in\n`api-cloudrun/.claude/plans/line-model-spec.md`).\n\nA client submits FULL rows (ruling 190): a submitted row IS the row, and an\nomitted key resets or re-derives. So \"what did the operator change\" is a\ncomparison by VALUE against the stored row it pairs with, and that comparison\n— plus what an edit does to a line's money — lives here once, for the order,\nthe invoice, the purchase and the bill. The manager runs it before sending, to\nrefuse on the row's own field; the api runs it as the authority.\n\n- {@link diffLine} first: a submitted row's changes against its stored pair,\n  over the keys the grain's update INPUT accepts, minus the keys the stored\n  schema marks `derived` (the manager sends its optimistic recompute, and a\n  derived key is the pricer's). Absent ≡ null. An echoed stored row is no\n  change (ruling 193).\n- {@link applyLineEdit} applies one change: the edited row, or every refusal\n  with the row-relative path it lands on.\n- {@link diffItems} pairs whole arrays (`pairItemsAcrossRebuild`, ruling 192).\n\nBoth key sets are READ OFF THE SCHEMAS ({@link lineEditKeys}), never listed:\nthe input's leaves say what a client may send, `.meta({ derived: true })` what\nthe pricer owns, and `.meta({ server_owned: true })` (ruling 197) what a\nclient may echo but never change.\n\nPure and side-generic; the per-side differences are entries in\n{@link LINE_EDIT_SIDES}, never a branch on the document.\n\n⚠️ The returned line's DERIVED money (`subtotal_cents`, `taxes`, `total_cents`)\nis stale by design: the writer prices the whole document (`priceDocument`).\nWhat this module writes is the money an edit DECIDES — a stated line's\ndiscount cents (the one rate event, D7) and a payable line's net.",
+      "symbols": [
+        {
+          "kind": "interface",
+          "name": "ItemsChange",
+          "declaration": "interface ItemsChange {\n  paired: PairedLineChange<R>[];\n  added: R[];\n  removed: R[];\n}",
+          "doc": "{@link diffItems}' answer."
+        },
+        {
+          "kind": "variable",
+          "name": "LINE_EDIT_GRAINS",
+          "declaration": "const LINE_EDIT_GRAINS: readonly [\"order\", \"invoice\", \"purchase\", \"bill\"];",
+          "doc": "The items-bearing documents whose lines an operator edits."
+        },
+        {
+          "kind": "variable",
+          "name": "LINE_EDIT_REFUSALS",
+          "declaration": "const LINE_EDIT_REFUSALS: readonly [\"server_owned\", \"discount_exceeds_gross\", \"uncounted_row\", \"no_money_input\"];",
+          "doc": "The closed refusal vocabulary (an explicit tuple, core#43)."
+        },
+        {
+          "kind": "variable",
+          "name": "LINE_EDIT_SIDES",
+          "declaration": "const LINE_EDIT_SIDES: mapped;",
+          "doc": "**What differs per SIDE, as entries** (ruling 33): the line's posting key, and\nwhich rows are UNCOUNTED (carry no money and no account: a payable kit header,\n`isKitHeaderLine`; the receivable side has none)."
+        },
+        {
+          "kind": "interface",
+          "name": "LineChange",
+          "declaration": "interface LineChange {\n  fields: LineFieldChange[];\n}",
+          "doc": "What a submitted row changes against its stored pair. Empty `fields` is no change."
+        },
+        {
+          "kind": "interface",
+          "name": "LineEditContext",
+          "declaration": "interface LineEditContext {\n  products: ReadonlyMap<string, LinePostingDefault>;\n  default_account: number;\n}",
+          "doc": "What a pure function cannot read for itself."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "LineEditGrain",
+          "declaration": "type LineEditGrain = indexedAccess;",
+          "doc": "One of {@link LINE_EDIT_GRAINS}."
+        },
+        {
+          "kind": "interface",
+          "name": "LineEditKeys",
+          "declaration": "interface LineEditKeys {\n  compared: Readonly<Record<string, readonly string[]>>;\n  serverOwned: readonly string[];\n}",
+          "doc": "{@link lineEditKeys}' answer for one grain."
+        },
+        {
+          "kind": "interface",
+          "name": "LineEditRefusal",
+          "declaration": "interface LineEditRefusal {\n  code: LineEditRefusalCode;\n  path: parenthesized[];\n  message: string;\n}",
+          "doc": "A refusal, pathed relative to the ROW (`[\"price\", \"stated_cents\"]`); the manager prefixes `items.N`."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "LineEditRefusalCode",
+          "declaration": "type LineEditRefusalCode = indexedAccess;",
+          "doc": "One of {@link LINE_EDIT_REFUSALS}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "LineEditResult",
+          "declaration": "type LineEditResult = typeLiteral | typeLiteral;",
+          "doc": "{@link applyLineEdit}'s answer."
+        },
+        {
+          "kind": "interface",
+          "name": "LineFieldChange",
+          "declaration": "interface LineFieldChange {\n  key: string;\n  from: unknown;\n  to: unknown;\n}",
+          "doc": "One key a submitted row changes: `from` the stored value, `to` the submitted one (`null` for absent)."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "LineLike",
+          "declaration": "type LineLike = typeLiteral;",
+          "doc": "A line as this module reads it: any grain's stored or submitted row."
+        },
+        {
+          "kind": "interface",
+          "name": "LinePostingDefault",
+          "declaration": "interface LinePostingDefault {\n  account: number | null;\n  uid_tracking_category: string | null;\n}",
+          "doc": "The posting defaults a cleared account resets to (ruling 196)."
+        },
+        {
+          "kind": "interface",
+          "name": "PairedLineChange",
+          "declaration": "interface PairedLineChange {\n  stored: R;\n  submitted: R;\n  change: LineChange;\n}",
+          "doc": "One paired line and what its submitted row changes."
+        },
+        {
+          "kind": "variable",
+          "name": "SERVER_OWNED_META_KEY",
+          "declaration": "const SERVER_OWNED_META_KEY: \"server_owned\";",
+          "doc": "The meta key marking a key a client may echo but never change (ruling 197)."
+        },
+        {
+          "kind": "function",
+          "name": "applyLineEdit",
+          "signature": "applyLineEdit(grain: LineEditGrain, stored: LineLike, change: LineChange, ctx: LineEditContext): LineEditResult",
+          "doc": "**Apply one change to one stored row** — the edited row, or every refusal.\n\n- A change to a `server_owned` key is refused (ruling 197).\n- An UNCOUNTED row ({@link LINE_EDIT_SIDES}) takes no money and no account.\n- A cleared account or tracking category resets to the product's, or to the\n  side's default account on a line with no product (ruling 196).\n- **A STATED line:** a change to its gross, quantity or discount terms — or a\n  switch to stated — restates its discount cents through `applyDiscountTerms`\n  on its gross at its quantity (D7, the one rate event); a quantity edit keeps\n  the gross. A payable line's `amount_cents` is the net.\n- **A RATE line:** its money is `rates × counts`; a switch from stated needs\n  rates (`no_money_input`). A payable line's `amount_cents` is the net where\n  its counts are stated.\n- A discount larger than the gross is refused on both sides (ruling 195).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "diffItems",
+          "signature": "diffItems(grain: LineEditGrain, stored: readonly R[], submitted: readonly R[]): ItemsChange<R>",
+          "doc": "**Pair a submitted items array with the stored one and diff each line**\n(rulings 191, 192): pairs through `pairItemsAcrossRebuild` (exact path, then\n`(uid, component ancestry, k)`, then `(uid, k)`), so a moved or renamed-group\nline still pairs with the stored row it is. Dividers pair but are not lines.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "diffLine",
+          "signature": "diffLine(grain: LineEditGrain, stored: LineLike, submitted: LineLike): LineChange",
+          "doc": "**What a submitted row changes against its stored pair** — by VALUE, over the\ngrain's compared keys ({@link lineEditKeys}), absent ≡ null. It runs FIRST:\ncomparing is what tells an echoed key from an edited one (the bill writer's\n`grossEdited` read every echoed `stated_cents` as an edit). Derived money a\nclient sends (its optimistic recompute) is never a change.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "lineEditKeys",
+          "signature": "lineEditKeys(grain: LineEditGrain): LineEditKeys",
+          "doc": "**The keys a grain's line edit reads, off its schemas** (C10, ruling 197):\n`compared` = the update input's line keys − the side's `derived` keys − a\nrow's identity − the formula snapshot's re-derived half; `serverOwned` = the\nstored keys tagged `server_owned`. Memoized per grain.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "lineEditSide",
+          "signature": "lineEditSide(grain: LineEditGrain): Side",
+          "doc": "The side a grain is on.",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
       "entrypoint": "@cfs/core/utils/journal",
       "moduleDoc": "The movement journal, folded: the orders a fold may use, and the custody\nreplay as projections over it (stock campaign P1, api-cloudrun#1240).\n\n```ts\nimport { foldJournal, journalOrder, custodyByBooking } from \"@cfs/core/utils/journal\";\n```\n\n## Two orders, because two questions\n\nThree folds each ordered the journal their own way: the custody replay\ngrouped by `date` instant with no tiebreak; the ledger replay sorted `date_fs`\nthen `number`; and the unit replay sorted `created_at` then `number`. They\nanswer two different questions, so they need exactly two orders:\n\n- **What happened, in what order** — {@link journalOrder}: the movement's own\n  `date` instant, then its `number`. Custody folds use it. A rebook pair is\n  numbered `rebook_out` first precisely so that a fold takes it first.\n- **What a writer applied, in what order** — {@link replayOrder}: what a\n  replay must use to reproduce a stored ledger or roster, since basis and\n  roster state depend on the order movements were applied, not the order\n  they happened (api-cloudrun#1255). {@link recordOrder} is its live-writer\n  half.\n\n## The replay identity, and why it covers exactly the history keys\n\n`calculateBookingBreakdown` carries every custody-history key forward\nverbatim and re-derives only the plan keys, so the order path never\nORIGINATES a unit in a history key; only the fulfillment ladder does, and it\nwrites a movement for every step. Hence\n\n    net[k] = Σ(movements with custody.to === k) − Σ(movements with custody.from === k)\n    net[k] === booking.breakdown[k]        for k in CUSTODY_HISTORY_KEYS\n\nThe plan keys move with an order's status, a planning act with no event, so\nthey are deliberately outside the identity. **The stored breakdown wins on\ndisagreement**: a divergence is a bug report about the journal, never a\nlicence to rewrite the booking.\n\n## Two ladders, and a movement's TYPE says which (7a, C10)\n\nAn outbound booking (an order's, `bookings`) and an inbound one (a\npurchase's, `bookings-inbound`) keep different breakdowns, and five key\nspellings (`quoted`, `lost`, `damaged`, the two transit keys) are shared\nbetween them with a different place on each. So a custody pair cannot be\nfolded until its LADDER is known, and the ladder is the movement type's\n`MovementContract.booking_ladder` ({@link movementLadder}) — never the key,\nnever the booking id (the two collections share one id grammar).\n\nEvery custody projection therefore takes the ladder it folds and SKIPS every\nmovement of the other one: {@link custodyByBooking}, {@link custodyByGrain},\n{@link orphanedCustody}, {@link unitsByBooking} and {@link replayCustody}.\nA caller wanting both runs two projections in one {@link foldJournal} pass.\nThe inbound identity is the outbound one over `INBOUND_HISTORY_KEYS`, judged\nby {@link classifyInboundReplay}.\n\nLifted from api-cloudrun's custodyReplay module (`replayCustody`,\n`classifyReplay`; deleted there in stock campaign P3), unchanged in behaviour. How the audit judges each verdict\n(the cutover instant, `booking.created_at`) stays in the audit.",
       "symbols": [

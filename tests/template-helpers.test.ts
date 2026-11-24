@@ -71,6 +71,7 @@ import * as templateLintUtils from "../src/utils/template-lint.ts";
 import * as substitutionUtils from "../src/utils/substitutions.ts";
 import * as itemPairingUtils from "../src/utils/item-pairing.ts";
 import * as itemRulesUtils from "../src/utils/item-rules.ts";
+import * as lineEditUtils from "../src/utils/line-edit.ts";
 import * as taxClassUtils from "../src/utils/tax-classes.ts";
 import * as unitUtils from "../src/utils/units.ts";
 import * as priceDocumentUtils from "../src/utils/price-document.ts";
@@ -215,6 +216,7 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // sees its exports.
   "item-pairing": itemPairingUtils,
   "item-rules": itemRulesUtils,
+  "line-edit": lineEditUtils,
   invoices: invoiceUtils,
   locations: locationUtils,
   money: moneyUtils,

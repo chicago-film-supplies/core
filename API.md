@@ -47247,6 +47247,241 @@ orders, stay legal (ruling 53).
 
 Returns `[]` for a legal array.
 
+## `@cfs/core/utils/line-edit`
+
+**The one line-edit module, both sides, run twice** (one-document-model rulings
+190, 191, 193, 195–197; spec S6/S7 in
+`api-cloudrun/.claude/plans/line-model-spec.md`).
+
+A client submits FULL rows (ruling 190): a submitted row IS the row, and an
+omitted key resets or re-derives. So "what did the operator change" is a
+comparison by VALUE against the stored row it pairs with, and that comparison
+— plus what an edit does to a line's money — lives here once, for the order,
+the invoice, the purchase and the bill. The manager runs it before sending, to
+refuse on the row's own field; the api runs it as the authority.
+
+- {@link diffLine} first: a submitted row's changes against its stored pair,
+  over the keys the grain's update INPUT accepts, minus the keys the stored
+  schema marks `derived` (the manager sends its optimistic recompute, and a
+  derived key is the pricer's). Absent ≡ null. An echoed stored row is no
+  change (ruling 193).
+- {@link applyLineEdit} applies one change: the edited row, or every refusal
+  with the row-relative path it lands on.
+- {@link diffItems} pairs whole arrays (`pairItemsAcrossRebuild`, ruling 192).
+
+Both key sets are READ OFF THE SCHEMAS ({@link lineEditKeys}), never listed:
+the input's leaves say what a client may send, `.meta({ derived: true })` what
+the pricer owns, and `.meta({ server_owned: true })` (ruling 197) what a
+client may echo but never change.
+
+Pure and side-generic; the per-side differences are entries in
+{@link LINE_EDIT_SIDES}, never a branch on the document.
+
+⚠️ The returned line's DERIVED money (`subtotal_cents`, `taxes`, `total_cents`)
+is stale by design: the writer prices the whole document (`priceDocument`).
+What this module writes is the money an edit DECIDES — a stated line's
+discount cents (the one rate event, D7) and a payable line's net.
+
+### `ItemsChange`
+
+{@link diffItems}' answer.
+
+```ts
+interface ItemsChange {
+  paired: PairedLineChange<R>[];
+  added: R[];
+  removed: R[];
+}
+```
+
+### `LINE_EDIT_GRAINS`
+
+The items-bearing documents whose lines an operator edits.
+
+```ts
+const LINE_EDIT_GRAINS: readonly ["order", "invoice", "purchase", "bill"];
+```
+
+### `LINE_EDIT_REFUSALS`
+
+The closed refusal vocabulary (an explicit tuple, core#43).
+
+```ts
+const LINE_EDIT_REFUSALS: readonly ["server_owned", "discount_exceeds_gross", "uncounted_row", "no_money_input"];
+```
+
+### `LINE_EDIT_SIDES`
+
+**What differs per SIDE, as entries** (ruling 33): the line's posting key, and
+which rows are UNCOUNTED (carry no money and no account: a payable kit header,
+`isKitHeaderLine`; the receivable side has none).
+
+```ts
+const LINE_EDIT_SIDES: mapped;
+```
+
+### `LineChange`
+
+What a submitted row changes against its stored pair. Empty `fields` is no change.
+
+```ts
+interface LineChange {
+  fields: LineFieldChange[];
+}
+```
+
+### `LineEditContext`
+
+What a pure function cannot read for itself.
+
+```ts
+interface LineEditContext {
+  products: ReadonlyMap<string, LinePostingDefault>;
+  default_account: number;
+}
+```
+
+### `LineEditGrain`
+
+One of {@link LINE_EDIT_GRAINS}.
+
+```ts
+type LineEditGrain = indexedAccess;
+```
+
+### `LineEditKeys`
+
+{@link lineEditKeys}' answer for one grain.
+
+```ts
+interface LineEditKeys {
+  compared: Readonly<Record<string, readonly string[]>>;
+  serverOwned: readonly string[];
+}
+```
+
+### `LineEditRefusal`
+
+A refusal, pathed relative to the ROW (`["price", "stated_cents"]`); the manager prefixes `items.N`.
+
+```ts
+interface LineEditRefusal {
+  code: LineEditRefusalCode;
+  path: parenthesized[];
+  message: string;
+}
+```
+
+### `LineEditRefusalCode`
+
+One of {@link LINE_EDIT_REFUSALS}.
+
+```ts
+type LineEditRefusalCode = indexedAccess;
+```
+
+### `LineEditResult`
+
+{@link applyLineEdit}'s answer.
+
+```ts
+type LineEditResult = typeLiteral | typeLiteral;
+```
+
+### `LineFieldChange`
+
+One key a submitted row changes: `from` the stored value, `to` the submitted one (`null` for absent).
+
+```ts
+interface LineFieldChange {
+  key: string;
+  from: unknown;
+  to: unknown;
+}
+```
+
+### `LineLike`
+
+A line as this module reads it: any grain's stored or submitted row.
+
+```ts
+type LineLike = typeLiteral;
+```
+
+### `LinePostingDefault`
+
+The posting defaults a cleared account resets to (ruling 196).
+
+```ts
+interface LinePostingDefault {
+  account: number | null;
+  uid_tracking_category: string | null;
+}
+```
+
+### `PairedLineChange`
+
+One paired line and what its submitted row changes.
+
+```ts
+interface PairedLineChange {
+  stored: R;
+  submitted: R;
+  change: LineChange;
+}
+```
+
+### `SERVER_OWNED_META_KEY`
+
+The meta key marking a key a client may echo but never change (ruling 197).
+
+```ts
+const SERVER_OWNED_META_KEY: "server_owned";
+```
+
+### `applyLineEdit(grain: LineEditGrain, stored: LineLike, change: LineChange, ctx: LineEditContext): LineEditResult`
+
+**Apply one change to one stored row** — the edited row, or every refusal.
+
+- A change to a `server_owned` key is refused (ruling 197).
+- An UNCOUNTED row ({@link LINE_EDIT_SIDES}) takes no money and no account.
+- A cleared account or tracking category resets to the product's, or to the
+  side's default account on a line with no product (ruling 196).
+- **A STATED line:** a change to its gross, quantity or discount terms — or a
+  switch to stated — restates its discount cents through `applyDiscountTerms`
+  on its gross at its quantity (D7, the one rate event); a quantity edit keeps
+  the gross. A payable line's `amount_cents` is the net.
+- **A RATE line:** its money is `rates × counts`; a switch from stated needs
+  rates (`no_money_input`). A payable line's `amount_cents` is the net where
+  its counts are stated.
+- A discount larger than the gross is refused on both sides (ruling 195).
+
+### `diffItems(grain: LineEditGrain, stored: readonly R[], submitted: readonly R[]): ItemsChange<R>`
+
+**Pair a submitted items array with the stored one and diff each line**
+(rulings 191, 192): pairs through `pairItemsAcrossRebuild` (exact path, then
+`(uid, component ancestry, k)`, then `(uid, k)`), so a moved or renamed-group
+line still pairs with the stored row it is. Dividers pair but are not lines.
+
+### `diffLine(grain: LineEditGrain, stored: LineLike, submitted: LineLike): LineChange`
+
+**What a submitted row changes against its stored pair** — by VALUE, over the
+grain's compared keys ({@link lineEditKeys}), absent ≡ null. It runs FIRST:
+comparing is what tells an echoed key from an edited one (the bill writer's
+`grossEdited` read every echoed `stated_cents` as an edit). Derived money a
+client sends (its optimistic recompute) is never a change.
+
+### `lineEditKeys(grain: LineEditGrain): LineEditKeys`
+
+**The keys a grain's line edit reads, off its schemas** (C10, ruling 197):
+`compared` = the update input's line keys − the side's `derived` keys − a
+row's identity − the formula snapshot's re-derived half; `serverOwned` = the
+stored keys tagged `server_owned`. Memoized per grain.
+
+### `lineEditSide(grain: LineEditGrain): Side`
+
+The side a grain is on.
+
 ## `@cfs/core/utils/journal`
 
 The movement journal, folded: the orders a fold may use, and the custody

@@ -1000,6 +1000,16 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   "item-rules": [
     "itemArrayIssues",
   ],
+  // `utils/line-edit.ts` (one-document-model ruling 191) judges an operator's edit
+  // to a stored line before it is written. A template renders a document whose
+  // edits were all judged already, so nothing here belongs in a render context.
+  "line-edit": [
+    "applyLineEdit",
+    "diffItems",
+    "diffLine",
+    "lineEditKeys",
+    "lineEditSide",
+  ],
   substitutions: [
     "collectSubstitutionAnchors",
     "findSubtreeAnchor",
