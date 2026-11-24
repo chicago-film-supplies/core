@@ -865,7 +865,6 @@ export {
   PurchaseDocumentItemInput,
   CreatePurchaseBillInput,
   CreatePurchaseCreditInput,
-  VoidPurchaseCreditInput,
   VoidPurchaseBillInput,
   type PurchaseDocumentOriginType,
   type PurchaseBillXeroDocumentType,
@@ -893,7 +892,6 @@ export {
   type PurchaseDocumentChargeItemInputType,
   type CreatePurchaseBillInputType,
   type CreatePurchaseCreditInputType,
-  type VoidPurchaseCreditInputType,
   type VoidPurchaseBillInputType,
 } from "./purchase-bill.ts";
 
@@ -1395,6 +1393,10 @@ export {
   CREDIT_NOTE_STATUS_CONTRACTS,
   CreateCreditNoteInput,
   type CreateCreditNoteInputType,
+  VoidCreditInput,
+  type VoidCreditInputType,
+  VoidResponse,
+  type VoidResponseType,
   type CreateCreditNoteItemInputType,
   creditIsLive,
   type CreditNoteStatusContract,

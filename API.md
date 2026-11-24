@@ -17247,6 +17247,33 @@ interface ValidationIssue {
 }
 ```
 
+### `VoidCreditInput`
+
+Zod schema for {@link VoidCreditInputType}.
+
+```ts
+const VoidCreditInput: z.ZodType<VoidCreditInputType>;
+```
+
+### `VoidCreditInputType`
+
+Input for an operator's void of a credit, on EITHER side: a customer credit
+note (`POST /credit-notes/{uid}/void`) or a supplier credit
+(`POST /purchase-credits/{uid}/void`). One shape because it is one action,
+`void_credit` in `utils/document-actions.ts` (one-document-model rulings 33,
+43, 44). `version` is the credit's, and a stale one is refused (409), so an
+operator cannot void a credit someone else has just allocated from.
+
+Refused (`void_credit`'s refusal) while any allocation or refund draws on the
+credit: Xero refuses to void such a note, and CFS adopts its rule rather than
+working around it. It replaced `VoidPurchaseCreditInput`.
+
+```ts
+interface VoidCreditInputType {
+  version: number;
+}
+```
+
 ### `VoidPurchaseBillInput`
 
 Zod schema for VoidPurchaseBillInputType.
@@ -17267,23 +17294,28 @@ interface VoidPurchaseBillInputType {
 }
 ```
 
-### `VoidPurchaseCreditInput`
+### `VoidResponse`
 
-Zod schema for VoidPurchaseCreditInputType.
+Zod schema for {@link VoidResponseType}.
 
 ```ts
-const VoidPurchaseCreditInput: z.ZodType<VoidPurchaseCreditInputType>;
+const VoidResponse: z.ZodType<VoidResponseType>;
 ```
 
-### `VoidPurchaseCreditInputType`
+### `VoidResponseType`
 
-Input for voiding a supplier credit from CFS. `version` is the credit's.
-Refused while anything draws on the credit — remove its allocations and
-refunds in Xero first, as Xero itself requires.
+What every operator void route answers: a bill's, a supplier credit's and a
+customer credit note's. `queued`: Xero's limit held the void, NOTHING has
+changed yet (the route answers 202), and a task runs the same Xero-first void
+past the reset. `version` is the document's after the void, or as it stands
+when the void was queued or was a replay of one already done.
 
 ```ts
-interface VoidPurchaseCreditInputType {
+interface VoidResponseType {
+  success: boolean;
+  uid: string;
   version: number;
+  queued: boolean;
 }
 ```
 
@@ -31314,26 +31346,6 @@ interface VoidPurchaseBillInputType {
 }
 ```
 
-### `VoidPurchaseCreditInput`
-
-Zod schema for VoidPurchaseCreditInputType.
-
-```ts
-const VoidPurchaseCreditInput: z.ZodType<VoidPurchaseCreditInputType>;
-```
-
-### `VoidPurchaseCreditInputType`
-
-Input for voiding a supplier credit from CFS. `version` is the credit's.
-Refused while anything draws on the credit — remove its allocations and
-refunds in Xero first, as Xero itself requires.
-
-```ts
-interface VoidPurchaseCreditInputType {
-  version: number;
-}
-```
-
 ### `creditItemMemoCents(item: Pick<PurchaseCreditItemInputType, "price">): number | undefined`
 
 The supplier's memo a credit item input states (6e-0b1 D4): its
@@ -32109,6 +32121,58 @@ interface CreditSourceRow {
   type?: string;
   uid_billing?: string;
   path_billing_item?: string[];
+}
+```
+
+### `VoidCreditInput`
+
+Zod schema for {@link VoidCreditInputType}.
+
+```ts
+const VoidCreditInput: z.ZodType<VoidCreditInputType>;
+```
+
+### `VoidCreditInputType`
+
+Input for an operator's void of a credit, on EITHER side: a customer credit
+note (`POST /credit-notes/{uid}/void`) or a supplier credit
+(`POST /purchase-credits/{uid}/void`). One shape because it is one action,
+`void_credit` in `utils/document-actions.ts` (one-document-model rulings 33,
+43, 44). `version` is the credit's, and a stale one is refused (409), so an
+operator cannot void a credit someone else has just allocated from.
+
+Refused (`void_credit`'s refusal) while any allocation or refund draws on the
+credit: Xero refuses to void such a note, and CFS adopts its rule rather than
+working around it. It replaced `VoidPurchaseCreditInput`.
+
+```ts
+interface VoidCreditInputType {
+  version: number;
+}
+```
+
+### `VoidResponse`
+
+Zod schema for {@link VoidResponseType}.
+
+```ts
+const VoidResponse: z.ZodType<VoidResponseType>;
+```
+
+### `VoidResponseType`
+
+What every operator void route answers: a bill's, a supplier credit's and a
+customer credit note's. `queued`: Xero's limit held the void, NOTHING has
+changed yet (the route answers 202), and a task runs the same Xero-first void
+past the reset. `version` is the document's after the void, or as it stands
+when the void was queued or was a replay of one already done.
+
+```ts
+interface VoidResponseType {
+  success: boolean;
+  uid: string;
+  version: number;
+  queued: boolean;
 }
 ```
 

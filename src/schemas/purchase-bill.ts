@@ -1706,20 +1706,6 @@ export const CreatePurchaseBillInput: z.ZodType<CreatePurchaseBillInputType> = z
 }) as z.ZodType<CreatePurchaseBillInputType>;
 
 /**
- * Input for voiding a supplier credit from CFS. `version` is the credit's.
- * Refused while anything draws on the credit — remove its allocations and
- * refunds in Xero first, as Xero itself requires.
- */
-export interface VoidPurchaseCreditInputType {
-  version: number;
-}
-
-/** Zod schema for VoidPurchaseCreditInputType. */
-export const VoidPurchaseCreditInput: z.ZodType<VoidPurchaseCreditInputType> = z.object({
-  version: z.int().min(0),
-});
-
-/**
  * Input for voiding a supplier bill from CFS. `version` is the bill's. A pushed
  * bill only: a linked one is Xero's. The refusals are
  * `voidRefusal` (`utils/document-actions.ts`).

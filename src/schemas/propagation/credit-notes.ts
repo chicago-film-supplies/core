@@ -516,8 +516,9 @@ const reverseCreditNoteRefundTransaction: TransactionDefinition = {
 // It existed here until beta.133 and described a void that appended a
 // `credit_reversal` per live allocation. **CFS no longer does that, and the rule
 // outlived the code by one release.** Voiding a note with any unreversed
-// allocation is now refused unconditionally with a 409
-// (`VOID_BLOCKED_BY_ALLOCATION`), because Xero refuses to void an allocated note
+// allocation is now refused unconditionally (400 `ACTION_REFUSED`, the
+// `void_credit` refusal in `utils/document-actions.ts`; until 2026-11 a 409
+// `VOID_BLOCKED_BY_ALLOCATION`), because Xero refuses to void an allocated note
 // and clearing an allocation needs `DELETE /CreditNotes/{id}/Allocations/{id}` —
 // so the one-call path completed the CFS half, re-opened every affected invoice's
 // balance, and then failed the Xero half. A ledger divergence produced by using a
@@ -552,7 +553,7 @@ const voidCreditNoteRules: CollectionRule[] = [
 const voidCreditNoteTransaction: TransactionDefinition = {
   id: "void-credit-note",
   description:
-    "Voids a credit note. Refused when ANY allocation or cash refund is unreversed (a refund is a Xero payment on the note, which Xero also refuses to void past). An allocation is refused with a 409 (`VOID_BLOCKED_BY_ALLOCATION`) — unconditionally, with no flag to override it, because Xero locks both ends of an allocation and CFS must not complete a retraction it cannot mirror. So a void that proceeds touches exactly ONE document in its commit: the note's own status. It moves no invoice balance, because a note with no live allocation has no invoice to affect. After the commit it converges the note's entry in `credit_notes[]` on every order it names, to `void`. Retract allocations first with `POST /settlements/{uid}/reverse`, then void.",
+    "An operator voids a customer credit note nothing draws on, exactly as a supplier credit is voided (`void-purchase-credit`; one-document-model rulings 33, 43, 44): the request carries the note's `version` (a stale one is refused), the `void_credit` ruleset refuses (400 `ACTION_REFUSED`) while ANY allocation or cash refund is unreversed — unconditionally, with no flag to override it, because Xero locks both ends of an allocation and CFS must not complete a retraction it cannot mirror — then the posted Xero credit note is voided FIRST (`POST /CreditNotes/{id}` `Status: VOIDED`; a refusal there leaves CFS unchanged, 409), then one commit marks the note void. A note Xero does not hold yet is voided in CFS alone, and its queued push posts it and then voids it. If Xero's limit holds the void, nothing changes, the route answers 202 `{ queued: true }`, and `/tasks/void-credit-note` runs the same void past the reset. The commit touches exactly ONE document, the note's own status: a note with no live allocation has no invoice to affect. After the commit it converges the note's entry in `credit_notes[]` on every order it names, to `void`. Retract allocations first with `POST /settlements/{uid}/reverse`, then void. Fires on: every void that is not a replay.",
   steps: [
     "void-credit-note:status",
     "update-credit-note:note-to-orders",

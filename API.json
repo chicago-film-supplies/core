@@ -7712,6 +7712,18 @@
         },
         {
           "kind": "variable",
+          "name": "VoidCreditInput",
+          "declaration": "const VoidCreditInput: z.ZodType<VoidCreditInputType>;",
+          "doc": "Zod schema for {@link VoidCreditInputType}."
+        },
+        {
+          "kind": "interface",
+          "name": "VoidCreditInputType",
+          "declaration": "interface VoidCreditInputType {\n  version: number;\n}",
+          "doc": "Input for an operator's void of a credit, on EITHER side: a customer credit\nnote (`POST /credit-notes/{uid}/void`) or a supplier credit\n(`POST /purchase-credits/{uid}/void`). One shape because it is one action,\n`void_credit` in `utils/document-actions.ts` (one-document-model rulings 33,\n43, 44). `version` is the credit's, and a stale one is refused (409), so an\noperator cannot void a credit someone else has just allocated from.\n\nRefused (`void_credit`'s refusal) while any allocation or refund draws on the\ncredit: Xero refuses to void such a note, and CFS adopts its rule rather than\nworking around it. It replaced `VoidPurchaseCreditInput`."
+        },
+        {
+          "kind": "variable",
           "name": "VoidPurchaseBillInput",
           "declaration": "const VoidPurchaseBillInput: z.ZodType<VoidPurchaseBillInputType>;",
           "doc": "Zod schema for VoidPurchaseBillInputType."
@@ -7724,15 +7736,15 @@
         },
         {
           "kind": "variable",
-          "name": "VoidPurchaseCreditInput",
-          "declaration": "const VoidPurchaseCreditInput: z.ZodType<VoidPurchaseCreditInputType>;",
-          "doc": "Zod schema for VoidPurchaseCreditInputType."
+          "name": "VoidResponse",
+          "declaration": "const VoidResponse: z.ZodType<VoidResponseType>;",
+          "doc": "Zod schema for {@link VoidResponseType}."
         },
         {
           "kind": "interface",
-          "name": "VoidPurchaseCreditInputType",
-          "declaration": "interface VoidPurchaseCreditInputType {\n  version: number;\n}",
-          "doc": "Input for voiding a supplier credit from CFS. `version` is the credit's.\nRefused while anything draws on the credit — remove its allocations and\nrefunds in Xero first, as Xero itself requires."
+          "name": "VoidResponseType",
+          "declaration": "interface VoidResponseType {\n  success: boolean;\n  uid: string;\n  version: number;\n  queued: boolean;\n}",
+          "doc": "What every operator void route answers: a bill's, a supplier credit's and a\ncustomer credit note's. `queued`: Xero's limit held the void, NOTHING has\nchanged yet (the route answers 202), and a task runs the same Xero-first void\npast the reset. `version` is the document's after the void, or as it stands\nwhen the void was queued or was a replay of one already done."
         },
         {
           "kind": "interface",
@@ -14708,18 +14720,6 @@
           "doc": "Input for voiding a supplier bill from CFS. `version` is the bill's. A pushed\nbill only: a linked one is Xero's. The refusals are\n`voidRefusal` (`utils/document-actions.ts`)."
         },
         {
-          "kind": "variable",
-          "name": "VoidPurchaseCreditInput",
-          "declaration": "const VoidPurchaseCreditInput: z.ZodType<VoidPurchaseCreditInputType>;",
-          "doc": "Zod schema for VoidPurchaseCreditInputType."
-        },
-        {
-          "kind": "interface",
-          "name": "VoidPurchaseCreditInputType",
-          "declaration": "interface VoidPurchaseCreditInputType {\n  version: number;\n}",
-          "doc": "Input for voiding a supplier credit from CFS. `version` is the credit's.\nRefused while anything draws on the credit — remove its allocations and\nrefunds in Xero first, as Xero itself requires."
-        },
-        {
           "kind": "function",
           "name": "creditItemMemoCents",
           "signature": "creditItemMemoCents(item: Pick<PurchaseCreditItemInputType, \"price\">): number | undefined",
@@ -15089,6 +15089,30 @@
           "name": "CreditSourceRow",
           "declaration": "interface CreditSourceRow {\n  type?: string;\n  uid_billing?: string;\n  path_billing_item?: string[];\n}",
           "doc": "The row keys {@link deriveCreditNoteSources} reads: a divider's `type`, a line's pointer."
+        },
+        {
+          "kind": "variable",
+          "name": "VoidCreditInput",
+          "declaration": "const VoidCreditInput: z.ZodType<VoidCreditInputType>;",
+          "doc": "Zod schema for {@link VoidCreditInputType}."
+        },
+        {
+          "kind": "interface",
+          "name": "VoidCreditInputType",
+          "declaration": "interface VoidCreditInputType {\n  version: number;\n}",
+          "doc": "Input for an operator's void of a credit, on EITHER side: a customer credit\nnote (`POST /credit-notes/{uid}/void`) or a supplier credit\n(`POST /purchase-credits/{uid}/void`). One shape because it is one action,\n`void_credit` in `utils/document-actions.ts` (one-document-model rulings 33,\n43, 44). `version` is the credit's, and a stale one is refused (409), so an\noperator cannot void a credit someone else has just allocated from.\n\nRefused (`void_credit`'s refusal) while any allocation or refund draws on the\ncredit: Xero refuses to void such a note, and CFS adopts its rule rather than\nworking around it. It replaced `VoidPurchaseCreditInput`."
+        },
+        {
+          "kind": "variable",
+          "name": "VoidResponse",
+          "declaration": "const VoidResponse: z.ZodType<VoidResponseType>;",
+          "doc": "Zod schema for {@link VoidResponseType}."
+        },
+        {
+          "kind": "interface",
+          "name": "VoidResponseType",
+          "declaration": "interface VoidResponseType {\n  success: boolean;\n  uid: string;\n  version: number;\n  queued: boolean;\n}",
+          "doc": "What every operator void route answers: a bill's, a supplier credit's and a\ncustomer credit note's. `queued`: Xero's limit held the void, NOTHING has\nchanged yet (the route answers 202), and a task runs the same Xero-first void\npast the reset. `version` is the document's after the void, or as it stands\nwhen the void was queued or was a replay of one already done."
         },
         {
           "kind": "function",

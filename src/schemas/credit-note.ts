@@ -958,3 +958,46 @@ export const CreateCreditNoteInput: z.ZodType<CreateCreditNoteInputType> = z.obj
   overbilling_of_order: FirestoreId.optional(),
   uuid_session: z.uuid(),
 });
+
+/**
+ * Input for an operator's void of a credit, on EITHER side: a customer credit
+ * note (`POST /credit-notes/{uid}/void`) or a supplier credit
+ * (`POST /purchase-credits/{uid}/void`). One shape because it is one action,
+ * `void_credit` in `utils/document-actions.ts` (one-document-model rulings 33,
+ * 43, 44). `version` is the credit's, and a stale one is refused (409), so an
+ * operator cannot void a credit someone else has just allocated from.
+ *
+ * Refused (`void_credit`'s refusal) while any allocation or refund draws on the
+ * credit: Xero refuses to void such a note, and CFS adopts its rule rather than
+ * working around it. It replaced `VoidPurchaseCreditInput`.
+ */
+export interface VoidCreditInputType {
+  version: number;
+}
+
+/** Zod schema for {@link VoidCreditInputType}. */
+export const VoidCreditInput: z.ZodType<VoidCreditInputType> = z.object({
+  version: z.int().min(0),
+});
+
+/**
+ * What every operator void route answers: a bill's, a supplier credit's and a
+ * customer credit note's. `queued`: Xero's limit held the void, NOTHING has
+ * changed yet (the route answers 202), and a task runs the same Xero-first void
+ * past the reset. `version` is the document's after the void, or as it stands
+ * when the void was queued or was a replay of one already done.
+ */
+export interface VoidResponseType {
+  success: boolean;
+  uid: string;
+  version: number;
+  queued: boolean;
+}
+
+/** Zod schema for {@link VoidResponseType}. */
+export const VoidResponse: z.ZodType<VoidResponseType> = z.object({
+  success: z.boolean(),
+  uid: z.string(),
+  version: z.number(),
+  queued: z.boolean(),
+});
