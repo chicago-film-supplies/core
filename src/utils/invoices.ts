@@ -27,6 +27,7 @@ export {
   isPreTaxItem,
   isPreTaxPricingItem,
   isTransactionFeeItem,
+  statedUnitGrossCents,
   type StructuralItem,
   type ItemPathIssue,
   type ItemUniquenessIssue,

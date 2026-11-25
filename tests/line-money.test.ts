@@ -322,3 +322,30 @@ Deno.test("checkFormulaLineMoney: a STATED line is checked against its stated to
   checkFormulaLineMoney({ ...stated(1118, 1118), price: { ...stated(1118, 1118).price, stated_cents: null } }, ctx);
   assertEquals(issues.length, 2);
 });
+
+// ── statedUnitGrossCents: a stated line's Unit Price (2c-3a step 2) ─────────
+// Expected values are worked by hand, not computed by the line-money module.
+
+Deno.test("statedUnitGrossCents: the gross of one unit, rounded once half away from zero", async () => {
+  const { statedUnitGrossCents } = await import("../src/utils/orders.ts");
+  const stated = (stated_cents: number | null, quantity: number) => ({ quantity, price: { stated_cents } });
+  assertEquals(statedUnitGrossCents(stated(1000, 3)), 333); // 333.33…
+  assertEquals(statedUnitGrossCents(stated(2000, 3)), 667); // 666.66…
+  assertEquals(statedUnitGrossCents(stated(1001, 2)), 501); // 500.5 → away from zero
+  assertEquals(statedUnitGrossCents(stated(-1001, 2)), -501); // symmetric, not -500
+  assertEquals(statedUnitGrossCents(stated(4500, 1)), 4500);
+  assertEquals(statedUnitGrossCents(stated(4500, 0)), 0); // a line of no units
+  assertEquals(statedUnitGrossCents(stated(null, 3)), null); // a rate line
+  assertEquals(statedUnitGrossCents({ quantity: 3, price: {} }), null);
+  assertThrows(() => statedUnitGrossCents(stated(10.5, 2)));
+});
+
+Deno.test("statedUnitGrossCents: the first unit's gross is the partition's first unit", () => {
+  // The cumulative value at k = 1 (gross = money + discount at one unit), so
+  // the printed unit and lineUnitsCents(line, 0, 1) never disagree about unit one.
+  const line: LineMoneyLike = { quantity: 7, price: { rates: [], counts: [], discount: { rate: 10, type: "percent" }, stated_cents: 12345 } };
+  return import("../src/utils/invoices.ts").then(({ statedUnitGrossCents }) => {
+    assertEquals(statedUnitGrossCents(line), lineMoneyAtCents(line, 1) + lineDiscountAtCents(line, 1));
+    assertEquals(statedUnitGrossCents(line), 1764); // 12345 ÷ 7 = 1763.57…
+  });
+});

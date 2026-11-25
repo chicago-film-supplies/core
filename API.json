@@ -21833,6 +21833,14 @@
         },
         {
           "kind": "function",
+          "name": "statedUnitGrossCents",
+          "signature": "statedUnitGrossCents(line: StatedPricedLineLike): number | null",
+          "doc": "**A stated line's Unit Price: the gross of ONE unit, or `null` on a rate\nline** (one-document-model ruling 189, 2c-3a step 2; owner 2026-11-25). The\nstated arm's own cumulative value at `k = 1` (`stated × 1 ÷ Q`, rounded once,\nhalf away from zero), so the printed unit is the partition rule's first unit,\nnot a second rounding of the line.\n\n⚠️ A DISPLAY figure: Unit × Qty can differ from the stated gross by under one\ncent per unit, as a Xero `UnitAmount` does (the wire contract, `cfs-money`).\nNothing sums it, and nothing prices from it: the line's money is\n`price.stated_cents`. A line of no units prints `0`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "syncOrderDestinationScope",
           "signature": "syncOrderDestinationScope(prevOrder: typeLiteral, nextOrder: typeLiteral, currentScopedItems: InvoiceDocItemType[], currentInvoiceDests: InvoiceDestinationPair[], orderUid: string, mode: OrderInvoiceFieldSync): OrderDestinationScopeSyncResult",
           "doc": "Sync one order's scope of an invoice — its items and its destination pairs.\n\n🔴 **A pair follows its destination divider and decides no membership of its\nown** (core#126, owner 2026-10-03). The items decide which destinations the\ninvoice holds — by the one row rule {@link syncOrderToInvoiceSelective} runs\non lines, groups and destination dividers alike — and then each pair whose\ndivider is present is merged PER FIELD ({@link mergePair}), projected from the\norder when the invoice has none (a new destination, or a declined one a new\nline re-opened), or kept as the invoice's own when no order carried it. A pair\nwhose divider is gone goes with it.\n\nThat makes the divider ⟺ pair join hold by construction. It replaces the\napi-cloudrun#664 re-decision loop, which ran two independent membership rules\n(by path for the divider, by `pair.uid` for the pair) and then re-decided every\ndeleted destination as one row afterwards; and it ends the resurrection\ncore#126 found, where the pair loop read a pair the invoice had DECLINED as a\nnew one and re-added it with an empty section.\n\n⚠️ **The pair's own override still keeps a destination the order deleted.**\nThe divider's override is the item sync's own test; the pair's is not, so for\na destination on the previous order and not the next, an overridden pair\n(`jurisdiction`, dates, an endpoint) restores the stored divider — appended at\nthe tail of the scope, where the old loop put it. Every other kept row stays\nwhere it stood ({@link interleaveStoredOnlyRows}).",
@@ -25273,6 +25281,14 @@
         },
         {
           "kind": "function",
+          "name": "statedUnitGrossCents",
+          "signature": "statedUnitGrossCents(line: StatedPricedLineLike): number | null",
+          "doc": "**A stated line's Unit Price: the gross of ONE unit, or `null` on a rate\nline** (one-document-model ruling 189, 2c-3a step 2; owner 2026-11-25). The\nstated arm's own cumulative value at `k = 1` (`stated × 1 ÷ Q`, rounded once,\nhalf away from zero), so the printed unit is the partition rule's first unit,\nnot a second rounding of the line.\n\n⚠️ A DISPLAY figure: Unit × Qty can differ from the stated gross by under one\ncent per unit, as a Xero `UnitAmount` does (the wire contract, `cfs-money`).\nNothing sums it, and nothing prices from it: the line's money is\n`price.stated_cents`. A line of no units prints `0`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "transactionFeeBasisCents",
           "signature": "transactionFeeBasisCents(totals: typeLiteral): number",
           "doc": "The basis a document's `transaction_fee` lines are costed against:\n`subtotal_discounted + Σ tax`, read off a document's `totals`.\n\nThe audit oracle costs its fees through this same function, so a\nreader that needs ONE fee line's amount (a row cell, where a percent line's\nstored `total_cents` is 0 by contract) gets the number the totals pass used\nrather than a second derivation of it.",
@@ -26020,6 +26036,14 @@
           "name": "statedOf",
           "signature": "statedOf(line: LineMoneyLike): number | null",
           "doc": "A pre-tax line's stated gross, or `null` for a rate line ({@link lineKindOf}).\nThrows on a line whose money is the document's (`pricing` other than\n`pre_tax`), and on a non-integer total.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "statedUnitGrossCents",
+          "signature": "statedUnitGrossCents(line: StatedPricedLineLike): number | null",
+          "doc": "**A stated line's Unit Price: the gross of ONE unit, or `null` on a rate\nline** (one-document-model ruling 189, 2c-3a step 2; owner 2026-11-25). The\nstated arm's own cumulative value at `k = 1` (`stated × 1 ÷ Q`, rounded once,\nhalf away from zero), so the printed unit is the partition rule's first unit,\nnot a second rounding of the line.\n\n⚠️ A DISPLAY figure: Unit × Qty can differ from the stated gross by under one\ncent per unit, as a Xero `UnitAmount` does (the wire contract, `cfs-money`).\nNothing sums it, and nothing prices from it: the line's money is\n`price.stated_cents`. A line of no units prints `0`.",
           "paramTags": [],
           "returnsTag": null
         },

@@ -50,6 +50,10 @@ import { componentSignatureHash } from "./booking-id.ts";
 import { closestAncestor } from "./item-pairing.ts";
 import { applyDateEdit, type ChargeDates, chargeWindowBusinessDays, chargeWindowsOf, toChicagoYmd } from "./dates.ts";
 import { formulaPartMoney, lineKindOf, type RateSnapshot, statedLineSubtotals, type TierCount } from "./price-formulas.ts";
+
+// A stated line's Unit Price, for the document templates (`it.orders` /
+// `it.invoices` reach this module's exports, not `utils/price-formulas`).
+export { statedUnitGrossCents } from "./price-formulas.ts";
 import {
   fromCents,
   roundDivHalfAwayFromZero,

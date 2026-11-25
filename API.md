@@ -45841,6 +45841,19 @@ resets a line's account and tracking category to the order's (D6).
 The caller re-linearizes paths via {@link computeInvoiceItemPaths} and
 re-prices it with `priceDocument` before writing.
 
+### `statedUnitGrossCents(line: StatedPricedLineLike): number | null`
+
+**A stated line's Unit Price: the gross of ONE unit, or `null` on a rate
+line** (one-document-model ruling 189, 2c-3a step 2; owner 2026-11-25). The
+stated arm's own cumulative value at `k = 1` (`stated × 1 ÷ Q`, rounded once,
+half away from zero), so the printed unit is the partition rule's first unit,
+not a second rounding of the line.
+
+⚠️ A DISPLAY figure: Unit × Qty can differ from the stated gross by under one
+cent per unit, as a Xero `UnitAmount` does (the wire contract, `cfs-money`).
+Nothing sums it, and nothing prices from it: the line's money is
+`price.stated_cents`. A line of no units prints `0`.
+
 ### `syncOrderDestinationScope(prevOrder: typeLiteral, nextOrder: typeLiteral, currentScopedItems: InvoiceDocItemType[], currentInvoiceDests: InvoiceDestinationPair[], orderUid: string, mode: OrderInvoiceFieldSync): OrderDestinationScopeSyncResult`
 
 Sync one order's scope of an invoice — its items and its destination pairs.
@@ -52715,6 +52728,19 @@ because pointing it at the sum would check the implementation against itself
 core re-derives totals; the writers' `calculateOrderTotals` /
 `calculateInvoiceTotals` are deleted.
 
+### `statedUnitGrossCents(line: StatedPricedLineLike): number | null`
+
+**A stated line's Unit Price: the gross of ONE unit, or `null` on a rate
+line** (one-document-model ruling 189, 2c-3a step 2; owner 2026-11-25). The
+stated arm's own cumulative value at `k = 1` (`stated × 1 ÷ Q`, rounded once,
+half away from zero), so the printed unit is the partition rule's first unit,
+not a second rounding of the line.
+
+⚠️ A DISPLAY figure: Unit × Qty can differ from the stated gross by under one
+cent per unit, as a Xero `UnitAmount` does (the wire contract, `cfs-money`).
+Nothing sums it, and nothing prices from it: the line's money is
+`price.stated_cents`. A line of no units prints `0`.
+
 ### `transactionFeeBasisCents(totals: typeLiteral): number`
 
 The basis a document's `transaction_fee` lines are costed against:
@@ -54040,6 +54066,19 @@ and the payable `priceStatedTotalLine`; Ratchet E counts its call sites.
 A pre-tax line's stated gross, or `null` for a rate line ({@link lineKindOf}).
 Throws on a line whose money is the document's (`pricing` other than
 `pre_tax`), and on a non-integer total.
+
+### `statedUnitGrossCents(line: StatedPricedLineLike): number | null`
+
+**A stated line's Unit Price: the gross of ONE unit, or `null` on a rate
+line** (one-document-model ruling 189, 2c-3a step 2; owner 2026-11-25). The
+stated arm's own cumulative value at `k = 1` (`stated × 1 ÷ Q`, rounded once,
+half away from zero), so the printed unit is the partition rule's first unit,
+not a second rounding of the line.
+
+⚠️ A DISPLAY figure: Unit × Qty can differ from the stated gross by under one
+cent per unit, as a Xero `UnitAmount` does (the wire contract, `cfs-money`).
+Nothing sums it, and nothing prices from it: the line's money is
+`price.stated_cents`. A line of no units prints `0`.
 
 ### `statedUnits(formula: PriceFormulaRule, count: number, opts: typeLiteral): TierCount[]`
 

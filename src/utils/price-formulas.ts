@@ -633,6 +633,7 @@ export {
   statedLineSubtotals,
   type StatedPricedLineLike,
   statedOf,
+  statedUnitGrossCents,
 } from "../schemas/_line-money.ts";
 import type { RateSnapshot } from "../schemas/_line-money.ts";
 import type { DocLineItemTypeType } from "../schemas/common.ts";

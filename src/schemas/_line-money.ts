@@ -485,6 +485,27 @@ export function statedLineSubtotals(line: StatedPricedLineLike): {
 }
 
 /**
+ * **A stated line's Unit Price: the gross of ONE unit, or `null` on a rate
+ * line** (one-document-model ruling 189, 2c-3a step 2; owner 2026-11-25). The
+ * stated arm's own cumulative value at `k = 1` (`stated × 1 ÷ Q`, rounded once,
+ * half away from zero), so the printed unit is the partition rule's first unit,
+ * not a second rounding of the line.
+ *
+ * ⚠️ A DISPLAY figure: Unit × Qty can differ from the stated gross by under one
+ * cent per unit, as a Xero `UnitAmount` does (the wire contract, `cfs-money`).
+ * Nothing sums it, and nothing prices from it: the line's money is
+ * `price.stated_cents`. A line of no units prints `0`.
+ *
+ * @throws Error on a non-integer gross.
+ */
+export function statedUnitGrossCents(line: StatedPricedLineLike): number | null {
+  const gross = line.price.stated_cents ?? null;
+  if (gross === null) return null;
+  if (!Number.isInteger(gross)) throw new Error(`price.stated_cents is integer cents, got ${gross}`);
+  return Number(statedGrossAt(gross, line.quantity, 1));
+}
+
+/**
  * Does a line's stored money equal what its own snapshot reproduces? The
  * single-document check every formula-priced line runs (ruling 8): `rates`,
  * `counts`, `quantity` and `discount` → `subtotal_discounted_cents`, compared
