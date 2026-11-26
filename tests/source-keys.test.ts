@@ -33,7 +33,9 @@ Deno.test("a bill pair names its purchase on uid_source; the retired uid_purchas
   assertEquals(unrecognized(PurchaseDocDestinationSchema.safeParse({ ...pair, uid_purchase: O })), ["uid_purchase"]);
 });
 
-Deno.test("withRowSourcePath: sets the one move pointer, and undefined clears it", () => {
+Deno.test("withRowSourcePath: sets the one move pointer, and undefined clears it to `null` (ruling 204)", () => {
   assertEquals(withRowSourcePath({ uid: "x" }, ["d"]) as unknown, { uid: "x", path_source_item: ["d"] });
-  assertEquals(withRowSourcePath({ uid: "x", path_source_item: ["a"] }, undefined) as unknown, { uid: "x" });
+  assertEquals(withRowSourcePath({ uid: "x", path_source_item: ["a"] }, undefined) as unknown, { uid: "x", path_source_item: null });
+  // A row whose arm has no pointer key (a divider) is left as it is.
+  assertEquals(withRowSourcePath({ uid: "x" }, undefined) as unknown, { uid: "x" });
 });

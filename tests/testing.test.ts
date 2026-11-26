@@ -171,6 +171,7 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
         // The flat meter's one tier (ruling 108), a cross-field refine.
         counts: [{ rate_key: "flat", num: 1, den: 1 }],
         stated_cents: 0,
+        replacement_cents: null,
         subtotal_cents: 0,
         subtotal_discounted_cents: 0,
         total_cents: 0,
@@ -178,6 +179,9 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
       ledger_account: 1999,
       uid_tracking_category: null,
       landed_costs: [],
+      // Every key stated (ruling 204): arrays replace wholesale, so the line is whole.
+      quantity_per_parent: null,
+      uid_tax_class_override: null,
     }],
   },
   // ⚠️ **Eighth entry, added when a bill's lines became items** (api-cloudrun#1407).
@@ -219,6 +223,14 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
       },
       ledger_account: 1999,
       uid_tracking_category: null,
+      // Every key stated (ruling 204): arrays replace wholesale, so the line is whole.
+      quantity_per_parent: null,
+      uid_tax_class_override: null,
+      xero_line_id: null,
+      path_source_item: null,
+      units_from: null,
+      substituted_for: [],
+      exchanged_for: [],
     }],
   },
 };

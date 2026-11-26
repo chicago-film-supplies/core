@@ -158,7 +158,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "svg", expr: "it.icons.svg(name, arg2)", desc: "Inline SVG markup for a lucide icon. Emit raw: `<%~ it.icons.svg(\"truck\") %>`.", returns: "string" },
   ],
   "invoices": [
-    { name: "buildInvoiceDestinationDivider", expr: "it.invoices.buildInvoiceDestinationDivider(source, arg2)", desc: "Build an invoice destination divider from a source order's destination item. Single source of truth for the divider shape — reused by `projectOrderItemToInvoiceItem` (order→invoice projection) and the destination-divider backfill. ⚠️ **It had a third caller, the CRMS invoice webhook, and that whole ingest is deleted with the cutover.**", returns: "OrderDocDestinationItemType" },
+    { name: "buildInvoiceDestinationDivider", expr: "it.invoices.buildInvoiceDestinationDivider(source, arg2)", desc: "Build an invoice destination divider from a source order's destination item. Single source of truth for the divider shape — reused by `projectOrderItemToInvoiceItem` (order→invoice projection) and the destination-divider backfill. ⚠️ **It had a third caller, the CRMS invoice webhook, and that whole ingest is deleted with the cutover.**", returns: "InvoiceDocDestinationItemType" },
     { name: "calculateItemDiscountCents", expr: "it.invoices.calculateItemDiscountCents(item)", desc: "Calculate the discount amount, in cents, for a single line item.", returns: "number" },
     { name: "calculateItemPrice", expr: "it.invoices.calculateItemPrice(item, taxes, arg3)", desc: "Calculate the complete price for a single line item. Runs the full pipeline: subtotal → discount → taxes → total.", returns: "typeLiteral" },
     { name: "calculateItemSubtotal", expr: "it.invoices.calculateItemSubtotal(item)", desc: "Calculate the pre-discount and post-discount subtotals for a single line item, by how the LINE states its money (one-document-model ruling 189, `lineKindOf`):", returns: "typeLiteral" },
@@ -363,6 +363,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "sessionQuantity", expr: "it.sessions.sessionQuantity(items)", desc: "Total units across a set of rows.", returns: "number" },
   ],
   "shared-fields": [
+    { name: "canonicalizePayload", expr: "it.shared-fields.canonicalizePayload(value)", desc: "**The ONE comparison rule** (ruling 204 F4.5): a key-sorted deep copy with `null`/`undefined`/absent collapsed to absent, so two values compare equal iff they say the same thing. The three-way merge, the line-edit diff and the destination-pair diff (`@cfs/core/utils/invoices` re-exports it) all read it; there were three copies.", returns: "unknown" },
     { name: "deriveProjectionCollection", expr: "it.shared-fields.deriveProjectionCollection(merged, stored, projectionItems)", desc: "**Settle a projection pair's collection leg after the three-way merge** — the fulfillment's or invoice's answer to what the order's `normalizeCollectionLegs` (`@cfs/core/utils/orders`) decides on the order.", returns: "P" },
   ],
   "stock": [

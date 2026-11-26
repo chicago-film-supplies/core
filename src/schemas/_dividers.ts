@@ -96,12 +96,13 @@ export const DestinationDividerArm = z.strictObject({
  *   line**: `priceDocument` prices every line under an extension section at its
  *   own stated `counts`, the formula's minimum skipped.
  *
- * ⚠️ Absent on every divider that does not open a section. There is no `null`: a
- * divider either extends a section or it does not. A supplier credit admits the
- * key through the shared row union and no writer sets it there.
+ * `null` on every divider that does not open a section (ruling 204, class C: a
+ * POINTER path's empty value is `null`, never `[]`, and the key is required — a
+ * submitted row states every key). A supplier credit admits the key through
+ * the shared row union and no writer sets it there.
  */
 export const DestinationSectionDividerArm = extendChecked(DestinationDividerArm, {
-  path_extension_for: z.array(ItemUid).min(1).optional(),
+  path_extension_for: z.array(ItemUid).min(1).nullable(),
 });
 
 /** Group divider in an order/invoice items array. */

@@ -1037,11 +1037,13 @@ Deno.test("rateInForce compares instants, not strings; snapshotRates names a mis
   );
 });
 
-Deno.test("an input price names its formula by uid_price_formula, and a percent fee naming one is refused", async () => {
+Deno.test("an input price names its formula by its snapshot (ruling 204 R3), and a percent fee naming one is refused", async () => {
   const { ItemPrice } = await import("../src/schemas/order.ts");
-  assert(ItemPrice.safeParse({ uid_price_formula: "AAAAAAAAAAAAAAAAAAAA", rates: [] }).success);
-  assert(ItemPrice.safeParse({ base_percent: 4 }).success);
-  const both = ItemPrice.safeParse({ uid_price_formula: "AAAAAAAAAAAAAAAAAAAA", base_percent: 4 });
+  const empty = { rates: [], replacement_cents: null, discount: null, stated_cents: null };
+  const formula = { uid: "AAAAAAAAAAAAAAAAAAAA", name: "Fixed", basis: "flat" as const };
+  assert(ItemPrice.safeParse({ ...empty, price_formula: formula, base_percent: null }).success);
+  assert(ItemPrice.safeParse({ ...empty, price_formula: null, base_percent: 4 }).success);
+  const both = ItemPrice.safeParse({ ...empty, price_formula: formula, base_percent: 4 });
   assert(!both.success);
   assertEquals(both.error!.issues[0].path, ["price_formula"]);
 });

@@ -88,7 +88,7 @@ import {
 import { closestAncestor, mapPathsAcrossRebuild, pairItemsAcrossRebuild } from "./item-pairing.ts";
 import { interleaveStoredOnlyRows } from "./stored-only-rows.ts";
 import { followStatedParts, type PartSourceLike, requantifyPart } from "./price-document.ts";
-import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDatesType, OrderDocDestinationItemType, SettlementReasonType, SettlementTypeType, SubstitutedForEntryType, PurchaseCreditStatusType } from "../schemas/mod.ts";
+import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDatesType, InvoiceDocDestinationItemType, SettlementReasonType, SettlementTypeType, SubstitutedForEntryType, PurchaseCreditStatusType } from "../schemas/mod.ts";
 import { fitOutOfServiceEntries } from "./replacements.ts";
 import type { InitiatorAccount } from "./quantityAccounting.ts";
 import {
@@ -165,24 +165,21 @@ export interface InvoiceItem extends LineItem {
   uid_tracking_category?: string | null;
   xero_id?: string | null;
   crms_id?: number | string | null;
-  // Present on the stored schema (`schemas/invoice.ts`) but absent from this
-  // shadow until 2026-08-10, which is why it was missing from every one of the
-  // four hand-maintained copies of {@link INVOICE_ONLY_ITEM_FIELDS}.
-  crms_opportunity_id?: number | null;
   /**
    * @see `InvoiceDocLineItemType.substituted_for` (manager#414). Declared here as
    * well as on the stored schema because {@link InvoiceOnlyOverrides} is
    * `Pick<InvoiceItem, …>` — a member of {@link INVOICE_ONLY_ITEM_FIELDS}
-   * missing from this shadow does not compile, which is the guard the
-   * `crms_opportunity_id` line above records the absence of.
+   * missing from this shadow does not compile.
    */
   substituted_for?: SubstitutedForEntryType[];
   /** @see `InvoiceDocLineItemType.out_of_service` — a `replacement` or `service` line's only, read through `outOfServiceEntries`. */
   out_of_service?: OutOfServiceEntryType[];
-  /** @see `InvoiceDocDestinationItemType.path_extension_for` — a destination divider's only. */
-  path_extension_for?: string[];
-  /** @see `InvoiceDocLineItemType.path_source_item` — a moved line's root row only (core#125; ruling 109). */
-  path_source_item?: string[];
+  /** @see `InvoiceDocDestinationItemType.path_extension_for` — a destination divider's only; `null` off a section. */
+  path_extension_for?: string[] | null;
+  /** @see `InvoiceDocLineItemType.path_source_item` — a moved line's root row only (core#125; ruling 109); `null` at its own path. */
+  path_source_item?: string[] | null;
+  /** @see `InvoiceDocLineItemType.units_from`. */
+  units_from?: number | null;
 }
 
 // ── Invoice totals ──────────────────────────────────────────────
@@ -639,7 +636,6 @@ const INVOICE_ONLY_ITEM_FIELDS = [
   // projection and a resync carried them back.
   "xero_id",
   "crms_id",
-  "crms_opportunity_id",
   "substituted_for",
   // The lost/damaged records a `replacement` line bills. Invoice-authored and
   // never on the order, so it must be carried across a rebuild, and it is not
@@ -769,13 +765,15 @@ export function isInExtensionSection(
 export function buildInvoiceDestinationDivider(
   source: { uid: string; name: string; description?: string | null },
   path: string[] = [],
-): OrderDocDestinationItemType {
+): InvoiceDocDestinationItemType {
   return {
     uid: source.uid,
     type: "destination",
     name: source.name,
     description: source.description ?? "",
     path,
+    // A projected section is a full-window one (ruling 204, class C: `null`).
+    path_extension_for: null,
   };
 }
 
@@ -887,42 +885,44 @@ export function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: s
       taxes: p.taxes ?? [],
       // The would-be-taxed snapshot inherits, so an exempt invoice records
       // what it was exempt FROM the way its order does. Spread
-      // CONDITIONALLY, twice over: an explicit `undefined` trips
-      // `validateBeforeWrite`'s no-undefined guard, and emitting the key
-      // unconditionally would widen the stored key set of every pre-2026-08
-      // invoice line on a field neither it nor its order line ever set.
+      // CONDITIONALLY: `taxes_base` is DERIVED, the one key whose absence
+      // still means "this writer does not author it" (ruling 204 F4.5).
       ...(p.taxes_base !== undefined ? { taxes_base: p.taxes_base } : {}),
       total_cents: p.total_cents ?? 0,
       // A STATED line's gross (ruling 189), carried WHOLE: this projects the whole
       // line, and a part's slice is `partOf`'s (`./price-document.ts`), applied by
-      // the remainder builder and the sync's part follow. Conditional, so a rate
-      // line keeps the key set every stored invoice line has.
-      ...(p.stated_cents != null ? { stated_cents: p.stated_cents } : {}),
+      // the remainder builder and the sync's part follow. `null` on a rate line:
+      // every key is stated (ruling 204).
+      stated_cents: p.stated_cents ?? null,
     },
     // Mirrored from the order line so the invoice carries the same answer as the
     // line it was projected from. UNCONDITIONAL — see the docblock: this is the
     // one key here whose presence must not depend on its value.
     zero_priced: item.zero_priced ?? null,
-    // CONDITIONAL, unlike `zero_priced` above, and the population is why: every
-    // line stored before core#131 lacks the key on BOTH documents, so `?? null`
-    // would make each such pair report a key-set difference. Presence follows
-    // the order line's, never the value — the stamp is a snapshot, so the
-    // statedness hazard the docblock names cannot arise.
-    ...(item.quantity_per_parent !== undefined ? { quantity_per_parent: item.quantity_per_parent } : {}),
-    // An exchange line's take-back list (ruling 82 of the one-document-model plan),
-    // CONDITIONAL for `quantity_per_parent`'s reason, and presence-faithful: an order
-    // line's `[]` projects as `[]`. Entries stay ORDER-relative, as every billing
-    // pointer does, so nothing is re-pathed under `orderDividerUid`.
-    ...(item.exchanged_for !== undefined ? { exchanged_for: item.exchanged_for } : {}),
+    // Every key stated with its empty value (ruling 204): the window's backfill
+    // stated `null` on the pre-core#131 lines of both documents, so a projected
+    // `null` equals its stored pair.
+    quantity_per_parent: item.quantity_per_parent ?? null,
+    // An exchange line's take-back list (ruling 82 of the one-document-model plan).
+    // Entries stay ORDER-relative, as every billing pointer does, so nothing is
+    // re-pathed under `orderDividerUid`.
+    exchanged_for: item.exchanged_for ?? [],
+    // The invoice-only keys, at their empty values: a rebuild carries a stored
+    // line's own across (`INVOICE_ONLY_ITEM_FIELDS`), and the pointers are the
+    // sync's and the remainder builder's to author.
+    xero_id: null,
+    crms_id: null,
+    substituted_for: [],
+    out_of_service: [],
+    path_source_item: null,
+    units_from: null,
     // The account + tracking category (`LinePostingCore`) — shared fields that
     // propagate, so the projection carries the order line's and the three-way
     // merge decides whether an invoice override keeps its own.
     ...pickLinePostingFields(item),
     // The tax levers (`LineTaxCore`: `uid_tax_class`, `uid_tax_class_override`) mirror onto the invoice, because the invoice is
     // what gets billed and it prices its OWN line through the same resolver.
-    // The class is required on both grains; the override is copied only when
-    // present, for the `taxes_base` reason one field up — the comparator
-    // compares KEY SETS.
+    // Both are required on both grains (ruling 204 for the override).
     ...pickLineTaxFields(item),
     path,
   };
@@ -932,20 +932,20 @@ export function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: s
  * The `LINE_TAX_FIELDS` a line carries, for a projection onto another
  * grain. `uid_tax_class` is required on every priced line (api-cloudrun#993),
  * so a source line without one is refused loudly rather than projected into a
- * document the schema would 400; `uid_tax_class_override` is copied only when
- * present, so the projection preserves the source line's key set.
+ * document the schema would 400; `uid_tax_class_override` is stated, `null`
+ * for none (ruling 204).
  *
  * @throws Error when the line has no `uid_tax_class`.
  */
 export function pickLineTaxFields(
   item: { uid: string; uid_tax_class?: string | null; uid_tax_class_override?: string | null },
-): { uid_tax_class: string; uid_tax_class_override?: string | null } {
+): { uid_tax_class: string; uid_tax_class_override: string | null } {
   if (!item.uid_tax_class) {
     throw new Error(`Line ${item.uid} has no uid_tax_class — every priced line must carry its tax class`);
   }
   return {
     uid_tax_class: item.uid_tax_class,
-    ...(item.uid_tax_class_override !== undefined ? { uid_tax_class_override: item.uid_tax_class_override } : {}),
+    uid_tax_class_override: item.uid_tax_class_override ?? null,
   };
 }
 
@@ -1195,7 +1195,7 @@ export const RECEIVABLE_SCOPED_SYNC: ScopedSyncSide = {
   // quantity alone, the behaviour every line had before.
   requantify: (row, quantity, { source, scaleFrom }) =>
     isPreTaxItem(row as LineItem) && (source === undefined || isPreTaxItem(source))
-      ? requantifyPart(row as unknown as PartSourceLike & { units_from?: number | null }, quantity, source as unknown as PartSourceLike | undefined, scaleFrom) as unknown as typeof row
+      ? requantifyPart(row as PartSourceLike & { units_from?: number | null }, quantity, source as PartSourceLike | undefined, scaleFrom) as typeof row
       : { ...row, quantity },
 };
 
@@ -1213,7 +1213,7 @@ function followOrderParts(
   orderUid: string,
 ): InvoiceDocItemType[] {
   const linesOf = (items: readonly LineItem[]) =>
-    new Map(items.filter(isPreTaxItem).map((i) => [(i.path ?? []).join("/"), i as unknown as PartSourceLike]));
+    new Map(items.filter(isPreTaxItem).map((i) => [(i.path ?? []).join("/"), i as PartSourceLike]));
   const keyOf = (row: InvoiceDocItemType): string | null => {
     const path = row.path ?? [];
     if (path[0] !== orderUid) return null;
@@ -1223,11 +1223,11 @@ function followOrderParts(
   return followStatedParts({
     synced: synced as unknown as (PartSourceLike & { path: string[] })[],
     scoped: scoped as unknown as (PartSourceLike & { path: string[] })[],
-    keyOf: keyOf as unknown as (row: PartSourceLike & { path: string[] }) => string | null,
+    keyOf: keyOf as (row: PartSourceLike & { path: string[] }) => string | null,
     prevLines: linesOf(prevItems),
     nextLines: linesOf(nextItems),
-    isLine: (row) => isPreTaxItem(row as unknown as LineItem),
-  }) as unknown as InvoiceDocItemType[];
+    isLine: (row) => isPreTaxItem(row as LineItem),
+  }) as InvoiceDocItemType[];
 }
 
 function scopedLineOverridden<R extends InvoiceItem>(side: ScopedSyncSide<R>, prev: LineItem, row: R, scopeUid: string): boolean {
@@ -1869,7 +1869,8 @@ function syncScopedItems<R extends InvoiceItem>(
     );
     const out = { ...requantified } as R & { substituted_for?: SubstitutedForEntryType[] };
     if (substituted_for) out.substituted_for = substituted_for as SubstitutedForEntryType[];
-    else delete out.substituted_for;
+    // Cleared to `[]` (ruling 204: a list's empty value), on the arms that carry it.
+    else if ("substituted_for" in out) out.substituted_for = [];
     items.push(out);
   }
   return { items };
@@ -2244,7 +2245,7 @@ export function adoptOrderDividerStructure(
       if (emitted.has(child)) continue;
       emitted.add(child);
       const childPath = [...parentPath, child.uid];
-      out.push({ ...child, path: childPath } as InvoiceDocItemType);
+      out.push({ ...child, path: childPath });
       emitUnpairedChildren(child, childPath);
     }
   };
@@ -2260,7 +2261,7 @@ export function adoptOrderDividerStructure(
       const existing = invoiceDividerByUid.get(orderItem.uid);
       out.push(
         existing
-          ? ({ ...existing, path } as InvoiceDocItemType)
+          ? { ...existing, path }
           : projectOrderItemToInvoiceItem(orderItem, orderDividerUid),
       );
       emitUnpairedChildren(orderItem, path);
@@ -2268,7 +2269,7 @@ export function adoptOrderDividerStructure(
     }
     const match = pairedFor.get(orderItem);
     if (!match) continue; // an order line the invoice does not bill — not added
-    out.push({ ...match, path } as InvoiceDocItemType);
+    out.push({ ...match, path });
     emitUnpairedChildren(orderItem, path);
   }
 
@@ -2926,32 +2927,8 @@ export function toInvoiceDestinationPair(
   return out as unknown as InvoiceDestinationPair;
 }
 
-/**
- * Key-sorted deep copy with `null`/`undefined`/absent collapsed to absent —
- * so two payloads compare equal iff they say the same thing.
- *
- * ⚠️ **Both normalizations are load-bearing, and neither is cosmetic.**
- * *Key order*: one side of a comparison is a stored document (Firestore returns
- * map keys sorted) and the other may be freshly built (insertion order), so a
- * raw `JSON.stringify` can report two identical pairs as different. *Nullish*:
- * every field on this pair means the same thing absent as it does `null` — no
- * destination record, no address, no instructions, no jurisdiction claim — and
- * a corpus mid-migration holds both spellings of that. Reading one as an edit
- * would freeze the pair as "overridden" and stop it syncing **entirely**,
- * because the check is all-or-nothing for the whole pair.
- */
-export function canonicalizePayload(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalizePayload);
-  if (value === null || value === undefined) return null;
-  if (typeof value !== "object") return value;
-  const out: Record<string, unknown> = {};
-  for (const key of Object.keys(value as Record<string, unknown>).sort()) {
-    const v = (value as Record<string, unknown>)[key];
-    if (v === null || v === undefined) continue;
-    out[key] = canonicalizePayload(v);
-  }
-  return out;
-}
+/** The one comparison rule — see `canonicalizePayload` in `./shared-fields.ts`. Re-exported: the manager's pair diff imports it from here. */
+export { canonicalizePayload } from "./shared-fields.ts";
 
 /**
  * One invoice destination pair that {@link syncOrderDestinationsSelective} or

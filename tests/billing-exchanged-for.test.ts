@@ -70,7 +70,7 @@ Deno.test("billing: pairs are scoped by `uid_source` — another order's exchang
   assertEquals(billingExchangedForViolations(d).map((x) => x.field), ["exchanged_for"]);
 });
 
-Deno.test("projection: an exchange line's list is carried ORDER-relative; a line stating none carries none", () => {
+Deno.test("projection: an exchange line's list is carried ORDER-relative; a line stating none states `[]` (ruling 204)", () => {
   const line = {
     uid: X,
     type: "rental",
@@ -82,5 +82,5 @@ Deno.test("projection: an exchange line's list is carried ORDER-relative; a line
   } as LineItem;
   assertEquals((projectOrderItemToInvoiceItem(line, O) as { exchanged_for?: unknown }).exchanged_for, [entry([PARENT, X])]);
   const { exchanged_for: _none, ...plain } = line;
-  assertEquals("exchanged_for" in projectOrderItemToInvoiceItem(plain as LineItem, O), false);
+  assertEquals((projectOrderItemToInvoiceItem(plain as LineItem, O) as { exchanged_for?: unknown }).exchanged_for, []);
 });

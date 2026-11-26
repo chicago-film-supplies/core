@@ -11,6 +11,7 @@
  */
 import { assertEquals } from "@std/assert";
 import { fdwPrice, fixedPrice } from "./helpers/formulas.ts";
+import { creditNoteLine } from "./helpers/lines.ts";
 import {
   COA_BAD_DEBT,
   CREDIT_NOTE_REASONS,
@@ -46,7 +47,8 @@ function makeCreditNote(overrides: Record<string, unknown> = {}) {
       xero_id: null,
       billing_address: null,
     },
-    items: [{
+    // The shared seed states every key (ruling 204); this file's line below.
+    items: [creditNoteLine({
       uid: "cnitem10000000000000",
       path: ["cnitem10000000000000"],
       type: "sale",
@@ -55,6 +57,7 @@ function makeCreditNote(overrides: Record<string, unknown> = {}) {
       quantity: 1,
       price: {
         ...fixedPrice(219600),
+        base_percent: null,
         subtotal_cents: 219600,
         subtotal_discounted_cents: 219600,
         discount: null,
@@ -69,7 +72,13 @@ function makeCreditNote(overrides: Record<string, unknown> = {}) {
       // `schemas/credit-note.ts`. Stated explicitly rather than omitted, which is
       // the whole reason it is not optional.
       reverses_billing: false,
-    }],
+      // An unpointed line (ruling 204c): `null`, never absent.
+      uid_billing: null,
+      path_billing_item: null,
+      units_from: null,
+      substituted_for: [],
+      exchanged_for: [],
+    })],
     totals: {
       subtotal_cents: 219600,
       subtotal_discounted_cents: 219600,
@@ -288,12 +297,16 @@ Deno.test("deriveCreditNoteSources: no billing document names nothing (a histori
   assertEquals(deriveCreditNoteSources([], [{}]), { sources: [], query_by_sources: [] });
 });
 
-Deno.test("a credit line carries its invoice row's substituted_for and exchanged_for, both optional (ruling 84, beta A)", () => {
-  const line = (makeCreditNote().items as Record<string, unknown>[])[0];
+Deno.test("a credit line carries its invoice row's substituted_for and exchanged_for, both REQUIRED, `[]` for none (ruling 84, beta A; ruling 204)", () => {
+  const line = makeCreditNote().items[0];
   const parse = (over: Record<string, unknown>) => CreditNoteDocLineItem.safeParse({ ...line, ...over });
   const X = ["testdest100000000000", "testitemx10000000000"];
   const W = ["testdest100000000000", "testitemw10000000000"];
-  assertEquals(parse({}).success, true, "control: absent on both, as on every historic line");
+  assertEquals(parse({}).success, true, "control: `[]` on both, as on every historic line after the window");
+  for (const key of ["substituted_for", "exchanged_for"] as const) {
+    const { [key]: _dropped, ...withoutKey } = line;
+    assertEquals(CreditNoteDocLineItem.safeParse(withoutKey).error?.issues.map((i) => i.path.join(".")), [key], `${key} absent is refused`);
+  }
   assertEquals(parse({ substituted_for: [{ path: X, quantity: 2 }] }).success, true);
   assertEquals(parse({ exchanged_for: [{ path: X, quantity: 1, reason: "damaged" }] }).success, true);
   assertEquals(parse({ substituted_for: [], exchanged_for: [] }).success, true, "an empty list is stated, not refused");
@@ -301,8 +314,8 @@ Deno.test("a credit line carries its invoice row's substituted_for and exchanged
   assertEquals(parse({ substituted_for: [{ path: X, quantity: 1 }, { path: X, quantity: 1 }] }).success, false, "one entry per path");
   assertEquals(parse({ exchanged_for: [{ path: W, quantity: 1 }] }).success, false, "an exchange entry states its reason");
   assertEquals(parse({ substituted_for: [{ path: X, quantity: 1, extra: true }] }).success, false, "strict entries");
-  // The form seed omits the take-back list, exactly as the invoice line's.
-  assertEquals("exchanged_for" in (getInitialValues(CreditNoteDocLineItem) as object), false);
+  // The form seed states the take-back list empty, exactly as the invoice line's (ruling 204).
+  assertEquals(getInitialValues(CreditNoteDocLineItem).exchanged_for, []);
 });
 
 // ── Ruling 34 / beta H1: one credit shape on both sides ────────────────────
@@ -311,7 +324,7 @@ const INV = "testinv1000000000000";
 const INV2 = "testinv2000000000000";
 const ORD = "testord1000000000000";
 const DEST = "11111111-1111-4111-8111-111111111111";
-const baseLine = () => makeCreditNote().items[0] as Record<string, unknown>;
+const baseLine = () => makeCreditNote().items[0];
 const parseNote = (o: Record<string, unknown>) => CreditNoteSchema.safeParse(makeCreditNote(o));
 const issuePathsOf = (o: Record<string, unknown>) => {
   const r = parseNote(o);
@@ -328,14 +341,14 @@ Deno.test("H2: the retired posting spellings are refused, and a line states its 
 Deno.test("uid_billing and path_billing_item are set together", () => {
   assertEquals(issuePathsOf({ items: [{ ...baseLine(), path: [INV, ORD, "cnitem10000000000000"], uid_billing: INV }] }), ["items.0.path_billing_item"]);
   assertEquals(
-    issuePathsOf({ items: [{ ...baseLine(), path_billing_item: [ORD, "cnitem10000000000000"], price: { ...baseLine().price as object, counts: [] } }] }),
+    issuePathsOf({ items: [{ ...baseLine(), path_billing_item: [ORD, "cnitem10000000000000"], price: { ...baseLine().price, counts: [] } }] }),
     ["items.0.path_billing_item"],
   );
 });
 
 Deno.test("(ruling 106): a pointed line states only the time it takes back — none on a flat row", () => {
   // A units credit of a flat row: counts [] (its money is the row's part).
-  const units = { ...baseLine(), path: [INV, ORD, "cnitem10000000000000"], uid_billing: INV, path_billing_item: [ORD, "cnitem10000000000000"], price: { ...baseLine().price as object, counts: [] } };
+  const units = { ...baseLine(), path: [INV, ORD, "cnitem10000000000000"], uid_billing: INV, path_billing_item: [ORD, "cnitem10000000000000"], price: { ...baseLine().price, counts: [] } };
   assertEquals(issuePathsOf({ items: [units] }), []);
   // Copying the flat row's `[flat 1/1]` onto the credit would read as a time credit.
   const copied = { ...baseLine(), path: [INV, ORD, "cnitem10000000000000"], uid_billing: INV, path_billing_item: [ORD, "cnitem10000000000000"] };
@@ -343,7 +356,7 @@ Deno.test("(ruling 106): a pointed line states only the time it takes back — n
 });
 
 Deno.test("(ruling 106): an unpointed time line states the counts it moves", () => {
-  const price = { ...fdwPrice(10000, null), subtotal_cents: 0, subtotal_discounted_cents: 0, discount: null, taxes: [], total_cents: 0 };
+  const price = { ...baseLine().price, ...fdwPrice(10000, null), subtotal_cents: 0, subtotal_discounted_cents: 0, discount: null, taxes: [], total_cents: 0 };
   assertEquals(issuePathsOf({ items: [{ ...baseLine(), price }] }).includes("items.0.price.counts"), true);
   // Pointed, the same empty counts mean "whole units of the named row".
   const pointed = { ...baseLine(), price, path: [INV, ORD, "cnitem10000000000000"], uid_billing: INV, path_billing_item: [ORD, "cnitem10000000000000"] };
@@ -353,7 +366,7 @@ Deno.test("(ruling 106): an unpointed time line states the counts it moves", () 
 Deno.test("(ruling 107): a divided note leads with a billing or order divider; a flat one is unchecked", () => {
   const billing = { uid: INV, type: "billing", name: "Invoice #2001", path: [INV], description: "" };
   const order = { uid: ORD, type: "order", name: "Order #1000", path: [INV, ORD], description: "" };
-  const line = { ...baseLine(), path: [INV, ORD, "cnitem10000000000000"], uid_billing: INV, path_billing_item: [ORD, "cnitem10000000000000"], price: { ...baseLine().price as object, counts: [] } };
+  const line = { ...baseLine(), path: [INV, ORD, "cnitem10000000000000"], uid_billing: INV, path_billing_item: [ORD, "cnitem10000000000000"], price: { ...baseLine().price, counts: [] } };
   assertEquals(issuePathsOf({ items: [billing, order, line] }), []);
   // A line ahead of every divider in a divided note.
   assertEquals(issuePathsOf({ items: [line, billing, order] }).includes("items.0.type"), true);
@@ -363,14 +376,14 @@ Deno.test("(ruling 107): a divided note leads with a billing or order divider; a
 
 Deno.test("(ruling 107): a pointed line sits under its own billing document's divider", () => {
   const billing = { uid: INV, type: "billing", name: "Invoice #2001", path: [INV], description: "" };
-  const line = { ...baseLine(), path: [INV, "cnitem10000000000000"], uid_billing: INV2, path_billing_item: ["cnitem10000000000000"], price: { ...baseLine().price as object, counts: [] } };
+  const line = { ...baseLine(), path: [INV, "cnitem10000000000000"], uid_billing: INV2, path_billing_item: ["cnitem10000000000000"], price: { ...baseLine().price, counts: [] } };
   assertEquals(issuePathsOf({ items: [billing, line] }), ["items.1.path"]);
 });
 
 Deno.test("destinations, when stated, answer the note's destination dividers", () => {
   const billing = { uid: INV, type: "billing", name: "Invoice #2001", path: [INV], description: "" };
   const order = { uid: ORD, type: "order", name: "Order #1000", path: [INV, ORD], description: "" };
-  const dest = { uid: DEST, type: "destination", name: "Stage 2", path: [INV, ORD, DEST], description: "" };
+  const dest = { uid: DEST, type: "destination", name: "Stage 2", path: [INV, ORD, DEST], description: "", path_extension_for: null };
   assertEquals(issuePathsOf({ items: [billing, order, dest], destinations: [] }).includes("items"), true);
 });
 

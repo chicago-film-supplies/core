@@ -223,16 +223,16 @@ export interface CreditNoteDocItemPrice {
   /** See {@link OrderDocItemPriceType.counts} — frozen when the line is priced. */
   counts: TierCountType[];
   /** See {@link OrderDocItemPriceType.base_percent} — same biconditional. */
-  base_percent?: number | null;
+  base_percent: number | null;
   /**
    * A stated GROSS total over the line's quantity, the one declaration every
    * priced line carries (`StatedCore`, `schemas/_line-money.ts`). It governs the line's money
    * when present (`lineMoneyAtCents`), and the rates are then kept for the
    * record only. Written by the import of a credit note Xero holds and CFS does
    * not (one-document-model ruling 145): Xero prices its lines to 4dp per unit,
-   * which no integer-cent rate reproduces. Absent on every line CFS prices.
+   * which no integer-cent rate reproduces. `null` on every line CFS prices.
    */
-  stated_cents?: number | null;
+  stated_cents: number | null;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
@@ -244,7 +244,7 @@ const CreditNoteDocItemPriceSchema: z.ZodType<CreditNoteDocItemPrice> = z.strict
   price_formula: PriceFormulaRefSchema.nullable(),
   rates: z.array(RateSnapshotSchema).meta({ label: "Rate" }),
   counts: z.array(TierCountSchema),
-  base_percent: z.number().nullable().optional(),
+  base_percent: z.number().nullable(),
   ...StatedCore,
   subtotal_cents: z.int().meta({ column: true, label: "Subtotal" }),
   subtotal_discounted_cents: z.int().meta({ column: true, label: "Discounted Subtotal" }),
@@ -325,7 +325,8 @@ export interface CreditNoteDocLineItem {
    * **The billing document this line credits** (ruling 34, one name on both
    * sides): an invoice's uid here, a bill's on a supplier credit. Set together
    * with {@link path_billing_item} by every writer raising the credit from a
-   * billing row; absent on a goodwill or bad-debt line (ruling 104). A path is
+   * billing row; `null` on a goodwill or bad-debt line (ruling 104), and on a
+   * legacy or Xero-imported line (ruling 204c), like a custom item. A path is
    * a row identity within ONE document (`item.uid` repeats: a full-window and a
    * date-extension section carry one product twice, api-cloudrun#680 R1), so
    * the document travels with it. It replaced `path_invoice_item`, which could
@@ -334,17 +335,17 @@ export interface CreditNoteDocLineItem {
    * A pointed line sits under that document's `billing` divider:
    * `path[0] === uid_billing` (ruling 107).
    */
-  uid_billing?: string;
-  /** The `path` of the billing row credited, on its own document (ruling 34). */
-  path_billing_item?: string[];
+  uid_billing: string | null;
+  /** The `path` of the billing row credited, on its own document (ruling 34); `null` unpointed. */
+  path_billing_item: string[] | null;
   /**
    * The first unit of its SOURCE line this line covers (one-document-model ruling
    * 174, `UnitsFromField` in `schemas/_line-money.ts`, one declaration on every
    * billing and credit line): a rate line prices units `(units_from, units_from +
    * quantity]` of its source as cumulative formula differences, so its parts sum
-   * exactly to the source's money. Absent or `null` is a whole line.
+   * exactly to the source's money. `null` is a whole line.
    */
-  units_from?: number | null;
+  units_from: number | null;
   /**
    * The row's identity on this note, self-inclusive (ruling 107):
    * `[uid_billing, ...billing row path]` for a pointed line, `[uid]` for a flat
@@ -405,24 +406,22 @@ export interface CreditNoteDocLineItem {
    * (`path_billing_item[0]`, an order divider's uid), never through a path of
    * this document.
    *
-   * **Optional FOREVER, not mid-expand.** The 146 lines stored before this field
-   * name no invoice row (no {@link path_billing_item}, ruling 53), so
-   * there is no source row to copy from and no value to backfill. The invoice's
-   * spelling — plain `.optional()`, array-member-uncensusable — so a copy and its
-   * source agree on what absence means. Untagged: `CreditNoteSchema` is in none of
-   * `classifySharedFields`' pairs.
+   * Required, `[]` on a line whose source stood in for nothing — and on the
+   * lines stored before this field, which name no invoice row (ruling 204c: a
+   * legacy or Xero-imported line takes the empty value, like a custom item).
+   * Untagged: `CreditNoteSchema` is in none of `classifySharedFields`' pairs.
    */
-  substituted_for?: SubstitutedForEntryType[];
+  substituted_for: SubstitutedForEntryType[];
   /**
    * The invoice row's `exchanged_for` (`InvoiceDocLineItemType.exchanged_for`),
    * copied AS STATED — never sliced: it names the rows an exchange line goes out
    * against, which a credit of some of its units does not change (ruling 84).
-   * ORDER-relative and optional forever, for {@link substituted_for}'s reasons.
+   * ORDER-relative, and `[]` off an exchange line (ruling 204).
    *
    * No document refine checks it: the invoice's `checkInvoiceExchangedFor` reads
    * the order block the line sits in, and a credit line sits in none.
    */
-  exchanged_for?: ExchangedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
 }
 
 const CreditNoteDocLineItemInner = z.strictObject({
@@ -449,17 +448,14 @@ const CreditNoteDocLineItemInner = z.strictObject({
   uid_tracking_category: FirestoreId.nullable(),
   xero_id: XeroId.nullable(),
   // The payable pair's spelling (`purchase-bill.ts`), paired-presence refined below.
-  // `seed: false`: `[]` fails `.min(1)`, so the form seed must omit the key.
-  uid_billing: FirestoreId.optional().meta({ seed: false }),
-  path_billing_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
+  // Required, `null` on an unpointed line (ruling 204 Q2, 204c).
+  uid_billing: FirestoreId.nullable(),
+  path_billing_item: z.array(ItemUid).min(1).nullable(),
   units_from: UnitsFromField,
   reverses_billing: z.boolean(),
-  // See the interface docblock. The invoice line's spelling, field for field:
-  // `substituted_for` plain `.optional()`; `exchanged_for` `seed: false`, so a form
-  // seed omits the key rather than stating an empty take-back list its source
-  // row never stated.
-  substituted_for: SubstitutedForList.optional(),
-  exchanged_for: ExchangedForList.optional().meta({ seed: false }),
+  // See the interface docblock. The invoice line's spelling, field for field.
+  substituted_for: SubstitutedForList,
+  exchanged_for: ExchangedForList,
 }).superRefine(checkItemPriceFormula).superRefine((line, ctx) => {
   for (const issue of creditLineShapeIssues(line)) ctx.addIssue({ code: "custom", ...issue });
 });
@@ -472,9 +468,9 @@ export const CreditNoteDocLineItem: z.ZodType<CreditNoteDocLineItem> = CreditNot
  * `null` for an unpointed line.
  */
 export function creditLineBillingPointer(
-  line: { uid_billing?: string; path_billing_item?: string[] },
+  line: { uid_billing?: string | null; path_billing_item?: string[] | null },
 ): { uid: string; path: string[] } | null {
-  return line.uid_billing !== undefined && line.path_billing_item !== undefined
+  return line.uid_billing != null && line.path_billing_item != null
     ? { uid: line.uid_billing, path: line.path_billing_item }
     : null;
 }
@@ -497,8 +493,8 @@ export function creditLineBillingPointer(
  */
 export function creditLineShapeIssues(
   line: {
-    uid_billing?: string;
-    path_billing_item?: string[];
+    uid_billing?: string | null;
+    path_billing_item?: string[] | null;
     price: { price_formula: { basis: string } | null; counts: readonly unknown[] };
   },
   opts: {
@@ -510,10 +506,12 @@ export function creditLineShapeIssues(
   } = {},
 ): { path: (string | number)[]; message: string }[] {
   const issues: { path: (string | number)[]; message: string }[] = [];
-  if ((line.uid_billing === undefined) !== (line.path_billing_item === undefined)) {
+  // A CLAIM is a non-null pointer: every credit line states both keys, `null`
+  // on an unpointed one (ruling 204 Q2).
+  if ((line.uid_billing == null) !== (line.path_billing_item == null)) {
     issues.push({ path: ["path_billing_item"], message: "uid_billing and path_billing_item are set together" });
   }
-  const pointed = line.path_billing_item !== undefined;
+  const pointed = line.path_billing_item != null;
   const time = line.price.price_formula?.basis === "time";
   const counts = line.price.counts.length;
   if (!pointed && time && counts === 0 && opts.linked !== true) {
@@ -693,8 +691,9 @@ export interface CreditNote {
 /** The row keys {@link deriveCreditNoteSources} reads: a divider's `type`, a line's pointer. */
 export interface CreditSourceRow {
   type?: string;
-  uid_billing?: string;
-  path_billing_item?: string[];
+  /** `null` on an unpointed line (ruling 204 Q2); absent on a divider. */
+  uid_billing?: string | null;
+  path_billing_item?: string[] | null;
 }
 
 /** The billing-document facts {@link deriveCreditNoteSources} reads: an invoice and the orders it bills. */
@@ -783,7 +782,7 @@ function checkCreditNote(cn: CreditNote, ctx: z.RefinementCtx): void {
   // A pointed line sits under the billing divider of the document it names
   // (ruling 107). Only checked once the line states its path (H2 requires it).
   cn.items.forEach((row, i) => {
-    if (!isCreditNoteLine(row) || row.uid_billing === undefined || row.path === undefined) return;
+    if (!isCreditNoteLine(row) || row.uid_billing == null || row.path === undefined) return;
     if (row.path[0] !== row.uid_billing) {
       ctx.addIssue({ code: "custom", path: ["items", i, "path"], message: "a line naming a billing row sits under that document's billing divider: path[0] is uid_billing" });
     }

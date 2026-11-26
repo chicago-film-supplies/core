@@ -768,6 +768,17 @@ A contract before its `undoes`, `booking_ladder` and `source_item` are filled in
 type BaseMovementContract = Omit<MovementContract, "undoes" | "booking_ladder" | "source_item">;
 ```
 
+### `BilledOutOfServiceList`
+
+`out_of_service` on an INVOICE line, which is REQUIRED on every line (ruling
+204): `[]` is "bills no record", so this node has no `.min(1)`. The payable
+lines keep {@link OutOfServiceList}, where the key is absent off a
+`replacement` line and `[]` would be a second spelling of that.
+
+```ts
+const BilledOutOfServiceList: z.ZodType<OutOfServiceEntryType[]>;
+```
+
 ### `BillingCollection`
 
 The `billing` collection on side `S`.
@@ -3895,8 +3906,8 @@ interface CreditNoteDocItemPrice {
   price_formula: PriceFormulaRef | null;
   rates: RateSnapshotType[];
   counts: TierCountType[];
-  base_percent?: number | null;
-  stated_cents?: number | null;
+  base_percent: number | null;
+  stated_cents: number | null;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
@@ -3964,13 +3975,13 @@ interface CreditNoteDocLineItem {
   source_ledger_account: COARevenueType | null;
   uid_tracking_category: string | null;
   xero_id: string | null;
-  uid_billing?: string;
-  path_billing_item?: string[];
-  units_from?: number | null;
+  uid_billing: string | null;
+  path_billing_item: string[] | null;
+  units_from: number | null;
   path: string[];
   reverses_billing: boolean;
-  substituted_for?: SubstitutedForEntryType[];
-  exchanged_for?: ExchangedForEntryType[];
+  substituted_for: SubstitutedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
 }
 ```
 
@@ -4068,8 +4079,8 @@ The row keys {@link deriveCreditNoteSources} reads: a divider's `type`, a line's
 ```ts
 interface CreditSourceRow {
   type?: string;
-  uid_billing?: string;
-  path_billing_item?: string[];
+  uid_billing?: string | null;
+  path_billing_item?: string[] | null;
 }
 ```
 
@@ -5601,8 +5612,8 @@ interface FulfillmentItemInputLineType {
   uid: string;
   path: string[];
   quantity: number;
-  substituted_for?: SubstitutedForEntryType[];
-  exchanged_for?: ExchangedForEntryType[];
+  substituted_for: SubstitutedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
   quantity_ordered?: number | null;
 }
 ```
@@ -5632,15 +5643,15 @@ interface FulfillmentLineItemType {
   name: string;
   description: string;
   quantity: number;
-  stock_method?: StockMethodType;
+  stock_method: StockMethodType;
   zero_priced: boolean | null;
-  quantity_per_parent?: number | null;
+  quantity_per_parent: number | null;
   path: string[];
-  order_number?: number;
-  uid_order?: string;
+  order_number: number | null;
+  uid_order: string | null;
   quantity_ordered: number | null;
-  substituted_for?: SubstitutedForEntryType[];
-  exchanged_for?: ExchangedForEntryType[];
+  substituted_for: SubstitutedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
 }
 ```
 
@@ -6688,13 +6699,11 @@ one key only a billing document can carry, `path_extension_for`, which marks a
 both sides (`DestinationSectionDividerArm`, `schemas/_dividers.ts`): an
 invoice's rows and a bill's or supplier credit's rows take it.
 
-⚠️ Absent on every divider stored before 2026-09-15, and on every full-window
-section after it. There is no `null`: a divider either extends a section or
-it does not.
+`null` on every divider that does not open a section (ruling 204, class C).
 
 ```ts
 interface InvoiceDocDestinationItemType {
-  path_extension_for?: string[];
+  path_extension_for: string[] | null;
 }
 ```
 
@@ -6763,14 +6772,14 @@ interface InvoiceDocItemPriceType {
   price_formula: PriceFormulaRef | null;
   rates: RateSnapshotType[];
   counts: TierCountType[];
-  base_percent?: number | null;
+  base_percent: number | null;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
   taxes: PriceModifierType[];
   taxes_base?: TaxRefType[];
   total_cents: number;
-  stated_cents?: number | null;
+  stated_cents: number | null;
 }
 ```
 
@@ -6802,19 +6811,18 @@ interface InvoiceDocLineItemType {
   price: InvoiceDocItemPriceType;
   path: string[];
   zero_priced: boolean | null;
-  quantity_per_parent?: number | null;
+  quantity_per_parent: number | null;
   coa_revenue: COARevenueType | null;
   uid_tracking_category: string | null;
   uid_tax_class: string;
-  uid_tax_class_override?: string | null;
-  xero_id?: string | null;
-  crms_opportunity_id?: number | null;
-  crms_id?: number | string | null;
-  substituted_for?: SubstitutedForEntryType[];
-  out_of_service?: OutOfServiceEntryType[];
-  path_source_item?: string[];
-  units_from?: number | null;
-  exchanged_for?: ExchangedForEntryType[];
+  uid_tax_class_override: string | null;
+  xero_id: string | null;
+  crms_id: number | string | null;
+  substituted_for: SubstitutedForEntryType[];
+  out_of_service: OutOfServiceEntryType[];
+  path_source_item: string[] | null;
+  units_from: number | null;
+  exchanged_for: ExchangedForEntryType[];
 }
 ```
 
@@ -6914,10 +6922,10 @@ A destination divider as a client sends it.
 interface InvoiceItemInputDestinationType {
   uid: string;
   type: "destination";
-  name?: string;
-  description?: string;
+  name: string;
+  description: string;
   path: string[];
-  path_extension_for?: string[];
+  path_extension_for: string[] | null;
 }
 ```
 
@@ -6937,8 +6945,8 @@ A group divider as a client sends it.
 interface InvoiceItemInputGroupType {
   uid: string;
   type: "group";
-  name?: string;
-  description?: string;
+  name: string;
+  description: string;
   path: string[];
 }
 ```
@@ -6967,21 +6975,21 @@ it). Prod agrees: 0 of 8,744 invoice line items carry any of the three.
 interface InvoiceItemInputLineType {
   uid: string;
   type: DocLineItemTypeType;
-  name?: string;
-  description?: string;
-  quantity?: number;
-  price?: InvoiceItemInputPriceType;
+  name: string;
+  description: string;
+  quantity: number;
+  price: InvoiceItemInputPriceType;
   path: string[];
-  coa_revenue?: COARevenueType | null;
-  uid_tracking_category?: string | null;
-  uid_tax_class_override?: string | null;
-  substituted_for?: SubstitutedForEntryType[];
-  exchanged_for?: ExchangedForEntryType[];
-  zero_priced?: boolean | null;
-  quantity_per_parent?: number | null;
-  out_of_service?: OutOfServiceEntryType[];
-  path_source_item?: string[];
-  units_from?: number | null;
+  coa_revenue: COARevenueType | null;
+  uid_tracking_category: string | null;
+  uid_tax_class_override: string | null;
+  substituted_for: SubstitutedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
+  zero_priced: boolean | null;
+  quantity_per_parent: number | null;
+  out_of_service: OutOfServiceEntryType[];
+  path_source_item: string[] | null;
+  units_from: number | null;
 }
 ```
 
@@ -7001,8 +7009,8 @@ An order divider as a client sends it — invoice-only, scopes items to a source
 interface InvoiceItemInputOrderType {
   uid: string;
   type: "order";
-  name?: string;
-  description?: string;
+  name: string;
+  description: string;
   path: string[];
 }
 ```
@@ -7126,20 +7134,21 @@ const ItemPrice: z.ZodType<ItemPriceType>;
 
 ### `ItemPriceType`
 
-Price breakdown for an order item (input — client sends partial data, server computes the rest).
+Price breakdown for an order item (input). **A submitted row states every key**
+(ruling 204): a clear is an explicit `null`, and an omitted key is a 400 —
+never a keep, never a fill. The DERIVED keys (`counts`, `subtotal_cents`,
+`subtotal_discounted_cents`, `taxes`, `taxes_base`, `total_cents`) are the
+pricer's and are not on the input (ruling 204 Q3): an echoed stored line
+carries them and has them stripped.
 
 ```ts
 interface ItemPriceType {
-  uid_price_formula?: string;
-  price_formula?: PriceFormulaRef | null;
-  rates?: RateSnapshotType[];
-  base_percent?: number | null;
-  replacement_cents?: number | null;
-  subtotal_cents?: number;
-  discount?: DiscountInputType | null;
-  taxes?: Array<typeLiteral>;
-  total_cents?: number;
-  stated_cents?: number | null;
+  price_formula: PriceFormulaRef | null;
+  rates: RateSnapshotType[];
+  base_percent: number | null;
+  replacement_cents: number | null;
+  discount: DiscountInputType | null;
+  stated_cents: number | null;
 }
 ```
 
@@ -9207,15 +9216,15 @@ interface OrderDocItemPriceType {
   price_formula: PriceFormulaRef | null;
   rates: RateSnapshotType[];
   counts: TierCountType[];
-  base_percent?: number | null;
-  replacement_cents?: number | null;
+  base_percent: number | null;
+  replacement_cents: number | null;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
   taxes: PriceModifierType[];
   taxes_base?: TaxRefType[];
   total_cents: number;
-  stated_cents?: number | null;
+  stated_cents: number | null;
 }
 ```
 
@@ -9262,18 +9271,18 @@ interface OrderDocLineItemType {
   quantity: number;
   price: OrderDocItemPriceType;
   stock_method: StockMethodType;
-  order_number?: number;
-  uid_order?: string;
+  order_number: number | null;
+  uid_order: string | null;
   path: string[];
-  inclusion_type?: "default" | "mandatory" | "optional" | null;
+  inclusion_type: "default" | "mandatory" | "optional" | null;
   zero_priced: boolean | null;
-  quantity_per_parent?: number | null;
-  crms_id?: number | null;
+  quantity_per_parent: number | null;
+  crms_id: number | null;
   coa_revenue: COARevenueType | null;
   uid_tracking_category: string | null;
   uid_tax_class: string;
-  uid_tax_class_override?: string | null;
-  exchanged_for?: ExchangedForEntryType[];
+  uid_tax_class_override: string | null;
+  exchanged_for: ExchangedForEntryType[];
 }
 ```
 
@@ -9361,8 +9370,8 @@ A destination divider as a client sends it.
 interface OrderItemDestinationType {
   uid: string;
   type: "destination";
-  name?: string;
-  description?: string;
+  name: string;
+  description: string;
   path: string[];
 }
 ```
@@ -9383,8 +9392,8 @@ A group divider as a client sends it.
 interface OrderItemGroupType {
   uid: string;
   type: "group";
-  name?: string;
-  description?: string;
+  name: string;
+  description: string;
   path: string[];
 }
 ```
@@ -9402,10 +9411,10 @@ const OrderItemLine: z.ZodType<OrderItemLineType>;
 A billable order line as a client sends it — the input mirror of
 `OrderDocLineItem`.
 
-Deliberately permissive about what may be OMITTED: the server fills `name`,
-`stock_method` and the whole price from the backing product doc, and a custom
-line supplies them itself. What it is no longer permissive about is what a
-line may CLAIM — see {@link OrderItem} for why the arms exist.
+**A submitted row states every key** (ruling 204, "clients should submit
+valid shapes; no presumptive fallbacks"): an omitted key is a 400 naming the
+row and the key, a clear is an explicit `null` or `[]`. Creates too (R4). The
+stored row is a valid input row, so echoing it changes nothing (ruling 193).
 
 `uid_delivery` / `uid_collection` are absent here on purpose. The flat schema
 this replaces accepted both on any item, and `buildOrderLineItem` has never
@@ -9417,21 +9426,21 @@ live exclusively.
 interface OrderItemLineType {
   uid: string;
   type: DocLineItemTypeType;
-  name?: string;
-  description?: string;
-  quantity?: number;
-  price?: ItemPriceType;
-  stock_method?: StockMethodType;
+  name: string;
+  description: string;
+  quantity: number;
+  price: ItemPriceType;
+  stock_method: StockMethodType;
   path: string[];
-  inclusion_type?: InclusionTypeType | null;
-  zero_priced?: boolean | null;
-  quantity_per_parent?: number | null;
-  order_number?: number;
-  uid_order?: string;
-  coa_revenue?: COARevenueType | null;
-  uid_tracking_category?: string | null;
-  uid_tax_class_override?: string | null;
-  exchanged_for?: ExchangedForEntryType[];
+  inclusion_type: InclusionTypeType | null;
+  zero_priced: boolean | null;
+  quantity_per_parent: number | null;
+  order_number: number | null;
+  uid_order: string | null;
+  coa_revenue: COARevenueType | null;
+  uid_tracking_category: string | null;
+  uid_tax_class_override: string | null;
+  exchanged_for: ExchangedForEntryType[];
 }
 ```
 
@@ -11383,56 +11392,62 @@ interface PurchaseBillDestinationInputType {
 
 ### `PurchaseBillDividerInputType`
 
-A divider row of a bill's whole-array input.
+A divider row of a bill's whole-array input. Every key stated (ruling 204 Q7).
 
 ```ts
 interface PurchaseBillDividerInputType {
   type: "purchase" | "destination" | "group";
   uid: string;
   path: string[];
-  name?: string;
-  path_extension_for?: string[];
+  name: string;
+  path_extension_for?: string[] | null;
 }
 ```
 
 ### `PurchaseBillLineInputType`
 
-A line row of a bill's whole-array input.
-
-The writer pairs each row to a stored one (exact path, then the row's uid and
-ancestry), and the paired row is the base for every key this row omits, so a
-row that moved keeps them. A row no stored row pairs with is, in order: a
-split's clone if it states {@link path_source_item}; a line of the purchase
-named by its path; or a line the bill itself authors, which states its name,
-account, quantity and money; a sale or rental names its product by its uid.
-
-On a TIME line `price.rates` restates each unit rate; a flat line states its
-GROSS as `price.stated_cents` (ruling 39, core beta B), and its stored
-`amount_cents` is derived from it.
-
-`path_source_item` absent keeps the stored pointer, and there is no `null`
-form: the writer stamps every moved row's pointer and clears one a move back
-made pointless, so a stale client's identity-only rows cannot clear one.
-The writer assigns the tax class and a bill-authored line's flat formula.
+A line row of a bill's whole-array input, one arm per stored arm.
 
 ```ts
-interface PurchaseBillLineInputType {
-  type: SharedLineType;
-  uid: string;
-  path: string[];
-  name?: string;
-  description?: string;
-  quantity?: number;
-  ledger_account?: COACodeType | null;
-  zero_priced?: boolean | null;
-  quantity_per_parent?: number | null;
-  out_of_service?: OutOfServiceEntryType[];
-  path_source_item?: string[];
-  substituted_for?: SubstitutedForEntryType[];
-  exchanged_for?: ExchangedForEntryType[];
-  uid_tax_class_override?: string | null;
-  uid_tracking_category?: string | null;
-  price?: typeLiteral;
+type PurchaseBillLineInputType = PurchaseBillProductLineInputType | PurchaseBillServiceLineInputType | PurchaseBillReplacementLineInputType;
+```
+
+### `PurchaseBillLinePriceInputType`
+
+A bill line row's price: every key stated (ruling 204), the formula by its stored snapshot (R3).
+
+```ts
+interface PurchaseBillLinePriceInputType {
+  price_formula: PriceFormulaRef;
+  uid_price_formula?: never;
+  rates: typeLiteral[];
+  discount: DiscountInputType | null;
+  stated_cents: number | null;
+}
+```
+
+### `PurchaseBillProductLineInputType`
+
+A sale or rental row: the stored product arm's keys.
+
+```ts
+interface PurchaseBillProductLineInputType {
+  type: "sale" | "rental";
+  ledger_account: COACodeType | null;
+  substituted_for: SubstitutedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
+}
+```
+
+### `PurchaseBillReplacementLineInputType`
+
+A replacement row: a service row naming its records, shares summing to `quantity`.
+
+```ts
+interface PurchaseBillReplacementLineInputType {
+  type: "replacement";
+  ledger_account: COACodeType;
+  out_of_service: OutOfServiceEntryType[];
 }
 ```
 
@@ -11458,6 +11473,17 @@ Zod schema for PurchaseBill.
 
 ```ts
 const PurchaseBillSchema: z.ZodType<PurchaseBill>;
+```
+
+### `PurchaseBillServiceLineInputType`
+
+A service row: the stored service arm's keys. The account is required (S15).
+
+```ts
+interface PurchaseBillServiceLineInputType {
+  type: "service";
+  ledger_account: COACodeType;
+}
 ```
 
 ### `PurchaseBillTotals`
@@ -11876,9 +11902,9 @@ sit in the type's class (`payablePostingIssues`).
 interface PurchaseDocumentProductItem {
   ledger_account: COACodeType | null;
   type: PurchaseProductItemTypeType;
-  path_source_item?: string[];
-  substituted_for?: SubstitutedForEntryType[];
-  exchanged_for?: ExchangedForEntryType[];
+  path_source_item: string[] | null;
+  substituted_for: SubstitutedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
 }
 ```
 
@@ -11949,7 +11975,7 @@ line's device is read through its units (api-cloudrun#1488).
 ```ts
 interface PurchaseDocumentServiceItem {
   type: "service";
-  path_source_item?: string[];
+  path_source_item: string[] | null;
 }
 ```
 
@@ -12110,7 +12136,7 @@ interface PurchaseLandedCostInputType {
   uid?: string;
   description: string;
   amount_cents: number;
-  uid_purchase_bill?: string | null;
+  uid_purchase_bill: string | null;
 }
 ```
 
@@ -12164,8 +12190,8 @@ interface PurchaseLinePrice {
   discount: DiscountType | null;
   taxes: PriceModifierType[];
   taxes_base?: TaxRefType[];
-  replacement_cents?: number | null;
-  stated_cents?: number | null;
+  replacement_cents: number | null;
+  stated_cents: number | null;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   total_cents: number;
@@ -12175,24 +12201,27 @@ interface PurchaseLinePrice {
 
 ### `PurchaseLinePriceInputType`
 
-How an operator prices an item input (ruling 1, 7). `uid_price_formula`
-names the formula; absent takes the writer's default (a buy and a flat charge
-Fixed; a subrent or a time charge the product's `cogs` activation entry's
-formula, else Fixed). The writer snapshots the formula's name and basis.
+How an operator prices an item input (ruling 1, 7). **Every key stated**
+(ruling 204): an omitted key is a 400, never a writer default or a keep.
 
-- `rates` — a time line's rates; absent takes the rates in force today on
-  the product's activation entry. Refused on a flat line.
+- `price_formula` — the formula, as a STORED line carries it (ruling 204 R3:
+  one spelling on both sides; only its `uid` is read, the writer re-derives
+  the name and basis). The client states it: a new line takes the catalog's
+  (manager behaviour), never a server fill. `uid_price_formula` is retired: a
+  400 if sent, never stripped (a stripped formula would fall to a default).
+- `rates` — the line's rates; `[]` on a STATED line.
 - `discount` — a supplier discount, `{ rate, type }`; the writer computes its
   `amount_cents`. On a flat line `amount_cents` is then the GROSS the
   operator states, and the stored amount is net of the discount.
 
 ```ts
 interface PurchaseLinePriceInputType {
-  uid_price_formula?: string;
-  rates?: RateSnapshotType[];
-  discount?: DiscountInputType | null;
-  replacement_cents?: number | null;
-  stated_cents?: number | null;
+  price_formula: PriceFormulaRef;
+  uid_price_formula?: never;
+  rates: RateSnapshotType[];
+  discount: DiscountInputType | null;
+  replacement_cents: number | null;
+  stated_cents: number | null;
 }
 ```
 
@@ -12329,10 +12358,10 @@ interface PurchaseReceiptLineItemType {
   description: string;
   quantity: number;
   zero_priced: boolean | null;
-  quantity_per_parent?: number | null;
+  quantity_per_parent: number | null;
   path: string[];
   quantity_ordered: number | null;
-  exchanged_for?: ExchangedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
 }
 ```
 
@@ -12353,7 +12382,7 @@ interface PurchaseRentalItem {
   amount_cents: number | null;
   price: PurchaseLinePrice;
   uid_orders: string[];
-  exchanged_for?: ExchangedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
 }
 ```
 
@@ -12367,9 +12396,9 @@ as `price.stated_cents`; a time line states `null`. Its hire window is its pair'
 interface PurchaseRentalItemInputType {
   type: "rental";
   quantity: number;
-  ledger_account?: COACodeType | null;
-  uid_orders?: string[];
-  exchanged_for?: ExchangedForEntryType[];
+  ledger_account: COACodeType | null;
+  uid_orders: string[];
+  exchanged_for: ExchangedForEntryType[];
   uid_units?: never;
 }
 ```
@@ -12485,8 +12514,8 @@ A sale (Buy) item as an operator orders it — the buckets are the server's.
 interface PurchaseSaleItemInputType {
   type: "sale";
   quantity: number;
-  ledger_account?: COACodeType | null;
-  landed_costs?: PurchaseLandedCostInputType[];
+  ledger_account: COACodeType | null;
+  landed_costs: PurchaseLandedCostInputType[];
 }
 ```
 
@@ -12540,8 +12569,8 @@ that line's (ruling 74); see {@link PurchaseItemInputBase}.
 interface PurchaseServiceItemInputType {
   type: "service";
   name: string;
-  quantity?: number;
-  ledger_account?: COACodeType;
+  quantity: number;
+  ledger_account: COACodeType;
   uid_units?: never;
 }
 ```
@@ -17725,7 +17754,9 @@ draws on it; edit the draft instead. A status outside the vocabulary answers
 
 ### `billsOutOfService(line: OutOfServiceLinkCarrier): boolean`
 
-Whether a line bills an out-of-service record at all.
+Whether a line bills an out-of-service record at all. Reads a CLAIM as a
+non-empty list: an invoice line states `[]` (ruling 204), a payable line
+omits the key, and both bill no record.
 
 ### `canOperatorTransition(from: string, to: string): boolean`
 
@@ -17880,13 +17911,12 @@ fee as $2.90. The unit lives in the NAME, and a percentage is never a rate row.
 (non-null exactly when `base_percent` is null). An input price may omit it —
 the writer resolves it from the product.
 
-### `checkLinePriceInput(price: parenthesized | null | undefined, ctx: z.RefinementCtx): void`
+### `checkLinePriceInput(price: NonNullable<indexedAccess> | null | undefined, ctx: z.RefinementCtx): void`
 
 {@link checkLinePrice} on an INPUT price, where the writer resolves the
-formula. An input names its formula by `uid_price_formula` or — echoing a
-stored line — by the `price_formula` snapshot, so the percent-xor-formula
-rule reads whichever is present. Both present and naming different formulas
-is refused: one of them is a client bug, and preferring either hides it.
+formula's snapshot. An input names its formula ONE way, by the stored
+`price_formula` snapshot (only its `uid` is read): the `uid_price_formula`
+alias is retired (ruling 204 R3), so there is no second spelling to agree.
 
 ### `checkMixedBookingGrains(items: ReadonlyArray<unknown>, ctx: z.RefinementCtx): void`
 
@@ -19271,6 +19301,24 @@ string — a fixture's stored `collection_source`, an MCP argument — have one
 door, and so the `Partial` index is narrowed in one place instead of at each
 call site.
 
+### `timestampInstant(value: unknown): typeLiteral | null`
+
+**The instant a Firestore Timestamp value states, in whichever of its forms it
+arrives**, or `null` when `value` is not one. The one structural test, shared
+by the {@link FirestoreTimestamp} schema and every comparison that must read
+two forms of one instant as equal (`canonicalizePayload`,
+`@cfs/core/utils/shared-fields`):
+
+- the public accessor shape, `seconds`/`nanoseconds` — a client-SDK
+  `Timestamp`'s own keys, a firebase-admin `Timestamp`'s prototype getters;
+- the private underscored shape, `_seconds`/`_nanoseconds` — a firebase-admin
+  `Timestamp`'s own keys, and what survives `structuredClone` /
+  `lodash.cloneDeep`. Firestore writes accept both.
+
+`Object.keys` therefore sees `_seconds` on one side and `seconds` on the
+other for the SAME instant; reading the instant through this is what makes
+them compare equal.
+
 ### `toRegionCode(input: string): string`
 
 Canonical stored form of `Address.region`: the two-letter code when the input
@@ -19352,7 +19400,9 @@ must call {@link toUsStateCode} themselves rather than trusting storage.
 
 `row` with its move pointer (`path_source_item`, ruling 109: the initiator
 line a billing row bills from another position, initiator-relative) set to
-`pointer`; `undefined` clears it.
+`pointer`; `undefined` clears it to `null` — the key is required on a billing
+LINE (ruling 204, class C). A row whose arm has no such key (a divider) is
+returned as it is when cleared.
 
 ### `zeroPricedFlaggedNonComponents(items: readonly ZeroPricedItemLike[]): ZeroPricedComponentFinding[]`
 
@@ -19798,6 +19848,25 @@ references (`DocSource`, `UidNameRef`) that may point at any collection.
 
 ```ts
 const AnyUid: z.ZodType<string>;
+```
+
+### `BilledOutOfServiceList`
+
+`out_of_service` on an INVOICE line, which is REQUIRED on every line (ruling
+204): `[]` is "bills no record", so this node has no `.min(1)`. The payable
+lines keep {@link OutOfServiceList}, where the key is absent off a
+`replacement` line and `[]` would be a second spelling of that.
+
+```ts
+const BilledOutOfServiceList: z.ZodType<OutOfServiceEntryType[]>;
+```
+
+### `BilledOutOfServiceListInput`
+
+{@link BilledOutOfServiceList} as an input takes it: an extra key is stripped.
+
+```ts
+const BilledOutOfServiceListInput: z.ZodType<OutOfServiceEntryType[]>;
 ```
 
 ### `BookingId`
@@ -21720,7 +21789,9 @@ interface ZeroPricedItemLike {
 
 ### `billsOutOfService(line: OutOfServiceLinkCarrier): boolean`
 
-Whether a line bills an out-of-service record at all.
+Whether a line bills an out-of-service record at all. Reads a CLAIM as a
+non-empty list: an invoice line states `[]` (ruling 204), a payable line
+omits the key, and both bill no record.
 
 ### `checkItemContract(item: typeLiteral, ctx: z.RefinementCtx): void`
 
@@ -21789,13 +21860,12 @@ fee as $2.90. The unit lives in the NAME, and a percentage is never a rate row.
 (non-null exactly when `base_percent` is null). An input price may omit it —
 the writer resolves it from the product.
 
-### `checkLinePriceInput(price: parenthesized | null | undefined, ctx: z.RefinementCtx): void`
+### `checkLinePriceInput(price: NonNullable<indexedAccess> | null | undefined, ctx: z.RefinementCtx): void`
 
 {@link checkLinePrice} on an INPUT price, where the writer resolves the
-formula. An input names its formula by `uid_price_formula` or — echoing a
-stored line — by the `price_formula` snapshot, so the percent-xor-formula
-rule reads whichever is present. Both present and naming different formulas
-is refused: one of them is a client bug, and preferring either hides it.
+formula's snapshot. An input names its formula ONE way, by the stored
+`price_formula` snapshot (only its `uid` is read): the `uid_price_formula`
+alias is retired (ruling 204 R3), so there is no second spelling to agree.
 
 ### `checkZeroPricedAmount(item: typeLiteral, ctx: z.RefinementCtx): void`
 
@@ -21995,6 +22065,24 @@ The LINE rules of an out-of-service link, as `[path, message]` pairs:
 The contract for a settlement `type`, or `undefined` for a value outside
 {@link SETTLEMENT_TYPES}. Tolerant of a `string` for the same reason
 {@link itemContract} is — callers hold types from loosely-typed sources.
+
+### `timestampInstant(value: unknown): typeLiteral | null`
+
+**The instant a Firestore Timestamp value states, in whichever of its forms it
+arrives**, or `null` when `value` is not one. The one structural test, shared
+by the {@link FirestoreTimestamp} schema and every comparison that must read
+two forms of one instant as equal (`canonicalizePayload`,
+`@cfs/core/utils/shared-fields`):
+
+- the public accessor shape, `seconds`/`nanoseconds` — a client-SDK
+  `Timestamp`'s own keys, a firebase-admin `Timestamp`'s prototype getters;
+- the private underscored shape, `_seconds`/`_nanoseconds` — a firebase-admin
+  `Timestamp`'s own keys, and what survives `structuredClone` /
+  `lodash.cloneDeep`. Firestore writes accept both.
+
+`Object.keys` therefore sees `_seconds` on one side and `seconds` on the
+other for the SAME instant; reading the instant through this is what makes
+them compare equal.
 
 ### `toRegionCode(input: string): string`
 
@@ -24967,13 +25055,11 @@ one key only a billing document can carry, `path_extension_for`, which marks a
 both sides (`DestinationSectionDividerArm`, `schemas/_dividers.ts`): an
 invoice's rows and a bill's or supplier credit's rows take it.
 
-⚠️ Absent on every divider stored before 2026-09-15, and on every full-window
-section after it. There is no `null`: a divider either extends a section or
-it does not.
+`null` on every divider that does not open a section (ruling 204, class C).
 
 ```ts
 interface InvoiceDocDestinationItemType {
-  path_extension_for?: string[];
+  path_extension_for: string[] | null;
 }
 ```
 
@@ -25042,14 +25128,14 @@ interface InvoiceDocItemPriceType {
   price_formula: PriceFormulaRef | null;
   rates: RateSnapshotType[];
   counts: TierCountType[];
-  base_percent?: number | null;
+  base_percent: number | null;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
   taxes: PriceModifierType[];
   taxes_base?: TaxRefType[];
   total_cents: number;
-  stated_cents?: number | null;
+  stated_cents: number | null;
 }
 ```
 
@@ -25081,19 +25167,18 @@ interface InvoiceDocLineItemType {
   price: InvoiceDocItemPriceType;
   path: string[];
   zero_priced: boolean | null;
-  quantity_per_parent?: number | null;
+  quantity_per_parent: number | null;
   coa_revenue: COARevenueType | null;
   uid_tracking_category: string | null;
   uid_tax_class: string;
-  uid_tax_class_override?: string | null;
-  xero_id?: string | null;
-  crms_opportunity_id?: number | null;
-  crms_id?: number | string | null;
-  substituted_for?: SubstitutedForEntryType[];
-  out_of_service?: OutOfServiceEntryType[];
-  path_source_item?: string[];
-  units_from?: number | null;
-  exchanged_for?: ExchangedForEntryType[];
+  uid_tax_class_override: string | null;
+  xero_id: string | null;
+  crms_id: number | string | null;
+  substituted_for: SubstitutedForEntryType[];
+  out_of_service: OutOfServiceEntryType[];
+  path_source_item: string[] | null;
+  units_from: number | null;
+  exchanged_for: ExchangedForEntryType[];
 }
 ```
 
@@ -25187,10 +25272,10 @@ A destination divider as a client sends it.
 interface InvoiceItemInputDestinationType {
   uid: string;
   type: "destination";
-  name?: string;
-  description?: string;
+  name: string;
+  description: string;
   path: string[];
-  path_extension_for?: string[];
+  path_extension_for: string[] | null;
 }
 ```
 
@@ -25210,8 +25295,8 @@ A group divider as a client sends it.
 interface InvoiceItemInputGroupType {
   uid: string;
   type: "group";
-  name?: string;
-  description?: string;
+  name: string;
+  description: string;
   path: string[];
 }
 ```
@@ -25240,21 +25325,21 @@ it). Prod agrees: 0 of 8,744 invoice line items carry any of the three.
 interface InvoiceItemInputLineType {
   uid: string;
   type: DocLineItemTypeType;
-  name?: string;
-  description?: string;
-  quantity?: number;
-  price?: InvoiceItemInputPriceType;
+  name: string;
+  description: string;
+  quantity: number;
+  price: InvoiceItemInputPriceType;
   path: string[];
-  coa_revenue?: COARevenueType | null;
-  uid_tracking_category?: string | null;
-  uid_tax_class_override?: string | null;
-  substituted_for?: SubstitutedForEntryType[];
-  exchanged_for?: ExchangedForEntryType[];
-  zero_priced?: boolean | null;
-  quantity_per_parent?: number | null;
-  out_of_service?: OutOfServiceEntryType[];
-  path_source_item?: string[];
-  units_from?: number | null;
+  coa_revenue: COARevenueType | null;
+  uid_tracking_category: string | null;
+  uid_tax_class_override: string | null;
+  substituted_for: SubstitutedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
+  zero_priced: boolean | null;
+  quantity_per_parent: number | null;
+  out_of_service: OutOfServiceEntryType[];
+  path_source_item: string[] | null;
+  units_from: number | null;
 }
 ```
 
@@ -25274,25 +25359,24 @@ An order divider as a client sends it — invoice-only, scopes items to a source
 interface InvoiceItemInputOrderType {
   uid: string;
   type: "order";
-  name?: string;
-  description?: string;
+  name: string;
+  description: string;
   path: string[];
 }
 ```
 
 ### `InvoiceItemInputPriceType`
 
-Item price input — partial, server computes the rest.
+Item price input: every key stated (ruling 204), the derived keys the
+pricer's (Q3). See {@link ItemPriceType}.
 
 ```ts
 interface InvoiceItemInputPriceType {
-  uid_price_formula?: string;
-  price_formula?: PriceFormulaRef | null;
-  rates?: RateSnapshotType[];
-  base_percent?: number | null;
-  discount?: DiscountInputType | null;
-  taxes?: Array<typeLiteral>;
-  stated_cents?: number | null;
+  price_formula: PriceFormulaRef | null;
+  rates: RateSnapshotType[];
+  base_percent: number | null;
+  discount: DiscountInputType | null;
+  stated_cents: number | null;
 }
 ```
 
@@ -26342,20 +26426,21 @@ const ItemPrice: z.ZodType<ItemPriceType>;
 
 ### `ItemPriceType`
 
-Price breakdown for an order item (input — client sends partial data, server computes the rest).
+Price breakdown for an order item (input). **A submitted row states every key**
+(ruling 204): a clear is an explicit `null`, and an omitted key is a 400 —
+never a keep, never a fill. The DERIVED keys (`counts`, `subtotal_cents`,
+`subtotal_discounted_cents`, `taxes`, `taxes_base`, `total_cents`) are the
+pricer's and are not on the input (ruling 204 Q3): an echoed stored line
+carries them and has them stripped.
 
 ```ts
 interface ItemPriceType {
-  uid_price_formula?: string;
-  price_formula?: PriceFormulaRef | null;
-  rates?: RateSnapshotType[];
-  base_percent?: number | null;
-  replacement_cents?: number | null;
-  subtotal_cents?: number;
-  discount?: DiscountInputType | null;
-  taxes?: Array<typeLiteral>;
-  total_cents?: number;
-  stated_cents?: number | null;
+  price_formula: PriceFormulaRef | null;
+  rates: RateSnapshotType[];
+  base_percent: number | null;
+  replacement_cents: number | null;
+  discount: DiscountInputType | null;
+  stated_cents: number | null;
 }
 ```
 
@@ -26673,15 +26758,15 @@ interface OrderDocItemPriceType {
   price_formula: PriceFormulaRef | null;
   rates: RateSnapshotType[];
   counts: TierCountType[];
-  base_percent?: number | null;
-  replacement_cents?: number | null;
+  base_percent: number | null;
+  replacement_cents: number | null;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
   taxes: PriceModifierType[];
   taxes_base?: TaxRefType[];
   total_cents: number;
-  stated_cents?: number | null;
+  stated_cents: number | null;
 }
 ```
 
@@ -26728,18 +26813,18 @@ interface OrderDocLineItemType {
   quantity: number;
   price: OrderDocItemPriceType;
   stock_method: StockMethodType;
-  order_number?: number;
-  uid_order?: string;
+  order_number: number | null;
+  uid_order: string | null;
   path: string[];
-  inclusion_type?: "default" | "mandatory" | "optional" | null;
+  inclusion_type: "default" | "mandatory" | "optional" | null;
   zero_priced: boolean | null;
-  quantity_per_parent?: number | null;
-  crms_id?: number | null;
+  quantity_per_parent: number | null;
+  crms_id: number | null;
   coa_revenue: COARevenueType | null;
   uid_tracking_category: string | null;
   uid_tax_class: string;
-  uid_tax_class_override?: string | null;
-  exchanged_for?: ExchangedForEntryType[];
+  uid_tax_class_override: string | null;
+  exchanged_for: ExchangedForEntryType[];
 }
 ```
 
@@ -26803,8 +26888,8 @@ A destination divider as a client sends it.
 interface OrderItemDestinationType {
   uid: string;
   type: "destination";
-  name?: string;
-  description?: string;
+  name: string;
+  description: string;
   path: string[];
 }
 ```
@@ -26825,8 +26910,8 @@ A group divider as a client sends it.
 interface OrderItemGroupType {
   uid: string;
   type: "group";
-  name?: string;
-  description?: string;
+  name: string;
+  description: string;
   path: string[];
 }
 ```
@@ -26844,10 +26929,10 @@ const OrderItemLine: z.ZodType<OrderItemLineType>;
 A billable order line as a client sends it — the input mirror of
 `OrderDocLineItem`.
 
-Deliberately permissive about what may be OMITTED: the server fills `name`,
-`stock_method` and the whole price from the backing product doc, and a custom
-line supplies them itself. What it is no longer permissive about is what a
-line may CLAIM — see {@link OrderItem} for why the arms exist.
+**A submitted row states every key** (ruling 204, "clients should submit
+valid shapes; no presumptive fallbacks"): an omitted key is a 400 naming the
+row and the key, a clear is an explicit `null` or `[]`. Creates too (R4). The
+stored row is a valid input row, so echoing it changes nothing (ruling 193).
 
 `uid_delivery` / `uid_collection` are absent here on purpose. The flat schema
 this replaces accepted both on any item, and `buildOrderLineItem` has never
@@ -26859,21 +26944,21 @@ live exclusively.
 interface OrderItemLineType {
   uid: string;
   type: DocLineItemTypeType;
-  name?: string;
-  description?: string;
-  quantity?: number;
-  price?: ItemPriceType;
-  stock_method?: StockMethodType;
+  name: string;
+  description: string;
+  quantity: number;
+  price: ItemPriceType;
+  stock_method: StockMethodType;
   path: string[];
-  inclusion_type?: InclusionTypeType | null;
-  zero_priced?: boolean | null;
-  quantity_per_parent?: number | null;
-  order_number?: number;
-  uid_order?: string;
-  coa_revenue?: COARevenueType | null;
-  uid_tracking_category?: string | null;
-  uid_tax_class_override?: string | null;
-  exchanged_for?: ExchangedForEntryType[];
+  inclusion_type: InclusionTypeType | null;
+  zero_priced: boolean | null;
+  quantity_per_parent: number | null;
+  order_number: number | null;
+  uid_order: string | null;
+  coa_revenue: COARevenueType | null;
+  uid_tracking_category: string | null;
+  uid_tax_class_override: string | null;
+  exchanged_for: ExchangedForEntryType[];
 }
 ```
 
@@ -27556,7 +27641,9 @@ one today, and the refusal waits until the backfill has nulled them —
 
 `row` with its move pointer (`path_source_item`, ruling 109: the initiator
 line a billing row bills from another position, initiator-relative) set to
-`pointer`; `undefined` clears it.
+`pointer`; `undefined` clears it to `null` — the key is required on a billing
+LINE (ruling 204, class C). A row whose arm has no such key (a divider) is
+returned as it is when cleared.
 
 ## `@cfs/core/schemas/fulfillment`
 
@@ -27685,8 +27772,8 @@ interface FulfillmentItemInputLineType {
   uid: string;
   path: string[];
   quantity: number;
-  substituted_for?: SubstitutedForEntryType[];
-  exchanged_for?: ExchangedForEntryType[];
+  substituted_for: SubstitutedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
   quantity_ordered?: number | null;
 }
 ```
@@ -27716,15 +27803,15 @@ interface FulfillmentLineItemType {
   name: string;
   description: string;
   quantity: number;
-  stock_method?: StockMethodType;
+  stock_method: StockMethodType;
   zero_priced: boolean | null;
-  quantity_per_parent?: number | null;
+  quantity_per_parent: number | null;
   path: string[];
-  order_number?: number;
-  uid_order?: string;
+  order_number: number | null;
+  uid_order: string | null;
   quantity_ordered: number | null;
-  substituted_for?: SubstitutedForEntryType[];
-  exchanged_for?: ExchangedForEntryType[];
+  substituted_for: SubstitutedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
 }
 ```
 
@@ -30009,7 +30096,7 @@ interface PurchaseLandedCostInputType {
   uid?: string;
   description: string;
   amount_cents: number;
-  uid_purchase_bill?: string | null;
+  uid_purchase_bill: string | null;
 }
 ```
 
@@ -30063,8 +30150,8 @@ interface PurchaseLinePrice {
   discount: DiscountType | null;
   taxes: PriceModifierType[];
   taxes_base?: TaxRefType[];
-  replacement_cents?: number | null;
-  stated_cents?: number | null;
+  replacement_cents: number | null;
+  stated_cents: number | null;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   total_cents: number;
@@ -30074,24 +30161,27 @@ interface PurchaseLinePrice {
 
 ### `PurchaseLinePriceInputType`
 
-How an operator prices an item input (ruling 1, 7). `uid_price_formula`
-names the formula; absent takes the writer's default (a buy and a flat charge
-Fixed; a subrent or a time charge the product's `cogs` activation entry's
-formula, else Fixed). The writer snapshots the formula's name and basis.
+How an operator prices an item input (ruling 1, 7). **Every key stated**
+(ruling 204): an omitted key is a 400, never a writer default or a keep.
 
-- `rates` — a time line's rates; absent takes the rates in force today on
-  the product's activation entry. Refused on a flat line.
+- `price_formula` — the formula, as a STORED line carries it (ruling 204 R3:
+  one spelling on both sides; only its `uid` is read, the writer re-derives
+  the name and basis). The client states it: a new line takes the catalog's
+  (manager behaviour), never a server fill. `uid_price_formula` is retired: a
+  400 if sent, never stripped (a stripped formula would fall to a default).
+- `rates` — the line's rates; `[]` on a STATED line.
 - `discount` — a supplier discount, `{ rate, type }`; the writer computes its
   `amount_cents`. On a flat line `amount_cents` is then the GROSS the
   operator states, and the stored amount is net of the discount.
 
 ```ts
 interface PurchaseLinePriceInputType {
-  uid_price_formula?: string;
-  rates?: RateSnapshotType[];
-  discount?: DiscountInputType | null;
-  replacement_cents?: number | null;
-  stated_cents?: number | null;
+  price_formula: PriceFormulaRef;
+  uid_price_formula?: never;
+  rates: RateSnapshotType[];
+  discount: DiscountInputType | null;
+  replacement_cents: number | null;
+  stated_cents: number | null;
 }
 ```
 
@@ -30151,7 +30241,7 @@ interface PurchaseRentalItem {
   amount_cents: number | null;
   price: PurchaseLinePrice;
   uid_orders: string[];
-  exchanged_for?: ExchangedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
 }
 ```
 
@@ -30165,9 +30255,9 @@ as `price.stated_cents`; a time line states `null`. Its hire window is its pair'
 interface PurchaseRentalItemInputType {
   type: "rental";
   quantity: number;
-  ledger_account?: COACodeType | null;
-  uid_orders?: string[];
-  exchanged_for?: ExchangedForEntryType[];
+  ledger_account: COACodeType | null;
+  uid_orders: string[];
+  exchanged_for: ExchangedForEntryType[];
   uid_units?: never;
 }
 ```
@@ -30283,8 +30373,8 @@ A sale (Buy) item as an operator orders it — the buckets are the server's.
 interface PurchaseSaleItemInputType {
   type: "sale";
   quantity: number;
-  ledger_account?: COACodeType | null;
-  landed_costs?: PurchaseLandedCostInputType[];
+  ledger_account: COACodeType | null;
+  landed_costs: PurchaseLandedCostInputType[];
 }
 ```
 
@@ -30338,8 +30428,8 @@ that line's (ruling 74); see {@link PurchaseItemInputBase}.
 interface PurchaseServiceItemInputType {
   type: "service";
   name: string;
-  quantity?: number;
-  ledger_account?: COACodeType;
+  quantity: number;
+  ledger_account: COACodeType;
   uid_units?: never;
 }
 ```
@@ -30816,56 +30906,62 @@ interface PurchaseBillDestinationInputType {
 
 ### `PurchaseBillDividerInputType`
 
-A divider row of a bill's whole-array input.
+A divider row of a bill's whole-array input. Every key stated (ruling 204 Q7).
 
 ```ts
 interface PurchaseBillDividerInputType {
   type: "purchase" | "destination" | "group";
   uid: string;
   path: string[];
-  name?: string;
-  path_extension_for?: string[];
+  name: string;
+  path_extension_for?: string[] | null;
 }
 ```
 
 ### `PurchaseBillLineInputType`
 
-A line row of a bill's whole-array input.
-
-The writer pairs each row to a stored one (exact path, then the row's uid and
-ancestry), and the paired row is the base for every key this row omits, so a
-row that moved keeps them. A row no stored row pairs with is, in order: a
-split's clone if it states {@link path_source_item}; a line of the purchase
-named by its path; or a line the bill itself authors, which states its name,
-account, quantity and money; a sale or rental names its product by its uid.
-
-On a TIME line `price.rates` restates each unit rate; a flat line states its
-GROSS as `price.stated_cents` (ruling 39, core beta B), and its stored
-`amount_cents` is derived from it.
-
-`path_source_item` absent keeps the stored pointer, and there is no `null`
-form: the writer stamps every moved row's pointer and clears one a move back
-made pointless, so a stale client's identity-only rows cannot clear one.
-The writer assigns the tax class and a bill-authored line's flat formula.
+A line row of a bill's whole-array input, one arm per stored arm.
 
 ```ts
-interface PurchaseBillLineInputType {
-  type: SharedLineType;
-  uid: string;
-  path: string[];
-  name?: string;
-  description?: string;
-  quantity?: number;
-  ledger_account?: COACodeType | null;
-  zero_priced?: boolean | null;
-  quantity_per_parent?: number | null;
-  out_of_service?: OutOfServiceEntryType[];
-  path_source_item?: string[];
-  substituted_for?: SubstitutedForEntryType[];
-  exchanged_for?: ExchangedForEntryType[];
-  uid_tax_class_override?: string | null;
-  uid_tracking_category?: string | null;
-  price?: typeLiteral;
+type PurchaseBillLineInputType = PurchaseBillProductLineInputType | PurchaseBillServiceLineInputType | PurchaseBillReplacementLineInputType;
+```
+
+### `PurchaseBillLinePriceInputType`
+
+A bill line row's price: every key stated (ruling 204), the formula by its stored snapshot (R3).
+
+```ts
+interface PurchaseBillLinePriceInputType {
+  price_formula: PriceFormulaRef;
+  uid_price_formula?: never;
+  rates: typeLiteral[];
+  discount: DiscountInputType | null;
+  stated_cents: number | null;
+}
+```
+
+### `PurchaseBillProductLineInputType`
+
+A sale or rental row: the stored product arm's keys.
+
+```ts
+interface PurchaseBillProductLineInputType {
+  type: "sale" | "rental";
+  ledger_account: COACodeType | null;
+  substituted_for: SubstitutedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
+}
+```
+
+### `PurchaseBillReplacementLineInputType`
+
+A replacement row: a service row naming its records, shares summing to `quantity`.
+
+```ts
+interface PurchaseBillReplacementLineInputType {
+  type: "replacement";
+  ledger_account: COACodeType;
+  out_of_service: OutOfServiceEntryType[];
 }
 ```
 
@@ -30891,6 +30987,17 @@ Zod schema for PurchaseBill.
 
 ```ts
 const PurchaseBillSchema: z.ZodType<PurchaseBill>;
+```
+
+### `PurchaseBillServiceLineInputType`
+
+A service row: the stored service arm's keys. The account is required (S15).
+
+```ts
+interface PurchaseBillServiceLineInputType {
+  type: "service";
+  ledger_account: COACodeType;
+}
 ```
 
 ### `PurchaseBillTotals`
@@ -31220,9 +31327,9 @@ sit in the type's class (`payablePostingIssues`).
 interface PurchaseDocumentProductItem {
   ledger_account: COACodeType | null;
   type: PurchaseProductItemTypeType;
-  path_source_item?: string[];
-  substituted_for?: SubstitutedForEntryType[];
-  exchanged_for?: ExchangedForEntryType[];
+  path_source_item: string[] | null;
+  substituted_for: SubstitutedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
 }
 ```
 
@@ -31293,7 +31400,7 @@ line's device is read through its units (api-cloudrun#1488).
 ```ts
 interface PurchaseDocumentServiceItem {
   type: "service";
-  path_source_item?: string[];
+  path_source_item: string[] | null;
 }
 ```
 
@@ -31534,10 +31641,10 @@ interface PurchaseReceiptLineItemType {
   description: string;
   quantity: number;
   zero_priced: boolean | null;
-  quantity_per_parent?: number | null;
+  quantity_per_parent: number | null;
   path: string[];
   quantity_ordered: number | null;
-  exchanged_for?: ExchangedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
 }
 ```
 
@@ -31948,8 +32055,8 @@ interface CreditNoteDocItemPrice {
   price_formula: PriceFormulaRef | null;
   rates: RateSnapshotType[];
   counts: TierCountType[];
-  base_percent?: number | null;
-  stated_cents?: number | null;
+  base_percent: number | null;
+  stated_cents: number | null;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
@@ -32017,13 +32124,13 @@ interface CreditNoteDocLineItem {
   source_ledger_account: COARevenueType | null;
   uid_tracking_category: string | null;
   xero_id: string | null;
-  uid_billing?: string;
-  path_billing_item?: string[];
-  units_from?: number | null;
+  uid_billing: string | null;
+  path_billing_item: string[] | null;
+  units_from: number | null;
   path: string[];
   reverses_billing: boolean;
-  substituted_for?: SubstitutedForEntryType[];
-  exchanged_for?: ExchangedForEntryType[];
+  substituted_for: SubstitutedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
 }
 ```
 
@@ -32117,8 +32224,8 @@ The row keys {@link deriveCreditNoteSources} reads: a divider's `type`, a line's
 ```ts
 interface CreditSourceRow {
   type?: string;
-  uid_billing?: string;
-  path_billing_item?: string[];
+  uid_billing?: string | null;
+  path_billing_item?: string[] | null;
 }
 ```
 
@@ -42802,8 +42909,8 @@ lines and the fold's alike.
 ```ts
 interface KeyableCreditLine {
   quantity: number;
-  uid_billing?: string;
-  path_billing_item?: readonly string[];
+  uid_billing?: string | null;
+  path_billing_item?: readonly string[] | null;
   price?: typeLiteral;
 }
 ```
@@ -44238,11 +44345,11 @@ interface InvoiceItem {
   uid_tracking_category?: string | null;
   xero_id?: string | null;
   crms_id?: number | string | null;
-  crms_opportunity_id?: number | null;
   substituted_for?: SubstitutedForEntryType[];
   out_of_service?: OutOfServiceEntryType[];
-  path_extension_for?: string[];
-  path_source_item?: string[];
+  path_extension_for?: string[] | null;
+  path_source_item?: string[] | null;
+  units_from?: number | null;
 }
 ```
 
@@ -44343,7 +44450,7 @@ interface LineItem {
   quantity_per_parent?: number | null;
   exchanged_for?: ExchangedForEntryType[];
   description?: string;
-  order_number?: number;
+  order_number?: number | null;
   uid_order?: string | null;
   coa_revenue?: COARevenueType | null;
   uid_tracking_category?: string | null;
@@ -44501,7 +44608,7 @@ type PriceModifier = PriceModifierType;
 ### `PriceObject`
 
 ```ts
-type PriceObject = OrderDocItemPriceType;
+type PriceObject = Omit<OrderDocItemPriceType, "replacement_cents" | "base_percent"> & typeLiteral;
 ```
 
 ### `PriceableLineItem`
@@ -44828,7 +44935,7 @@ agingOf("2026-08-01T00:00:00.000-05:00", "2026-09-07T00:00:00.000-05:00");
 anchor — the two members of `AGING_ANCHORS` in `schemas/reporting.ts`.
 - `asOf` — The report's as-of invoice date.
 
-### `buildInvoiceDestinationDivider(source: typeLiteral, _: unknown): OrderDocDestinationItemType`
+### `buildInvoiceDestinationDivider(source: typeLiteral, _: unknown): InvoiceDocDestinationItemType`
 
 Build an invoice destination divider from a source order's destination item.
 Single source of truth for the divider shape — reused by
@@ -44903,18 +45010,29 @@ the two functions answer one question instead of two.
 
 ### `canonicalizePayload(value: unknown): unknown`
 
-Key-sorted deep copy with `null`/`undefined`/absent collapsed to absent —
-so two payloads compare equal iff they say the same thing.
+**The ONE comparison rule** (ruling 204 F4.5): a key-sorted deep copy with
+`null`/`undefined`/absent collapsed to absent, so two values compare equal iff
+they say the same thing. The three-way merge, the line-edit diff and the
+destination-pair diff (`@cfs/core/utils/invoices` re-exports it) all read it;
+there were three copies.
 
-⚠️ **Both normalizations are load-bearing, and neither is cosmetic.**
-*Key order*: one side of a comparison is a stored document (Firestore returns
-map keys sorted) and the other may be freshly built (insertion order), so a
-raw `JSON.stringify` can report two identical pairs as different. *Nullish*:
-every field on this pair means the same thing absent as it does `null` — no
-destination record, no address, no instructions, no jurisdiction claim — and
-a corpus mid-migration holds both spellings of that. Reading one as an edit
-would freeze the pair as "overridden" and stop it syncing **entirely**,
-because the check is all-or-nothing for the whole pair.
+- *Key order*: one side is often a stored document (Firestore returns map keys
+  sorted) and the other freshly built, so a raw `JSON.stringify` can report
+  two identical values as different.
+- *Nullish*: on a line row absence is unrepresentable after ruling 204 (every
+  key is stated) except the derived `price.taxes_base`, so the collapse is
+  inert there; it stays load-bearing for the destination pair, where every
+  field means the same thing absent as `null`, and reading one as an edit
+  would freeze the whole pair as overridden.
+
+- *Timestamps*: one instant arrives in several forms — a firebase-admin
+  `Timestamp` (own keys `_seconds`/`_nanoseconds`), a client-SDK `Timestamp`
+  (`seconds`/`nanoseconds`), a cloned map — so `Object.keys` alone would read
+  one instant as two values. Each reduces to its instant through
+  `timestampInstant`, the test the `FirestoreTimestamp` schema itself uses.
+  ⚠️ This compares INSTANTS; it does not certify the FORM. A raw map is never
+  a legal stored value (the `cfs-datetime` skill), and finding one is the
+  datetime audit's job and api-cloudrun#1146's, not this comparison's.
 
 ### `carryForwardOverrides(rebuiltItems: InvoiceDocItemType[], existingItems: InvoiceItem[]): InvoiceDocItemType[]`
 
@@ -45650,8 +45768,8 @@ is a real answer on both (a custom line; a product with no category).
 The `LINE_TAX_FIELDS` a line carries, for a projection onto another
 grain. `uid_tax_class` is required on every priced line (api-cloudrun#993),
 so a source line without one is refused loudly rather than projected into a
-document the schema would 400; `uid_tax_class_override` is copied only when
-present, so the projection preserves the source line's key set.
+document the schema would 400; `uid_tax_class_override` is stated, `null`
+for none (ruling 204).
 
 ### `projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: string): InvoiceDocItemType`
 
@@ -46469,7 +46587,7 @@ interface LineItem {
   quantity_per_parent?: number | null;
   exchanged_for?: ExchangedForEntryType[];
   description?: string;
-  order_number?: number;
+  order_number?: number | null;
   uid_order?: string | null;
   coa_revenue?: COARevenueType | null;
   uid_tracking_category?: string | null;
@@ -46786,7 +46904,7 @@ interface FulfillmentLineSource {
   readonly type: indexedAccess;
   readonly name: string;
   readonly description?: string | null;
-  readonly stock_method?: indexedAccess;
+  readonly stock_method: indexedAccess;
   readonly zero_priced?: boolean | null;
   readonly quantity_per_parent?: number | null;
 }
@@ -46910,9 +47028,9 @@ projection's to state; everything else comes from the source.
 merge compares a projected line against the stored one, so a key whose
 PRESENCE moved with its VALUE would make a catalog edit a permanent diff.
 
-Optional keys (`stock_method`, `order_number`, `uid_order`, `exchanged_for`)
-are omitted when the source does not carry them — the stored documents
-depend on it. `quantity_ordered` is always stated.
+**Every key is stated** (ruling 204): a source that does not carry an
+attribution, a ratio or an exchange states its empty value (`null`, `[]`).
+`stock_method` has no empty value, so the source must state it.
 
 ### `rebuildFulfillmentItems(storedItems: readonly FulfillmentItemType[], submitted: readonly FulfillmentLineItemType[]): FulfillmentItemType[]`
 
@@ -50571,6 +50689,7 @@ interface CustomLineBuildOptions {
   taxes: ReadonlyArray<typeLiteral>;
   uid_tax_class: string;
   uidOrder?: string;
+  orderNumber?: number;
 }
 ```
 
@@ -50638,12 +50757,13 @@ interface OrderLineBuildOptions {
   quantity: number;
   inheritedAncestry?: string[];
   uidOrder?: string;
+  orderNumber?: number;
   taxClassForType: fnOrConstructor;
   raisedQuantity?: fnOrConstructor;
 }
 ```
 
-### `buildCustomInvoiceLine(opts: Omit<CustomLineBuildOptions, "uidOrder">): InvoiceDocLineItemType`
+### `buildCustomInvoiceLine(opts: Omit<CustomLineBuildOptions, "uidOrder" | "orderNumber">): InvoiceDocLineItemType`
 
 Build a custom (no-product) invoice line item.
 
@@ -51162,10 +51282,10 @@ const INVOICE_DECLARED_PRICE_KEYS: Record<DeclaredPriceKey<InvoiceDocItemPriceTy
 
 ### `InvoiceDeclaredPrice`
 
-An invoice line's declared price half, every nullable key present.
+An invoice line's declared price half — see {@link OrderDeclaredPrice}.
 
 ```ts
-type InvoiceDeclaredPrice = Omit<OrderDeclaredPrice, "replacement_cents">;
+type InvoiceDeclaredPrice = Pick<InvoiceDocItemPriceType, DeclaredPriceKey<InvoiceDocItemPriceType>>;
 ```
 
 ### `ItemDividers`
@@ -51293,7 +51413,7 @@ interface LineItem {
   quantity_per_parent?: number | null;
   exchanged_for?: ExchangedForEntryType[];
   description?: string;
-  order_number?: number;
+  order_number?: number | null;
   uid_order?: string | null;
   coa_revenue?: COARevenueType | null;
   uid_tracking_category?: string | null;
@@ -51397,18 +51517,13 @@ interface OrderDateEnvelope {
 
 ### `OrderDeclaredPrice`
 
-An order line's declared price half, every nullable key present — except
-`stated_cents`, present only on a STATED line (`DECLARED_ONLY_WHEN_SET`).
+An order line's declared price half: EVERY declared key of the stored price,
+read off `OrderDocItemPriceType` (so a key added there is a compile error in
+the builder below), each stated — `null` for none (ruling 204: a stored row
+states every key, so a rate line states `stated_cents: null`).
 
 ```ts
-interface OrderDeclaredPrice {
-  price_formula: PriceFormulaRef | null;
-  rates: RateSnapshot[];
-  counts: TierCount[];
-  base_percent: number | null;
-  replacement_cents: number | null;
-  stated_cents?: number;
-}
+type OrderDeclaredPrice = Pick<OrderDocItemPriceType, DeclaredPriceKey<OrderDocItemPriceType>>;
 ```
 
 ### `OrderTotals`
@@ -51466,7 +51581,7 @@ type PriceModifier = PriceModifierType;
 ### `PriceObject`
 
 ```ts
-type PriceObject = OrderDocItemPriceType;
+type PriceObject = Omit<OrderDocItemPriceType, "replacement_cents" | "base_percent"> & typeLiteral;
 ```
 
 ### `PriceRefusalError`
@@ -52203,17 +52318,16 @@ zero-priced accessories, or a `splitItem` clone, on one row.
 
 ### `declaredInvoicePrice(price: DeclaredPriceInput): InvoiceDeclaredPrice`
 
-Copy exactly {@link INVOICE_DECLARED_PRICE_KEYS} — see {@link declaredOrderPrice}.
+Copy exactly the invoice's declared keys — see {@link declaredOrderPrice}.
 
 ### `declaredOrderPrice(price: DeclaredPriceInput): OrderDeclaredPrice`
 
-Copy exactly {@link ORDER_DECLARED_PRICE_KEYS} off an input price, normalizing
-an absent nullable key to `null`. Extra keys (computed money, `discount`,
-`taxes`) are ignored — they are the pricer's, not the caller's.
+Copy exactly the declared keys off an input price, normalizing an absent
+nullable key to `null`. Extra keys (computed money, `discount`, `taxes`) are
+ignored — they are the pricer's, not the caller's.
 
 ⚠️ **Every order line therefore carries `base_percent`** — `null` on all but a
-percent-of-total fee line. That matches what `buildOrderLineFromProduct` already
-stages.
+percent-of-total fee line — and `stated_cents`, `null` on a rate line.
 
 ### `deriveNextEventDate(order: typeLiteral): typeLiteral`
 
@@ -56054,7 +56168,9 @@ rewritten, whose NEW lines the caller adds itself.
 
 ### `billsOutOfService(line: OutOfServiceLinkCarrier): boolean`
 
-Whether a line bills an out-of-service record at all.
+Whether a line bills an out-of-service record at all. Reads a CLAIM as a
+non-empty list: an invoice line states `[]` (ruling 204), a payable line
+omits the key, and both bill no record.
 
 ### `fitOutOfServiceEntries(entries: readonly OutOfServiceEntryType[], quantity: number): OutOfServiceEntryType[]`
 
@@ -56542,6 +56658,32 @@ interface SharedFieldMerge {
 }
 ```
 
+### `canonicalizePayload(value: unknown): unknown`
+
+**The ONE comparison rule** (ruling 204 F4.5): a key-sorted deep copy with
+`null`/`undefined`/absent collapsed to absent, so two values compare equal iff
+they say the same thing. The three-way merge, the line-edit diff and the
+destination-pair diff (`@cfs/core/utils/invoices` re-exports it) all read it;
+there were three copies.
+
+- *Key order*: one side is often a stored document (Firestore returns map keys
+  sorted) and the other freshly built, so a raw `JSON.stringify` can report
+  two identical values as different.
+- *Nullish*: on a line row absence is unrepresentable after ruling 204 (every
+  key is stated) except the derived `price.taxes_base`, so the collapse is
+  inert there; it stays load-bearing for the destination pair, where every
+  field means the same thing absent as `null`, and reading one as an edit
+  would freeze the whole pair as overridden.
+
+- *Timestamps*: one instant arrives in several forms — a firebase-admin
+  `Timestamp` (own keys `_seconds`/`_nanoseconds`), a client-SDK `Timestamp`
+  (`seconds`/`nanoseconds`), a cloned map — so `Object.keys` alone would read
+  one instant as two values. Each reduces to its instant through
+  `timestampInstant`, the test the `FirestoreTimestamp` schema itself uses.
+  ⚠️ This compares INSTANTS; it does not certify the FORM. A raw map is never
+  a legal stored value (the `cfs-datetime` skill), and finding one is the
+  datetime audit's job and api-cloudrun#1146's, not this comparison's.
+
 ### `classifySharedFields(source: z.ZodType, downstream: z.ZodType): SharedFieldClassification`
 
 Classify every field `source` (the order) shares with `downstream` (an invoice
@@ -56713,7 +56855,7 @@ window it cannot count.
 
 ### `sameSharedValue(a: unknown, b: unknown): boolean`
 
-Do two values state the same thing? Absent and `null` are the same statement.
+Do two values state the same thing? See {@link canonicalizePayload}.
 
 ## `@cfs/core/utils/stored-only-rows`
 
@@ -56989,7 +57131,7 @@ interface LineItem {
   quantity_per_parent?: number | null;
   exchanged_for?: ExchangedForEntryType[];
   description?: string;
-  order_number?: number;
+  order_number?: number | null;
   uid_order?: string | null;
   coa_revenue?: COARevenueType | null;
   uid_tracking_category?: string | null;

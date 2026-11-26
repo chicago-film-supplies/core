@@ -40,6 +40,8 @@ const NOW = { now: mockTimestamp };
 const stamps = { created_at: mockTimestamp, updated_at: mockTimestamp };
 
 const divider = (uid: string) => ({ uid, type: "destination" as const, name: "Site", description: "", path: [uid] });
+/** {@link divider} on a BILLING document: it states `path_extension_for`, `null` off a section (ruling 204). */
+const billingDivider = (uid: string) => ({ ...divider(uid), path_extension_for: null });
 
 /** A parsed fixture with its pairs renamed to `uids`, one pair per uid. */
 function withPairs<D extends { destinations: { uid: string }[] }>(doc: D, uids: string[]): D {
@@ -143,7 +145,7 @@ Deno.test("checkDestinationJoin: wired on the order and the fulfillment, NOT the
   await t.step("invoice: the SAME divider-less mismatch is NOT refused by the schema", () => {
     // Invoices are excluded on purpose — scoped to what they bill. The API's
     // write guard applies the shared function to them at write time instead.
-    const doc = { ...invoice(), destinations: invoicePairs([DIV_A, DIV_B]), items: [divider(DIV_A)] };
+    const doc = { ...invoice(), destinations: invoicePairs([DIV_A, DIV_B]), items: [billingDivider(DIV_A)] };
     const result = InvoiceSchema.safeParse(doc);
     assertEquals(result.success, true, JSON.stringify(result.error?.issues));
   });
@@ -219,9 +221,10 @@ Deno.test("checkZeroQuantityComponents: the stored order and BOTH inputs refuse 
     const fulfillmentItems = rows((uid, path, quantity, zero_priced) =>
       getTestDoc(FulfillmentLineItem, { uid, type: "sale", path, quantity, zero_priced })
     );
-    const invoiceItems = rows((uid, path, quantity, zero_priced) =>
+    const [, ...invoiceLines] = rows((uid, path, quantity, zero_priced) =>
       getTestDoc(InvoiceDocLineItem, { uid, type: "sale", path, quantity, zero_priced })
     );
+    const invoiceItems = [billingDivider(DIV_A), ...invoiceLines];
     const f = FulfillmentSchema.safeParse({ ...withPairs(fulfillment(), [DIV_A]), items: fulfillmentItems });
     assertEquals(f.success, true, JSON.stringify(f.error?.issues));
     const i = InvoiceSchema.safeParse({ ...invoice(), destinations: invoicePairs([DIV_A]), items: invoiceItems });
@@ -290,9 +293,9 @@ Deno.test("checkLeadingDivider: wired on the order, the fulfillment and the invo
   await t.step("invoice: order-linked with no order divider first is refused", () => {
     const base = { ...invoice(), destinations: invoicePairs([DIV_A]).map((p) => ({ ...p, uid_source: ORDER_UID })) };
     const linked = { ...base, query_by_orders: [ORDER_UID] };
-    const good = InvoiceSchema.safeParse({ ...linked, items: [orderDivider(), { ...divider(DIV_A), path: [ORDER_UID, DIV_A] }] });
+    const good = InvoiceSchema.safeParse({ ...linked, items: [orderDivider(), { ...billingDivider(DIV_A), path: [ORDER_UID, DIV_A] }] });
     assertEquals(good.success, true, JSON.stringify(good.error?.issues));
-    const bad = InvoiceSchema.safeParse({ ...linked, items: [{ ...divider(DIV_A), path: [DIV_A] }] });
+    const bad = InvoiceSchema.safeParse({ ...linked, items: [{ ...billingDivider(DIV_A), path: [DIV_A] }] });
     assertEquals(refusedAt(bad, ["items", 0, "type"]), true, JSON.stringify(bad.error?.issues));
   });
 

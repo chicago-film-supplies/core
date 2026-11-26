@@ -4020,6 +4020,7 @@ Deno.test("priceTransactionFeeLine — a percent fee's stored ZERO does not reac
       price_formula: null, rates: [], counts: [],
       base_percent: 4,
       replacement_cents: null,
+      stated_cents: null,
       discount: null,
       subtotal_cents: 0,
       subtotal_discounted_cents: 0,
@@ -4126,7 +4127,7 @@ Deno.test("ORDER_DECLARED_PRICE_KEYS — equals the runtime schema's keys minus 
 
 Deno.test("declaredOrderPrice — a percent fee keeps base_percent, every other line gets it as null", () => {
   const fee = declaredOrderPrice({ price_formula: null, rates: [], base_percent: 4 });
-  assertEquals(fee, { price_formula: null, rates: [], counts: [], base_percent: 4, replacement_cents: null });
+  assertEquals(fee, { price_formula: null, rates: [], counts: [], base_percent: 4, replacement_cents: null, stated_cents: null });
 
   // Extra input keys (money, discount, taxes) are the pricer's and are not copied.
   const sale = declaredOrderPrice({ ...fixedPrice(1_000), replacement_cents: 5_000, ...{ subtotal_cents: 9 } });
@@ -4166,7 +4167,8 @@ Deno.test("declaredOrderPrice — assembled fee and sale lines both parse as Ord
   );
   const saleParse = OrderDocItemPrice.safeParse(sale);
   assertEquals(saleParse.success, true, JSON.stringify(saleParse.error?.issues));
-  assertEquals(Object.keys(sale).length, 11);
+  // The declared half now states `stated_cents` too (ruling 204), so 12 keys.
+  assertEquals(Object.keys(sale).length, 12);
 });
 
 Deno.test("assembleLinePrice — an ORDER shape keeps replacement_cents, an INVOICE shape never gains one", () => {

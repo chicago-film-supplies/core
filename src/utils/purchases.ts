@@ -451,14 +451,15 @@ function expandOnto(
       ...item,
       ...keyed,
       quantity,
-      ...(item.landed_costs !== undefined ? { landed_costs: item.landed_costs.map((e) => ({ ...e })) } : {}),
+      // Stated on every Buy row (ruling 204): copied, never conditionally.
+      landed_costs: item.landed_costs.map((e) => ({ ...e })),
     };
   }
   return {
     ...item,
     ...keyed,
     quantity,
-    ...(item.uid_orders !== undefined ? { uid_orders: [...item.uid_orders] } : {}),
+    uid_orders: [...item.uid_orders],
   };
 }
 

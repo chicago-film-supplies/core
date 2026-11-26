@@ -45,6 +45,8 @@ import {
   CreateCreditNoteInput,
   INVOICE_STATUS_CONTRACTS,
   creditIsLive,
+  type PurchaseRowInputType,
+  type PurchaseSaleItemInputType,
 } from "../src/schemas/mod.ts";
 import { buildFirestoreColumns } from "../src/schemas/display-columns.ts";
 import { classifySharedFields } from "../src/utils/shared-fields.ts";
@@ -71,6 +73,7 @@ import {
   purchaseItemProduct,
 } from "../src/utils/purchases.ts";
 import { purchaseTotals } from "../src/utils/price-document.ts";
+import { billProductLine, billProductLineInput, billServiceLine, purchaseDividerInput, purchaseLineInput } from "./helpers/lines.ts";
 import { apportionCents } from "../src/utils/money.ts";
 import { costedProductUid, lineProductUid } from "../src/utils/purchases.ts";
 import { type FormulaDiscount, lineDiscountAtCents, lineMoneyAtCents, lineUnitsCents, statedLine } from "../src/utils/price-formulas.ts";
@@ -90,7 +93,7 @@ function flatMoney(gross: number, quantity: number, discount: FormulaDiscount | 
   return { amount_cents, discount: discount === null ? null : { ...discount, amount_cents: lineDiscountAtCents(line, quantity) } };
 }
 import { mockTimestamp } from "./helpers/timestamp.ts";
-import { asCreditRows, payablePrice, purchaseDivider, purchasePair, payableLine, withPayableMoney } from "./helpers/payable.ts";
+import { asCreditRows, payableDocPrice, payablePrice, billDivider, purchaseDivider, purchasePair, payableLine, withPayableMoney } from "./helpers/payable.ts";
 
 /** The tax class every payable test line is stamped with: exempt on this side, so it prices nothing. */
 const TAX_CLASS = "TaxClassResale000000";
@@ -247,6 +250,13 @@ const flatPrice = payablePrice(0, { formula: FIXED });
 const weeklyPrice = {
   ...payablePrice(0, { formula: WEEKLY }),
   rates: [{ rate_key: "month", amount_cents: 15750 }, { rate_key: "week", amount_cents: 4500 }],
+};
+// The same two prices as a BILL line carries them: no `replacement_cents`, which
+// only a purchase line has (the strict document arm refuses it).
+const flatDocPrice = payableDocPrice(0, { formula: FIXED });
+const weeklyDocPrice = {
+  ...payableDocPrice(0, { formula: WEEKLY }),
+  rates: weeklyPrice.rates,
 };
 
 /** A FLAT subrent item of 10 steamers. Its custody is the movements', handed in beside it (C8). */
@@ -644,11 +654,11 @@ Deno.test("uid_units and query_by_units are retired: a purchase line names no un
 });
 
 Deno.test("PurchaseItemInput: a line input naming units is REFUSED, never stripped (rulings 73, 79)", () => {
-  const charge = { type: "service", ...lineHead(3), name: "Freight", amount_cents: 1, ledger_account: 5300 };
+  const charge = purchaseLineInput("service", { ...lineHead(3), name: "Freight", ledger_account: 5300 });
   assertEquals(issuePaths(PurchaseItemInput, charge), [], "control");
   assertEquals(issuePaths(PurchaseItemInput, { ...charge, uid_units: ["unit-7"] }), ["uid_units"]);
   assertEquals(issuePaths(PurchaseItemInput, { ...charge, uid_units: [] }), ["uid_units"], "even an empty list");
-  const sub = { type: "rental", ...keyedHead(2), quantity: 10, amount_cents: 1 };
+  const sub = purchaseLineInput("rental", { ...keyedHead(2), quantity: 10 });
   assertEquals(issuePaths(PurchaseItemInput, sub), [], "control");
   assertEquals(issuePaths(PurchaseItemInput, { ...sub, uid_units: ["unit-7"] }), ["uid_units"], "a subrent names its units on the receipt");
   assertEquals(issuePaths(PurchaseItemInput, { ...sub, uid_units: [] }), ["uid_units"], "even an empty list");
@@ -687,13 +697,14 @@ const SESSION = "0199a1f2-3b4c-7d8e-9f01-234567890abc";
 const PAIR_A = iuid(901);
 const PAIR_B = iuid(902);
 const GROUP = iuid(903);
-const destRow = (uid = PAIR_A) => ({ type: "destination", uid, path: [uid] });
+const destRow = (uid = PAIR_A) => purchaseDividerInput("destination", { uid, path: [uid] });
+const groupRow = (uid: string, path: string[], name: string) => purchaseDividerInput("group", { uid, path, name });
 const lineHead = (n: number, pair = PAIR_A) => ({ uid: iuid(n), path: [pair, iuid(n)] });
 /** The n-th product's uid. */
 const pid = (n: number) => `testprod${String(n).padStart(12, "0")}`;
 /** A catalog line's head, keyed by its product (W4K): the uid and the path leaf ARE the product (7a). */
 const keyedHead = (n: number, pair = PAIR_A) => ({ uid: pid(n), path: [pair, pid(n)] });
-const buyInput = { type: "sale", ...keyedHead(1), quantity: 1, price: { stated_cents: 100 } };
+const buyInput = purchaseLineInput("sale", { ...keyedHead(1), quantity: 1, price: { stated_cents: 100 } });
 const nullDates = { delivery_start: null, delivery_end: null, collection_start: null, collection_end: null, charge_windows: null };
 /** A hire in the order's shape (api-cloudrun#1469): possession to `collection_start`, `collection_end` following it. */
 const hireDates = {
@@ -723,17 +734,26 @@ Deno.test("CreatePurchaseInput: rows of every arm, the same product in two group
     destRow(),
     buyInput,
     { ...buyInput, ...keyedHead(3), quantity: 2 },
-    { type: "rental", ...keyedHead(4), quantity: 10, amount_cents: 50_000 },
-    {
-      type: "rental",
+    purchaseLineInput("rental", { ...keyedHead(4), quantity: 10, price: { stated_cents: 50_000 } }),
+    purchaseLineInput("rental", {
       ...keyedHead(5),
       quantity: 2,
-      price: { uid_price_formula: WEEKLY.uid, rates: weeklyPrice.rates },
-    },
-    { type: "service", ...lineHead(5), name: "Hotspot line", ledger_account: 5150, price: { uid_price_formula: MONTHLY.uid } },
-    { type: "service", ...lineHead(6), name: "Freight", amount_cents: 1_500, ledger_account: 5300, price: { discount: { rate: 10, type: "percent" } } },
+      price: { price_formula: WEEKLY, rates: weeklyPrice.rates, stated_cents: null },
+    }),
+    purchaseLineInput("service", {
+      ...lineHead(5),
+      name: "Hotspot line",
+      ledger_account: 5150,
+      price: { price_formula: MONTHLY, rates: [{ rate_key: "month", amount_cents: 8000 }], stated_cents: null },
+    }),
+    purchaseLineInput("service", {
+      ...lineHead(6),
+      name: "Freight",
+      ledger_account: 5300,
+      price: { stated_cents: 1_500, discount: { rate: 10, type: "percent" } },
+    }),
     // The same product again, in its own group: one product per group (W4K).
-    { type: "group", uid: GROUP, path: [PAIR_A, GROUP], name: "Second" },
+    groupRow(GROUP, [PAIR_A, GROUP], "Second"),
     { ...buyInput, path: [PAIR_A, GROUP, pid(1)], quantity: 2 },
   ];
   assertEquals(issuePaths(CreatePurchaseInput, createInput({ items })), []);
@@ -742,10 +762,10 @@ Deno.test("CreatePurchaseInput: rows of every arm, the same product in two group
 Deno.test("purchase input: two pairs on one window and a group, parsed through the barrel", () => {
   const items = [
     destRow(PAIR_A),
-    { type: "group", uid: GROUP, path: [PAIR_A, GROUP], name: "Camera" },
+    groupRow(GROUP, [PAIR_A, GROUP], "Camera"),
     { ...buyInput, path: [PAIR_A, GROUP, pid(1)] },
     destRow(PAIR_B),
-    { type: "rental", ...keyedHead(2, PAIR_B), quantity: 1, amount_cents: 1 },
+    purchaseLineInput("rental", { ...keyedHead(2, PAIR_B), quantity: 1 }),
   ];
   const destinations = [pairInput({ dates: hireDates }), pairInput({ uid: PAIR_B, dates: hireDates, delivery: { uid: "testdest100000000000" } })];
   const parsed = CreatePurchaseInput.safeParse(createInput({ items, destinations }));
@@ -785,9 +805,9 @@ Deno.test("purchase row input: a line and a divider each require their identity"
   assertEquals(issuePaths(PurchaseRowInput, noUid), ["uid"]);
   assertEquals(issuePaths(PurchaseRowInput, noPath), ["path"]);
   assertEquals(issuePaths(PurchaseRowInput, { ...destRow(), uid: "testfirestoreid00000" }), ["uid"]);
-  assertEquals(issuePaths(PurchaseRowInput, { type: "group", uid: GROUP, path: [] }), ["path"]);
-  assertEquals(issuePaths(PurchaseRowInput, { type: "group", uid: GROUP, path: [GROUP], name: "" }), ["name"]);
-  assertEquals(issuePaths(PurchaseRowInput, { type: "group", uid: GROUP, path: [GROUP], name: "x".repeat(101) }), ["name"]);
+  assertEquals(issuePaths(PurchaseRowInput, groupRow(GROUP, [], "Camera")), ["path"]);
+  assertEquals(issuePaths(PurchaseRowInput, groupRow(GROUP, [GROUP], "")), ["name"]);
+  assertEquals(issuePaths(PurchaseRowInput, groupRow(GROUP, [GROUP], "x".repeat(101))), ["name"]);
   assertEquals(issuePaths(PurchaseRowInput, { ...destRow(), name: "x".repeat(201) }), ["name"]);
   // Stripping, as the bill's dividers are: a stray key is dropped, never refused.
   const parsed = PurchaseRowInput.safeParse({ ...destRow(), quantity: 3 });
@@ -796,7 +816,7 @@ Deno.test("purchase row input: a line and a divider each require their identity"
 });
 
 Deno.test("purchase row input: a stale line `dates` strips, so only the rest of the body refuses an old client", () => {
-  const stale = { type: "rental", ...keyedHead(2), quantity: 1, amount_cents: 1, dates: HIRE };
+  const stale = { ...purchaseLineInput("rental", { ...keyedHead(2), quantity: 1 }), dates: HIRE };
   const parsed = PurchaseRowInput.safeParse(stale);
   assert(parsed.success);
   assertEquals("dates" in parsed.data, false);
@@ -832,18 +852,20 @@ Deno.test("PurchaseDestinationInput: a hire states both collection bounds or nei
 });
 
 Deno.test("PurchaseItemInput: each arm's own requirements, one field at a time", () => {
-  const sub = { type: "rental", ...keyedHead(2), quantity: 10, amount_cents: 1 };
-  const charge = lineHead(3);
+  const sub = purchaseLineInput("rental", { ...keyedHead(2), quantity: 10 });
+  const charge = purchaseLineInput("service", { ...lineHead(3), name: "Freight", ledger_account: 5300 });
   assertEquals(issuePaths(PurchaseItemInput, sub), []);
   assertEquals(issuePaths(PurchaseItemInput, { ...sub, ledger_account: 1999 }), ["ledger_account"]);
-  // A charge's name is the operator's. Its account may be left to the writer, which
-  // defaults only a PLACED charge (ruling 74), so the input takes it absent; a null
-  // is a kit header's and a charge is never one; a stated one is the operator's.
-  assertEquals(issuePaths(PurchaseItemInput, { type: "service", ...charge, name: "Freight", amount_cents: 1 }), []);
-  assertEquals(issuePaths(PurchaseItemInput, { type: "service", ...charge, name: "Freight", amount_cents: 1, ledger_account: null }), ["ledger_account"]);
-  assertEquals(issuePaths(PurchaseItemInput, { type: "replacement", ...charge, name: "Lost", amount_cents: 1, out_of_service: [] }).includes("ledger_account"), false);
-  assertEquals(issuePaths(PurchaseItemInput, { type: "service", ...charge, amount_cents: 1, ledger_account: 5300 }), ["name"]);
-  assertEquals(issuePaths(PurchaseItemInput, { ...sub, price: { discount: { rate: 101, type: "percent" } } }), ["price.discount.rate"]);
+  // A charge's name and account are the operator's, and both are REQUIRED (ruling
+  // 204 S15: "default to the catalog" is the client pre-filling it, never a server
+  // fill). A null is a kit header's and a charge is never one.
+  assertEquals(issuePaths(PurchaseItemInput, charge), []);
+  const { ledger_account: _account, ...noAccount } = charge;
+  assertEquals(issuePaths(PurchaseItemInput, noAccount), ["ledger_account"]);
+  assertEquals(issuePaths(PurchaseItemInput, { ...charge, ledger_account: null }), ["ledger_account"]);
+  const { name: _name, ...noName } = charge;
+  assertEquals(issuePaths(PurchaseItemInput, noName), ["name"]);
+  assertEquals(issuePaths(PurchaseItemInput, { ...sub, price: { ...sub.price, discount: { rate: 101, type: "percent" } } }), ["price.discount.rate"]);
   assertEquals(issuePaths(PurchaseItemInput, { ...buyInput, ledger_account: 5100 }), ["ledger_account"]);
   // Non-strict: an extra key strips rather than 400s (core/CLAUDE.md § Document vs input).
   const parsed = PurchaseItemInput.safeParse({ ...buyInput, quantity_received: 3 });
@@ -864,7 +886,7 @@ const XERO_ID = "384eb64a-0000-4000-8000-000000000000";
 const P = "testpurch10000000000";
 const scope = { uid: P, type: "purchase", name: "PO-1", path: [P], description: "" };
 /** The purchase's destination divider as it sits on a bill: `[P, D]`. */
-const docDivider = { ...purchaseDivider(D), path: [P, D] };
+const docDivider = billDivider(D, [P, D]);
 /** A bill's or credit's pair for `D`, scoped to the purchase. */
 const docPair = { uid_source: P, ...purchasePair(D) };
 
@@ -875,18 +897,20 @@ const docPair = { uid_source: P, ...purchasePair(D) };
 const billItem = (over: Record<string, unknown> = {}) => {
   const uid = (over.uid as string | undefined) ?? lid(1);
   return withPayableMoney({
-    type: "sale",
-    uid,
-    path: [P, D, uid],
-    description: "",
-    zero_priced: null,
-    name: "Walkie Talkie",
-    quantity: 3,
-    amount_cents: 140985,
-    price: flatPrice,
-    ledger_account: 1999,
-    uid_tracking_category: null,
-    uid_tax_class: TAX_CLASS,
+    ...billProductLine({
+      type: "sale",
+      uid,
+      path: [P, D, uid],
+      description: "",
+      zero_priced: null,
+      name: "Walkie Talkie",
+      quantity: 3,
+      amount_cents: 140985,
+      price: payableDocPrice(0),
+      ledger_account: 1999,
+      uid_tracking_category: null,
+      uid_tax_class: TAX_CLASS,
+    }),
     ...over,
   });
 };
@@ -895,18 +919,19 @@ const billItem = (over: Record<string, unknown> = {}) => {
 const billDirect = (over: Record<string, unknown> = {}) => {
   const uid = (over.uid as string | undefined) ?? `custom-${lid(201)}`;
   return withPayableMoney({
-    type: "service",
-    uid,
-    path: [P, D, uid],
-    description: "",
-    zero_priced: null,
-    name: "Freight",
-    quantity: 1,
-    amount_cents: 1500,
-    ledger_account: 5100,
-    uid_tracking_category: null,
-    uid_tax_class: TAX_CLASS,
-    price: flatPrice,
+    ...billServiceLine({
+      uid,
+      path: [P, D, uid],
+      description: "",
+      zero_priced: null,
+      name: "Freight",
+      quantity: 1,
+      amount_cents: 1500,
+      ledger_account: 5100,
+      uid_tracking_category: null,
+      uid_tax_class: TAX_CLASS,
+      price: payableDocPrice(0),
+    }),
     ...over,
   });
 };
@@ -1114,7 +1139,7 @@ Deno.test("CreatePurchaseBillInput: the invoice's create shape — every purchas
   const { due_date: _d, ...noDue } = push;
   assertEquals(issuePaths(CreatePurchaseBillInput, noDue), ["due_date"]);
   // Rows: a purchase divider names one of the bill's purchases, and a row appears once.
-  const divider = (uid: string) => ({ type: "purchase", uid, path: [uid] });
+  const divider = (uid: string) => ({ type: "purchase", uid, path: [uid], name: "PO" });
   assertEquals(issuePaths(CreatePurchaseBillInput, { ...push, items: [divider(P), divider(Q)] }), []);
   assertEquals(issuePaths(CreatePurchaseBillInput, { ...push, items: [divider(P), divider("testpurch30000000000")] }), ["items.1.uid"]);
   assertEquals(issuePaths(CreatePurchaseBillInput, { ...push, items: [divider(P), divider(P)] }), ["items.1.path"]);
@@ -1162,7 +1187,7 @@ const billTimeLine = (over: Record<string, unknown> = {}) =>
     ledger_account: 5100,
     quantity: 2,
     amount_cents: 9000,
-    price: { ...weeklyPrice, counts: [{ rate_key: "month", num: 0, den: 1 }, { rate_key: "week", num: 2, den: 1 }] },
+    price: { ...weeklyDocPrice, counts: [{ rate_key: "month", num: 0, den: 1 }, { rate_key: "week", num: 2, den: 1 }] },
     ...over,
   });
 const t9000 = { total_cents: 9000, amount_paid_cents: 0, amount_credited_cents: 0, amount_void_cents: 0, amount_due_cents: 9000 };
@@ -1172,19 +1197,19 @@ Deno.test("PurchaseBillSchema: a TIME line states its amount; a PUSHED one state
     const doc = bill({ origin, xero_id: origin === "linked" ? XERO_ID : null, items: [billTimeLine()], totals: t9000 });
     assertEquals(issuePaths(PurchaseBillSchema, doc), [], origin);
   }
-  const uncounted = billTimeLine({ price: { ...weeklyPrice, counts: [] } });
+  const uncounted = billTimeLine({ price: { ...weeklyDocPrice, counts: [] } });
   assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [uncounted], totals: t9000 })), ["items.2.price.counts"]);
   // A linked line's money is Xero's; its counts are what the link could read.
   assertEquals(issuePaths(PurchaseBillSchema, bill({ origin: "linked", xero_id: XERO_ID, items: [uncounted], totals: t9000 })), []);
-  assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [billTimeLine({ price: { ...weeklyPrice, counts: [{ rate_key: "week", num: 2, den: 1 }], rates: [] } })], totals: t9000 })), [
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [billTimeLine({ price: { ...weeklyDocPrice, counts: [{ rate_key: "week", num: 2, den: 1 }], rates: [] } })], totals: t9000 })), [
     "items.2.price.rates",
   ]);
 });
 
 Deno.test("PurchaseBillSchema: a bill line's price money is what its stated amount gives, linked as well as pushed", () => {
-  const discounted = billItem({ amount_cents: 140985, price: { ...flatPrice, discount: { rate: 5, type: "percent", amount_cents: 7420 } } });
+  const discounted = billItem({ amount_cents: 140985, price: { ...flatDocPrice, discount: { rate: 5, type: "percent", amount_cents: 7420 } } });
   assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [discounted] })), []);
-  const stale = { ...discounted, price: { ...(discounted.price as Record<string, unknown>), subtotal_discounted_cents: 140984 } };
+  const stale = { ...discounted, price: { ...discounted.price, subtotal_discounted_cents: 140984 } };
   assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [stale] })), ["items.2.price.subtotal_discounted_cents"]);
   // A linked line's amount is Xero's; its money still follows from it.
   assertEquals(
@@ -1194,7 +1219,7 @@ Deno.test("PurchaseBillSchema: a bill line's price money is what its stated amou
 });
 
 Deno.test("PurchaseBillSchema: a flat line's counts are the meter's one tier at 1/1, and `[]` is refused (ruling 108)", () => {
-  const counted = (counts: unknown[]) => billItem({ price: { ...flatPrice, counts } });
+  const counted = (counts: unknown[]) => billItem({ price: { ...flatDocPrice, counts } });
   assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [counted([])] })), ["items.2.price.counts"]);
   assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [counted([{ rate_key: "flat", num: 1, den: 1 }])] })), []);
   assertEquals(issuePaths(PurchaseBillSchema, bill({ items: [counted([{ rate_key: "week", num: 2, den: 1 }])] })), ["items.2.price.counts"]);
@@ -1355,7 +1380,7 @@ Deno.test("PurchaseCreditSchema: a line naming a bill row sits under that bill's
       uid_billing: BILL,
       path_billing_item: [P, D, lid(1)],
       // A whole-unit credit of a flat row states no time of its own (ruling 106).
-      price: { ...flatPrice, counts: [] },
+      price: { ...flatDocPrice, counts: [] },
       ...over,
     });
   const rows = (line: unknown) => asCreditRows([billing, { ...scope, path: [BILL, P] }, { ...docDivider, path: [BILL, P, D] }, line] as { type: string }[]);
@@ -1577,9 +1602,40 @@ const CATALOG = new Map<string, PurchaseExpansionProduct>([
   ["svc", product("svc", "none", [comp("labor", ["svc"], 1, "bulk", { type: "service" })])],
 ]);
 
-/** A buy line keyed by its product (W4K), as a client sends it. */
-const buy = (product: string, quantity: number, amount_cents: number, over: Record<string, unknown> = {}) =>
-  ({ type: "sale" as const, uid: product, path: [PAIR_A, product], quantity, amount_cents, ...over });
+/** The keys every line input row states (ruling 204), keyed by its product (W4K). */
+const rowHead = (product: string) => ({
+  uid: product,
+  path: [PAIR_A, product],
+  description: "",
+  zero_priced: null,
+  quantity_per_parent: null,
+  uid_tracking_category: null,
+  uid_tax_class_override: null,
+});
+/** A flat STATED line input's price: every key stated, the formula by its snapshot (R3). */
+const statedInputPrice = (stated_cents: number) => ({
+  price_formula: FIXED,
+  rates: [],
+  discount: null,
+  replacement_cents: null,
+  stated_cents,
+});
+
+/** A buy line keyed by its product (W4K), as a client sends it: a full row (ruling 204). */
+const buy = (
+  product: string,
+  quantity: number,
+  stated_cents: number,
+  over: Partial<PurchaseSaleItemInputType> = {},
+): PurchaseSaleItemInputType => ({
+  type: "sale",
+  ...rowHead(product),
+  quantity,
+  ledger_account: 1999,
+  landed_costs: [],
+  price: statedInputPrice(stated_cents),
+  ...over,
+});
 
 Deno.test("expandPurchaseItems: a stocked product passes through unchanged", () => {
   const items = [buy("410", 7, 700, { description: "" })];
@@ -1644,18 +1700,18 @@ Deno.test("expandPurchaseItems: a product the caller did not read is the caller'
 });
 
 Deno.test("expandPurchaseItems: a subrent pack expands carrying its price and orders; a divider and a charge pass through", () => {
-  const sub = {
-    type: "rental" as const,
-    uid: "118",
-    path: [PAIR_A, "118"],
+  const sub: PurchaseRowInputType = {
+    type: "rental",
+    ...rowHead("118"),
     quantity: 1,
-    amount_cents: 900,
-    price: { uid_price_formula: FIXED.uid },
+    ledger_account: 5100,
+    price: statedInputPrice(900),
     uid_orders: [ORDER_1074],
+    exchanged_for: [],
   };
-  const other = [
-    { type: "destination" as const, uid: PAIR_A, path: [PAIR_A] },
-    { type: "service" as const, uid: iuid(3), path: [PAIR_A, iuid(3)], name: "Freight", amount_cents: 1, ledger_account: 5300 as const },
+  const other: PurchaseRowInputType[] = [
+    { type: "destination", uid: PAIR_A, path: [PAIR_A], name: "", description: "" },
+    { type: "service", ...rowHead(iuid(3)), name: "Freight", quantity: 1, ledger_account: 5300, price: statedInputPrice(1) },
   ];
   assertEquals(expandPurchaseItems([sub, ...other], CATALOG), {
     ok: true,
@@ -1664,7 +1720,7 @@ Deno.test("expandPurchaseItems: a subrent pack expands carrying its price and or
 });
 
 Deno.test("expandPurchaseItems: landed costs ride a pack onto its component", () => {
-  const freight = { description: "Freight", amount_cents: 500 };
+  const freight = { description: "Freight", amount_cents: 500, uid_purchase_bill: null };
   assertEquals(expandPurchaseItems([buy("118", 1, 900, { landed_costs: [freight] })], CATALOG), {
     ok: true,
     items: [buy("410", 40, 900, { landed_costs: [freight] })],
@@ -1905,11 +1961,8 @@ Deno.test("PurchaseSchema: a landed cost's own refines, one field at a time", ()
 
 Deno.test("landed cost inputs: a subrent item cannot carry them; a buy item input refuses a uid named twice", () => {
   const sub = PurchaseItemInput.safeParse({
-    type: "rental",
-    ...keyedHead(2),
-    quantity: 1,
-    billing: { basis: "fixed", amount_cents: 100 },
-    landed_costs: [{ description: "Freight", amount_cents: 1 }],
+    ...purchaseLineInput("rental", { ...keyedHead(2), quantity: 1 }),
+    landed_costs: [{ description: "Freight", amount_cents: 1, uid_purchase_bill: null }],
   });
   // Non-strict input: the key strips, and the subrent arm has no place to keep it.
   assert(sub.success);
@@ -1917,8 +1970,8 @@ Deno.test("landed cost inputs: a subrent item cannot carry them; a buy item inpu
   const twice = PurchaseItemInput.safeParse({
     ...buyInput,
     landed_costs: [
-      { uid: entry().uid, description: "Freight", amount_cents: 1 },
-      { uid: entry().uid, description: "Duty", amount_cents: 1 },
+      { uid: entry().uid, description: "Freight", amount_cents: 1, uid_purchase_bill: null },
+      { uid: entry().uid, description: "Duty", amount_cents: 1, uid_purchase_bill: null },
     ],
   });
   assert(!twice.success);
@@ -2063,26 +2116,29 @@ Deno.test("lineProductUid — the product a payable line names is its uid, and a
 
 Deno.test("PurchaseItemInput: a Buy states its gross as price.stated_cents, and an echoed amount_cents is stripped", () => {
   const { price: _p, ...bare } = buyInput;
+  const noGross = { ...buyInput, price: { ...buyInput.price, stated_cents: null } };
   assertEquals(issuePaths(PurchaseItemInput, buyInput), [], "control: the stated gross");
-  assertEquals(issuePaths(PurchaseItemInput, bare), ["price.stated_cents"], "a Buy states its gross");
-  assertEquals(issuePaths(PurchaseItemInput, { ...bare, price: { stated_cents: null } }), ["price.stated_cents"]);
+  // An omitted price is the input parse's 400 (ruling 204), never a keep.
+  assertEquals(issuePaths(PurchaseItemInput, bare), ["price"], "a row states its price");
+  assertEquals(issuePaths(PurchaseItemInput, noGross), ["price.stated_cents"], "a Buy states its gross or its rates");
   // The retired input: a stored line's derived `amount_cents` echoed back is
   // stripped, never read as the gross, so it cannot stand in for one.
-  assertEquals(issuePaths(PurchaseItemInput, { ...bare, amount_cents: 100 }), ["price.stated_cents"]);
+  assertEquals(issuePaths(PurchaseItemInput, { ...noGross, amount_cents: 100 }), ["price.stated_cents"]);
   const parsed = PurchaseItemInput.parse({ ...buyInput, amount_cents: 999 });
   assertEquals("amount_cents" in parsed, false, "stripped");
-  assertEquals(parsed.price?.stated_cents, 100);
-  // A charge may state none (an amend keeps the stored gross).
-  const charge = { type: "service", ...lineHead(5), name: "Freight", ledger_account: 5100 };
+  assertEquals(parsed.price.stated_cents, 100);
+  // A charge states its gross or `null` (a rate charge); it never omits the key.
+  const charge = purchaseLineInput("service", { ...lineHead(5), name: "Freight", ledger_account: 5100, price: { stated_cents: null } });
   assertEquals(issuePaths(PurchaseItemInput, charge), []);
-  assertEquals(issuePaths(PurchaseItemInput, { ...charge, price: { stated_cents: 6 } }), []);
+  assertEquals(issuePaths(PurchaseItemInput, { ...charge, price: { ...charge.price, stated_cents: 6 } }), []);
 });
 
 Deno.test("PurchaseBillRowInput: a row's gross is price.stated_cents, and an echoed amount_cents is stripped", () => {
-  const row = { type: "sale", ...keyedHead(1) };
-  assertEquals(issuePaths(PurchaseBillRowInput, row), [], "a row stating none keeps the stored gross");
-  assertEquals(issuePaths(PurchaseBillRowInput, { ...row, price: { stated_cents: 100 } }), []);
-  const parsed = PurchaseBillRowInput.parse({ ...row, amount_cents: 100, price: { stated_cents: 99 } });
+  const row = billProductLineInput("sale", { ...keyedHead(1), price: { stated_cents: 100 } });
+  assertEquals(issuePaths(PurchaseBillRowInput, row), []);
+  // A bare row is a 400 now (ruling 204): it no longer keeps the stored gross.
+  assert(issuePaths(PurchaseBillRowInput, { type: "sale", ...keyedHead(1) }).includes("price"));
+  const parsed = PurchaseBillRowInput.parse({ ...row, amount_cents: 100, price: { ...row.price, stated_cents: 99 } });
   assertEquals("amount_cents" in parsed, false, "stripped");
 });
 

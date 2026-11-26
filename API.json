@@ -325,6 +325,12 @@
           "doc": "A contract before its `undoes`, `booking_ladder` and `source_item` are filled in."
         },
         {
+          "kind": "variable",
+          "name": "BilledOutOfServiceList",
+          "declaration": "const BilledOutOfServiceList: z.ZodType<OutOfServiceEntryType[]>;",
+          "doc": "`out_of_service` on an INVOICE line, which is REQUIRED on every line (ruling\n204): `[]` is \"bills no record\", so this node has no `.min(1)`. The payable\nlines keep {@link OutOfServiceList}, where the key is absent off a\n`replacement` line and `[]` would be a second spelling of that."
+        },
+        {
           "kind": "typeAlias",
           "name": "BillingCollection",
           "declaration": "type BillingCollection = indexedAccess;",
@@ -1749,7 +1755,7 @@
         {
           "kind": "interface",
           "name": "CreditNoteDocItemPrice",
-          "declaration": "interface CreditNoteDocItemPrice {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent?: number | null;\n  stated_cents?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  total_cents: number;\n}",
+          "declaration": "interface CreditNoteDocItemPrice {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent: number | null;\n  stated_cents: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  total_cents: number;\n}",
           "doc": "Pricing breakdown for a single credit-note line."
         },
         {
@@ -1761,7 +1767,7 @@
         {
           "kind": "interface",
           "name": "CreditNoteDocLineItem",
-          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  ledger_account: COACodeType;\n  source_ledger_account: COARevenueType | null;\n  uid_tracking_category: string | null;\n  xero_id: string | null;\n  uid_billing?: string;\n  path_billing_item?: string[];\n  units_from?: number | null;\n  path: string[];\n  reverses_billing: boolean;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  ledger_account: COACodeType;\n  source_ledger_account: COARevenueType | null;\n  uid_tracking_category: string | null;\n  xero_id: string | null;\n  uid_billing: string | null;\n  path_billing_item: string[] | null;\n  units_from: number | null;\n  path: string[];\n  reverses_billing: boolean;\n  substituted_for: SubstitutedForEntryType[];\n  exchanged_for: ExchangedForEntryType[];\n}",
           "doc": "A credited line.\n\n**`coa_revenue` is required, not optional.** A credit spanning lines with\ndifferent revenue accounts (#1689 hits 4000 and 4100; #1322 is all 4210)\ncannot be posted correctly from a document-level amount, and apportioning it\nafterwards is inferring cause from effect — the thing `schemas/transaction.ts` warns\nagainst. This is also the gap Xero *has*: its allocation view carries\n`LineItems: []`, and Odoo's users pay OCA for a module that adds line-level\nprovenance.\n\n**Dividers only when raised from billing rows** (ruling 107): a credit row\ncopies its billing row's path under that document's `billing` divider, so a\nnote crediting rows carries the invoice's dividers and pairs; a historic or\ngoodwill note is flat (each line's path is `[uid]`).\n\n## `source_ledger_account` and `ledger_account` are TWO facts, and a line has both\n\nThey are routinely different, and collapsing them loses real information.\nMeasured on the live tenant: CN-1009 writes off 35 lines whose products are\nrentals — `product.price.coa_revenue` 4000 Rental Income — and every one of\nthem posts to **6900 Bad Debt**. Store only the posting account and the\nrevenue attribution that tracking-category rollups and the tax tables depend\non is gone; store only the revenue account and the write-off is invisible.\n\n- **`source_ledger_account`** — the revenue account of the *thing being credited*.\n  Product-sourced, same vocabulary as the invoice line it mirrors. Never the\n  account the credit posts to, and — since the owner ruling of 2026-08-20 —\n  never an input to what the line is taxed either.\n- **`ledger_account`** — where this credit lands in the ledger. Any account in\n  the `chart-of-accounts` catalog, including the expense range, which is\n  exactly why it cannot be `COARevenueEnum`: that enum is shared with\n  `Product.price.coa_revenue`, and widening it would make a catalog product\n  whose revenue account is Bad Debt Expense representable."
         },
         {
@@ -1815,7 +1821,7 @@
         {
           "kind": "interface",
           "name": "CreditSourceRow",
-          "declaration": "interface CreditSourceRow {\n  type?: string;\n  uid_billing?: string;\n  path_billing_item?: string[];\n}",
+          "declaration": "interface CreditSourceRow {\n  type?: string;\n  uid_billing?: string | null;\n  path_billing_item?: string[] | null;\n}",
           "doc": "The row keys {@link deriveCreditNoteSources} reads: a divider's `type`, a line's pointer."
         },
         {
@@ -2499,7 +2505,7 @@
         {
           "kind": "interface",
           "name": "FulfillmentItemInputLineType",
-          "declaration": "interface FulfillmentItemInputLineType {\n  uid: string;\n  path: string[];\n  quantity: number;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n  quantity_ordered?: number | null;\n}",
+          "declaration": "interface FulfillmentItemInputLineType {\n  uid: string;\n  path: string[];\n  quantity: number;\n  substituted_for: SubstitutedForEntryType[];\n  exchanged_for: ExchangedForEntryType[];\n  quantity_ordered?: number | null;\n}",
           "doc": "One picker-editable line in a `PUT /fulfillments/{uid}/items` body.\n\n⚠️ **`quantity_ordered` is declared here even though the API always refuses it,\nand that is load-bearing rather than sloppy.** It is the ORDER's quantity for\nthe row, stamped by the order sync, so a client structurally cannot compute\nit, and `updateFulfillmentItems` refuses any body carrying it as\nserver-managed.\n\n🔴 **Omitting it here would DELETE that 400.** A `z.object` strips an\nundeclared key, so the service would never see the field and would answer 200\nwhile silently ignoring what the client asserted — the exact silent-acceptance\nclass this whole block exists to close. Declaring it keeps the key intact\nthrough the parse so the service's check still fires.\n\n⚠️ **The refusal deliberately stays in the SERVICE rather than moving to a\n`z.never()` here**, though the boundary is where a constraint would normally\nlive. Two reasons, and the second is the stronger one: the service's message\nnames the field and says *why*, where Zod's would not; and `never` is a\nconstruct nothing in this package walks — `collectLeafPaths`\n(`schemas/zod-walk.ts`) reports it as uninterpretable and `tests/pii.test.ts`\nfails rather than skipping it, correctly. Introducing the package's only\n`never` node to save one runtime check would mean teaching a SHARED walker a\nnew arm, which is a worse trade than one owner in the service.\n\n⚠️ **`path` is REQUIRED here, and the two existing input schemas disagree\nabout that** — `OrderItemLineInner` has `path: z.array(ItemUid)` while\n`InvoiceItemInputLineInner` has `.optional()`. This grain follows the order,\nfor a reason rather than by majority: `updateFulfillmentItems` map-keys the\nsubmission on `pathKey(li.path)` and `rebuildFulfillmentItems` treats it as a\nSET keyed on `path`, so an absent one is not a defaulted value but a row that\naddresses nothing. Requiring it turns a confusing failure deep in the rebuild\ninto a 400 that names the field.\n\n⚠️ It is a refinement of the boundary — the DOCUMENT schema standing in as\nthe request contract accepted an absent `path` via `LineItemCore.path`'s\n`.default([])` — but no writer can produce one: the manager sends stored\nlines, and `computeItemPaths` authors `path` on every stored line."
         },
         {
@@ -2517,7 +2523,7 @@
         {
           "kind": "interface",
           "name": "FulfillmentLineItemType",
-          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method?: StockMethodType;\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  path: string[];\n  order_number?: number;\n  uid_order?: string;\n  quantity_ordered: number | null;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method: StockMethodType;\n  zero_priced: boolean | null;\n  quantity_per_parent: number | null;\n  path: string[];\n  order_number: number | null;\n  uid_order: string | null;\n  quantity_ordered: number | null;\n  substituted_for: SubstitutedForEntryType[];\n  exchanged_for: ExchangedForEntryType[];\n}",
           "doc": "Line item in the fulfillment order view — no price, no financial flags."
         },
         {
@@ -3003,8 +3009,8 @@
         {
           "kind": "interface",
           "name": "InvoiceDocDestinationItemType",
-          "declaration": "interface InvoiceDocDestinationItemType {\n  path_extension_for?: string[];\n}",
-          "doc": "A BILLING document's destination divider: the initiator's divider, plus the\none key only a billing document can carry, `path_extension_for`, which marks a\n**date-extension section**. The schema arm and its rules are declared once for\nboth sides (`DestinationSectionDividerArm`, `schemas/_dividers.ts`): an\ninvoice's rows and a bill's or supplier credit's rows take it.\n\n⚠️ Absent on every divider stored before 2026-09-15, and on every full-window\nsection after it. There is no `null`: a divider either extends a section or\nit does not."
+          "declaration": "interface InvoiceDocDestinationItemType {\n  path_extension_for: string[] | null;\n}",
+          "doc": "A BILLING document's destination divider: the initiator's divider, plus the\none key only a billing document can carry, `path_extension_for`, which marks a\n**date-extension section**. The schema arm and its rules are declared once for\nboth sides (`DestinationSectionDividerArm`, `schemas/_dividers.ts`): an\ninvoice's rows and a bill's or supplier credit's rows take it.\n\n`null` on every divider that does not open a section (ruling 204, class C)."
         },
         {
           "kind": "interface",
@@ -3021,7 +3027,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocItemPriceType",
-          "declaration": "interface InvoiceDocItemPriceType {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n  stated_cents?: number | null;\n}",
+          "declaration": "interface InvoiceDocItemPriceType {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n  stated_cents: number | null;\n}",
           "doc": "Pricing breakdown for a single invoice line item."
         },
         {
@@ -3039,7 +3045,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocLineItemType",
-          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  xero_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  out_of_service?: OutOfServiceEntryType[];\n  path_source_item?: string[];\n  units_from?: number | null;\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  quantity_per_parent: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override: string | null;\n  xero_id: string | null;\n  crms_id: number | string | null;\n  substituted_for: SubstitutedForEntryType[];\n  out_of_service: OutOfServiceEntryType[];\n  path_source_item: string[] | null;\n  units_from: number | null;\n  exchanged_for: ExchangedForEntryType[];\n}",
           "doc": "A billable line item on an invoice."
         },
         {
@@ -3087,7 +3093,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputDestinationType",
-          "declaration": "interface InvoiceItemInputDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path: string[];\n  path_extension_for?: string[];\n}",
+          "declaration": "interface InvoiceItemInputDestinationType {\n  uid: string;\n  type: \"destination\";\n  name: string;\n  description: string;\n  path: string[];\n  path_extension_for: string[] | null;\n}",
           "doc": "A destination divider as a client sends it."
         },
         {
@@ -3099,7 +3105,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputGroupType",
-          "declaration": "interface InvoiceItemInputGroupType {\n  uid: string;\n  type: \"group\";\n  name?: string;\n  description?: string;\n  path: string[];\n}",
+          "declaration": "interface InvoiceItemInputGroupType {\n  uid: string;\n  type: \"group\";\n  name: string;\n  description: string;\n  path: string[];\n}",
           "doc": "A group divider as a client sends it."
         },
         {
@@ -3111,7 +3117,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  uid_tax_class_override?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_source_item?: string[];\n  units_from?: number | null;\n}",
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class_override: string | null;\n  substituted_for: SubstitutedForEntryType[];\n  exchanged_for: ExchangedForEntryType[];\n  zero_priced: boolean | null;\n  quantity_per_parent: number | null;\n  out_of_service: OutOfServiceEntryType[];\n  path_source_item: string[] | null;\n  units_from: number | null;\n}",
           "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItem`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
@@ -3123,7 +3129,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputOrderType",
-          "declaration": "interface InvoiceItemInputOrderType {\n  uid: string;\n  type: \"order\";\n  name?: string;\n  description?: string;\n  path: string[];\n}",
+          "declaration": "interface InvoiceItemInputOrderType {\n  uid: string;\n  type: \"order\";\n  name: string;\n  description: string;\n  path: string[];\n}",
           "doc": "An order divider as a client sends it — invoice-only, scopes items to a source order."
         },
         {
@@ -3183,8 +3189,8 @@
         {
           "kind": "interface",
           "name": "ItemPriceType",
-          "declaration": "interface ItemPriceType {\n  uid_price_formula?: string;\n  price_formula?: PriceFormulaRef | null;\n  rates?: RateSnapshotType[];\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  subtotal_cents?: number;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n  total_cents?: number;\n  stated_cents?: number | null;\n}",
-          "doc": "Price breakdown for an order item (input — client sends partial data, server computes the rest)."
+          "declaration": "interface ItemPriceType {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  base_percent: number | null;\n  replacement_cents: number | null;\n  discount: DiscountInputType | null;\n  stated_cents: number | null;\n}",
+          "doc": "Price breakdown for an order item (input). **A submitted row states every key**\n(ruling 204): a clear is an explicit `null`, and an omitted key is a 400 —\nnever a keep, never a fill. The DERIVED keys (`counts`, `subtotal_cents`,\n`subtotal_discounted_cents`, `taxes`, `taxes_base`, `total_cents`) are the\npricer's and are not on the input (ruling 204 Q3): an echoed stored line\ncarries them and has them stripped."
         },
         {
           "kind": "variable",
@@ -4095,7 +4101,7 @@
         {
           "kind": "interface",
           "name": "OrderDocItemPriceType",
-          "declaration": "interface OrderDocItemPriceType {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n  stated_cents?: number | null;\n}",
+          "declaration": "interface OrderDocItemPriceType {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent: number | null;\n  replacement_cents: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n  stated_cents: number | null;\n}",
           "doc": "Line item price in the full order document (all fields required after server compute).\n\n- subtotal = `priceFromFormula(rates, counts, quantity)` — Σ tier\n  `rate × quantity × num ÷ den`, each tier rounded once (purchases-as-documents\n  Phase 2 ruling 8).\n- subtotal_discounted = post-discount.\n- total = subtotal_discounted + sum(taxes[].amount).\n\nA percent-of-total fee line states `base_percent` instead of a formula\n({@link checkLinePrice})."
         },
         {
@@ -4113,7 +4119,7 @@
         {
           "kind": "interface",
           "name": "OrderDocLineItemType",
-          "declaration": "interface OrderDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: OrderDocItemPriceType;\n  stock_method: StockMethodType;\n  order_number?: number;\n  uid_order?: string;\n  path: string[];\n  inclusion_type?: \"default\" | \"mandatory\" | \"optional\" | null;\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  crms_id?: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface OrderDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: OrderDocItemPriceType;\n  stock_method: StockMethodType;\n  order_number: number | null;\n  uid_order: string | null;\n  path: string[];\n  inclusion_type: \"default\" | \"mandatory\" | \"optional\" | null;\n  zero_priced: boolean | null;\n  quantity_per_parent: number | null;\n  crms_id: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override: string | null;\n  exchanged_for: ExchangedForEntryType[];\n}",
           "doc": "Line item in the full order document.\n\n`price` and `stock_method` are REQUIRED, and that is a statement about the\nwriters rather than a convenience: every one of the 9,303 line items in prod\n(and in dev) carries both, because `buildOrderLineItem` resolves them off the\nbacking product doc — or off the `custom-` line's own payload — before it can\nbuild anything at all. While they were optional, three call sites downstream\nhad to compensate for a shape no writer has ever produced: two `item.price!`\nassertions, and a `\"stock_method\" in item` duck-type that answered \"not a line\nitem\" for a line item that merely omitted the field.\n\n`uid_delivery` / `uid_collection` are absent, matching the input arm. They\nbelong to the destination divider — 0 of 9,303 stored lines carry either key,\nno writer has ever set one on a line, and both readers in\n`@cfs/core/utils/orders` gate on `type === \"destination\"` before looking. The\nFULFILLMENT line arm keeps its own pair: 9,304 prod rows carry an explicit\n`null` there, so removing it would be a backfill, not a tightening."
         },
         {
@@ -4149,7 +4155,7 @@
         {
           "kind": "interface",
           "name": "OrderItemDestinationType",
-          "declaration": "interface OrderItemDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path: string[];\n}",
+          "declaration": "interface OrderItemDestinationType {\n  uid: string;\n  type: \"destination\";\n  name: string;\n  description: string;\n  path: string[];\n}",
           "doc": "A destination divider as a client sends it."
         },
         {
@@ -4161,7 +4167,7 @@
         {
           "kind": "interface",
           "name": "OrderItemGroupType",
-          "declaration": "interface OrderItemGroupType {\n  uid: string;\n  type: \"group\";\n  name?: string;\n  description?: string;\n  path: string[];\n}",
+          "declaration": "interface OrderItemGroupType {\n  uid: string;\n  type: \"group\";\n  name: string;\n  description: string;\n  path: string[];\n}",
           "doc": "A group divider as a client sends it."
         },
         {
@@ -4173,8 +4179,8 @@
         {
           "kind": "interface",
           "name": "OrderItemLineType",
-          "declaration": "interface OrderItemLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: ItemPriceType;\n  stock_method?: StockMethodType;\n  path: string[];\n  inclusion_type?: InclusionTypeType | null;\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  order_number?: number;\n  uid_order?: string;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  uid_tax_class_override?: string | null;\n  exchanged_for?: ExchangedForEntryType[];\n}",
-          "doc": "A billable order line as a client sends it — the input mirror of\n`OrderDocLineItem`.\n\nDeliberately permissive about what may be OMITTED: the server fills `name`,\n`stock_method` and the whole price from the backing product doc, and a custom\nline supplies them itself. What it is no longer permissive about is what a\nline may CLAIM — see {@link OrderItem} for why the arms exist.\n\n`uid_delivery` / `uid_collection` are absent here on purpose. The flat schema\nthis replaces accepted both on any item, and `buildOrderLineItem` has never\npropagated them to a line — prod agrees: 0 of 9,303 order line items carry\neither key. They belong to the destination divider, which is where they now\nlive exclusively."
+          "declaration": "interface OrderItemLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: ItemPriceType;\n  stock_method: StockMethodType;\n  path: string[];\n  inclusion_type: InclusionTypeType | null;\n  zero_priced: boolean | null;\n  quantity_per_parent: number | null;\n  order_number: number | null;\n  uid_order: string | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class_override: string | null;\n  exchanged_for: ExchangedForEntryType[];\n}",
+          "doc": "A billable order line as a client sends it — the input mirror of\n`OrderDocLineItem`.\n\n**A submitted row states every key** (ruling 204, \"clients should submit\nvalid shapes; no presumptive fallbacks\"): an omitted key is a 400 naming the\nrow and the key, a clear is an explicit `null` or `[]`. Creates too (R4). The\nstored row is a valid input row, so echoing it changes nothing (ruling 193).\n\n`uid_delivery` / `uid_collection` are absent here on purpose. The flat schema\nthis replaces accepted both on any item, and `buildOrderLineItem` has never\npropagated them to a line — prod agrees: 0 of 9,303 order line items carry\neither key. They belong to the destination divider, which is where they now\nlive exclusively."
         },
         {
           "kind": "typeAlias",
@@ -5031,14 +5037,32 @@
         {
           "kind": "interface",
           "name": "PurchaseBillDividerInputType",
-          "declaration": "interface PurchaseBillDividerInputType {\n  type: \"purchase\" | \"destination\" | \"group\";\n  uid: string;\n  path: string[];\n  name?: string;\n  path_extension_for?: string[];\n}",
-          "doc": "A divider row of a bill's whole-array input."
+          "declaration": "interface PurchaseBillDividerInputType {\n  type: \"purchase\" | \"destination\" | \"group\";\n  uid: string;\n  path: string[];\n  name: string;\n  path_extension_for?: string[] | null;\n}",
+          "doc": "A divider row of a bill's whole-array input. Every key stated (ruling 204 Q7)."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PurchaseBillLineInputType",
+          "declaration": "type PurchaseBillLineInputType = PurchaseBillProductLineInputType | PurchaseBillServiceLineInputType | PurchaseBillReplacementLineInputType;",
+          "doc": "A line row of a bill's whole-array input, one arm per stored arm."
         },
         {
           "kind": "interface",
-          "name": "PurchaseBillLineInputType",
-          "declaration": "interface PurchaseBillLineInputType {\n  type: SharedLineType;\n  uid: string;\n  path: string[];\n  name?: string;\n  description?: string;\n  quantity?: number;\n  ledger_account?: COACodeType | null;\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_source_item?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n  uid_tax_class_override?: string | null;\n  uid_tracking_category?: string | null;\n  price?: typeLiteral;\n}",
-          "doc": "A line row of a bill's whole-array input.\n\nThe writer pairs each row to a stored one (exact path, then the row's uid and\nancestry), and the paired row is the base for every key this row omits, so a\nrow that moved keeps them. A row no stored row pairs with is, in order: a\nsplit's clone if it states {@link path_source_item}; a line of the purchase\nnamed by its path; or a line the bill itself authors, which states its name,\naccount, quantity and money; a sale or rental names its product by its uid.\n\nOn a TIME line `price.rates` restates each unit rate; a flat line states its\nGROSS as `price.stated_cents` (ruling 39, core beta B), and its stored\n`amount_cents` is derived from it.\n\n`path_source_item` absent keeps the stored pointer, and there is no `null`\nform: the writer stamps every moved row's pointer and clears one a move back\nmade pointless, so a stale client's identity-only rows cannot clear one.\nThe writer assigns the tax class and a bill-authored line's flat formula."
+          "name": "PurchaseBillLinePriceInputType",
+          "declaration": "interface PurchaseBillLinePriceInputType {\n  price_formula: PriceFormulaRef;\n  uid_price_formula?: never;\n  rates: typeLiteral[];\n  discount: DiscountInputType | null;\n  stated_cents: number | null;\n}",
+          "doc": "A bill line row's price: every key stated (ruling 204), the formula by its stored snapshot (R3)."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseBillProductLineInputType",
+          "declaration": "interface PurchaseBillProductLineInputType {\n  type: \"sale\" | \"rental\";\n  ledger_account: COACodeType | null;\n  substituted_for: SubstitutedForEntryType[];\n  exchanged_for: ExchangedForEntryType[];\n}",
+          "doc": "A sale or rental row: the stored product arm's keys."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseBillReplacementLineInputType",
+          "declaration": "interface PurchaseBillReplacementLineInputType {\n  type: \"replacement\";\n  ledger_account: COACodeType;\n  out_of_service: OutOfServiceEntryType[];\n}",
+          "doc": "A replacement row: a service row naming its records, shares summing to `quantity`."
         },
         {
           "kind": "variable",
@@ -5057,6 +5081,12 @@
           "name": "PurchaseBillSchema",
           "declaration": "const PurchaseBillSchema: z.ZodType<PurchaseBill>;",
           "doc": "Zod schema for PurchaseBill."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseBillServiceLineInputType",
+          "declaration": "interface PurchaseBillServiceLineInputType {\n  type: \"service\";\n  ledger_account: COACodeType;\n}",
+          "doc": "A service row: the stored service arm's keys. The account is required (S15)."
         },
         {
           "kind": "interface",
@@ -5241,7 +5271,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocumentProductItem",
-          "declaration": "interface PurchaseDocumentProductItem {\n  ledger_account: COACodeType | null;\n  type: PurchaseProductItemTypeType;\n  path_source_item?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface PurchaseDocumentProductItem {\n  ledger_account: COACodeType | null;\n  type: PurchaseProductItemTypeType;\n  path_source_item: string[] | null;\n  substituted_for: SubstitutedForEntryType[];\n  exchanged_for: ExchangedForEntryType[];\n}",
           "doc": "A bill or credit item that PROJECTS a purchase item — some quantity of one\nsale (Buy) or rental (Subrent) item (D5). It sits AT that item's path under\nthe item's purchase divider, as an invoice line sits at its order line's\n(one-document-model Phase 3), and carries its own copy of the shared fields, each of\nwhich it may override until the bill is settled: the billed `quantity` and\n`amount_cents` (homonyms of the purchase item's ordered ones), `price`,\n`name`, `description`, `ledger_account`, `uid_tracking_category` and the tax\nclass (`propagate: true` on the shared declarations).\n\nOn a LINKED bill the posting is the Xero document's where it has one; the\npurchase item's is the expected one, so an account divergence is an ordinary\nfield difference between projection and source. The account still has to\nsit in the type's class (`payablePostingIssues`)."
         },
         {
@@ -5277,7 +5307,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocumentServiceItem",
-          "declaration": "interface PurchaseDocumentServiceItem {\n  type: \"service\";\n  path_source_item?: string[];\n}",
+          "declaration": "interface PurchaseDocumentServiceItem {\n  type: \"service\";\n  path_source_item: string[] | null;\n}",
           "doc": "A bill or credit SERVICE (Charge) line — freight, a fee, a carrier line.\nPosts to its own account and never touches basis.\n\nA **document-only** service line (at a path its purchase does not carry, or\noutside any purchase divider) is the document's own row, like an invoice's\nloss-and-damage line: freight nobody expected. One that projects a purchase\n`service` item sits at its path.\n\nIts uid is its catalog service product's, else `custom-`, as on the purchase\n({@link payableLineUid}). No attribution key (owner, 2026-11-11): a carrier\nline's device is read through its units (api-cloudrun#1488)."
         },
         {
@@ -5355,7 +5385,7 @@
         {
           "kind": "interface",
           "name": "PurchaseLandedCostInputType",
-          "declaration": "interface PurchaseLandedCostInputType {\n  uid?: string;\n  description: string;\n  amount_cents: number;\n  uid_purchase_bill?: string | null;\n}",
+          "declaration": "interface PurchaseLandedCostInputType {\n  uid?: string;\n  description: string;\n  amount_cents: number;\n  uid_purchase_bill: string | null;\n}",
           "doc": "One landed cost as the operator states it on a buy item. `quantity` and\n`received_at_entry` are the server's, stamped from the stored item.\n\n`uid` names a stored entry to keep or edit. A uid the item does not hold\nis a NEW entry stored under it (the manager mints one as it adds the entry, so\na re-send before the Firestore echo is the same entry), and absent mints one\nserver-side. Splitting one amount across several items is\n`allocateLandedCostCents` (`@cfs/core/utils/purchases`), run by the client so\nthe preview it shows is the split it sends."
         },
         {
@@ -5367,14 +5397,14 @@
         {
           "kind": "interface",
           "name": "PurchaseLinePrice",
-          "declaration": "interface PurchaseLinePrice {\n  price_formula: PriceFormulaRef;\n  rates: RateSnapshotType[];\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  replacement_cents?: number | null;\n  stated_cents?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  total_cents: number;\n  counts: TierCountType[];\n}",
+          "declaration": "interface PurchaseLinePrice {\n  price_formula: PriceFormulaRef;\n  rates: RateSnapshotType[];\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  replacement_cents: number | null;\n  stated_cents: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  total_cents: number;\n  counts: TierCountType[];\n}",
           "doc": "How a purchase line is priced (purchases-as-documents Phase 2 rulings 1, 2,\n7): the formula it is priced by, the rates it snapshots, a supplier\ndiscount, and the money `priceDocument` computes from them.\n\n- A flat line states its WHOLE gross cost in `price.stated_cents` (the\n  DECLARED stated total: a buy, a fixed-cost subrent, freight or a fee) and\n  carries `rates: []`. Measured: most stored buys cost a total that does not\n  divide by their quantity, and every reader slices the total\n  (`sliceStoredMoney`), so no per-unit rate is stored.\n- The COMPUTED half is the receivable line's money (`subtotal_cents`,\n  `subtotal_discounted_cents`, `taxes`, `total_cents`) and the line's\n  `amount_cents`, written by `priceDocument`'s stated-total arm (ruling 39,\n  D7): subtotal = `stated_cents`, discounted = `amount_cents` =\n  `stated_cents − discount.amount_cents`, total = discounted + Σ taxes. Every\n  money reader reads it, as on an order line; `stated_cents` is the input.\n\n⚠️ **A TIME line** commits nothing here: its money is zero and its rates are\nthe formula's; its bills price it from their pair's windows\n(`priceDocument`'s time arms, one-document-model Phase 3).\n\n`discount` is core's `Discount`. On a payable line it records what came off\nthe operator's GROSS, so `discount.amount_cents` is declared, not derived;\n`amount_cents` is the NET — what CFS pays, which receipts, basis and bills\nslice.\n\n**Tax is EXEMPTION, not absence** (api-cloudrun's `one-document-model` plan):\na payable line is stamped with its type's default tax class like any other\npriced line (`LineTaxCore`), and the payable side resolves it exempt, so\n`taxes` is `[]`. `taxes_base` is the class's rates BEFORE the exemption, as\non an order line, so an exempt line records a non-empty base. A taxable\npurchase later (consumables, use tax) then needs no new path. Neither key\nreaches a Xero body or the bill's projection hash."
         },
         {
           "kind": "interface",
           "name": "PurchaseLinePriceInputType",
-          "declaration": "interface PurchaseLinePriceInputType {\n  uid_price_formula?: string;\n  rates?: RateSnapshotType[];\n  discount?: DiscountInputType | null;\n  replacement_cents?: number | null;\n  stated_cents?: number | null;\n}",
-          "doc": "How an operator prices an item input (ruling 1, 7). `uid_price_formula`\nnames the formula; absent takes the writer's default (a buy and a flat charge\nFixed; a subrent or a time charge the product's `cogs` activation entry's\nformula, else Fixed). The writer snapshots the formula's name and basis.\n\n- `rates` — a time line's rates; absent takes the rates in force today on\n  the product's activation entry. Refused on a flat line.\n- `discount` — a supplier discount, `{ rate, type }`; the writer computes its\n  `amount_cents`. On a flat line `amount_cents` is then the GROSS the\n  operator states, and the stored amount is net of the discount."
+          "declaration": "interface PurchaseLinePriceInputType {\n  price_formula: PriceFormulaRef;\n  uid_price_formula?: never;\n  rates: RateSnapshotType[];\n  discount: DiscountInputType | null;\n  replacement_cents: number | null;\n  stated_cents: number | null;\n}",
+          "doc": "How an operator prices an item input (ruling 1, 7). **Every key stated**\n(ruling 204): an omitted key is a 400, never a writer default or a keep.\n\n- `price_formula` — the formula, as a STORED line carries it (ruling 204 R3:\n  one spelling on both sides; only its `uid` is read, the writer re-derives\n  the name and basis). The client states it: a new line takes the catalog's\n  (manager behaviour), never a server fill. `uid_price_formula` is retired: a\n  400 if sent, never stripped (a stripped formula would fall to a default).\n- `rates` — the line's rates; `[]` on a STATED line.\n- `discount` — a supplier discount, `{ rate, type }`; the writer computes its\n  `amount_cents`. On a flat line `amount_cents` is then the GROSS the\n  operator states, and the stored amount is net of the discount."
         },
         {
           "kind": "variable",
@@ -5445,7 +5475,7 @@
         {
           "kind": "interface",
           "name": "PurchaseReceiptLineItemType",
-          "declaration": "interface PurchaseReceiptLineItemType {\n  uid: string;\n  type: PurchaseProductItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  path: string[];\n  quantity_ordered: number | null;\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface PurchaseReceiptLineItemType {\n  uid: string;\n  type: PurchaseProductItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  zero_priced: boolean | null;\n  quantity_per_parent: number | null;\n  path: string[];\n  quantity_ordered: number | null;\n  exchanged_for: ExchangedForEntryType[];\n}",
           "doc": "A receipt line — one custody row of the purchase, with no price."
         },
         {
@@ -5457,13 +5487,13 @@
         {
           "kind": "interface",
           "name": "PurchaseRentalItem",
-          "declaration": "interface PurchaseRentalItem {\n  ledger_account: COACodeType | null;\n  type: \"rental\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  uid_orders: string[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface PurchaseRentalItem {\n  ledger_account: COACodeType | null;\n  type: \"rental\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  uid_orders: string[];\n  exchanged_for: ExchangedForEntryType[];\n}",
           "doc": "A RENTAL (Subrent) item — `quantity` units borrowed for a hire window and given back. Flat or time."
         },
         {
           "kind": "interface",
           "name": "PurchaseRentalItemInputType",
-          "declaration": "interface PurchaseRentalItemInputType {\n  type: \"rental\";\n  quantity: number;\n  ledger_account?: COACodeType | null;\n  uid_orders?: string[];\n  exchanged_for?: ExchangedForEntryType[];\n  uid_units?: never;\n}",
+          "declaration": "interface PurchaseRentalItemInputType {\n  type: \"rental\";\n  quantity: number;\n  ledger_account: COACodeType | null;\n  uid_orders: string[];\n  exchanged_for: ExchangedForEntryType[];\n  uid_units?: never;\n}",
           "doc": "A rental (Subrent) item as an operator orders it. A flat line states its gross\nas `price.stated_cents`; a time line states `null`. Its hire window is its pair's dates, stated on\n`destinations[]`, never on the line (one-document-model Phase 5b)."
         },
         {
@@ -5523,7 +5553,7 @@
         {
           "kind": "interface",
           "name": "PurchaseSaleItemInputType",
-          "declaration": "interface PurchaseSaleItemInputType {\n  type: \"sale\";\n  quantity: number;\n  ledger_account?: COACodeType | null;\n  landed_costs?: PurchaseLandedCostInputType[];\n}",
+          "declaration": "interface PurchaseSaleItemInputType {\n  type: \"sale\";\n  quantity: number;\n  ledger_account: COACodeType | null;\n  landed_costs: PurchaseLandedCostInputType[];\n}",
           "doc": "A sale (Buy) item as an operator orders it — the buckets are the server's."
         },
         {
@@ -5547,7 +5577,7 @@
         {
           "kind": "interface",
           "name": "PurchaseServiceItemInputType",
-          "declaration": "interface PurchaseServiceItemInputType {\n  type: \"service\";\n  name: string;\n  quantity?: number;\n  ledger_account?: COACodeType;\n  uid_units?: never;\n}",
+          "declaration": "interface PurchaseServiceItemInputType {\n  type: \"service\";\n  name: string;\n  quantity: number;\n  ledger_account: COACodeType;\n  uid_units?: never;\n}",
           "doc": "A service (Charge) item as an operator raises it. Its account is the\noperator's, except that a charge PLACED under a line and stating none takes\nthat line's (ruling 74); see {@link PurchaseItemInputBase}."
         },
         {
@@ -7927,7 +7957,7 @@
           "kind": "function",
           "name": "billsOutOfService",
           "signature": "billsOutOfService(line: OutOfServiceLinkCarrier): boolean",
-          "doc": "Whether a line bills an out-of-service record at all.",
+          "doc": "Whether a line bills an out-of-service record at all. Reads a CLAIM as a\nnon-empty list: an invoice line states `[]` (ruling 204), a payable line\nomits the key, and both bill no record.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -8014,8 +8044,8 @@
         {
           "kind": "function",
           "name": "checkLinePriceInput",
-          "signature": "checkLinePriceInput(price: parenthesized | null | undefined, ctx: z.RefinementCtx): void",
-          "doc": "{@link checkLinePrice} on an INPUT price, where the writer resolves the\nformula. An input names its formula by `uid_price_formula` or — echoing a\nstored line — by the `price_formula` snapshot, so the percent-xor-formula\nrule reads whichever is present. Both present and naming different formulas\nis refused: one of them is a client bug, and preferring either hides it.",
+          "signature": "checkLinePriceInput(price: NonNullable<indexedAccess> | null | undefined, ctx: z.RefinementCtx): void",
+          "doc": "{@link checkLinePrice} on an INPUT price, where the writer resolves the\nformula's snapshot. An input names its formula ONE way, by the stored\n`price_formula` snapshot (only its `uid` is read): the `uid_price_formula`\nalias is retired (ruling 204 R3), so there is no second spelling to agree.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -9039,6 +9069,14 @@
         },
         {
           "kind": "function",
+          "name": "timestampInstant",
+          "signature": "timestampInstant(value: unknown): typeLiteral | null",
+          "doc": "**The instant a Firestore Timestamp value states, in whichever of its forms it\narrives**, or `null` when `value` is not one. The one structural test, shared\nby the {@link FirestoreTimestamp} schema and every comparison that must read\ntwo forms of one instant as equal (`canonicalizePayload`,\n`@cfs/core/utils/shared-fields`):\n\n- the public accessor shape, `seconds`/`nanoseconds` — a client-SDK\n  `Timestamp`'s own keys, a firebase-admin `Timestamp`'s prototype getters;\n- the private underscored shape, `_seconds`/`_nanoseconds` — a firebase-admin\n  `Timestamp`'s own keys, and what survives `structuredClone` /\n  `lodash.cloneDeep`. Firestore writes accept both.\n\n`Object.keys` therefore sees `_seconds` on one side and `seconds` on the\nother for the SAME instant; reading the instant through this is what makes\nthem compare equal.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "toRegionCode",
           "signature": "toRegionCode(input: string): string",
           "doc": "Canonical stored form of `Address.region`: the two-letter code when the input\nresolves, otherwise the input trimmed and otherwise untouched.\n\nDeliberately **normalizing, not validating**. `Address` is shared by\ndestinations, organizations, orders and invoices, and its `region` is free\ntext that is legitimately blank on plenty of prod documents and could hold a\nnon-US region tomorrow. Rejecting an unresolvable value would turn a cosmetic\ndata-quality problem into a failed write on the order path. Idempotent.",
@@ -9095,7 +9133,7 @@
           "kind": "function",
           "name": "withRowSourcePath",
           "signature": "withRowSourcePath(row: R, pointer: readonly string[] | undefined): R",
-          "doc": "`row` with its move pointer (`path_source_item`, ruling 109: the initiator\nline a billing row bills from another position, initiator-relative) set to\n`pointer`; `undefined` clears it.",
+          "doc": "`row` with its move pointer (`path_source_item`, ruling 109: the initiator\nline a billing row bills from another position, initiator-relative) set to\n`pointer`; `undefined` clears it to `null` — the key is required on a billing\nLINE (ruling 204, class C). A row whose arm has no such key (a divider) is\nreturned as it is when cleared.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -9296,6 +9334,18 @@
           "name": "AnyUid",
           "declaration": "const AnyUid: z.ZodType<string>;",
           "doc": "Any known CFS document-id shape — atomic Firestore id, divider/custom item\nid, a composite (booking / event-card), or a lowercase-kebab slug (slug-keyed\ncollections such as `roles` and seeded `lists`). Use for polymorphic\nreferences (`DocSource`, `UidNameRef`) that may point at any collection.\n`ItemUid` already covers `FirestoreId | uuid | custom-`."
+        },
+        {
+          "kind": "variable",
+          "name": "BilledOutOfServiceList",
+          "declaration": "const BilledOutOfServiceList: z.ZodType<OutOfServiceEntryType[]>;",
+          "doc": "`out_of_service` on an INVOICE line, which is REQUIRED on every line (ruling\n204): `[]` is \"bills no record\", so this node has no `.min(1)`. The payable\nlines keep {@link OutOfServiceList}, where the key is absent off a\n`replacement` line and `[]` would be a second spelling of that."
+        },
+        {
+          "kind": "variable",
+          "name": "BilledOutOfServiceListInput",
+          "declaration": "const BilledOutOfServiceListInput: z.ZodType<OutOfServiceEntryType[]>;",
+          "doc": "{@link BilledOutOfServiceList} as an input takes it: an extra key is stripped."
         },
         {
           "kind": "variable",
@@ -10129,7 +10179,7 @@
           "kind": "function",
           "name": "billsOutOfService",
           "signature": "billsOutOfService(line: OutOfServiceLinkCarrier): boolean",
-          "doc": "Whether a line bills an out-of-service record at all.",
+          "doc": "Whether a line bills an out-of-service record at all. Reads a CLAIM as a\nnon-empty list: an invoice line states `[]` (ruling 204), a payable line\nomits the key, and both bill no record.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -10160,8 +10210,8 @@
         {
           "kind": "function",
           "name": "checkLinePriceInput",
-          "signature": "checkLinePriceInput(price: parenthesized | null | undefined, ctx: z.RefinementCtx): void",
-          "doc": "{@link checkLinePrice} on an INPUT price, where the writer resolves the\nformula. An input names its formula by `uid_price_formula` or — echoing a\nstored line — by the `price_formula` snapshot, so the percent-xor-formula\nrule reads whichever is present. Both present and naming different formulas\nis refused: one of them is a client bug, and preferring either hides it.",
+          "signature": "checkLinePriceInput(price: NonNullable<indexedAccess> | null | undefined, ctx: z.RefinementCtx): void",
+          "doc": "{@link checkLinePrice} on an INPUT price, where the writer resolves the\nformula's snapshot. An input names its formula ONE way, by the stored\n`price_formula` snapshot (only its `uid` is read): the `uid_price_formula`\nalias is retired (ruling 204 R3), so there is no second spelling to agree.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -10327,6 +10377,14 @@
           "name": "settlementContract",
           "signature": "settlementContract(type: string): SettlementContract | undefined",
           "doc": "The contract for a settlement `type`, or `undefined` for a value outside\n{@link SETTLEMENT_TYPES}. Tolerant of a `string` for the same reason\n{@link itemContract} is — callers hold types from loosely-typed sources.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "timestampInstant",
+          "signature": "timestampInstant(value: unknown): typeLiteral | null",
+          "doc": "**The instant a Firestore Timestamp value states, in whichever of its forms it\narrives**, or `null` when `value` is not one. The one structural test, shared\nby the {@link FirestoreTimestamp} schema and every comparison that must read\ntwo forms of one instant as equal (`canonicalizePayload`,\n`@cfs/core/utils/shared-fields`):\n\n- the public accessor shape, `seconds`/`nanoseconds` — a client-SDK\n  `Timestamp`'s own keys, a firebase-admin `Timestamp`'s prototype getters;\n- the private underscored shape, `_seconds`/`_nanoseconds` — a firebase-admin\n  `Timestamp`'s own keys, and what survives `structuredClone` /\n  `lodash.cloneDeep`. Firestore writes accept both.\n\n`Object.keys` therefore sees `_seconds` on one side and `seconds` on the\nother for the SAME instant; reading the instant through this is what makes\nthem compare equal.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -11751,8 +11809,8 @@
         {
           "kind": "interface",
           "name": "InvoiceDocDestinationItemType",
-          "declaration": "interface InvoiceDocDestinationItemType {\n  path_extension_for?: string[];\n}",
-          "doc": "A BILLING document's destination divider: the initiator's divider, plus the\none key only a billing document can carry, `path_extension_for`, which marks a\n**date-extension section**. The schema arm and its rules are declared once for\nboth sides (`DestinationSectionDividerArm`, `schemas/_dividers.ts`): an\ninvoice's rows and a bill's or supplier credit's rows take it.\n\n⚠️ Absent on every divider stored before 2026-09-15, and on every full-window\nsection after it. There is no `null`: a divider either extends a section or\nit does not."
+          "declaration": "interface InvoiceDocDestinationItemType {\n  path_extension_for: string[] | null;\n}",
+          "doc": "A BILLING document's destination divider: the initiator's divider, plus the\none key only a billing document can carry, `path_extension_for`, which marks a\n**date-extension section**. The schema arm and its rules are declared once for\nboth sides (`DestinationSectionDividerArm`, `schemas/_dividers.ts`): an\ninvoice's rows and a bill's or supplier credit's rows take it.\n\n`null` on every divider that does not open a section (ruling 204, class C)."
         },
         {
           "kind": "interface",
@@ -11769,7 +11827,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocItemPriceType",
-          "declaration": "interface InvoiceDocItemPriceType {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n  stated_cents?: number | null;\n}",
+          "declaration": "interface InvoiceDocItemPriceType {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n  stated_cents: number | null;\n}",
           "doc": "Pricing breakdown for a single invoice line item."
         },
         {
@@ -11787,7 +11845,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocLineItemType",
-          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  xero_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  out_of_service?: OutOfServiceEntryType[];\n  path_source_item?: string[];\n  units_from?: number | null;\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  quantity_per_parent: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override: string | null;\n  xero_id: string | null;\n  crms_id: number | string | null;\n  substituted_for: SubstitutedForEntryType[];\n  out_of_service: OutOfServiceEntryType[];\n  path_source_item: string[] | null;\n  units_from: number | null;\n  exchanged_for: ExchangedForEntryType[];\n}",
           "doc": "A billable line item on an invoice."
         },
         {
@@ -11829,7 +11887,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputDestinationType",
-          "declaration": "interface InvoiceItemInputDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path: string[];\n  path_extension_for?: string[];\n}",
+          "declaration": "interface InvoiceItemInputDestinationType {\n  uid: string;\n  type: \"destination\";\n  name: string;\n  description: string;\n  path: string[];\n  path_extension_for: string[] | null;\n}",
           "doc": "A destination divider as a client sends it."
         },
         {
@@ -11841,7 +11899,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputGroupType",
-          "declaration": "interface InvoiceItemInputGroupType {\n  uid: string;\n  type: \"group\";\n  name?: string;\n  description?: string;\n  path: string[];\n}",
+          "declaration": "interface InvoiceItemInputGroupType {\n  uid: string;\n  type: \"group\";\n  name: string;\n  description: string;\n  path: string[];\n}",
           "doc": "A group divider as a client sends it."
         },
         {
@@ -11853,7 +11911,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  uid_tax_class_override?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_source_item?: string[];\n  units_from?: number | null;\n}",
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class_override: string | null;\n  substituted_for: SubstitutedForEntryType[];\n  exchanged_for: ExchangedForEntryType[];\n  zero_priced: boolean | null;\n  quantity_per_parent: number | null;\n  out_of_service: OutOfServiceEntryType[];\n  path_source_item: string[] | null;\n  units_from: number | null;\n}",
           "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItem`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
@@ -11865,14 +11923,14 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputOrderType",
-          "declaration": "interface InvoiceItemInputOrderType {\n  uid: string;\n  type: \"order\";\n  name?: string;\n  description?: string;\n  path: string[];\n}",
+          "declaration": "interface InvoiceItemInputOrderType {\n  uid: string;\n  type: \"order\";\n  name: string;\n  description: string;\n  path: string[];\n}",
           "doc": "An order divider as a client sends it — invoice-only, scopes items to a source order."
         },
         {
           "kind": "interface",
           "name": "InvoiceItemInputPriceType",
-          "declaration": "interface InvoiceItemInputPriceType {\n  uid_price_formula?: string;\n  price_formula?: PriceFormulaRef | null;\n  rates?: RateSnapshotType[];\n  base_percent?: number | null;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n  stated_cents?: number | null;\n}",
-          "doc": "Item price input — partial, server computes the rest."
+          "declaration": "interface InvoiceItemInputPriceType {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  base_percent: number | null;\n  discount: DiscountInputType | null;\n  stated_cents: number | null;\n}",
+          "doc": "Item price input: every key stated (ruling 204), the derived keys the\npricer's (Q3). See {@link ItemPriceType}."
         },
         {
           "kind": "typeAlias",
@@ -12419,8 +12477,8 @@
         {
           "kind": "interface",
           "name": "ItemPriceType",
-          "declaration": "interface ItemPriceType {\n  uid_price_formula?: string;\n  price_formula?: PriceFormulaRef | null;\n  rates?: RateSnapshotType[];\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  subtotal_cents?: number;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n  total_cents?: number;\n  stated_cents?: number | null;\n}",
-          "doc": "Price breakdown for an order item (input — client sends partial data, server computes the rest)."
+          "declaration": "interface ItemPriceType {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  base_percent: number | null;\n  replacement_cents: number | null;\n  discount: DiscountInputType | null;\n  stated_cents: number | null;\n}",
+          "doc": "Price breakdown for an order item (input). **A submitted row states every key**\n(ruling 204): a clear is an explicit `null`, and an omitted key is a 400 —\nnever a keep, never a fill. The DERIVED keys (`counts`, `subtotal_cents`,\n`subtotal_discounted_cents`, `taxes`, `taxes_base`, `total_cents`) are the\npricer's and are not on the input (ruling 204 Q3): an echoed stored line\ncarries them and has them stripped."
         },
         {
           "kind": "typeAlias",
@@ -12551,7 +12609,7 @@
         {
           "kind": "interface",
           "name": "OrderDocItemPriceType",
-          "declaration": "interface OrderDocItemPriceType {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n  stated_cents?: number | null;\n}",
+          "declaration": "interface OrderDocItemPriceType {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent: number | null;\n  replacement_cents: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n  stated_cents: number | null;\n}",
           "doc": "Line item price in the full order document (all fields required after server compute).\n\n- subtotal = `priceFromFormula(rates, counts, quantity)` — Σ tier\n  `rate × quantity × num ÷ den`, each tier rounded once (purchases-as-documents\n  Phase 2 ruling 8).\n- subtotal_discounted = post-discount.\n- total = subtotal_discounted + sum(taxes[].amount).\n\nA percent-of-total fee line states `base_percent` instead of a formula\n({@link checkLinePrice})."
         },
         {
@@ -12569,7 +12627,7 @@
         {
           "kind": "interface",
           "name": "OrderDocLineItemType",
-          "declaration": "interface OrderDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: OrderDocItemPriceType;\n  stock_method: StockMethodType;\n  order_number?: number;\n  uid_order?: string;\n  path: string[];\n  inclusion_type?: \"default\" | \"mandatory\" | \"optional\" | null;\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  crms_id?: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface OrderDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: OrderDocItemPriceType;\n  stock_method: StockMethodType;\n  order_number: number | null;\n  uid_order: string | null;\n  path: string[];\n  inclusion_type: \"default\" | \"mandatory\" | \"optional\" | null;\n  zero_priced: boolean | null;\n  quantity_per_parent: number | null;\n  crms_id: number | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class: string;\n  uid_tax_class_override: string | null;\n  exchanged_for: ExchangedForEntryType[];\n}",
           "doc": "Line item in the full order document.\n\n`price` and `stock_method` are REQUIRED, and that is a statement about the\nwriters rather than a convenience: every one of the 9,303 line items in prod\n(and in dev) carries both, because `buildOrderLineItem` resolves them off the\nbacking product doc — or off the `custom-` line's own payload — before it can\nbuild anything at all. While they were optional, three call sites downstream\nhad to compensate for a shape no writer has ever produced: two `item.price!`\nassertions, and a `\"stock_method\" in item` duck-type that answered \"not a line\nitem\" for a line item that merely omitted the field.\n\n`uid_delivery` / `uid_collection` are absent, matching the input arm. They\nbelong to the destination divider — 0 of 9,303 stored lines carry either key,\nno writer has ever set one on a line, and both readers in\n`@cfs/core/utils/orders` gate on `type === \"destination\"` before looking. The\nFULFILLMENT line arm keeps its own pair: 9,304 prod rows carry an explicit\n`null` there, so removing it would be a backfill, not a tightening."
         },
         {
@@ -12593,7 +12651,7 @@
         {
           "kind": "interface",
           "name": "OrderItemDestinationType",
-          "declaration": "interface OrderItemDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path: string[];\n}",
+          "declaration": "interface OrderItemDestinationType {\n  uid: string;\n  type: \"destination\";\n  name: string;\n  description: string;\n  path: string[];\n}",
           "doc": "A destination divider as a client sends it."
         },
         {
@@ -12605,7 +12663,7 @@
         {
           "kind": "interface",
           "name": "OrderItemGroupType",
-          "declaration": "interface OrderItemGroupType {\n  uid: string;\n  type: \"group\";\n  name?: string;\n  description?: string;\n  path: string[];\n}",
+          "declaration": "interface OrderItemGroupType {\n  uid: string;\n  type: \"group\";\n  name: string;\n  description: string;\n  path: string[];\n}",
           "doc": "A group divider as a client sends it."
         },
         {
@@ -12617,8 +12675,8 @@
         {
           "kind": "interface",
           "name": "OrderItemLineType",
-          "declaration": "interface OrderItemLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: ItemPriceType;\n  stock_method?: StockMethodType;\n  path: string[];\n  inclusion_type?: InclusionTypeType | null;\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  order_number?: number;\n  uid_order?: string;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  uid_tax_class_override?: string | null;\n  exchanged_for?: ExchangedForEntryType[];\n}",
-          "doc": "A billable order line as a client sends it — the input mirror of\n`OrderDocLineItem`.\n\nDeliberately permissive about what may be OMITTED: the server fills `name`,\n`stock_method` and the whole price from the backing product doc, and a custom\nline supplies them itself. What it is no longer permissive about is what a\nline may CLAIM — see {@link OrderItem} for why the arms exist.\n\n`uid_delivery` / `uid_collection` are absent here on purpose. The flat schema\nthis replaces accepted both on any item, and `buildOrderLineItem` has never\npropagated them to a line — prod agrees: 0 of 9,303 order line items carry\neither key. They belong to the destination divider, which is where they now\nlive exclusively."
+          "declaration": "interface OrderItemLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: ItemPriceType;\n  stock_method: StockMethodType;\n  path: string[];\n  inclusion_type: InclusionTypeType | null;\n  zero_priced: boolean | null;\n  quantity_per_parent: number | null;\n  order_number: number | null;\n  uid_order: string | null;\n  coa_revenue: COARevenueType | null;\n  uid_tracking_category: string | null;\n  uid_tax_class_override: string | null;\n  exchanged_for: ExchangedForEntryType[];\n}",
+          "doc": "A billable order line as a client sends it — the input mirror of\n`OrderDocLineItem`.\n\n**A submitted row states every key** (ruling 204, \"clients should submit\nvalid shapes; no presumptive fallbacks\"): an omitted key is a 400 naming the\nrow and the key, a clear is an explicit `null` or `[]`. Creates too (R4). The\nstored row is a valid input row, so echoing it changes nothing (ruling 193).\n\n`uid_delivery` / `uid_collection` are absent here on purpose. The flat schema\nthis replaces accepted both on any item, and `buildOrderLineItem` has never\npropagated them to a line — prod agrees: 0 of 9,303 order line items carry\neither key. They belong to the destination divider, which is where they now\nlive exclusively."
         },
         {
           "kind": "typeAlias",
@@ -12921,7 +12979,7 @@
           "kind": "function",
           "name": "withRowSourcePath",
           "signature": "withRowSourcePath(row: R, pointer: readonly string[] | undefined): R",
-          "doc": "`row` with its move pointer (`path_source_item`, ruling 109: the initiator\nline a billing row bills from another position, initiator-relative) set to\n`pointer`; `undefined` clears it.",
+          "doc": "`row` with its move pointer (`path_source_item`, ruling 109: the initiator\nline a billing row bills from another position, initiator-relative) set to\n`pointer`; `undefined` clears it to `null` — the key is required on a billing\nLINE (ruling 204, class C). A row whose arm has no such key (a divider) is\nreturned as it is when cleared.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -12976,7 +13034,7 @@
         {
           "kind": "interface",
           "name": "FulfillmentItemInputLineType",
-          "declaration": "interface FulfillmentItemInputLineType {\n  uid: string;\n  path: string[];\n  quantity: number;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n  quantity_ordered?: number | null;\n}",
+          "declaration": "interface FulfillmentItemInputLineType {\n  uid: string;\n  path: string[];\n  quantity: number;\n  substituted_for: SubstitutedForEntryType[];\n  exchanged_for: ExchangedForEntryType[];\n  quantity_ordered?: number | null;\n}",
           "doc": "One picker-editable line in a `PUT /fulfillments/{uid}/items` body.\n\n⚠️ **`quantity_ordered` is declared here even though the API always refuses it,\nand that is load-bearing rather than sloppy.** It is the ORDER's quantity for\nthe row, stamped by the order sync, so a client structurally cannot compute\nit, and `updateFulfillmentItems` refuses any body carrying it as\nserver-managed.\n\n🔴 **Omitting it here would DELETE that 400.** A `z.object` strips an\nundeclared key, so the service would never see the field and would answer 200\nwhile silently ignoring what the client asserted — the exact silent-acceptance\nclass this whole block exists to close. Declaring it keeps the key intact\nthrough the parse so the service's check still fires.\n\n⚠️ **The refusal deliberately stays in the SERVICE rather than moving to a\n`z.never()` here**, though the boundary is where a constraint would normally\nlive. Two reasons, and the second is the stronger one: the service's message\nnames the field and says *why*, where Zod's would not; and `never` is a\nconstruct nothing in this package walks — `collectLeafPaths`\n(`schemas/zod-walk.ts`) reports it as uninterpretable and `tests/pii.test.ts`\nfails rather than skipping it, correctly. Introducing the package's only\n`never` node to save one runtime check would mean teaching a SHARED walker a\nnew arm, which is a worse trade than one owner in the service.\n\n⚠️ **`path` is REQUIRED here, and the two existing input schemas disagree\nabout that** — `OrderItemLineInner` has `path: z.array(ItemUid)` while\n`InvoiceItemInputLineInner` has `.optional()`. This grain follows the order,\nfor a reason rather than by majority: `updateFulfillmentItems` map-keys the\nsubmission on `pathKey(li.path)` and `rebuildFulfillmentItems` treats it as a\nSET keyed on `path`, so an absent one is not a defaulted value but a row that\naddresses nothing. Requiring it turns a confusing failure deep in the rebuild\ninto a 400 that names the field.\n\n⚠️ It is a refinement of the boundary — the DOCUMENT schema standing in as\nthe request contract accepted an absent `path` via `LineItemCore.path`'s\n`.default([])` — but no writer can produce one: the manager sends stored\nlines, and `computeItemPaths` authors `path` on every stored line."
         },
         {
@@ -12994,7 +13052,7 @@
         {
           "kind": "interface",
           "name": "FulfillmentLineItemType",
-          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method?: StockMethodType;\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  path: string[];\n  order_number?: number;\n  uid_order?: string;\n  quantity_ordered: number | null;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method: StockMethodType;\n  zero_priced: boolean | null;\n  quantity_per_parent: number | null;\n  path: string[];\n  order_number: number | null;\n  uid_order: string | null;\n  quantity_ordered: number | null;\n  substituted_for: SubstitutedForEntryType[];\n  exchanged_for: ExchangedForEntryType[];\n}",
           "doc": "Line item in the fulfillment order view — no price, no financial flags."
         },
         {
@@ -14050,7 +14108,7 @@
         {
           "kind": "interface",
           "name": "PurchaseLandedCostInputType",
-          "declaration": "interface PurchaseLandedCostInputType {\n  uid?: string;\n  description: string;\n  amount_cents: number;\n  uid_purchase_bill?: string | null;\n}",
+          "declaration": "interface PurchaseLandedCostInputType {\n  uid?: string;\n  description: string;\n  amount_cents: number;\n  uid_purchase_bill: string | null;\n}",
           "doc": "One landed cost as the operator states it on a buy item. `quantity` and\n`received_at_entry` are the server's, stamped from the stored item.\n\n`uid` names a stored entry to keep or edit. A uid the item does not hold\nis a NEW entry stored under it (the manager mints one as it adds the entry, so\na re-send before the Firestore echo is the same entry), and absent mints one\nserver-side. Splitting one amount across several items is\n`allocateLandedCostCents` (`@cfs/core/utils/purchases`), run by the client so\nthe preview it shows is the split it sends."
         },
         {
@@ -14062,14 +14120,14 @@
         {
           "kind": "interface",
           "name": "PurchaseLinePrice",
-          "declaration": "interface PurchaseLinePrice {\n  price_formula: PriceFormulaRef;\n  rates: RateSnapshotType[];\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  replacement_cents?: number | null;\n  stated_cents?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  total_cents: number;\n  counts: TierCountType[];\n}",
+          "declaration": "interface PurchaseLinePrice {\n  price_formula: PriceFormulaRef;\n  rates: RateSnapshotType[];\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  replacement_cents: number | null;\n  stated_cents: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  total_cents: number;\n  counts: TierCountType[];\n}",
           "doc": "How a purchase line is priced (purchases-as-documents Phase 2 rulings 1, 2,\n7): the formula it is priced by, the rates it snapshots, a supplier\ndiscount, and the money `priceDocument` computes from them.\n\n- A flat line states its WHOLE gross cost in `price.stated_cents` (the\n  DECLARED stated total: a buy, a fixed-cost subrent, freight or a fee) and\n  carries `rates: []`. Measured: most stored buys cost a total that does not\n  divide by their quantity, and every reader slices the total\n  (`sliceStoredMoney`), so no per-unit rate is stored.\n- The COMPUTED half is the receivable line's money (`subtotal_cents`,\n  `subtotal_discounted_cents`, `taxes`, `total_cents`) and the line's\n  `amount_cents`, written by `priceDocument`'s stated-total arm (ruling 39,\n  D7): subtotal = `stated_cents`, discounted = `amount_cents` =\n  `stated_cents − discount.amount_cents`, total = discounted + Σ taxes. Every\n  money reader reads it, as on an order line; `stated_cents` is the input.\n\n⚠️ **A TIME line** commits nothing here: its money is zero and its rates are\nthe formula's; its bills price it from their pair's windows\n(`priceDocument`'s time arms, one-document-model Phase 3).\n\n`discount` is core's `Discount`. On a payable line it records what came off\nthe operator's GROSS, so `discount.amount_cents` is declared, not derived;\n`amount_cents` is the NET — what CFS pays, which receipts, basis and bills\nslice.\n\n**Tax is EXEMPTION, not absence** (api-cloudrun's `one-document-model` plan):\na payable line is stamped with its type's default tax class like any other\npriced line (`LineTaxCore`), and the payable side resolves it exempt, so\n`taxes` is `[]`. `taxes_base` is the class's rates BEFORE the exemption, as\non an order line, so an exempt line records a non-empty base. A taxable\npurchase later (consumables, use tax) then needs no new path. Neither key\nreaches a Xero body or the bill's projection hash."
         },
         {
           "kind": "interface",
           "name": "PurchaseLinePriceInputType",
-          "declaration": "interface PurchaseLinePriceInputType {\n  uid_price_formula?: string;\n  rates?: RateSnapshotType[];\n  discount?: DiscountInputType | null;\n  replacement_cents?: number | null;\n  stated_cents?: number | null;\n}",
-          "doc": "How an operator prices an item input (ruling 1, 7). `uid_price_formula`\nnames the formula; absent takes the writer's default (a buy and a flat charge\nFixed; a subrent or a time charge the product's `cogs` activation entry's\nformula, else Fixed). The writer snapshots the formula's name and basis.\n\n- `rates` — a time line's rates; absent takes the rates in force today on\n  the product's activation entry. Refused on a flat line.\n- `discount` — a supplier discount, `{ rate, type }`; the writer computes its\n  `amount_cents`. On a flat line `amount_cents` is then the GROSS the\n  operator states, and the stored amount is net of the discount."
+          "declaration": "interface PurchaseLinePriceInputType {\n  price_formula: PriceFormulaRef;\n  uid_price_formula?: never;\n  rates: RateSnapshotType[];\n  discount: DiscountInputType | null;\n  replacement_cents: number | null;\n  stated_cents: number | null;\n}",
+          "doc": "How an operator prices an item input (ruling 1, 7). **Every key stated**\n(ruling 204): an omitted key is a 400, never a writer default or a keep.\n\n- `price_formula` — the formula, as a STORED line carries it (ruling 204 R3:\n  one spelling on both sides; only its `uid` is read, the writer re-derives\n  the name and basis). The client states it: a new line takes the catalog's\n  (manager behaviour), never a server fill. `uid_price_formula` is retired: a\n  400 if sent, never stripped (a stripped formula would fall to a default).\n- `rates` — the line's rates; `[]` on a STATED line.\n- `discount` — a supplier discount, `{ rate, type }`; the writer computes its\n  `amount_cents`. On a flat line `amount_cents` is then the GROSS the\n  operator states, and the stored amount is net of the discount."
         },
         {
           "kind": "variable",
@@ -14104,13 +14162,13 @@
         {
           "kind": "interface",
           "name": "PurchaseRentalItem",
-          "declaration": "interface PurchaseRentalItem {\n  ledger_account: COACodeType | null;\n  type: \"rental\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  uid_orders: string[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface PurchaseRentalItem {\n  ledger_account: COACodeType | null;\n  type: \"rental\";\n  amount_cents: number | null;\n  price: PurchaseLinePrice;\n  uid_orders: string[];\n  exchanged_for: ExchangedForEntryType[];\n}",
           "doc": "A RENTAL (Subrent) item — `quantity` units borrowed for a hire window and given back. Flat or time."
         },
         {
           "kind": "interface",
           "name": "PurchaseRentalItemInputType",
-          "declaration": "interface PurchaseRentalItemInputType {\n  type: \"rental\";\n  quantity: number;\n  ledger_account?: COACodeType | null;\n  uid_orders?: string[];\n  exchanged_for?: ExchangedForEntryType[];\n  uid_units?: never;\n}",
+          "declaration": "interface PurchaseRentalItemInputType {\n  type: \"rental\";\n  quantity: number;\n  ledger_account: COACodeType | null;\n  uid_orders: string[];\n  exchanged_for: ExchangedForEntryType[];\n  uid_units?: never;\n}",
           "doc": "A rental (Subrent) item as an operator orders it. A flat line states its gross\nas `price.stated_cents`; a time line states `null`. Its hire window is its pair's dates, stated on\n`destinations[]`, never on the line (one-document-model Phase 5b)."
         },
         {
@@ -14170,7 +14228,7 @@
         {
           "kind": "interface",
           "name": "PurchaseSaleItemInputType",
-          "declaration": "interface PurchaseSaleItemInputType {\n  type: \"sale\";\n  quantity: number;\n  ledger_account?: COACodeType | null;\n  landed_costs?: PurchaseLandedCostInputType[];\n}",
+          "declaration": "interface PurchaseSaleItemInputType {\n  type: \"sale\";\n  quantity: number;\n  ledger_account: COACodeType | null;\n  landed_costs: PurchaseLandedCostInputType[];\n}",
           "doc": "A sale (Buy) item as an operator orders it — the buckets are the server's."
         },
         {
@@ -14194,7 +14252,7 @@
         {
           "kind": "interface",
           "name": "PurchaseServiceItemInputType",
-          "declaration": "interface PurchaseServiceItemInputType {\n  type: \"service\";\n  name: string;\n  quantity?: number;\n  ledger_account?: COACodeType;\n  uid_units?: never;\n}",
+          "declaration": "interface PurchaseServiceItemInputType {\n  type: \"service\";\n  name: string;\n  quantity: number;\n  ledger_account: COACodeType;\n  uid_units?: never;\n}",
           "doc": "A service (Charge) item as an operator raises it. Its account is the\noperator's, except that a charge PLACED under a line and stating none takes\nthat line's (ruling 74); see {@link PurchaseItemInputBase}."
         },
         {
@@ -14476,14 +14534,32 @@
         {
           "kind": "interface",
           "name": "PurchaseBillDividerInputType",
-          "declaration": "interface PurchaseBillDividerInputType {\n  type: \"purchase\" | \"destination\" | \"group\";\n  uid: string;\n  path: string[];\n  name?: string;\n  path_extension_for?: string[];\n}",
-          "doc": "A divider row of a bill's whole-array input."
+          "declaration": "interface PurchaseBillDividerInputType {\n  type: \"purchase\" | \"destination\" | \"group\";\n  uid: string;\n  path: string[];\n  name: string;\n  path_extension_for?: string[] | null;\n}",
+          "doc": "A divider row of a bill's whole-array input. Every key stated (ruling 204 Q7)."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PurchaseBillLineInputType",
+          "declaration": "type PurchaseBillLineInputType = PurchaseBillProductLineInputType | PurchaseBillServiceLineInputType | PurchaseBillReplacementLineInputType;",
+          "doc": "A line row of a bill's whole-array input, one arm per stored arm."
         },
         {
           "kind": "interface",
-          "name": "PurchaseBillLineInputType",
-          "declaration": "interface PurchaseBillLineInputType {\n  type: SharedLineType;\n  uid: string;\n  path: string[];\n  name?: string;\n  description?: string;\n  quantity?: number;\n  ledger_account?: COACodeType | null;\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  out_of_service?: OutOfServiceEntryType[];\n  path_source_item?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n  uid_tax_class_override?: string | null;\n  uid_tracking_category?: string | null;\n  price?: typeLiteral;\n}",
-          "doc": "A line row of a bill's whole-array input.\n\nThe writer pairs each row to a stored one (exact path, then the row's uid and\nancestry), and the paired row is the base for every key this row omits, so a\nrow that moved keeps them. A row no stored row pairs with is, in order: a\nsplit's clone if it states {@link path_source_item}; a line of the purchase\nnamed by its path; or a line the bill itself authors, which states its name,\naccount, quantity and money; a sale or rental names its product by its uid.\n\nOn a TIME line `price.rates` restates each unit rate; a flat line states its\nGROSS as `price.stated_cents` (ruling 39, core beta B), and its stored\n`amount_cents` is derived from it.\n\n`path_source_item` absent keeps the stored pointer, and there is no `null`\nform: the writer stamps every moved row's pointer and clears one a move back\nmade pointless, so a stale client's identity-only rows cannot clear one.\nThe writer assigns the tax class and a bill-authored line's flat formula."
+          "name": "PurchaseBillLinePriceInputType",
+          "declaration": "interface PurchaseBillLinePriceInputType {\n  price_formula: PriceFormulaRef;\n  uid_price_formula?: never;\n  rates: typeLiteral[];\n  discount: DiscountInputType | null;\n  stated_cents: number | null;\n}",
+          "doc": "A bill line row's price: every key stated (ruling 204), the formula by its stored snapshot (R3)."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseBillProductLineInputType",
+          "declaration": "interface PurchaseBillProductLineInputType {\n  type: \"sale\" | \"rental\";\n  ledger_account: COACodeType | null;\n  substituted_for: SubstitutedForEntryType[];\n  exchanged_for: ExchangedForEntryType[];\n}",
+          "doc": "A sale or rental row: the stored product arm's keys."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseBillReplacementLineInputType",
+          "declaration": "interface PurchaseBillReplacementLineInputType {\n  type: \"replacement\";\n  ledger_account: COACodeType;\n  out_of_service: OutOfServiceEntryType[];\n}",
+          "doc": "A replacement row: a service row naming its records, shares summing to `quantity`."
         },
         {
           "kind": "variable",
@@ -14502,6 +14578,12 @@
           "name": "PurchaseBillSchema",
           "declaration": "const PurchaseBillSchema: z.ZodType<PurchaseBill>;",
           "doc": "Zod schema for PurchaseBill."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseBillServiceLineInputType",
+          "declaration": "interface PurchaseBillServiceLineInputType {\n  type: \"service\";\n  ledger_account: COACodeType;\n}",
+          "doc": "A service row: the stored service arm's keys. The account is required (S15)."
         },
         {
           "kind": "interface",
@@ -14656,7 +14738,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocumentProductItem",
-          "declaration": "interface PurchaseDocumentProductItem {\n  ledger_account: COACodeType | null;\n  type: PurchaseProductItemTypeType;\n  path_source_item?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface PurchaseDocumentProductItem {\n  ledger_account: COACodeType | null;\n  type: PurchaseProductItemTypeType;\n  path_source_item: string[] | null;\n  substituted_for: SubstitutedForEntryType[];\n  exchanged_for: ExchangedForEntryType[];\n}",
           "doc": "A bill or credit item that PROJECTS a purchase item — some quantity of one\nsale (Buy) or rental (Subrent) item (D5). It sits AT that item's path under\nthe item's purchase divider, as an invoice line sits at its order line's\n(one-document-model Phase 3), and carries its own copy of the shared fields, each of\nwhich it may override until the bill is settled: the billed `quantity` and\n`amount_cents` (homonyms of the purchase item's ordered ones), `price`,\n`name`, `description`, `ledger_account`, `uid_tracking_category` and the tax\nclass (`propagate: true` on the shared declarations).\n\nOn a LINKED bill the posting is the Xero document's where it has one; the\npurchase item's is the expected one, so an account divergence is an ordinary\nfield difference between projection and source. The account still has to\nsit in the type's class (`payablePostingIssues`)."
         },
         {
@@ -14692,7 +14774,7 @@
         {
           "kind": "interface",
           "name": "PurchaseDocumentServiceItem",
-          "declaration": "interface PurchaseDocumentServiceItem {\n  type: \"service\";\n  path_source_item?: string[];\n}",
+          "declaration": "interface PurchaseDocumentServiceItem {\n  type: \"service\";\n  path_source_item: string[] | null;\n}",
           "doc": "A bill or credit SERVICE (Charge) line — freight, a fee, a carrier line.\nPosts to its own account and never touches basis.\n\nA **document-only** service line (at a path its purchase does not carry, or\noutside any purchase divider) is the document's own row, like an invoice's\nloss-and-damage line: freight nobody expected. One that projects a purchase\n`service` item sits at its path.\n\nIts uid is its catalog service product's, else `custom-`, as on the purchase\n({@link payableLineUid}). No attribution key (owner, 2026-11-11): a carrier\nline's device is read through its units (api-cloudrun#1488)."
         },
         {
@@ -14827,7 +14909,7 @@
         {
           "kind": "interface",
           "name": "PurchaseReceiptLineItemType",
-          "declaration": "interface PurchaseReceiptLineItemType {\n  uid: string;\n  type: PurchaseProductItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  path: string[];\n  quantity_ordered: number | null;\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface PurchaseReceiptLineItemType {\n  uid: string;\n  type: PurchaseProductItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  zero_priced: boolean | null;\n  quantity_per_parent: number | null;\n  path: string[];\n  quantity_ordered: number | null;\n  exchanged_for: ExchangedForEntryType[];\n}",
           "doc": "A receipt line — one custody row of the purchase, with no price."
         },
         {
@@ -15021,7 +15103,7 @@
         {
           "kind": "interface",
           "name": "CreditNoteDocItemPrice",
-          "declaration": "interface CreditNoteDocItemPrice {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent?: number | null;\n  stated_cents?: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  total_cents: number;\n}",
+          "declaration": "interface CreditNoteDocItemPrice {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshotType[];\n  counts: TierCountType[];\n  base_percent: number | null;\n  stated_cents: number | null;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  total_cents: number;\n}",
           "doc": "Pricing breakdown for a single credit-note line."
         },
         {
@@ -15033,7 +15115,7 @@
         {
           "kind": "interface",
           "name": "CreditNoteDocLineItem",
-          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  ledger_account: COACodeType;\n  source_ledger_account: COARevenueType | null;\n  uid_tracking_category: string | null;\n  xero_id: string | null;\n  uid_billing?: string;\n  path_billing_item?: string[];\n  units_from?: number | null;\n  path: string[];\n  reverses_billing: boolean;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  ledger_account: COACodeType;\n  source_ledger_account: COARevenueType | null;\n  uid_tracking_category: string | null;\n  xero_id: string | null;\n  uid_billing: string | null;\n  path_billing_item: string[] | null;\n  units_from: number | null;\n  path: string[];\n  reverses_billing: boolean;\n  substituted_for: SubstitutedForEntryType[];\n  exchanged_for: ExchangedForEntryType[];\n}",
           "doc": "A credited line.\n\n**`coa_revenue` is required, not optional.** A credit spanning lines with\ndifferent revenue accounts (#1689 hits 4000 and 4100; #1322 is all 4210)\ncannot be posted correctly from a document-level amount, and apportioning it\nafterwards is inferring cause from effect — the thing `schemas/transaction.ts` warns\nagainst. This is also the gap Xero *has*: its allocation view carries\n`LineItems: []`, and Odoo's users pay OCA for a module that adds line-level\nprovenance.\n\n**Dividers only when raised from billing rows** (ruling 107): a credit row\ncopies its billing row's path under that document's `billing` divider, so a\nnote crediting rows carries the invoice's dividers and pairs; a historic or\ngoodwill note is flat (each line's path is `[uid]`).\n\n## `source_ledger_account` and `ledger_account` are TWO facts, and a line has both\n\nThey are routinely different, and collapsing them loses real information.\nMeasured on the live tenant: CN-1009 writes off 35 lines whose products are\nrentals — `product.price.coa_revenue` 4000 Rental Income — and every one of\nthem posts to **6900 Bad Debt**. Store only the posting account and the\nrevenue attribution that tracking-category rollups and the tax tables depend\non is gone; store only the revenue account and the write-off is invisible.\n\n- **`source_ledger_account`** — the revenue account of the *thing being credited*.\n  Product-sourced, same vocabulary as the invoice line it mirrors. Never the\n  account the credit posts to, and — since the owner ruling of 2026-08-20 —\n  never an input to what the line is taxed either.\n- **`ledger_account`** — where this credit lands in the ledger. Any account in\n  the `chart-of-accounts` catalog, including the expense range, which is\n  exactly why it cannot be `COARevenueEnum`: that enum is shared with\n  `Product.price.coa_revenue`, and widening it would make a catalog product\n  whose revenue account is Bad Debt Expense representable."
         },
         {
@@ -15081,7 +15163,7 @@
         {
           "kind": "interface",
           "name": "CreditSourceRow",
-          "declaration": "interface CreditSourceRow {\n  type?: string;\n  uid_billing?: string;\n  path_billing_item?: string[];\n}",
+          "declaration": "interface CreditSourceRow {\n  type?: string;\n  uid_billing?: string | null;\n  path_billing_item?: string[] | null;\n}",
           "doc": "The row keys {@link deriveCreditNoteSources} reads: a divider's `type`, a line's pointer."
         },
         {
@@ -20021,7 +20103,7 @@
         {
           "kind": "interface",
           "name": "KeyableCreditLine",
-          "declaration": "interface KeyableCreditLine {\n  quantity: number;\n  uid_billing?: string;\n  path_billing_item?: readonly string[];\n  price?: typeLiteral;\n}",
+          "declaration": "interface KeyableCreditLine {\n  quantity: number;\n  uid_billing?: string | null;\n  path_billing_item?: readonly string[] | null;\n  price?: typeLiteral;\n}",
           "doc": "What {@link keyCreditLines} reads of a credit line, on both sides: the cap's\nlines and the fold's alike."
         },
         {
@@ -20959,7 +21041,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItem",
-          "declaration": "interface InvoiceItem {\n  uid_order?: string | null;\n  description?: string;\n  price?: PriceObject | InvoiceDocItemPriceType;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  xero_id?: string | null;\n  crms_id?: number | string | null;\n  crms_opportunity_id?: number | null;\n  substituted_for?: SubstitutedForEntryType[];\n  out_of_service?: OutOfServiceEntryType[];\n  path_extension_for?: string[];\n  path_source_item?: string[];\n}",
+          "declaration": "interface InvoiceItem {\n  uid_order?: string | null;\n  description?: string;\n  price?: PriceObject | InvoiceDocItemPriceType;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  xero_id?: string | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  out_of_service?: OutOfServiceEntryType[];\n  path_extension_for?: string[] | null;\n  path_source_item?: string[] | null;\n  units_from?: number | null;\n}",
           "doc": "An invoice item with optional order-scoping and invoice-specific fields.\nExtends LineItem with properties that should be carried forward during sync\nand fields needed for Xero mapping.\n\n`price` accepts both the utility's intermediate PriceObject and the full\nInvoiceDocItemPriceType from schemas to avoid type drift."
         },
         {
@@ -20995,7 +21077,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  exchanged_for?: ExchangedForEntryType[];\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  amount_cents?: number | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  exchanged_for?: ExchangedForEntryType[];\n  description?: string;\n  order_number?: number | null;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  amount_cents?: number | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {
@@ -21061,7 +21143,7 @@
         {
           "kind": "typeAlias",
           "name": "PriceObject",
-          "declaration": "type PriceObject = OrderDocItemPriceType;",
+          "declaration": "type PriceObject = Omit<OrderDocItemPriceType, \"replacement_cents\" | \"base_percent\"> & typeLiteral;",
           "doc": ""
         },
         {
@@ -21189,7 +21271,7 @@
         {
           "kind": "function",
           "name": "buildInvoiceDestinationDivider",
-          "signature": "buildInvoiceDestinationDivider(source: typeLiteral, _: unknown): OrderDocDestinationItemType",
+          "signature": "buildInvoiceDestinationDivider(source: typeLiteral, _: unknown): InvoiceDocDestinationItemType",
           "doc": "Build an invoice destination divider from a source order's destination item.\nSingle source of truth for the divider shape — reused by\n`projectOrderItemToInvoiceItem` (order→invoice projection) and the\ndestination-divider backfill. ⚠️ **It had a third caller, the CRMS invoice\nwebhook, and that whole ingest is deleted with the cutover.**\n\n`path` defaults to `[]` so a caller that runs `computeInvoiceItemPaths`\nafterward (the backfill) gets positional path assignment; the order-projection\ncaller passes the scoped path `[orderDividerUid, ...basePath]`.\n\n⚠️ **It no longer copies `uid_delivery`/`uid_collection`, and `source` no\nlonger accepts them.** They were the divider's second copy of the pair's\nendpoints, and copying them here across two documents is the mechanism\napi-cloudrun#664 describes: the pairs come from `order.destinations` and the\ndividers from `order.items`, ~100 lines apart, with nothing cross-checking\nthem. The section's endpoint is now read from the pair its `uid` names.",
           "paramTags": [],
           "returnsTag": null
@@ -21247,7 +21329,7 @@
           "kind": "function",
           "name": "canonicalizePayload",
           "signature": "canonicalizePayload(value: unknown): unknown",
-          "doc": "Key-sorted deep copy with `null`/`undefined`/absent collapsed to absent —\nso two payloads compare equal iff they say the same thing.\n\n⚠️ **Both normalizations are load-bearing, and neither is cosmetic.**\n*Key order*: one side of a comparison is a stored document (Firestore returns\nmap keys sorted) and the other may be freshly built (insertion order), so a\nraw `JSON.stringify` can report two identical pairs as different. *Nullish*:\nevery field on this pair means the same thing absent as it does `null` — no\ndestination record, no address, no instructions, no jurisdiction claim — and\na corpus mid-migration holds both spellings of that. Reading one as an edit\nwould freeze the pair as \"overridden\" and stop it syncing **entirely**,\nbecause the check is all-or-nothing for the whole pair.",
+          "doc": "**The ONE comparison rule** (ruling 204 F4.5): a key-sorted deep copy with\n`null`/`undefined`/absent collapsed to absent, so two values compare equal iff\nthey say the same thing. The three-way merge, the line-edit diff and the\ndestination-pair diff (`@cfs/core/utils/invoices` re-exports it) all read it;\nthere were three copies.\n\n- *Key order*: one side is often a stored document (Firestore returns map keys\n  sorted) and the other freshly built, so a raw `JSON.stringify` can report\n  two identical values as different.\n- *Nullish*: on a line row absence is unrepresentable after ruling 204 (every\n  key is stated) except the derived `price.taxes_base`, so the collapse is\n  inert there; it stays load-bearing for the destination pair, where every\n  field means the same thing absent as `null`, and reading one as an edit\n  would freeze the whole pair as overridden.\n\n- *Timestamps*: one instant arrives in several forms — a firebase-admin\n  `Timestamp` (own keys `_seconds`/`_nanoseconds`), a client-SDK `Timestamp`\n  (`seconds`/`nanoseconds`), a cloned map — so `Object.keys` alone would read\n  one instant as two values. Each reduces to its instant through\n  `timestampInstant`, the test the `FirestoreTimestamp` schema itself uses.\n  ⚠️ This compares INSTANTS; it does not certify the FORM. A raw map is never\n  a legal stored value (the `cfs-datetime` skill), and finding one is the\n  datetime audit's job and api-cloudrun#1146's, not this comparison's.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -21744,7 +21826,7 @@
           "kind": "function",
           "name": "pickLineTaxFields",
           "signature": "pickLineTaxFields(item: typeLiteral): typeLiteral",
-          "doc": "The `LINE_TAX_FIELDS` a line carries, for a projection onto another\ngrain. `uid_tax_class` is required on every priced line (api-cloudrun#993),\nso a source line without one is refused loudly rather than projected into a\ndocument the schema would 400; `uid_tax_class_override` is copied only when\npresent, so the projection preserves the source line's key set.",
+          "doc": "The `LINE_TAX_FIELDS` a line carries, for a projection onto another\ngrain. `uid_tax_class` is required on every priced line (api-cloudrun#993),\nso a source line without one is refused loudly rather than projected into a\ndocument the schema would 400; `uid_tax_class_override` is stated, `null`\nfor none (ruling 204).",
           "paramTags": [],
           "returnsTag": null
         },
@@ -22138,7 +22220,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  exchanged_for?: ExchangedForEntryType[];\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  amount_cents?: number | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  exchanged_for?: ExchangedForEntryType[];\n  description?: string;\n  order_number?: number | null;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  amount_cents?: number | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {
@@ -22297,7 +22379,7 @@
         {
           "kind": "interface",
           "name": "FulfillmentLineSource",
-          "declaration": "interface FulfillmentLineSource {\n  readonly uid: string;\n  readonly type: indexedAccess;\n  readonly name: string;\n  readonly description?: string | null;\n  readonly stock_method?: indexedAccess;\n  readonly zero_priced?: boolean | null;\n  readonly quantity_per_parent?: number | null;\n}",
+          "declaration": "interface FulfillmentLineSource {\n  readonly uid: string;\n  readonly type: indexedAccess;\n  readonly name: string;\n  readonly description?: string | null;\n  readonly stock_method: indexedAccess;\n  readonly zero_priced?: boolean | null;\n  readonly quantity_per_parent?: number | null;\n}",
           "doc": "What a line is made OF — the descriptive facts, from whichever source the\ncaller projects (an order line, a product, a catalog component)."
         },
         {
@@ -22364,7 +22446,7 @@
           "kind": "function",
           "name": "projectFulfillmentLine",
           "signature": "projectFulfillmentLine(source: FulfillmentLineSource, quantity: number, path: string[], _: unknown): FulfillmentLineItemType",
-          "doc": "Build one fulfillment line. `quantity` and `path` are the picker's /\nprojection's to state; everything else comes from the source.\n\n⚠️ **`zero_priced` is emitted UNCONDITIONALLY**, `?? null`. The order-side\nmerge compares a projected line against the stored one, so a key whose\nPRESENCE moved with its VALUE would make a catalog edit a permanent diff.\n\nOptional keys (`stock_method`, `order_number`, `uid_order`, `exchanged_for`)\nare omitted when the source does not carry them — the stored documents\ndepend on it. `quantity_ordered` is always stated.",
+          "doc": "Build one fulfillment line. `quantity` and `path` are the picker's /\nprojection's to state; everything else comes from the source.\n\n⚠️ **`zero_priced` is emitted UNCONDITIONALLY**, `?? null`. The order-side\nmerge compares a projected line against the stored one, so a key whose\nPRESENCE moved with its VALUE would make a catalog edit a permanent diff.\n\n**Every key is stated** (ruling 204): a source that does not carry an\nattribution, a ratio or an exchange states its empty value (`null`, `[]`).\n`stock_method` has no empty value, so the source must state it.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -24270,7 +24352,7 @@
         {
           "kind": "interface",
           "name": "CustomLineBuildOptions",
-          "declaration": "interface CustomLineBuildOptions {\n  type: DocLineItemTypeType;\n  name?: string;\n  quantity?: number;\n  formula: PricingFormula;\n  rates?: readonly RateSnapshot[];\n  taxes: ReadonlyArray<typeLiteral>;\n  uid_tax_class: string;\n  uidOrder?: string;\n}",
+          "declaration": "interface CustomLineBuildOptions {\n  type: DocLineItemTypeType;\n  name?: string;\n  quantity?: number;\n  formula: PricingFormula;\n  rates?: readonly RateSnapshot[];\n  taxes: ReadonlyArray<typeLiteral>;\n  uid_tax_class: string;\n  uidOrder?: string;\n  orderNumber?: number;\n}",
           "doc": "Options for a one-off \"custom\" line with no product catalog entry behind it —\nthe orders/invoices \"Add Custom Item\" flow.\n\n`taxes` is the line's own resolved tax set (already carrying name/rate/type),\nnot the tax catalog: a custom line has no product to read tax references off,\nso the caller resolves them."
         },
         {
@@ -24294,13 +24376,13 @@
         {
           "kind": "interface",
           "name": "OrderLineBuildOptions",
-          "declaration": "interface OrderLineBuildOptions {\n  quantity: number;\n  inheritedAncestry?: string[];\n  uidOrder?: string;\n  taxClassForType: fnOrConstructor;\n  raisedQuantity?: fnOrConstructor;\n}",
+          "declaration": "interface OrderLineBuildOptions {\n  quantity: number;\n  inheritedAncestry?: string[];\n  uidOrder?: string;\n  orderNumber?: number;\n  taxClassForType: fnOrConstructor;\n  raisedQuantity?: fnOrConstructor;\n}",
           "doc": "Shared options for building order line items from a Typesense\n`ProductDocument` — used by the staging popover, the substitute flow, and any\n\"add product to an order\" surface.\n\nThere is deliberately no `initial` option. All three consumers used to pass\n`getInitialValues(OrderItem)`, and the three seeds could drift; worse, the\nspread quietly supplied fields the builder did not own — every expanded\ncomponent claimed `stock_method: \"bulk\"` regardless of the component's real\nvalue, and every line carried `order_number: 0` for a number only the server\ncan allocate. Each builder now writes every field it emits."
         },
         {
           "kind": "function",
           "name": "buildCustomInvoiceLine",
-          "signature": "buildCustomInvoiceLine(opts: Omit<CustomLineBuildOptions, \"uidOrder\">): InvoiceDocLineItemType",
+          "signature": "buildCustomInvoiceLine(opts: Omit<CustomLineBuildOptions, \"uidOrder\" | \"orderNumber\">): InvoiceDocLineItemType",
           "doc": "Build a custom (no-product) invoice line item.\n\nAn invoice line is a strictly smaller shape than an order line: no\n`stock_method`, no `crms_id`, no `uid_order`, no `inclusion_type`, and no\n`price.replacement_cents` — an invoice does not track replacement value. It DOES\ncarry `zero_priced` (stated `null`: a custom line is never a kit component), since\nthe key is required on every stored line. This used to claim it \"strips order-only fields\" while the\n`initial` spread put `stock_method: \"bulk\"`, `order_number: 0` and\n`uid_order: \"\"` straight back in; constructing the object outright is what\nmakes the docblock true.",
           "paramTags": [],
           "returnsTag": null
@@ -24567,8 +24649,8 @@
         {
           "kind": "typeAlias",
           "name": "InvoiceDeclaredPrice",
-          "declaration": "type InvoiceDeclaredPrice = Omit<OrderDeclaredPrice, \"replacement_cents\">;",
-          "doc": "An invoice line's declared price half, every nullable key present."
+          "declaration": "type InvoiceDeclaredPrice = Pick<InvoiceDocItemPriceType, DeclaredPriceKey<InvoiceDocItemPriceType>>;",
+          "doc": "An invoice line's declared price half — see {@link OrderDeclaredPrice}."
         },
         {
           "kind": "typeAlias",
@@ -24621,7 +24703,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  exchanged_for?: ExchangedForEntryType[];\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  amount_cents?: number | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  exchanged_for?: ExchangedForEntryType[];\n  description?: string;\n  order_number?: number | null;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  amount_cents?: number | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {
@@ -24655,10 +24737,10 @@
           "doc": "Order-level date envelope derived on demand from per-destination dates.\n\nMirrors the field set of the old top-level `order.dates`, except the `_fs`\ncompanions are nullable: utilities can't mint a Firestore Timestamp, so each\nboundary copies the `_fs` from whichever destination owns the extreme value\n(and is null when no destination sets that boundary)."
         },
         {
-          "kind": "interface",
+          "kind": "typeAlias",
           "name": "OrderDeclaredPrice",
-          "declaration": "interface OrderDeclaredPrice {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshot[];\n  counts: TierCount[];\n  base_percent: number | null;\n  replacement_cents: number | null;\n  stated_cents?: number;\n}",
-          "doc": "An order line's declared price half, every nullable key present — except\n`stated_cents`, present only on a STATED line (`DECLARED_ONLY_WHEN_SET`)."
+          "declaration": "type OrderDeclaredPrice = Pick<OrderDocItemPriceType, DeclaredPriceKey<OrderDocItemPriceType>>;",
+          "doc": "An order line's declared price half: EVERY declared key of the stored price,\nread off `OrderDocItemPriceType` (so a key added there is a compile error in\nthe builder below), each stated — `null` for none (ruling 204: a stored row\nstates every key, so a rate line states `stated_cents: null`)."
         },
         {
           "kind": "typeAlias",
@@ -24693,7 +24775,7 @@
         {
           "kind": "typeAlias",
           "name": "PriceObject",
-          "declaration": "type PriceObject = OrderDocItemPriceType;",
+          "declaration": "type PriceObject = Omit<OrderDocItemPriceType, \"replacement_cents\" | \"base_percent\"> & typeLiteral;",
           "doc": ""
         },
         {
@@ -24957,7 +25039,7 @@
           "kind": "function",
           "name": "declaredInvoicePrice",
           "signature": "declaredInvoicePrice(price: DeclaredPriceInput): InvoiceDeclaredPrice",
-          "doc": "Copy exactly {@link INVOICE_DECLARED_PRICE_KEYS} — see {@link declaredOrderPrice}.",
+          "doc": "Copy exactly the invoice's declared keys — see {@link declaredOrderPrice}.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -24965,7 +25047,7 @@
           "kind": "function",
           "name": "declaredOrderPrice",
           "signature": "declaredOrderPrice(price: DeclaredPriceInput): OrderDeclaredPrice",
-          "doc": "Copy exactly {@link ORDER_DECLARED_PRICE_KEYS} off an input price, normalizing\nan absent nullable key to `null`. Extra keys (computed money, `discount`,\n`taxes`) are ignored — they are the pricer's, not the caller's.\n\n⚠️ **Every order line therefore carries `base_percent`** — `null` on all but a\npercent-of-total fee line. That matches what `buildOrderLineFromProduct` already\nstages.",
+          "doc": "Copy exactly the declared keys off an input price, normalizing an absent\nnullable key to `null`. Extra keys (computed money, `discount`, `taxes`) are\nignored — they are the pricer's, not the caller's.\n\n⚠️ **Every order line therefore carries `base_percent`** — `null` on all but a\npercent-of-total fee line — and `stated_cents`, `null` on a rate line.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -27200,7 +27282,7 @@
           "kind": "function",
           "name": "billsOutOfService",
           "signature": "billsOutOfService(line: OutOfServiceLinkCarrier): boolean",
-          "doc": "Whether a line bills an out-of-service record at all.",
+          "doc": "Whether a line bills an out-of-service record at all. Reads a CLAIM as a\nnon-empty list: an invoice line states `[]` (ruling 204), a payable line\nomits the key, and both bill no record.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -27473,6 +27555,14 @@
         },
         {
           "kind": "function",
+          "name": "canonicalizePayload",
+          "signature": "canonicalizePayload(value: unknown): unknown",
+          "doc": "**The ONE comparison rule** (ruling 204 F4.5): a key-sorted deep copy with\n`null`/`undefined`/absent collapsed to absent, so two values compare equal iff\nthey say the same thing. The three-way merge, the line-edit diff and the\ndestination-pair diff (`@cfs/core/utils/invoices` re-exports it) all read it;\nthere were three copies.\n\n- *Key order*: one side is often a stored document (Firestore returns map keys\n  sorted) and the other freshly built, so a raw `JSON.stringify` can report\n  two identical values as different.\n- *Nullish*: on a line row absence is unrepresentable after ruling 204 (every\n  key is stated) except the derived `price.taxes_base`, so the collapse is\n  inert there; it stays load-bearing for the destination pair, where every\n  field means the same thing absent as `null`, and reading one as an edit\n  would freeze the whole pair as overridden.\n\n- *Timestamps*: one instant arrives in several forms — a firebase-admin\n  `Timestamp` (own keys `_seconds`/`_nanoseconds`), a client-SDK `Timestamp`\n  (`seconds`/`nanoseconds`), a cloned map — so `Object.keys` alone would read\n  one instant as two values. Each reduces to its instant through\n  `timestampInstant`, the test the `FirestoreTimestamp` schema itself uses.\n  ⚠️ This compares INSTANTS; it does not certify the FORM. A raw map is never\n  a legal stored value (the `cfs-datetime` skill), and finding one is the\n  datetime audit's job and api-cloudrun#1146's, not this comparison's.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "classifySharedFields",
           "signature": "classifySharedFields(source: z.ZodType, downstream: z.ZodType): SharedFieldClassification",
           "doc": "Classify every field `source` (the order) shares with `downstream` (an invoice\nor a fulfillment). See the module docs for the kinds.\n\nPure and deterministic, and cheap enough to call per sync, but callers should\ncompute it once per schema pair.",
@@ -27565,7 +27655,7 @@
           "kind": "function",
           "name": "sameSharedValue",
           "signature": "sameSharedValue(a: unknown, b: unknown): boolean",
-          "doc": "Do two values state the same thing? Absent and `null` are the same statement.",
+          "doc": "Do two values state the same thing? See {@link canonicalizePayload}.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -27648,7 +27738,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  exchanged_for?: ExchangedForEntryType[];\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  amount_cents?: number | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  exchanged_for?: ExchangedForEntryType[];\n  description?: string;\n  order_number?: number | null;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tracking_category?: string | null;\n  amount_cents?: number | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {

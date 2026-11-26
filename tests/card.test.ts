@@ -498,6 +498,8 @@ const bline: PurchaseSaleItem = {
   path: [PAIR, "9a1b2c3d-0000-4000-8000-000000000001"],
   description: "",
   zero_priced: null,
+  quantity_per_parent: null,
+  uid_tax_class_override: null,
   name: "Gaff tape",
   quantity: 5,
   amount_cents: 1_000,

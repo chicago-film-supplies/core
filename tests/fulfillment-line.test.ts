@@ -36,12 +36,15 @@ Deno.test("projectFulfillmentLine: every optional key present — the full key s
   );
   assertEquals(sortedKeys(line), [
     "description",
+    "exchanged_for",
     "name",
     "order_number",
     "path",
     "quantity",
     "quantity_ordered",
+    "quantity_per_parent",
     "stock_method",
+    "substituted_for",
     "type",
     "uid",
     "uid_order",
@@ -52,49 +55,57 @@ Deno.test("projectFulfillmentLine: every optional key present — the full key s
 /**
  * 🔴 The arm that pins the property the order-side merge depends on: a key whose
  * PRESENCE moved with its VALUE would make a catalog edit a permanent diff. So
- * `zero_priced` is there when the source says nothing — as `null` — and the three
- * genuinely optional keys are not. `quantity_ordered` is REQUIRED on a stored line
- * (core `beta.582`, decision 19), so a row no order line backs states `null`.
+ * every key is stated whatever the source says (ruling 204): `null` for a
+ * scalar the source does not state, `[]` for a list.
  */
-Deno.test("projectFulfillmentLine: a bare source still states zero_priced and quantity_ordered, and omits the optional three", () => {
-  const line = projectFulfillmentLine({ uid: "p", type: "rental", name: "P" }, 1, ["dest", "p"]);
+Deno.test("projectFulfillmentLine: a bare source states EVERY key, each at its empty value (ruling 204)", () => {
+  const line = projectFulfillmentLine({ uid: "p", type: "rental", name: "P", stock_method: "bulk" }, 1, ["dest", "p"]);
   assertEquals(sortedKeys(line), [
     "description",
+    "exchanged_for",
     "name",
+    "order_number",
     "path",
     "quantity",
     "quantity_ordered",
+    "quantity_per_parent",
+    "stock_method",
+    "substituted_for",
     "type",
     "uid",
+    "uid_order",
     "zero_priced",
   ]);
-  assertStrictEquals(line.zero_priced, null);
-  assertStrictEquals(line.quantity_ordered, null);
+  for (const key of ["zero_priced", "quantity_ordered", "quantity_per_parent", "order_number", "uid_order"] as const) {
+    assertStrictEquals(line[key], null, key);
+  }
+  assertEquals(line.substituted_for, []);
+  assertEquals(line.exchanged_for, []);
   assertStrictEquals(line.description, "");
 });
 
-Deno.test("projectFulfillmentLine: an undefined source key is omitted, not stored as undefined", () => {
+Deno.test("projectFulfillmentLine: an undefined order fact is stated as null, never stored as undefined", () => {
   const line = projectFulfillmentLine(
-    { uid: "p", type: "rental", name: "P", stock_method: undefined },
+    { uid: "p", type: "rental", name: "P", stock_method: "bulk" },
     1,
     ["dest", "p"],
     { order_number: undefined, uid_order: undefined },
   );
-  assertEquals("stock_method" in line, false);
-  assertEquals("order_number" in line, false);
-  assertEquals("uid_order" in line, false);
+  assertStrictEquals(line.order_number, null);
+  assertStrictEquals(line.uid_order, null);
+  assert(!Object.values(line).includes(undefined));
 });
 
-Deno.test("projectFulfillmentLine: an exchange's `exchanged_for` is carried as a COPY, and omitted when absent", () => {
+Deno.test("projectFulfillmentLine: an exchange's `exchanged_for` is carried as a COPY, and `[]` when the order states none", () => {
   // api-cloudrun#1114 — the order line states it; the projection must carry it
   // or the checkout rider marks nothing damaged.
   const exchanged_for = [{ path: ["parent", "x"], quantity: 1, reason: "damaged" as const }];
-  const line = projectFulfillmentLine({ uid: "y", type: "rental", name: "Y" }, 1, ["exchange", "y"], { exchanged_for });
+  const line = projectFulfillmentLine({ uid: "y", type: "rental", name: "Y", stock_method: "bulk" }, 1, ["exchange", "y"], { exchanged_for });
   assertEquals(line.exchanged_for, exchanged_for);
   exchanged_for[0].path.push("mutated");
   assertEquals(line.exchanged_for?.[0].path, ["parent", "x"], "the stored row must not alias the order's array");
-  const bare = projectFulfillmentLine({ uid: "y", type: "rental", name: "Y" }, 1, ["exchange", "y"], {});
-  assertEquals("exchanged_for" in bare, false);
+  const bare = projectFulfillmentLine({ uid: "y", type: "rental", name: "Y", stock_method: "bulk" }, 1, ["exchange", "y"], {});
+  assertEquals(bare.exchanged_for, []);
 });
 
 // api-cloudrun#1055 — the three answers a replacement root can need, each a
@@ -137,9 +148,9 @@ Deno.test("substitutionRootQuantityPerParent: the replacement takes X's stamp", 
   assertStrictEquals(substitutionRootQuantityPerParent({}), null);
 });
 
-Deno.test("projectFulfillmentLine: quantity_per_parent follows the SOURCE's presence — a pre-stamp row gains no key", () => {
-  const base = { uid: "p", type: "rental" as const, name: "P" };
-  assert(!("quantity_per_parent" in projectFulfillmentLine(base, 1, ["p"])));
+Deno.test("projectFulfillmentLine: quantity_per_parent is always stated — a pre-stamp source states null (ruling 204 Q1b)", () => {
+  const base = { uid: "p", type: "rental" as const, name: "P", stock_method: "bulk" as const };
+  assertStrictEquals(projectFulfillmentLine(base, 1, ["p"]).quantity_per_parent, null);
   assertStrictEquals(projectFulfillmentLine({ ...base, quantity_per_parent: null }, 1, ["p"]).quantity_per_parent, null);
   assertStrictEquals(projectFulfillmentLine({ ...base, quantity_per_parent: 0.5 }, 1, ["p"]).quantity_per_parent, 0.5);
 });

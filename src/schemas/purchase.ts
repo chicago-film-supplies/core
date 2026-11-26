@@ -183,6 +183,7 @@ import { type PostingRole, SIDE_CONTRACTS, type SharedLineType } from "./side.ts
 import {
   type PriceFormulaBasis,
   type PriceFormulaRef,
+  PriceFormulaRefInput,
   PriceFormulaRefSchema,
   RateKey,
   type RateSnapshotType,
@@ -357,14 +358,13 @@ export interface PurchaseLinePrice {
   /** The class's taxes before the exemption; the order line's key. */
   taxes_base?: TaxRefType[];
   /** What this supplier charges CFS for a lost unit. A subrent line only; `null` when none was stated. */
-  replacement_cents?: number | null;
+  replacement_cents: number | null;
   /**
    * The line's stated GROSS over its `quantity`, before `discount` — the input
    * its money is derived from (one-document-model ruling 39, `StatedCore`, `schemas/_line-money.ts`).
-   * REQUIRED on a flat line ({@link purchaseLineMoneyIssues}, core beta B);
-   * absent or `null` on a time line, whose money its rates and counts decide.
+   * `null` on a RATE line, whose money its rates and counts decide (ruling 189).
    */
-  stated_cents?: number | null;
+  stated_cents: number | null;
   /** The gross: `amount_cents + discount.amount_cents`. Computed by `priceDocument`. */
   subtotal_cents: number;
   /** The net: equal to the line's `amount_cents`. Computed by `priceDocument`. */
@@ -425,7 +425,7 @@ export const PurchaseLinePriceSchema: z.ZodType<PurchaseLinePrice> = z.strictObj
   // What this supplier charges CFS for a lost unit, on a subrent line only: the
   // order line's declaration (`schemas/order.ts`, `ItemPrice`). A bill's price
   // has none, as an invoice's has none.
-  replacement_cents: z.int().nullable().optional().meta({ column: true, label: "Replacement" }),
+  replacement_cents: z.int().nullable().meta({ column: true, label: "Replacement" }),
   ...StatedCore,
   ...PayablePriceMoneyCore,
   // Derived by the meter, never merged (the interface docblock).
@@ -453,7 +453,7 @@ export const PurchaseLinePriceSchema: z.ZodType<PurchaseLinePrice> = z.strictObj
  */
 export function purchaseLineMoneyIssues(
   item: {
-    price?: PurchaseLinePrice;
+    price?: Omit<PurchaseLinePrice, "replacement_cents">;
     amount_cents: number | null;
     /** The line's quantity, which a stated line's money is derived over. */
     quantity?: number;
@@ -536,7 +536,7 @@ export function purchaseLineMoneyIssues(
  *   formula.
  */
 function statedTotalMoneyIssues(
-  price: PurchaseLinePrice,
+  price: Omit<PurchaseLinePrice, "replacement_cents">,
   amountCents: number,
 ): { path: (string | number)[]; message: string }[] {
   const issues: { path: (string | number)[]; message: string }[] = [];
@@ -689,14 +689,14 @@ interface PurchaseItemBase {
    */
   path: string[];
   zero_priced: boolean | null;
-  quantity_per_parent?: number | null;
+  quantity_per_parent: number | null;
   /** The Xero account the item posts to — per type, see {@link payablePostingIssues}. */
   ledger_account: COACodeType;
   /** The tracking category (`tracking-categories/{uid}`), or `null` for untracked. */
   uid_tracking_category: string | null;
   /** The line's tax class, stamped from its type's default; exempt on this side. */
   uid_tax_class: string;
-  uid_tax_class_override?: string | null;
+  uid_tax_class_override: string | null;
 }
 
 /** A SALE (Buy) item — ownership of `quantity` units of one product. Always flat. */
@@ -739,9 +739,9 @@ export interface PurchaseRentalItem extends Omit<PurchaseItemBase, "ledger_accou
    *
    * Tagged `shared: "value"`, as the order line's: its entries carry no `uid`, so
    * the merge takes it WHOLE. The receipt and bill lines carry it untagged.
-   * Plain `.optional()`, as on the order: meaningful on exchange lines only.
+   * Required, `[]` off an exchange line (ruling 204), as on the order.
    */
-  exchanged_for?: ExchangedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
 }
 
 /**
@@ -986,9 +986,9 @@ const RentalItemInner = z.strictObject({
   amount_cents: amountKey.nullable(),
   price: PurchaseLinePriceSchema,
   uid_orders: z.array(FirestoreId),
-  // See the interface docblock. `seed: false`: a seeded `[]` would claim a
-  // take-back list on a line under no exchange pair, which `checkExchangedFor` refuses.
-  exchanged_for: ExchangedForList.optional().meta({ shared: "value", seed: false }),
+  // See the interface docblock. Required, `[]` off an exchange line (ruling 204);
+  // `checkExchangedFor` reads a claim as a non-empty list.
+  exchanged_for: ExchangedForList.meta({ shared: "value" }),
 }).superRefine((item, ctx) => {
   storedUidIssue(item, ctx);
   addIssues(purchaseLineMoneyIssues(item), ctx);
@@ -1581,42 +1581,48 @@ export interface PurchaseLandedCostInputType {
   uid?: string;
   description: string;
   amount_cents: number;
-  uid_purchase_bill?: string | null;
+  uid_purchase_bill: string | null;
 }
 
 /** Zod schema for PurchaseLandedCostInputType. */
 export const PurchaseLandedCostInput: z.ZodType<PurchaseLandedCostInputType> = z.object({
+  // Absent MINTS a new entry: creation, not a fallback (the stored entry requires it).
   uid: z.uuid().optional(),
   description: z.string().min(1).max(200),
   amount_cents: z.int().min(1),
-  uid_purchase_bill: FirestoreId.nullable().optional(),
+  // Required, `null` until a bill prices it (ruling 204).
+  uid_purchase_bill: FirestoreId.nullable(),
 });
 
 /**
- * How an operator prices an item input (ruling 1, 7). `uid_price_formula`
- * names the formula; absent takes the writer's default (a buy and a flat charge
- * Fixed; a subrent or a time charge the product's `cogs` activation entry's
- * formula, else Fixed). The writer snapshots the formula's name and basis.
+ * How an operator prices an item input (ruling 1, 7). **Every key stated**
+ * (ruling 204): an omitted key is a 400, never a writer default or a keep.
  *
- * - `rates` — a time line's rates; absent takes the rates in force today on
- *   the product's activation entry. Refused on a flat line.
+ * - `price_formula` — the formula, as a STORED line carries it (ruling 204 R3:
+ *   one spelling on both sides; only its `uid` is read, the writer re-derives
+ *   the name and basis). The client states it: a new line takes the catalog's
+ *   (manager behaviour), never a server fill. `uid_price_formula` is retired: a
+ *   400 if sent, never stripped (a stripped formula would fall to a default).
+ * - `rates` — the line's rates; `[]` on a STATED line.
  * - `discount` — a supplier discount, `{ rate, type }`; the writer computes its
  *   `amount_cents`. On a flat line `amount_cents` is then the GROSS the
  *   operator states, and the stored amount is net of the discount.
  */
 export interface PurchaseLinePriceInputType {
-  uid_price_formula?: string;
-  rates?: RateSnapshotType[];
-  discount?: DiscountInputType | null;
-  /** What this supplier charges CFS for a lost unit. A subrent line only. */
-  replacement_cents?: number | null;
+  price_formula: PriceFormulaRef;
+  /** Retired (ruling 204 R3) — present is a 400. */
+  uid_price_formula?: never;
+  rates: RateSnapshotType[];
+  discount: DiscountInputType | null;
+  /** What this supplier charges CFS for a lost unit. A subrent line only; `null` elsewhere. */
+  replacement_cents: number | null;
   /**
    * The line's GROSS over its quantity (ruling 39): the one money input of a
-   * flat line, its stored `amount_cents` derived from it. `null` states none (a
-   * time line); absent on an amend keeps the stored gross. A stored line's
-   * `amount_cents` echoed back is stripped: it is derived.
+   * flat STATED line, its stored `amount_cents` derived from it. `null` on a
+   * RATE line. A stored line's `amount_cents` echoed back is stripped: it is
+   * derived.
    */
-  stated_cents?: number | null;
+  stated_cents: number | null;
 }
 
 /**
@@ -1626,51 +1632,49 @@ export interface PurchaseLinePriceInputType {
  * path, then by uid and ancestry, as an order's does. Both `uid` and `path` are
  * required: the uid is the path's last segment.
  *
- * `uid_tracking_category` takes the SAME rule as an order or invoice line's
- * (`resolveLinePosting`, `api-cloudrun/src/lib/lineDenorms.ts`): absent KEEPS
- * what is stored (a new item takes the product's category); `null` returns it to
- * the product's category — never "untracked"; a uid SETS it and must name a
- * live category. `ledger_account` is absent-KEEPS, value-SETS, with the writer's
- * default on a new item (D4): a sale's is `xeroPostingFor("purchase", …)`'s asset
- * account, a rental's 5100, and a `service` or `replacement` charge's its
- * nearest ancestor LINE's account as the writer resolves it in the same build
- * (ruling 74): a charge placed under a row costs that row, so it posts where the
- * row posts until the operator states otherwise. A top-level charge has no
- * default, so absent on a new one is a 400. Whichever account is stated, the
- * arm's {@link payablePostingIssues} class binds.
+ * **Every key is stated** (ruling 204, creates too, R4): an omitted key is a
+ * 400 naming the row and the key; a clear is an explicit `null` or `[]`.
  *
- * `description` absent KEEPS what is stored and is `""` on a new item;
- * `uid_tax_class_override` absent KEEPS, `null` clears it. The line's
- * `uid_tax_class` is the writer's, stamped from its type's default class.
+ * `uid_tracking_category` takes the SAME rule as an order or invoice line's
+ * (`resolveLinePosting`, `api-cloudrun/src/lib/lineDenorms.ts`): `null` returns
+ * it to the product's category — never "untracked"; a uid SETS it and must name
+ * a live category. `ledger_account` is REQUIRED on every counted line (ruling
+ * 204 S15): there is no writer default and no server fill. "Default to the
+ * catalog" is the CLIENT's behaviour — the manager pre-fills the product's
+ * account (or, for a charge placed under a row, that row's, ruling 74) and the
+ * operator may override it before saving. `null` is legal only on an uncounted
+ * kit header (`sale`/`rental` arms). Whichever account is stated, the arm's
+ * {@link payablePostingIssues} class binds.
+ *
+ * `uid_tax_class_override` `null` clears it. The line's `uid_tax_class` is the
+ * writer's, stamped from its type's default class.
  */
 interface PurchaseItemInputBase {
   uid: string;
   /** The row's identity, its last segment the `uid`; the first names the pair it sits under. */
   path: string[];
-  description?: string;
-  /** A kit component's flag, as on an order line's input. The writer states `false` for a component that leaves it out. */
-  zero_priced?: boolean | null;
-  /** A kit component's ratio to its direct parent. */
-  quantity_per_parent?: number | null;
-  uid_tracking_category?: string | null;
-  uid_tax_class_override?: string | null;
-  price?: PurchaseLinePriceInputType;
+  description: string;
+  /** A kit component's flag, as on an order line's input; `null` off a kit. */
+  zero_priced: boolean | null;
+  /** A kit component's ratio to its direct parent; `null` off a kit. */
+  quantity_per_parent: number | null;
+  uid_tracking_category: string | null;
+  uid_tax_class_override: string | null;
+  price: PurchaseLinePriceInputType;
 }
 
 /** A sale (Buy) item as an operator orders it — the buckets are the server's. */
 export interface PurchaseSaleItemInputType extends PurchaseItemInputBase {
   type: "sale";
   quantity: number;
-  /** `null` is a stored kit header echoed back; the writer decides what a `none` product holds. */
-  ledger_account?: COACodeType | null;
+  /** `null` only on an uncounted kit header (ruling 204 S15); every counted line states its account. */
+  ledger_account: COACodeType | null;
   /**
-   * The item's WHOLE landed-cost set. Absent keeps what is stored, so a client
-   * that never names landed costs cannot erase them: this is a replacement, and
-   * a default here would delete what the client did not restate. Present: a
-   * stored entry missing from it is removed, which the writer refuses once a
-   * receipt has priced it.
+   * The item's WHOLE landed-cost set, `[]` for none (ruling 204). A stored entry
+   * missing from it is removed, which the writer refuses once a receipt has
+   * priced it.
    */
-  landed_costs?: PurchaseLandedCostInputType[];
+  landed_costs: PurchaseLandedCostInputType[];
 }
 
 /**
@@ -1681,12 +1685,12 @@ export interface PurchaseSaleItemInputType extends PurchaseItemInputBase {
 export interface PurchaseRentalItemInputType extends PurchaseItemInputBase {
   type: "rental";
   quantity: number;
-  /** `null` is a stored kit header echoed back; the writer decides what a `none` product holds. */
-  ledger_account?: COACodeType | null;
-  /** The orders the item was raised for. Absent is `[]`: the writer states it. */
-  uid_orders?: string[];
-  /** @see {@link PurchaseRentalItem.exchanged_for}. A stripping list ({@link ExchangedForListInput}). */
-  exchanged_for?: ExchangedForEntryType[];
+  /** `null` only on an uncounted kit header (ruling 204 S15); every counted line states its account. */
+  ledger_account: COACodeType | null;
+  /** The orders the item was raised for; `[]` for none. */
+  uid_orders: string[];
+  /** @see {@link PurchaseRentalItem.exchanged_for}. A stripping list ({@link ExchangedForListInput}); `[]` off an exchange line. */
+  exchanged_for: ExchangedForEntryType[];
   /** Retired — see `retiredUnitsKey`. Present is a 400. */
   uid_units?: never;
 }
@@ -1699,9 +1703,9 @@ export interface PurchaseRentalItemInputType extends PurchaseItemInputBase {
 export interface PurchaseServiceItemInputType extends PurchaseItemInputBase {
   type: "service";
   name: string;
-  quantity?: number;
-  /** Absent KEEPS on an amend; on a new item the writer's default, which only a placed charge has. */
-  ledger_account?: COACodeType;
+  quantity: number;
+  /** Required (ruling 204 S15): the client states it, pre-filled from the catalog or the row the charge is placed under. */
+  ledger_account: COACodeType;
   /** Retired — see `retiredUnitsKey`. Present is a 400. */
   uid_units?: never;
 }
@@ -1713,7 +1717,7 @@ export interface PurchaseServiceItemInputType extends PurchaseItemInputBase {
  */
 export interface PurchaseReplacementItemInputType extends Omit<PurchaseServiceItemInputType, "type"> {
   type: "replacement";
-  /** Shares sum to `quantity` when it is stated. */
+  /** Shares sum to `quantity`. */
   out_of_service: OutOfServiceEntryType[];
 }
 
@@ -1724,22 +1728,37 @@ export type PurchaseItemInputType =
   | PurchaseServiceItemInputType
   | PurchaseReplacementItemInputType;
 
+/**
+ * A key retired from an input, declared only so a payload still carrying it is
+ * REFUSED rather than stripped (the input is a stripping `z.object`). Same shape
+ * as `retiredKey` in `schemas/booking.ts`, including its OpenAPI meta.
+ */
+function retiredInputKey(key: string, why: string) {
+  return z.never({ error: `"${key}" is retired: ${why}` })
+    .meta({ type: "null", not: {}, description: `Retired: ${why}. Present is a 400.` })
+    .optional();
+}
+
 const PurchaseLinePriceInput: z.ZodType<PurchaseLinePriceInputType> = z.object({
-  uid_price_formula: FirestoreId.optional(),
-  rates: z.array(z.object({ rate_key: RateKey, amount_cents: z.int().min(0) })).optional(),
-  discount: DiscountInput.nullable().optional(),
-  replacement_cents: z.int().nullable().optional(),
-  stated_cents: z.int().min(0).nullable().optional(),
+  price_formula: PriceFormulaRefInput,
+  uid_price_formula: retiredInputKey(
+    "uid_price_formula",
+    "name the formula as a stored line does, price.price_formula (ruling 204 R3)",
+  ),
+  rates: z.array(z.object({ rate_key: RateKey, amount_cents: z.int().min(0) })),
+  discount: DiscountInput.nullable(),
+  replacement_cents: z.int().nullable(),
+  stated_cents: z.int().min(0).nullable(),
 });
 const inputHead = {
   uid: ItemUid,
   path: z.array(ItemUid).min(1),
-  description: LineItemCore.description.optional(),
-  zero_priced: z.boolean().nullable().optional(),
-  quantity_per_parent: z.number().min(0).nullable().optional(),
-  uid_tracking_category: FirestoreId.nullable().optional(),
-  uid_tax_class_override: FirestoreId.nullable().optional(),
-  price: PurchaseLinePriceInput.optional(),
+  description: LineItemCore.description,
+  zero_priced: z.boolean().nullable(),
+  quantity_per_parent: z.number().min(0).nullable(),
+  uid_tracking_category: FirestoreId.nullable(),
+  uid_tax_class_override: FirestoreId.nullable(),
+  price: PurchaseLinePriceInput,
 };
 
 /**
@@ -1761,13 +1780,13 @@ export function payableInputStatedIssues(
 function inputPostingIssue(
   item: {
     type: SharedLineType;
-    ledger_account?: number | null;
-    price?: PurchaseLinePriceInputType;
+    ledger_account: number | null;
+    price: PurchaseLinePriceInputType;
   },
   ctx: z.RefinementCtx,
 ): void {
   addIssues(payableInputStatedIssues(item), ctx);
-  if (item.ledger_account !== undefined) addIssues(payablePostingIssues(item.type, item.ledger_account, "initiator"), ctx);
+  addIssues(payablePostingIssues(item.type, item.ledger_account, "initiator"), ctx);
   if (item.type !== "rental" && item.price?.replacement_cents != null) {
     ctx.addIssue({ code: "custom", path: ["price", "replacement_cents"], message: "only a subrent line states a replacement" });
   }
@@ -1784,17 +1803,16 @@ function inputPostingIssue(
  * comment explains.
  */
 function retiredUnitsKey(why: string) {
-  return z.never({ error: `"uid_units" is retired: ${why}` })
-    .meta({ type: "null", not: {}, description: `Retired: ${why}. Present is a 400.` })
-    .optional();
+  return retiredInputKey("uid_units", why);
 }
 
 const noCustodyInput = {
   ...inputHead,
   name: LineItemCore.name,
-  quantity: z.int().min(1).optional(),
-  // Optional, not nullable: `null` is a kit header's, and a charge is never one.
-  ledger_account: COACode.optional(),
+  quantity: z.int().min(1),
+  // Required, not nullable (ruling 204 S15): `null` is a kit header's, and a
+  // charge is never one. The client states it, pre-filled from the catalog.
+  ledger_account: COACode,
   uid_units: retiredUnitsKey("a charge names no units; place it under the product row it costs"),
 };
 
@@ -1818,13 +1836,13 @@ const saleItemInputArm = z.object({
   type: z.literal("sale"),
   ...inputHead,
   quantity: z.int().min(1),
-  ledger_account: COACode.nullable().optional(),
-  landed_costs: z.array(PurchaseLandedCostInput).optional(),
+  ledger_account: COACode.nullable(),
+  landed_costs: z.array(PurchaseLandedCostInput),
 }).superRefine((item, ctx) => {
   inputPostingIssue(item, ctx);
   inputUidIssue(item, ctx);
   const named = new Set<string>();
-  item.landed_costs?.forEach((entry, k) => {
+  item.landed_costs.forEach((entry, k) => {
     if (entry.uid === undefined) return;
     if (named.has(entry.uid)) {
       ctx.addIssue({ code: "custom", path: ["landed_costs", k, "uid"], message: "a landed cost uid appears once per item" });
@@ -1837,9 +1855,9 @@ const rentalItemInputArm = z.object({
   type: z.literal("rental"),
   ...inputHead,
   quantity: z.int().min(1),
-  ledger_account: COACode.nullable().optional(),
-  uid_orders: z.array(FirestoreId).optional(),
-  exchanged_for: ExchangedForListInput.optional().meta({ seed: false }),
+  ledger_account: COACode.nullable(),
+  uid_orders: z.array(FirestoreId),
+  exchanged_for: ExchangedForListInput,
   uid_units: retiredUnitsKey("a purchase line names no units; name them on the receipt's custody step"),
 }).superRefine((item, ctx) => {
   inputPostingIssue(item, ctx);
@@ -1869,11 +1887,12 @@ export const PurchaseItemInput: z.ZodType<PurchaseItemInputType> = z.discriminat
 ]);
 
 /** A divider row as a client sends it on a purchase. */
+/** A divider row of a purchase's input: every key stated (ruling 204 Q7); `""` is a value. */
 interface PurchaseDividerInputBase {
   uid: string;
   path: string[];
-  name?: string;
-  description?: string;
+  name: string;
+  description: string;
 }
 
 /** A destination divider as a client sends it on a purchase; `uid` is its pair's. */
@@ -1901,16 +1920,16 @@ const destinationRowInputArm = z.object({
   type: z.literal("destination"),
   uid: z.uuid(),
   path: z.array(ItemUid).min(1),
-  name: z.string().max(200).meta({ pii: "mask" }).optional(),
-  description: z.string().meta({ pii: "none" }).optional(),
+  name: z.string().max(200).meta({ pii: "mask" }),
+  description: z.string().meta({ pii: "none" }),
 });
 
 const groupRowInputArm = z.object({
   type: z.literal("group"),
   uid: z.uuid(),
   path: z.array(ItemUid).min(1),
-  name: z.string().min(1).max(100).meta({ pii: "none" }).optional(),
-  description: z.string().meta({ pii: "none" }).optional(),
+  name: z.string().min(1).max(100).meta({ pii: "none" }),
+  description: z.string().meta({ pii: "none" }),
 });
 
 /**

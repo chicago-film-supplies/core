@@ -12,6 +12,7 @@ import { creditTimeCounts } from "../src/utils/purchase-documents.ts";
 import { buildRemainder } from "../src/utils/billing-remainder.ts";
 import { businessDayWindow, fdwCounts, fdwPrice, FORMULAS, tier } from "./helpers/formulas.ts";
 import type { LineItem } from "../src/utils/orders.ts";
+import { payableLine, payablePrice } from "./helpers/payable.ts";
 import type { Purchase } from "../src/schemas/mod.ts";
 
 type Billable = Pick<Purchase, "uid" | "items" | "destinations">;
@@ -29,7 +30,16 @@ function purchaseOf(quantity: number, days: number) {
   const items = [
     row({ uid: D, type: "destination", path: [D], name: "Shop", description: "" }),
     row({ uid: G, type: "group", path: [D, G], name: "Lights", description: "" }),
-    row({ uid: X, type: "rental", path: [D, G, X], name: "Light", description: "", quantity, price: { ...fdwPrice(10000), discount: null, taxes: [] } }),
+    // The shared purchase-line builder: every key stated (ruling 204), no cast.
+    payableLine("rental", {
+      uid: X,
+      path: [D, G, X],
+      name: "Light",
+      description: "",
+      quantity,
+      amount_cents: null,
+      price: { ...payablePrice(0, { formula: fdwPrice(10000).price_formula }), ...fdwPrice(10000) },
+    }),
   ];
   return {
     uid: P,
@@ -92,7 +102,7 @@ Deno.test("the remainder: nothing unbilled builds the divider skeleton and bills
 Deno.test("the remainder: the owed time is a section extending its destination, and folds back to nothing owed", () => {
   const purchase = purchaseOf(2, 7);
   const built = remainderOf(purchase, [firstBill(2, 5)]);
-  const sectionDivider = built.items.find((r) => (r as { path_extension_for?: string[] }).path_extension_for !== undefined)!;
+  const sectionDivider = built.items.find((r) => (r as { path_extension_for?: string[] | null }).path_extension_for != null)!;
   const E = sectionDivider.uid;
   assertEquals(built.items.filter((r) => r.path[1] === E).map((r) => [r.type, r.path.join("/")]), [
     ["destination", `${P}/${E}`],

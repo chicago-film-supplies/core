@@ -134,17 +134,12 @@ Deno.test("checkLinePrice: a line priced from itself names its formula", () => {
   assertEquals(issuePaths(checkLinePriceInput, { rates: [{ rate_key: "week", amount_cents: 1 }] }), []);
 });
 
-Deno.test("checkLinePriceInput: two spellings of the formula must name the SAME formula", () => {
+Deno.test("checkLinePriceInput: the snapshot is the ONE spelling of the formula (ruling 204 R3)", () => {
   const rates = [{ rate_key: "week", amount_cents: 1 }];
-  // A stored-form echo names its formula by the snapshot alone, and that is legal.
+  // A stored-form echo names its formula by the snapshot, and that is legal.
   assertEquals(issuePaths(checkLinePriceInput, { price_formula: FDW, rates }), []);
-  // Both spellings, agreeing — legal.
-  assertEquals(issuePaths(checkLinePriceInput, { uid_price_formula: FDW.uid, price_formula: FDW, rates }), []);
-  // Both spellings, disagreeing — one of them is a client bug; refuse rather than pick.
-  assertEquals(
-    issuePaths(checkLinePriceInput, { uid_price_formula: "FixedPriceFormula000", price_formula: FDW, rates }),
-    ["price_formula.uid"],
-  );
+  // The retired `uid_price_formula` alias is not read: it can neither agree nor disagree.
+  assertEquals(issuePaths(checkLinePriceInput, { uid_price_formula: "FixedPriceFormula000", price_formula: FDW, rates }), []);
   // The snapshot spelling still feeds the percent-xor-formula rule.
   assertEquals(issuePaths(checkLinePriceInput, { price_formula: FDW, base_percent: 2.9 }), ["price_formula"]);
 });

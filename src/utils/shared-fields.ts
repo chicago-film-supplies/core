@@ -75,6 +75,7 @@ import {
   OrderSchema,
   PurchaseReceiptSchema,
   PurchaseSchema,
+  timestampInstant,
 } from "../schemas/mod.ts";
 import { readMetaThroughWrappers } from "../schemas/zod-walk.ts";
 
@@ -175,7 +176,7 @@ interface Def {
   options?: z.ZodType[];
   in?: z.ZodType;
 }
-const defOf = (node: z.ZodType): Def => (node as unknown as { _zod: { def: Def } })._zod.def;
+const defOf = (node: z.ZodType): Def => (node as { _zod: { def: Def } })._zod.def;
 
 /** Wrappers that do not change a node's shape. Matches `zod-walk.ts`. */
 const WRAPPERS: ReadonlySet<string> = new Set([
@@ -420,25 +421,48 @@ export interface SharedFieldMerge<T> {
   overridden: string[];
 }
 
-/** Absent ≡ null, recursively — two values that say the same thing compare equal. */
-function canonical(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonical);
+/**
+ * **The ONE comparison rule** (ruling 204 F4.5): a key-sorted deep copy with
+ * `null`/`undefined`/absent collapsed to absent, so two values compare equal iff
+ * they say the same thing. The three-way merge, the line-edit diff and the
+ * destination-pair diff (`@cfs/core/utils/invoices` re-exports it) all read it;
+ * there were three copies.
+ *
+ * - *Key order*: one side is often a stored document (Firestore returns map keys
+ *   sorted) and the other freshly built, so a raw `JSON.stringify` can report
+ *   two identical values as different.
+ * - *Nullish*: on a line row absence is unrepresentable after ruling 204 (every
+ *   key is stated) except the derived `price.taxes_base`, so the collapse is
+ *   inert there; it stays load-bearing for the destination pair, where every
+ *   field means the same thing absent as `null`, and reading one as an edit
+ *   would freeze the whole pair as overridden.
+ *
+ * - *Timestamps*: one instant arrives in several forms — a firebase-admin
+ *   `Timestamp` (own keys `_seconds`/`_nanoseconds`), a client-SDK `Timestamp`
+ *   (`seconds`/`nanoseconds`), a cloned map — so `Object.keys` alone would read
+ *   one instant as two values. Each reduces to its instant through
+ *   `timestampInstant`, the test the `FirestoreTimestamp` schema itself uses.
+ *   ⚠️ This compares INSTANTS; it does not certify the FORM. A raw map is never
+ *   a legal stored value (the `cfs-datetime` skill), and finding one is the
+ *   datetime audit's job and api-cloudrun#1146's, not this comparison's.
+ */
+export function canonicalizePayload(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizePayload);
   if (value === null || value === undefined) return null;
   if (typeof value !== "object") return value;
-  // A Firestore Timestamp (or anything with its own representation) compares by
-  // its seconds/nanoseconds, which Object.keys reaches, so no special case.
+  const instant = timestampInstant(value);
+  if (instant !== null) return instant;
   const out: Record<string, unknown> = {};
-  for (const key of Object.keys(value as Record<string, unknown>).sort()) {
-    const v = (value as Record<string, unknown>)[key];
+  for (const [key, v] of Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
     if (v === null || v === undefined) continue;
-    out[key] = canonical(v);
+    out[key] = canonicalizePayload(v);
   }
   return out;
 }
 
-/** Do two values state the same thing? Absent and `null` are the same statement. */
+/** Do two values state the same thing? See {@link canonicalizePayload}. */
 export function sameSharedValue(a: unknown, b: unknown): boolean {
-  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+  return JSON.stringify(canonicalizePayload(a)) === JSON.stringify(canonicalizePayload(b));
 }
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>

@@ -113,11 +113,12 @@ Deno.test("buildOrderLineFromProduct emits a schema-valid line, ancestry-only pa
   assert(parsed.success, JSON.stringify(parsed.error?.issues));
 });
 
-Deno.test("buildOrderLineFromProduct omits uid_order entirely when not asked for", () => {
+Deno.test("buildOrderLineFromProduct states uid_order null when not asked for (ruling 204)", () => {
   const line = buildOrderLineFromProduct(product(), OPTS);
-  // Absent, not `undefined` and not `""`. The `initial` spread this replaced
-  // seeded `uid_order: ""` on every invoice-surface line.
-  assert(!("uid_order" in line));
+  // `null`, never `""`: the `initial` spread this replaced seeded `uid_order: ""`
+  // on every invoice-surface line, a value that looks like an id.
+  assertEquals(line.uid_order, null);
+  assertEquals(buildOrderLineFromProduct(product(), { ...OPTS, uidOrder: "testorder10000000000" }).uid_order, "testorder10000000000");
 });
 
 Deno.test("buildOrderLineFromProduct carries inheritedAncestry and reads its own stock_method", () => {
@@ -420,8 +421,9 @@ Deno.test("component lines carry no order_number — only the server can allocat
   const doc = product({ components: [comp("B", ["A"])] });
   const line = buildOrderComponentLines(doc, OPTS)[0];
   // The seed used to supply `order_number: 0`, a real-looking number for a
-  // sequence value the API stamps from `counters/{id}` at write time.
-  assert(!("order_number" in line));
+  // sequence value the API stamps from `counters/{id}` at write time. Stated
+  // `null` instead (ruling 204: every key, an explicit empty value).
+  assertEquals(line.order_number, null);
 });
 
 Deno.test("a component with no description gets an empty string, not undefined", () => {
@@ -544,8 +546,8 @@ Deno.test("both builders agree with deriveLineCatalogFacts field for field", () 
     { type: line.type, stock_method: line.stock_method, zero_priced: line.zero_priced, rates: line.price.rates, replacement_cents: line.price.replacement_cents, price_formula: line.price.price_formula },
     { type: facts.type, stock_method: facts.stock_method, zero_priced: facts.zero_priced, rates: facts.price.rates, replacement_cents: facts.price.replacement_cents, price_formula: facts.price.price_formula },
   );
-  // A component line keeps its key set: no `base_percent` key.
-  assert(!("base_percent" in line.price));
+  // A component line is never a percent fee: `base_percent` stated `null` (ruling 204).
+  assertEquals(line.price.base_percent, null);
 });
 
 Deno.test("catalogSlotOf reads the DIRECT row, never a same-uid grandchild", () => {
@@ -616,9 +618,11 @@ Deno.test("buildCustomInvoiceLine emits no order-only field", () => {
   // The old docblock claimed it "strips order-only fields" while the `initial`
   // spread put `stock_method: "bulk"`, `order_number: 0` and `uid_order: ""`
   // straight back in. An invoice line arm is a strictObject with none of them.
-  for (const key of ["stock_method", "crms_id", "uid_order", "order_number", "inclusion_type"]) {
+  for (const key of ["stock_method", "uid_order", "order_number", "inclusion_type"]) {
     assert(!(key in line), `invoice line must not carry ${key}`);
   }
+  // `crms_id` IS an invoice-line key (legacy, server-set): stated `null` (ruling 204 Q2).
+  assertEquals(line.crms_id, null);
   // `zero_priced` is the exception and is REQUIRED on every stored line: a custom line is
   // never a kit component, so it states `null` rather than leaving the key absent.
   assertEquals(line.zero_priced, null);

@@ -98,7 +98,8 @@ export interface FulfillmentLineItemType {
   name: string;
   description: string;
   quantity: number;
-  stock_method?: StockMethodType;
+  /** Required, as on the order line it projects (ruling 204, class D: no empty value). */
+  stock_method: StockMethodType;
   /**
    * Was this line included at no charge as part of its parent product?
    *
@@ -124,7 +125,7 @@ export interface FulfillmentLineItemType {
    */
   zero_priced: boolean | null;
   /** @see `LineItemCore.quantity_per_parent` (`schemas/_items.ts`) — the per-parent ratio, stamped at expansion. */
-  quantity_per_parent?: number | null;
+  quantity_per_parent: number | null;
   path: string[];
   /**
    * The line's own order attribution — a DENORMALISED COPY of the document's
@@ -136,8 +137,8 @@ export interface FulfillmentLineItemType {
    * emitting a foreign order — the projection copies from the one order being
    * written, and the picker path re-derives from `orders/{same uid}`.
    *
-   * Optional because DIVIDERS omit both: measured 2026-09-05 across both envs,
-   * 3,907 of 13,863 prod items carry neither, and 0 items disagree.
+   * Required on a LINE, `.nullable()` (ruling 204 Q1a); dividers carry neither.
+   * Measured 2026-09-05 across both envs, 0 items disagree.
    *
    * ⚠️ Nothing READS them, so a divergence has no natural detector, and it
    * would not fail loudly: a pick sheet builds its booking key from the
@@ -145,8 +146,8 @@ export interface FulfillmentLineItemType {
    * and the section's unit total is silently short. `validateBeforeWrite`
    * asserts the agreement at write time for that reason (manager#357).
    */
-  order_number?: number;
-  uid_order?: string;
+  order_number: number | null;
+  uid_order: string | null;
   /**
    * The ORDER's quantity for this row, as the booking's `quantity_ordered` carries
    * it (api-cloudrun#1147). Server-set on EVERY line; picker writes that include it
@@ -170,8 +171,9 @@ export interface FulfillmentLineItemType {
   /**
    * Picker-set on substitution line items: the substitutions this row stands in
    * for, with how many units each — see `SubstitutedForList` (manager#414).
+   * `[]` on a row that stands in for nothing (ruling 204).
    */
-  substituted_for?: SubstitutedForEntryType[];
+  substituted_for: SubstitutedForEntryType[];
   /**
    * Set on a mid-rental exchange line: the DAMAGED rows this one is
    * going out against, with how many units each — see `ExchangedForList`.
@@ -182,9 +184,10 @@ export interface FulfillmentLineItemType {
    * are what the operator marks damaged when the exchange's trip completes.
    *
    * Only valid on a row under a pair carrying `exchange` — asserted at the
-   * document level, because a row cannot see its own pair.
+   * document level, because a row cannot see its own pair. `[]` off an
+   * exchange line (ruling 204).
    */
-  exchanged_for?: ExchangedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
 }
 
 // Un-annotated so `_zod.propValues` survives for the discriminated union below
@@ -203,15 +206,17 @@ const FulfillmentLineItemInner = z.strictObject({
     label: "Type",
   }),
   ...LineItemCore,
-  stock_method: StockMethodEnum.optional().meta({
+  // Every key required with its empty value (ruling 204; Q1a for the two
+  // order attributions).
+  stock_method: StockMethodEnum.meta({
     column: true,
     label: "Stock Method",
   }),
-  order_number: z.int().optional().meta({ column: true, label: "Order #" }),
-  uid_order: FirestoreId.optional(),
+  order_number: z.int().nullable().meta({ column: true, label: "Order #" }),
+  uid_order: FirestoreId.nullable(),
   quantity_ordered: z.int().min(0).nullable(),
-  substituted_for: SubstitutedForList.optional(),
-  exchanged_for: ExchangedForList.optional(),
+  substituted_for: SubstitutedForList,
+  exchanged_for: ExchangedForList,
   // 🔴 Attached to the **Inner** const so `FulfillmentItem`'s discriminated union
   // below enforces it, matching `order.ts` and (since 2026-09-09) `invoice.ts`.
   // ⚠️ It is VACUOUS at this grain and that is deliberate rather than an
@@ -338,17 +343,17 @@ export interface FulfillmentItemInputLineType {
   quantity: number;
   /**
    * What this row stands in for, per replaced X (manager#414). Unique by path,
-   * as on the stored line.
+   * as on the stored line. `[]` for none: every key is stated (ruling 204).
    */
-  substituted_for?: SubstitutedForEntryType[];
+  substituted_for: SubstitutedForEntryType[];
   /**
    * The damaged rows an exchange line goes out against — see the
    * stored line's `exchanged_for`. It needs an input channel for the reason this
    * file records above: a plain `z.object` STRIPS an undeclared key, so without
    * it a picker write would silently drop the exchange's link to the rows it
-   * goes out against.
+   * goes out against. `[]` off an exchange line.
    */
-  exchanged_for?: ExchangedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
   /**
    * Declared so the service can REFUSE it — see the note above. Nullable like the
    * stored field, so a client echoing a stored line back is refused by the
@@ -361,8 +366,8 @@ const FulfillmentItemInputLineInner = z.object({
   uid: ItemUid,
   path: z.array(ItemUid),
   quantity: z.number().int().min(0),
-  substituted_for: SubstitutedForList.optional(),
-  exchanged_for: ExchangedForList.optional(),
+  substituted_for: SubstitutedForList,
+  exchanged_for: ExchangedForList,
   // The stored line's declaration, optional, so a body carrying it survives the
   // parse and reaches `updateFulfillmentItems`' explicit refusal.
   quantity_ordered: z.int().min(0).nullable().optional(),

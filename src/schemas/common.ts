@@ -49,6 +49,36 @@ export type FirestoreTimestampType = FirestoreTimestampValue | FirestoreFieldVal
 export const FIRESTORE_TIMESTAMP_META = "firestoreTimestamp";
 
 /**
+ * **The instant a Firestore Timestamp value states, in whichever of its forms it
+ * arrives**, or `null` when `value` is not one. The one structural test, shared
+ * by the {@link FirestoreTimestamp} schema and every comparison that must read
+ * two forms of one instant as equal (`canonicalizePayload`,
+ * `@cfs/core/utils/shared-fields`):
+ *
+ * - the public accessor shape, `seconds`/`nanoseconds` — a client-SDK
+ *   `Timestamp`'s own keys, a firebase-admin `Timestamp`'s prototype getters;
+ * - the private underscored shape, `_seconds`/`_nanoseconds` — a firebase-admin
+ *   `Timestamp`'s own keys, and what survives `structuredClone` /
+ *   `lodash.cloneDeep`. Firestore writes accept both.
+ *
+ * `Object.keys` therefore sees `_seconds` on one side and `seconds` on the
+ * other for the SAME instant; reading the instant through this is what makes
+ * them compare equal.
+ */
+export function timestampInstant(value: unknown): { seconds: number; nanoseconds: number } | null {
+  if (value === null || typeof value !== "object") return null;
+  if ("seconds" in value && "nanoseconds" in value) {
+    const { seconds, nanoseconds } = value;
+    if (typeof seconds === "number" && typeof nanoseconds === "number") return { seconds, nanoseconds };
+  }
+  if ("_seconds" in value && "_nanoseconds" in value) {
+    const { _seconds, _nanoseconds } = value;
+    if (typeof _seconds === "number" && typeof _nanoseconds === "number") return { seconds: _seconds, nanoseconds: _nanoseconds };
+  }
+  return null;
+}
+
+/**
  * Firestore Timestamp — structural check for `{ seconds, nanoseconds }`.
  *
  * Tight on purpose: rejects `undefined`, `null`, plain objects, and
@@ -67,20 +97,7 @@ export const FIRESTORE_TIMESTAMP_META = "firestoreTimestamp";
  * `.meta()` clone** — see that constant.
  */
 export const FirestoreTimestamp: z.ZodType<FirestoreTimestampType> = z.custom<FirestoreTimestampType>(
-  (val) => {
-    if (val === null || typeof val !== "object") return false;
-    // Accept either the public Timestamp accessor shape (`seconds`/
-    // `nanoseconds`, exposed via getters on a `Timestamp` instance) OR the
-    // private underscored shape (`_seconds`/`_nanoseconds`, what survives
-    // `structuredClone` / `lodash.cloneDeep`). Firestore writes accept both.
-    const v = val as Partial<FirestoreTimestampValue> & {
-      _seconds?: number;
-      _nanoseconds?: number;
-    };
-    if (typeof v.seconds === "number" && typeof v.nanoseconds === "number") return true;
-    if (typeof v._seconds === "number" && typeof v._nanoseconds === "number") return true;
-    return false;
-  },
+  (val) => timestampInstant(val) !== null,
 ).meta({
   [FIRESTORE_TIMESTAMP_META]: true,
   // zod-to-openapi cannot infer a JSON schema for a `z.custom`, so it reads this
@@ -232,6 +249,20 @@ export const OutOfServiceListInput: z.ZodType<OutOfServiceEntryType[]> = z.array
   z.object({ uid: OutOfServiceId, quantity: z.int().min(0) }),
 ).min(1).superRefine(uniqueOutOfServiceUids);
 
+/**
+ * `out_of_service` on an INVOICE line, which is REQUIRED on every line (ruling
+ * 204): `[]` is "bills no record", so this node has no `.min(1)`. The payable
+ * lines keep {@link OutOfServiceList}, where the key is absent off a
+ * `replacement` line and `[]` would be a second spelling of that.
+ */
+export const BilledOutOfServiceList: z.ZodType<OutOfServiceEntryType[]> = z.array(OutOfServiceEntry)
+  .superRefine(uniqueOutOfServiceUids);
+
+/** {@link BilledOutOfServiceList} as an input takes it: an extra key is stripped. */
+export const BilledOutOfServiceListInput: z.ZodType<OutOfServiceEntryType[]> = z.array(
+  z.object({ uid: OutOfServiceId, quantity: z.int().min(0) }),
+).superRefine(uniqueOutOfServiceUids);
+
 /** A line that may carry an out-of-service link (see {@link outOfServiceEntries}). */
 export interface OutOfServiceLinkCarrier {
   quantity?: number | null;
@@ -254,9 +285,13 @@ export function outOfServiceEntries(line: OutOfServiceLinkCarrier): OutOfService
   return (line.out_of_service ?? []).map((e) => ({ uid: e.uid, quantity: e.quantity }));
 }
 
-/** Whether a line bills an out-of-service record at all. */
+/**
+ * Whether a line bills an out-of-service record at all. Reads a CLAIM as a
+ * non-empty list: an invoice line states `[]` (ruling 204), a payable line
+ * omits the key, and both bill no record.
+ */
 export function billsOutOfService(line: OutOfServiceLinkCarrier): boolean {
-  return line.out_of_service !== undefined;
+  return (line.out_of_service?.length ?? 0) > 0;
 }
 
 /**
@@ -1779,25 +1814,16 @@ export function checkLinePrice(
 
 /**
  * {@link checkLinePrice} on an INPUT price, where the writer resolves the
- * formula. An input names its formula by `uid_price_formula` or — echoing a
- * stored line — by the `price_formula` snapshot, so the percent-xor-formula
- * rule reads whichever is present. Both present and naming different formulas
- * is refused: one of them is a client bug, and preferring either hides it.
+ * formula's snapshot. An input names its formula ONE way, by the stored
+ * `price_formula` snapshot (only its `uid` is read): the `uid_price_formula`
+ * alias is retired (ruling 204 R3), so there is no second spelling to agree.
  */
 export function checkLinePriceInput(
-  price: (NonNullable<Parameters<typeof checkLinePrice>[0]> & { uid_price_formula?: string | null }) | null | undefined,
+  price: NonNullable<Parameters<typeof checkLinePrice>[0]> | null | undefined,
   ctx: z.RefinementCtx,
 ): void {
   if (price == null) return;
-  if (price.uid_price_formula != null && price.price_formula != null && price.price_formula.uid !== price.uid_price_formula) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["price_formula", "uid"],
-      message: `price.price_formula.uid (${price.price_formula.uid}) must match price.uid_price_formula (${price.uid_price_formula})`,
-    });
-  }
-  const named = price.uid_price_formula != null ? { uid: price.uid_price_formula } : price.price_formula;
-  checkLinePrice({ ...price, price_formula: named }, ctx, false);
+  checkLinePrice(price, ctx, false);
 }
 
 // `ITEM_CONTRACTS`' totality over `ITEM_TYPES` is enforced by the

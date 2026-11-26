@@ -69,19 +69,21 @@ export function fdwCounts(days: number, opts: { stated?: boolean } = {}): TierCo
 export function fdwPrice(
   baseCents: number,
   days: number | null = null,
-): { price_formula: PriceFormulaRef; rates: RateSnapshot[]; counts: TierCount[] } {
+): { price_formula: PriceFormulaRef; rates: RateSnapshot[]; counts: TierCount[]; stated_cents: null } {
   return {
     price_formula: FDW_REF,
     rates: [{ rate_key: "week", amount_cents: baseCents }],
     counts: days === null ? [] : fdwCounts(days),
+    // A RATE line states no gross: `null`, never absent (ruling 204).
+    stated_cents: null,
   };
 }
 
 /** A Fixed line price: `baseCents` per unit, count `1 / 1`. */
 export function fixedPrice(
   baseCents: number,
-): { price_formula: PriceFormulaRef; rates: RateSnapshot[]; counts: TierCount[] } {
-  return { price_formula: FIXED_REF, rates: [{ rate_key: "flat", amount_cents: baseCents }], counts: [tier("flat", 1, 1)] };
+): { price_formula: PriceFormulaRef; rates: RateSnapshot[]; counts: TierCount[]; stated_cents: null } {
+  return { price_formula: FIXED_REF, rates: [{ rate_key: "flat", amount_cents: baseCents }], counts: [tier("flat", 1, 1)], stated_cents: null };
 }
 
 const CHICAGO = tz("America/Chicago");
@@ -132,7 +134,7 @@ export function legacyPrice(price: Record<string, unknown>): Record<string, unkn
     [k: string]: unknown;
   };
   let shape: Record<string, unknown>;
-  if (formula === "percent_of_total") shape = { price_formula: null, rates: [], counts: [] };
+  if (formula === "percent_of_total") shape = { price_formula: null, rates: [], counts: [], stated_cents: null };
   else if (formula === "fixed") shape = fixedPrice(base_cents ?? 0);
   else shape = fdwPrice(base_cents ?? 0, typeof chargeable_days === "number" ? chargeable_days : null);
   const out: Record<string, unknown> = { ...shape };

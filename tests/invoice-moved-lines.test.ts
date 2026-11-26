@@ -11,6 +11,7 @@
  */
 import { assert, assertEquals } from "@std/assert";
 import { FORMULAS, fdwPrice } from "./helpers/formulas.ts";
+import { invoiceLineInput } from "./helpers/lines.ts";
 import type { DocDestinationType, Invoice, InvoiceDocItemType, Order } from "../src/schemas/mod.ts";
 import { CreditNoteDocLineItem, InvoiceDocLineItem, InvoiceItemInputLine } from "../src/schemas/mod.ts";
 import { getInitialValues } from "../src/schemas/initial.ts";
@@ -139,7 +140,7 @@ Deno.test("sync: a new row under a kit still at its own path is not adopted by a
   const out = syncOrderToInvoiceSelective(prev, next, invoice, O);
 
   assertEquals(byKey(out, NEW)?.uid, CSTAND, "under the kit that kept its place");
-  assertEquals(pointer(byKey(out, NEW)), undefined);
+  assertEquals(pointer(byKey(out, NEW)), null);
 });
 
 Deno.test("🔴 sync: a moved line follows X's quantity and name, stays where the operator put it, keeps its pointer", () => {
@@ -170,7 +171,7 @@ Deno.test("sync: the order moves X onto the row's own position ⇒ the pointer c
   const next = [dest(D), group(GRIP, "Grip"), group(MISC, "Misc"), line(TRIPOD, [D, MISC, TRIPOD]), line(CSTAND, AT, 5)];
   const out = syncOrderToInvoiceSelective(prev, next, movedInvoice(), O);
   const row = byKey(out, AT)!;
-  assertEquals([row.quantity, pointer(row)], [5, undefined]);
+  assertEquals([row.quantity, pointer(row)], [5, null], "cleared to `null` (ruling 204), never dropped");
   assertEquals(out.filter((it) => it.uid === CSTAND).length, 1);
 });
 
@@ -180,7 +181,7 @@ Deno.test("🔴 sync: X removed — an unedited moved line goes; an overridden o
   assertEquals(byKey(syncOrderToInvoiceSelective(prev, next, movedInvoice(), O), AT), undefined, "unedited: gone with X");
 
   const kept = byKey(syncOrderToInvoiceSelective(prev, next, movedInvoice(prev, { quantity: 3 }), O), AT);
-  assertEquals([kept?.quantity, pointer(kept)], [3, undefined], "overridden: kept, plainly invoice-authored");
+  assertEquals([kept?.quantity, pointer(kept)], [3, null], "overridden: kept, plainly invoice-authored");
 });
 
 Deno.test("sync: X removed takes the moved kit's components with it", () => {
@@ -350,19 +351,19 @@ Deno.test("field: a uid-keyed carry-forward does NOT spread it to another occurr
   const stored = byKey(movedInvoice(), AT)!;
   const rebuilt = buildOrderScopedItems(orderItems(), O);
   const carried = carryForwardOverrides(rebuilt, [stored]).find((it) => it.uid === CSTAND)!;
-  assertEquals(pointer(carried), undefined);
+  assertEquals(pointer(carried), null);
 });
 
 Deno.test("field: the stored line requires a non-empty path when present; the input line keeps it", () => {
   const stored = byKey(movedInvoice(), AT)!;
   assert(InvoiceDocLineItem.safeParse(stored).success);
   assertEquals(InvoiceDocLineItem.safeParse({ ...stored, path_source_item: [] }).success, false);
-  const input = InvoiceItemInputLine.parse({ uid: CSTAND, type: "rental", path: [O, ...AT], path_source_item: X });
+  const input = InvoiceItemInputLine.parse(invoiceLineInput({ uid: CSTAND, type: "rental", path: [O, ...AT], path_source_item: X }));
   assertEquals(input.path_source_item, X);
 });
 
-Deno.test("seed: `.meta({ seed: false })` omits a .min(1) pointer from the form seed — both grains", () => {
-  assertEquals("path_source_item" in (getInitialValues(InvoiceDocLineItem) as object), false);
-  assertEquals("path_source_item" in (getInitialValues(InvoiceItemInputLine) as object), false);
-  assertEquals("path_invoice_item" in (getInitialValues(CreditNoteDocLineItem) as object), false);
+Deno.test("seed: the pointer is seeded `null` — a required class-C key (ruling 204), both grains", () => {
+  assertEquals(getInitialValues(InvoiceDocLineItem).path_source_item, null);
+  assertEquals(getInitialValues(InvoiceItemInputLine).path_source_item, null);
+  assertEquals("path_invoice_item" in (getInitialValues(CreditNoteDocLineItem) as object), false, "the retired spelling stays gone");
 });

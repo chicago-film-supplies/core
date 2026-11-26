@@ -938,7 +938,7 @@ function statedLineOf(item: LineItem): StatedTotalLine {
       price_formula: price.price_formula,
       discount: price.discount ?? null,
       taxes: price.taxes ?? [],
-      ...(stated !== undefined ? { stated_cents: stated } : {}),
+      stated_cents: stated ?? null,
     },
   };
 }
@@ -999,7 +999,7 @@ export function priceDocument<T extends LineItem | PayableLine>(
   // A payable line enters the shared stages as a line item: it carries the
   // `type`, `quantity`, `price` and tax-class keys they read, and its price the
   // same money keys once priced. The cast is on the way IN; the return is `T`.
-  const items = input as unknown as readonly LineItem[];
+  const items = input as readonly LineItem[];
   // The document's date-extension sections, read off its own dividers: never a
   // caller's input, so no writer can forget them and re-meter an extension row
   // with its formula's minimum (one-document-model 6e-0b2 F5; both sides).
@@ -1035,7 +1035,7 @@ export function priceDocument<T extends LineItem | PayableLine>(
         money,
         item,
         taxesBase === undefined ? undefined : { taxesBase },
-      ) as unknown as PriceObject;
+      ) as PriceObject;
       continue;
     }
     const extension = extensionFor(item, extensions);
@@ -1054,7 +1054,7 @@ export function priceDocument<T extends LineItem | PayableLine>(
       money,
       item,
       taxesBase === undefined ? undefined : { taxesBase },
-    ) as unknown as PriceObject;
+    ) as PriceObject;
   }
 
   // ── Stage 4: percent fee lines store their costed amount ──
@@ -1082,7 +1082,7 @@ export function priceDocument<T extends LineItem | PayableLine>(
 
   // ── Stage 5: totals are a sum of what is stored ──
   return {
-    items: out as unknown as T[],
+    items: out as T[],
     totals: sumPricedLines(out),
     replacement_total_cents: ctx.document.kind === "order" || ctx.document.kind === "purchase"
       ? calculateReplacementTotals(out, pricing).total_cents
@@ -1225,16 +1225,20 @@ export function withPart<R extends PartRow>(row: R, quantity: number, part: Part
 
 /**
  * A stated part turned into a RATE part of a source that is now a rate line:
- * the gross key goes, the terms stay without cents (the pricer derives them at
- * `units_from`, ruling 174), and the money is the pricer's to restate.
+ * the gross is cleared to `null` (ruling 204: never dropped), the terms stay
+ * without cents (the pricer derives them at `units_from`, ruling 174), and the
+ * money is the pricer's to restate.
  */
 function asRatePart<R extends PartRow>(row: R): R {
   if (lineKindOf(row) === "rate") return row;
-  const { stated_cents: _gross, ...price } = row.price as R["price"] & { stated_cents?: number | null };
-  const terms = price.discount;
+  const terms = row.price.discount;
   return {
     ...row,
-    price: { ...price, discount: terms === null ? null : { rate: terms.rate, type: terms.type, amount_cents: 0 } },
+    price: {
+      ...row.price,
+      stated_cents: null,
+      discount: terms == null ? null : { rate: terms.rate, type: terms.type, amount_cents: 0 },
+    },
   };
 }
 
@@ -1524,7 +1528,7 @@ export function priceCreditNote(
         discount: line.price.discount,
         taxes: [...line.price.taxes],
       },
-    } as unknown as LineItem;
+    } as LineItem;
     if (!isPreTaxItem(source)) {
       throw new PriceRefusalError(`Line ${line.uid} has type "${line.type}", which cannot be credited — only a pre-tax line has a credit`);
     }
@@ -1565,7 +1569,7 @@ export function priceCreditNote(
           amount_cents: computeItemTaxAmountCents(taxDoc, part.amount_cents, quantity),
         };
       });
-      const unitItem = { ...source, price: { ...source.price, counts: [] } } as unknown as LineItem;
+      const unitItem = { ...source, price: { ...source.price, counts: [] } } as LineItem;
       const price = assembleLinePrice(
         { price_formula: line.price.price_formula, rates: [...line.price.rates], counts: [] },
         {
@@ -1579,10 +1583,10 @@ export function priceCreditNote(
       ) as CreditLinePrice;
       prices.push(price);
       unitsFrom.push(part.units_from);
-      priced.push({ ...unitItem, price } as unknown as LineItem);
+      priced.push({ ...unitItem, price } as LineItem);
       continue;
     }
-    const item = { ...source, price: { ...source.price, counts } } as unknown as LineItem;
+    const item = { ...source, price: { ...source.price, counts } } as LineItem;
     const price = assembleLinePrice(
       { price_formula: line.price.price_formula, rates: [...line.price.rates], counts },
       priceLine(item, taxes, credited_counts !== undefined || extension !== undefined),
@@ -1590,7 +1594,7 @@ export function priceCreditNote(
     ) as CreditLinePrice;
     prices.push(price);
     unitsFrom.push(null);
-    priced.push({ ...item, price } as unknown as LineItem);
+    priced.push({ ...item, price } as LineItem);
   }
   const { transaction_fees: _fees, ...totals } = sumPricedLines(priced);
   return { prices, units_from: unitsFrom, totals };
@@ -1632,7 +1636,7 @@ export function sumPricedLines(items: readonly LineItem[]): DocumentTotalsCore {
  */
 export function purchaseTotals(items: readonly PurchaseRow[]): InitiatorTotalsType {
   // A payable line enters the shared fold as a line item, as in `priceDocument`.
-  const lines = purchaseLines(items) as unknown as LineItem[];
+  const lines = purchaseLines(items) as LineItem[];
   return { ...sumPricedLinesOf(lines), replacement_total_cents: calculateReplacementTotals(lines, []).total_cents };
 }
 

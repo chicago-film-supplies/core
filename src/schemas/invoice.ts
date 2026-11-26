@@ -35,8 +35,8 @@ import {
   ExchangedForList,
   ExchangedForListInput,
   type ExchangedForEntryType,
-  OutOfServiceList,
-  OutOfServiceListInput,
+  BilledOutOfServiceList,
+  BilledOutOfServiceListInput,
   type OutOfServiceEntryType,
   outOfServiceEntries,
   outOfServiceLinkIssues,
@@ -457,7 +457,7 @@ export interface InvoiceDocItemPriceType {
   /** See {@link OrderDocItemPriceType.counts} — frozen when the line is priced. */
   counts: TierCountType[];
   /** See {@link OrderDocItemPriceType.base_percent} — same biconditional. */
-  base_percent?: number | null;
+  base_percent: number | null;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
@@ -484,11 +484,11 @@ export interface InvoiceDocItemPriceType {
   /**
    * The line's stated GROSS over its `quantity`, before `discount` — a STATED
    * line, as on its order line (one-document-model ruling 189; `StatedCore`, `schemas/_line-money.ts`).
-   * Absent or `null` is a RATE line, priced from `rates × counts`: every line
-   * stored before ruling 189. Set, `subtotal_cents` is this total and the net is
-   * it less `discount.amount_cents` (D7), and a quantity edit keeps the total.
+   * `null` is a RATE line, priced from `rates × counts`: every line stored
+   * before ruling 189. Set, `subtotal_cents` is this total and the net is it
+   * less `discount.amount_cents` (D7), and a quantity edit keeps the total.
    */
-  stated_cents?: number | null;
+  stated_cents: number | null;
 }
 
 const InvoiceDocItemPrice: z.ZodType<InvoiceDocItemPriceType> = z.strictObject({
@@ -496,7 +496,7 @@ const InvoiceDocItemPrice: z.ZodType<InvoiceDocItemPriceType> = z.strictObject({
   rates: z.array(RateSnapshotSchema).meta({ shared: "value", label: "Rate" }),
   // Metered from the invoice pair's charge windows, as on an order line.
   counts: z.array(TierCountSchema).meta({ derived: true }),
-  base_percent: z.number().nullable().optional(),
+  base_percent: z.number().nullable(),
   // `xero: true` on the three keys the edit body prices a line from (F16);
   // `discount` and `taxes` are tagged at the KEY, so the tag covers the block
   // without tagging `Discount` / `PriceModifier` everywhere else.
@@ -510,8 +510,9 @@ const InvoiceDocItemPrice: z.ZodType<InvoiceDocItemPriceType> = z.strictObject({
   // Labelled for the same reason the order side's is: `TaxRef` carries `name`
   // and `rate` as columns, so every key holding one inherits two columns and has
   // to name them, or the pre-override snapshot collides with the live `taxes`.
-  taxes_base: z.array(TaxRef).optional().meta({ label: "Base Tax" }),
-  total_cents: z.int().meta({ column: true, label: "Total" }),
+  // `derived: true`, as on the order line: the pricer writes both.
+  taxes_base: z.array(TaxRef).optional().meta({ label: "Base Tax", derived: true }),
+  total_cents: z.int().meta({ column: true, label: "Total", derived: true }),
   // Appended LAST so no existing column moves.
   ...StatedCore,
 }).superRefine((price, ctx) => checkLinePrice(price, ctx));
@@ -557,7 +558,7 @@ export interface InvoiceDocLineItemType {
    */
   zero_priced: boolean | null;
   /** @see `LineItemCore.quantity_per_parent` (`schemas/_items.ts`) — the per-parent ratio, stamped at expansion. */
-  quantity_per_parent?: number | null;
+  quantity_per_parent: number | null;
   /**
    * @see `OrderDocLineItemType.coa_revenue`. Shared with the order line
    * (`LinePostingCore`), so it follows the order line until an operator
@@ -577,12 +578,11 @@ export interface InvoiceDocLineItemType {
    */
   uid_tax_class: string;
   /** @see `OrderDocLineItemType.uid_tax_class_override`. */
-  uid_tax_class_override?: string | null;
-  xero_id?: string | null;
-  /** @deprecated Legacy CRMS field — not set on new invoices. */
-  crms_opportunity_id?: number | null;
-  /** @deprecated Legacy CRMS field — not set on new invoices. */
-  crms_id?: number | string | null;
+  uid_tax_class_override: string | null;
+  /** Server-set; `null` until set (ruling 204 Q2). */
+  xero_id: string | null;
+  /** @deprecated Legacy CRMS field — not set on new invoices; `null` there (ruling 204 Q2). */
+  crms_id: number | string | null;
   /**
    * Operator-set on substitution line items (manager#414): the ORDER lines this
    * row stands in for, with how many units each — see `SubstitutedForList`. It is
@@ -593,30 +593,12 @@ export interface InvoiceDocLineItemType {
    * that is the one place it differs from `FulfillmentLineItemType`'s field of
    * the same name, whose divergence is a physical fact.
    *
-   * **Why `.optional()` rather than the repo's preferred bare `.nullable()`**
-   * (`CLAUDE.md` § *Making a field REQUIRED*, and the ruling in
-   * `tests/stored-optionality.test.ts`):
-   *
-   * 1. **No writer can supply it on every line.** It is meaningful only where a
-   *    substitution happened; `null` on the other ~8,900 stored lines would be
-   *    filler to satisfy a requirement, which is the "never reach for
-   *    `.nullable()` as a cushion" clause rather than an exception to it.
-   * 2. 🔴 **The tightening procedure is not even executable here.** Step 1 is a
-   *    both-environment key-presence census, whose only oracle is `orderBy` —
-   *    and this field sits inside an ARRAY OF MAPS, which `orderBy` cannot
-   *    reach. That is `stored-optionality.test.ts`'s own
-   *    `array-member-uncensusable`.
-   * 3. **Its twin is already spelled this way.**
-   *    `FulfillmentLineItemType.substituted_for` is plain `.optional()`,
-   *    and this field's entire job is to mean the same thing on a second
-   *    surface. Two spellings of one fact is the defect
-   *    {@link INVOICE_ONLY_ITEM_FIELDS} records under `crms_id`.
-   * 4. **Absence cannot reach the state the ruling protects against.** Every
-   *    consumer is already absence-shaped — `pickInvoiceOnlyFields` skips
-   *    `undefined` and `projectOrderItemToInvoiceItem` spreads conditionally —
-   *    so no path hands a literal `undefined` to a write boundary.
+   * `[]` on a line that stands in for nothing (ruling 204: a list's empty value
+   * is `[]`, and the key is required, so a stored row is a valid input row). The
+   * earlier "why `.optional()`" argument — that no writer could supply it on
+   * every line — was overturned by that ruling: a writer states `[]`.
    */
-  substituted_for?: SubstitutedForEntryType[];
+  substituted_for: SubstitutedForEntryType[];
   /**
    * The `out-of-service` records this line BILLS, each with its share of the
    * line's `quantity` (`OutOfServiceList`; ruling 16, 2026-11-10) — a lost or
@@ -641,11 +623,11 @@ export interface InvoiceDocLineItemType {
    * It replaced the single `uid_out_of_service` (W4R), retired at W4K's
    * contract publish once every stored line was migrated.
    *
-   * `.optional()` with `seed: false`, as `path_source_item`: `[]` fails
-   * `.min(1)`, so the form seed must omit the key. Catalogued in
-   * `tests/stored-optionality.test.ts` as array-member-uncensusable.
+   * Required, `[]` on a line that bills no record (ruling 204), so this grain
+   * takes the min-less `BilledOutOfServiceList`; the payable lines keep
+   * `OutOfServiceList`'s `.min(1)`.
    */
-  out_of_service?: OutOfServiceEntryType[];
+  out_of_service: OutOfServiceEntryType[];
   /**
    * The ORDER line this row bills, when the row sits somewhere else (core#125):
    * an operator dragged it into another group or destination inside its own
@@ -669,21 +651,21 @@ export interface InvoiceDocLineItemType {
    * by `uid`, which repeats within a document, so carrying it would stamp the
    * pointer onto another occurrence of the same product.
    *
-   * `.optional()` for `substituted_for`'s reasons (array-member-uncensusable,
-   * meaningful on a handful of rows only).
+   * Required, `null` on a row that sits at its own source path (ruling 204,
+   * class C: a POINTER path's empty value is `null`, never `[]`).
    *
    * One key on both sides (ruling 109; it replaced `path_order_item`). Write it
    * through `withRowSourcePath`.
    */
-  path_source_item?: string[];
+  path_source_item: string[] | null;
   /**
    * The first unit of its SOURCE line this line covers (one-document-model ruling
    * 174, `UnitsFromField` in `schemas/_line-money.ts`, one declaration on every
    * billing and credit line): a rate line prices units `(units_from, units_from +
    * quantity]` of its source as cumulative formula differences, so its parts sum
-   * exactly to the source's money. Absent or `null` is a whole line.
+   * exactly to the source's money. `null` is a whole line.
    */
-  units_from?: number | null;
+  units_from: number | null;
   /**
    * An exchange line's take-back list, as the order line states it
    * (`OrderDocLineItemType.exchanged_for`; ruling 82 of the one-document-model
@@ -698,11 +680,10 @@ export interface InvoiceDocLineItemType {
    * ({@link checkInvoiceExchangedFor}) checks what this invoice can see; the
    * writer checks the rest against the order's pairs.
    *
-   * Plain `.optional()` for `substituted_for`'s reasons (array-member-uncensusable,
-   * meaningful on exchange lines only). Untagged: the order line's
+   * Required, `[]` off an exchange line (ruling 204). Untagged: the order line's
    * `shared: "value"` tag already classifies it, as the fulfillment line's is.
    */
-  exchanged_for?: ExchangedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
 }
 
 /**
@@ -780,24 +761,19 @@ const InvoiceDocLineItemInner = z.strictObject({
   // same declarations.
   ...LinePostingCore,
   ...LineTaxCore,
-  xero_id: XeroId.nullable().optional(),
-  crms_opportunity_id: z.int().nullable().optional(),
-  crms_id: z.union([z.int(), z.string()]).nullable().optional(),
-  // Plain `.optional()`, matching `FulfillmentLineItem.substituted_for`
-  // exactly — see the interface docblock for why this one is not `.nullable()`.
-  substituted_for: SubstitutedForList.optional(),
-  // `seed: false`: `[]` fails `.min(1)`, as `path_source_item` just below.
-  out_of_service: OutOfServiceList.optional().meta({ seed: false }),
+  // Server-set keys are present, `null` until set (ruling 204 Q2). The
+  // deprecated `crms_opportunity_id` is deleted (no reader; unset by the window).
+  xero_id: XeroId.nullable(),
+  crms_id: z.union([z.int(), z.string()]).nullable(),
+  // Every key below is required with its empty value (ruling 204): `[]` for a
+  // list of facts, `null` for a pointer path. See each interface docblock.
+  substituted_for: SubstitutedForList,
+  out_of_service: BilledOutOfServiceList,
   // See the interface docblock (core#125). The credit note's
   // `path_billing_item` is its twin one grain down.
-  // `seed: false`: `[]` fails `.min(1)`, so the form seed must omit the key.
-  path_source_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
+  path_source_item: z.array(ItemUid).min(1).nullable(),
   units_from: UnitsFromField,
-  // See the interface docblock. Plain `.optional()`, as the fulfillment line's.
-  // `seed: false`, as `path_source_item`: a seeded `[]` claims the take-back list of
-  // an exchange line on a line under no exchange pair, which `checkInvoiceExchangedFor`
-  // refuses, so the form seed must omit the key.
-  exchanged_for: ExchangedForList.optional().meta({ seed: false }),
+  exchanged_for: ExchangedForList,
 }).superRefine(checkItemPriceFormula).superRefine(checkZeroPricedAmount)
   .superRefine(checkOutOfServiceLineType);
 
@@ -847,13 +823,11 @@ export const InvoiceDocOrderItem: z.ZodType<InvoiceDocOrderItemType> =
  * both sides (`DestinationSectionDividerArm`, `schemas/_dividers.ts`): an
  * invoice's rows and a bill's or supplier credit's rows take it.
  *
- * ⚠️ Absent on every divider stored before 2026-09-15, and on every full-window
- * section after it. There is no `null`: a divider either extends a section or
- * it does not.
+ * `null` on every divider that does not open a section (ruling 204, class C).
  */
 export interface InvoiceDocDestinationItemType extends OrderDocDestinationItemType {
-  /** The initiator-relative path of the initiator destination divider this section extends. */
-  path_extension_for?: string[];
+  /** The initiator-relative path of the initiator destination divider this section extends; `null` off a section (ruling 204). */
+  path_extension_for: string[] | null;
 }
 
 /** Zod schema for an invoice destination divider. */
@@ -1522,38 +1496,35 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
 
 // ── Input schemas ────────────────────────────────────────────────
 
-/** Item price input — partial, server computes the rest. */
+/**
+ * Item price input: every key stated (ruling 204), the derived keys the
+ * pricer's (Q3). See {@link ItemPriceType}.
+ */
 export interface InvoiceItemInputPriceType {
-  /** See {@link ItemPriceType.uid_price_formula}. */
-  uid_price_formula?: string;
   /** See {@link ItemPriceType.price_formula}. */
-  price_formula?: PriceFormulaRef | null;
+  price_formula: PriceFormulaRef | null;
   /** See {@link ItemPriceType.rates}. */
-  rates?: RateSnapshotType[];
-  base_percent?: number | null;
-  discount?: DiscountInputType | null;
-  taxes?: Array<{ uid: string }>;
+  rates: RateSnapshotType[];
+  base_percent: number | null;
+  discount: DiscountInputType | null;
   /**
    * The line's stated GROSS over its quantity (ruling 189) — set makes a STATED
-   * line, omitted or `null` a RATE line priced from `rates` (ruling 190: a
-   * submitted row is the row). The writer turns the discount terms into cents
-   * once against it (`applyDiscountTerms`, D7).
+   * line, `null` a RATE line priced from `rates` (ruling 190: a submitted row is
+   * the row). The writer turns the discount terms into cents once against it
+   * (`applyDiscountTerms`, D7).
    */
-  stated_cents?: number | null;
+  stated_cents: number | null;
 }
 
 const InvoiceItemInputPrice: z.ZodType<InvoiceItemInputPriceType> = z.object({
-  uid_price_formula: FirestoreId.optional(),
-  price_formula: PriceFormulaRefInput.nullable().optional(),
-  rates: z.array(z.object({ rate_key: RateKey, amount_cents: z.int() })).optional(),
-  base_percent: z.number().nullable().optional(),
-  // No `counts`: metered from the pair's charge windows by `priceDocument`
-  // (Phase 2 ruling 8), and stripped if sent.
-  discount: DiscountInput.nullable().optional(),
-  taxes: z.array(z.object({ uid: FirestoreId })).optional(),
+  price_formula: PriceFormulaRefInput.nullable(),
+  rates: z.array(z.object({ rate_key: RateKey, amount_cents: z.int() })),
+  base_percent: z.number().nullable(),
+  // No `counts`, `taxes` or other derived key: the pricer's (Q3), stripped if sent.
+  discount: DiscountInput.nullable(),
   // Untagged: an input declares its own twin of `StatedCore` (the payable
   // inputs' precedent); the merge and the Xero hash read the stored schema.
-  stated_cents: z.int().min(0).nullable().optional(),
+  stated_cents: z.int().min(0).nullable(),
 }).superRefine(checkLinePriceInput);
 
 /**
@@ -1570,17 +1541,17 @@ const InvoiceItemInputPrice: z.ZodType<InvoiceItemInputPriceType> = z.object({
 export interface InvoiceItemInputLineType {
   uid: string;
   type: DocLineItemTypeType;
-  name?: string;
-  description?: string;
-  quantity?: number;
-  price?: InvoiceItemInputPriceType;
+  name: string;
+  description: string;
+  quantity: number;
+  price: InvoiceItemInputPriceType;
   path: string[];
-  /** @see `OrderItemLineType.coa_revenue` — the same set/keep/clear rule. */
-  coa_revenue?: COARevenueType | null;
-  /** @see `OrderItemLineType.uid_tracking_category` — the same set/keep/clear rule. */
-  uid_tracking_category?: string | null;
+  /** @see `OrderItemLineType.coa_revenue` — the same set/clear rule. */
+  coa_revenue: COARevenueType | null;
+  /** @see `OrderItemLineType.uid_tracking_category` — the same set/clear rule. */
+  uid_tracking_category: string | null;
   /** @see `OrderDocLineItemType.uid_tax_class_override` — operator-authored, so it is accepted here. */
-  uid_tax_class_override?: string | null;
+  uid_tax_class_override: string | null;
   /**
    * @see `InvoiceDocLineItemType.substituted_for`. Operator-authored, so it
    * needs an input channel: this schema is a plain `z.object` and STRIPS
@@ -1588,13 +1559,13 @@ export interface InvoiceItemInputLineType {
    * fields — so a field absent here is silently dropped on every PUT rather
    * than rejected.
    */
-  substituted_for?: SubstitutedForEntryType[];
+  substituted_for: SubstitutedForEntryType[];
   /**
    * @see `InvoiceDocLineItemType.exchanged_for`. Needs an input channel for the
    * `substituted_for` reason above. A stripping list ({@link ExchangedForListInput}),
    * so this input adds no strict node.
    */
-  exchanged_for?: ExchangedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
   /**
    * @see `InvoiceDocLineItemType.zero_priced`. NOT operator-authored — it is
    * projected from the order line — and it still needs an input channel, for
@@ -1606,31 +1577,31 @@ export interface InvoiceItemInputLineType {
    * `true` to every rate being `0`, so a client cannot flag a line it also
    * charges for.
    */
-  zero_priced?: boolean | null;
+  zero_priced: boolean | null;
   /**
    * @see `InvoiceDocLineItemType.quantity_per_parent`. Projected from the order
    * line, and needs an input channel for the `zero_priced` reason above:
    * `buildInvoiceItems` rebuilds every line from typed fields.
    */
-  quantity_per_parent?: number | null;
+  quantity_per_parent: number | null;
   /**
    * @see `InvoiceDocLineItemType.out_of_service`. Needs an input channel for
    * the `substituted_for` reason: `buildInvoiceItems` rebuilds every stored line
    * from typed fields, so a key absent here is dropped on every PUT.
    */
-  out_of_service?: OutOfServiceEntryType[];
+  out_of_service: OutOfServiceEntryType[];
   /**
    * @see `InvoiceDocLineItemType.path_source_item`. Operator-authored (a drop or
    * a split in the manager), so it needs an input channel for the
    * `substituted_for` reason. The API checks it names a line of the row's own
    * order (core#125 D3).
    */
-  path_source_item?: string[];
+  path_source_item: string[] | null;
   /**
    * @see `InvoiceDocLineItemType.units_from`. Echoed by the client so an operator
    * edit of a part keeps the units it covers (ruling 174); the server stamps it.
    */
-  units_from?: number | null;
+  units_from: number | null;
 }
 
 // Un-annotated for `_zod.propValues`, `z.object` so unknown keys are stripped
@@ -1656,10 +1627,9 @@ const InvoiceItemInputLineInner = z.object({
   // hits `case "string": return ""` whether or not the node carries `.min(1)`,
   // so all three spellings yield `{"name":""}`. Kept as an explicit statement of
   // intent, because the bound would otherwise read as forbidding a blank row.
-  name: z.string().min(1).max(100).meta({ pii: "none", initial: "" })
-    .optional(),
+  name: z.string().min(1).max(100).meta({ pii: "none", initial: "" }),
   // Line-item text — not customer data. See `OrderDocLineItem.description`.
-  description: z.string().meta({ pii: "none" }).optional(),
+  description: z.string().meta({ pii: "none" }),
   // `.min(0)` to match `LineItemCore.quantity`; the input admitted a negative.
   // ⚠️ **No `.meta({ initial })` beside it, and that is checked rather than
   // assumed** — no `quantity` field anywhere in the package carries one, and
@@ -1667,19 +1637,20 @@ const InvoiceItemInputLineInner = z.object({
   // seed. The five fields that do carry an `initial` are `z.boolean().default(true)`,
   // where the type-derived zero is wrong. Same reasoning `9435a15` recorded for
   // the destination pair's two flags.
-  quantity: z.int().min(0).optional(),
-  price: InvoiceItemInputPrice.optional(),
+  quantity: z.int().min(0),
+  price: InvoiceItemInputPrice,
   path: z.array(ItemUid),
-  coa_revenue: COARevenueEnum.nullable().optional(),
-  uid_tracking_category: FirestoreId.nullable().optional(),
-  uid_tax_class_override: FirestoreId.nullable().optional(),
-  substituted_for: SubstitutedForList.optional(),
-  zero_priced: z.boolean().nullable().optional(),
-  quantity_per_parent: z.number().min(0).nullable().optional(),
-  out_of_service: OutOfServiceListInput.optional().meta({ seed: false }),
-  path_source_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
+  // Every key below is required with its empty value (ruling 204).
+  coa_revenue: COARevenueEnum.nullable(),
+  uid_tracking_category: FirestoreId.nullable(),
+  uid_tax_class_override: FirestoreId.nullable(),
+  substituted_for: SubstitutedForList,
+  zero_priced: z.boolean().nullable(),
+  quantity_per_parent: z.number().min(0).nullable(),
+  out_of_service: BilledOutOfServiceListInput,
+  path_source_item: z.array(ItemUid).min(1).nullable(),
   units_from: UnitsFromField,
-  exchanged_for: ExchangedForListInput.optional().meta({ seed: false }),
+  exchanged_for: ExchangedForListInput,
 }).superRefine(checkItemPriceFormula).superRefine(checkOutOfServiceLineType);
 
 /** Zod schema for a billable invoice line (input). */
@@ -1690,11 +1661,11 @@ export const InvoiceItemInputLine: z.ZodType<InvoiceItemInputLineType> =
 export interface InvoiceItemInputDestinationType {
   uid: string;
   type: "destination";
-  name?: string;
-  description?: string;
+  name: string;
+  description: string;
   path: string[];
   /** See {@link InvoiceDocDestinationItemType.path_extension_for}. */
-  path_extension_for?: string[];
+  path_extension_for: string[] | null;
 }
 
 // `z.strictObject`, unlike the line arm above — see the note on
@@ -1704,11 +1675,12 @@ export interface InvoiceItemInputDestinationType {
 const InvoiceItemInputDestinationInner = z.strictObject({
   uid: ItemUid,
   type: z.literal("destination"),
-  // Venue label, not a person. See `DestinationDividerArm.name`.
-  name: z.string().meta({ pii: "none" }).optional(),
-  description: z.string().meta({ pii: "none" }).optional(),
+  // Venue label, not a person. See `DestinationDividerArm.name`. Every key
+  // required (ruling 204 Q7); `""` is a value.
+  name: z.string().max(200).meta({ pii: "none" }),
+  description: z.string().meta({ pii: "none" }),
   path: z.array(ItemUid),
-  path_extension_for: z.array(ItemUid).min(1).optional(),
+  path_extension_for: z.array(ItemUid).min(1).nullable(),
   // `.nullable()`, not merely `.optional()` (api-cloudrun#492). The divider
   // BUILDER writes `?? null`, so the stored shape carries an explicit `null`
   // whenever the client omitted the id — and the manager drafts an invoice from
@@ -1732,8 +1704,8 @@ export const InvoiceItemInputDestination: z.ZodType<
 export interface InvoiceItemInputGroupType {
   uid: string;
   type: "group";
-  name?: string;
-  description?: string;
+  name: string;
+  description: string;
   path: string[];
 }
 
@@ -1741,9 +1713,10 @@ export interface InvoiceItemInputGroupType {
 const InvoiceItemInputGroupInner = z.strictObject({
   uid: ItemUid,
   type: z.literal("group"),
-  // Section header drawn from the catalog. See `GroupDividerArm.name`.
-  name: z.string().meta({ pii: "none" }).optional(),
-  description: z.string().meta({ pii: "none" }).optional(),
+  // Section header drawn from the catalog. See `GroupDividerArm.name`. Required
+  // and bounded as the stored arm (ruling 204 Q7).
+  name: z.string().min(1).max(100).meta({ pii: "none" }),
+  description: z.string().meta({ pii: "none" }),
   path: z.array(ItemUid),
 });
 
@@ -1755,8 +1728,8 @@ export const InvoiceItemInputGroup: z.ZodType<InvoiceItemInputGroupType> =
 export interface InvoiceItemInputOrderType {
   uid: string;
   type: "order";
-  name?: string;
-  description?: string;
+  name: string;
+  description: string;
   path: string[];
 }
 
@@ -1766,8 +1739,8 @@ const InvoiceItemInputOrderInner = z.strictObject({
   // `InvoiceDocOrderItem`.
   uid: ItemUid,
   type: z.literal("order"),
-  name: z.string().meta({ pii: "none" }).optional(),
-  description: z.string().meta({ pii: "none" }).optional(),
+  name: z.string().max(200).meta({ pii: "none" }),
+  description: z.string().meta({ pii: "none" }),
   path: z.array(ItemUid),
 });
 

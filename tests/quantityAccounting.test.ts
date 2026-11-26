@@ -1231,7 +1231,7 @@ Deno.test("buildRemainder: every order's block in source order, each line a PART
   const light = (scope: string) => built.items.find((it) => it.path.join("/") === `${scope}/${lightKey}`) as unknown as { quantity: number; units_from?: number };
   // Order 1: 4 of 6 billed, so 2 units continuing after the 4th; order 2: all 3, a whole line.
   assertEquals([light(O).quantity, light(O).units_from], [2, 4]);
-  assertEquals([light(O2).quantity, light(O2).units_from], [3, undefined]);
+  assertEquals([light(O2).quantity, light(O2).units_from], [3, null], "a whole line states `null` (ruling 204)");
   assertEquals(built.destinations.map((d) => d.uid_source), [O, O2]);
 });
 

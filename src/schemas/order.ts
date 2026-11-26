@@ -798,8 +798,10 @@ export function exchangedForViolations(
   const out: ExchangedForViolation[] = [];
 
   doc.items.forEach((item, i) => {
+    // A CLAIM is a non-empty list: every line states the key, `[]` off an
+    // exchange line (ruling 204), and a divider states none.
     const entries = (item as { exchanged_for?: ExchangedForEntryType[] }).exchanged_for;
-    if (entries === undefined) return;
+    if (entries === undefined || entries.length === 0) return;
     const leg = item.path[0];
     const exchange = leg === undefined ? undefined : exchangeByPair.get(leg);
     if (exchange === undefined) {
@@ -844,11 +846,13 @@ export function exchangedForViolations(
 /**
  * `row` with its move pointer (`path_source_item`, ruling 109: the initiator
  * line a billing row bills from another position, initiator-relative) set to
- * `pointer`; `undefined` clears it.
+ * `pointer`; `undefined` clears it to `null` — the key is required on a billing
+ * LINE (ruling 204, class C). A row whose arm has no such key (a divider) is
+ * returned as it is when cleared.
  */
 export function withRowSourcePath<R extends object>(row: R, pointer: readonly string[] | undefined): R {
-  const { path_source_item: _s, ...rest } = row as R & { path_source_item?: string[] | null };
-  return (pointer === undefined ? rest : { ...rest, path_source_item: [...pointer] }) as R;
+  if (pointer !== undefined) return { ...row, path_source_item: [...pointer] };
+  return "path_source_item" in row ? { ...row, path_source_item: null } : row;
 }
 
 /**
@@ -874,7 +878,8 @@ export function billingExchangedForViolations(
 ): ExchangedForViolation[] {
   const scopes = new Map<string, number[]>();
   doc.items.forEach((item, i) => {
-    if ((item as { exchanged_for?: unknown }).exchanged_for === undefined) return;
+    // A claim is a non-empty list (ruling 204), as in `exchangedForViolations`.
+    if (!("exchanged_for" in item) || !Array.isArray(item.exchanged_for) || item.exchanged_for.length === 0) return;
     const scope = item.path[0];
     if (scope === undefined) return;
     scopes.set(scope, [...(scopes.get(scope) ?? []), i]);
@@ -1944,73 +1949,58 @@ export const DiscountInput: z.ZodType<DiscountInputType> = z.object({
 // ── Input schemas ─────────────────────────────────────────────────
 
 /**
- * Price breakdown for an order item (input — client sends partial data, server computes the rest).
+ * Price breakdown for an order item (input). **A submitted row states every key**
+ * (ruling 204): a clear is an explicit `null`, and an omitted key is a 400 —
+ * never a keep, never a fill. The DERIVED keys (`counts`, `subtotal_cents`,
+ * `subtotal_discounted_cents`, `taxes`, `taxes_base`, `total_cents`) are the
+ * pricer's and are not on the input (ruling 204 Q3): an echoed stored line
+ * carries them and has them stripped.
  */
 export interface ItemPriceType {
   /**
-   * The `price-formulas/{uid}` to price by. Omitted, the writer takes the
-   * product's (or keeps the stored line's); the line then snapshots the
-   * formula's `{ uid, name, basis }` as `price_formula`.
+   * The formula, as a STORED line carries it — the one spelling (ruling 204 R3;
+   * the `uid_price_formula` alias is retired). Only `uid` is read; the writer
+   * re-derives `name` and `basis`. `null` keeps its meaning: with `base_percent`
+   * set, a percent-of-total fee. See {@link OrderDocItemPriceType.price_formula}.
    */
-  uid_price_formula?: string;
-  /**
-   * The formula as a STORED line carries it — accepted so a client echoing a
-   * stored line names its formula without converting it (api-cloudrun order
-   * 1083, 2026-11-02: the manager PUTs `items` in stored form, and stripping
-   * this key left every custom line unpriced). Only `uid` is read; the writer
-   * re-derives `name` and `basis`. Disagreeing with `uid_price_formula` is
-   * refused ({@link checkLinePriceInput}). See
-   * {@link OrderDocItemPriceType.price_formula}.
-   */
-  price_formula?: PriceFormulaRef | null;
-  /**
-   * The rates to price with, per `rate_key` — the operator's override. Omitted,
-   * the writer snapshots the product's rates in force on the line's pricing
-   * date (or keeps the stored line's).
-   */
-  rates?: RateSnapshotType[];
-  base_percent?: number | null;
-  replacement_cents?: number | null;
-  subtotal_cents?: number;
-  discount?: DiscountInputType | null;
-  taxes?: Array<{ uid: string }>;
-  total_cents?: number;
+  price_formula: PriceFormulaRef | null;
+  /** The rates to price with, per `rate_key` — the line's rates, stated whole. */
+  rates: RateSnapshotType[];
+  base_percent: number | null;
+  replacement_cents: number | null;
+  discount: DiscountInputType | null;
   /**
    * The line's stated GROSS over its quantity (ruling 189) — set makes a STATED
-   * line, omitted or `null` a RATE line priced from `rates` (ruling 190: a
-   * submitted row is the row). The writer turns the discount terms into cents
-   * once against it (`applyDiscountTerms`, D7).
+   * line, `null` a RATE line priced from `rates` (ruling 190: a submitted row is
+   * the row). The writer turns the discount terms into cents once against it
+   * (`applyDiscountTerms`, D7).
    */
-  stated_cents?: number | null;
+  stated_cents: number | null;
 }
 
 /** Zod schema for item price breakdown (input). */
 export const ItemPrice: z.ZodType<ItemPriceType> = z.object({
-  uid_price_formula: FirestoreId.optional(),
-  price_formula: PriceFormulaRefInput.nullable().optional(),
-  rates: z.array(z.object({ rate_key: RateKey, amount_cents: z.int() })).optional(),
-  base_percent: z.number().nullable().optional(),
-  replacement_cents: z.int().nullable().optional(),
+  price_formula: PriceFormulaRefInput.nullable(),
+  rates: z.array(z.object({ rate_key: RateKey, amount_cents: z.int() })),
+  base_percent: z.number().nullable(),
+  replacement_cents: z.int().nullable(),
   // No `counts`: a line's tier counts are metered from its pair's charge windows
   // by `priceDocument` (Phase 2 ruling 8). A client that sends them has them
-  // stripped.
-  subtotal_cents: z.int().optional(),
-  discount: DiscountInput.nullable().optional(),
-  taxes: z.array(z.object({ uid: FirestoreId })).optional(),
-  total_cents: z.int().optional(),
+  // stripped, as every derived key.
+  discount: DiscountInput.nullable(),
   // Untagged: an input declares its own twin of `StatedCore` (the payable
   // inputs' precedent); the merge and the Xero hash read the stored schema.
-  stated_cents: z.int().min(0).nullable().optional(),
+  stated_cents: z.int().min(0).nullable(),
 }).superRefine(checkLinePriceInput);
 
 /**
  * A billable order line as a client sends it — the input mirror of
  * `OrderDocLineItem`.
  *
- * Deliberately permissive about what may be OMITTED: the server fills `name`,
- * `stock_method` and the whole price from the backing product doc, and a custom
- * line supplies them itself. What it is no longer permissive about is what a
- * line may CLAIM — see {@link OrderItem} for why the arms exist.
+ * **A submitted row states every key** (ruling 204, "clients should submit
+ * valid shapes; no presumptive fallbacks"): an omitted key is a 400 naming the
+ * row and the key, a clear is an explicit `null` or `[]`. Creates too (R4). The
+ * stored row is a valid input row, so echoing it changes nothing (ruling 193).
  *
  * `uid_delivery` / `uid_collection` are absent here on purpose. The flat schema
  * this replaces accepted both on any item, and `buildOrderLineItem` has never
@@ -2021,39 +2011,38 @@ export const ItemPrice: z.ZodType<ItemPriceType> = z.object({
 export interface OrderItemLineType {
   uid: string;
   type: DocLineItemTypeType;
-  name?: string;
-  description?: string;
-  quantity?: number;
-  price?: ItemPriceType;
-  stock_method?: StockMethodType;
+  name: string;
+  description: string;
+  quantity: number;
+  price: ItemPriceType;
+  stock_method: StockMethodType;
   path: string[];
-  inclusion_type?: InclusionTypeType | null;
-  zero_priced?: boolean | null;
+  inclusion_type: InclusionTypeType | null;
+  zero_priced: boolean | null;
   /**
    * @see `OrderDocLineItemType.quantity_per_parent`. Needs an input channel: this
    * is a `z.object`, so an undeclared key is STRIPPED and every order PUT would
    * silently drop the stamp off every line.
    */
-  quantity_per_parent?: number | null;
-  order_number?: number;
-  uid_order?: string;
+  quantity_per_parent: number | null;
+  order_number: number | null;
+  uid_order: string | null;
   /**
    * @see `OrderDocLineItemType.coa_revenue` — operator-authored, so it is accepted
-   * here. A missing key keeps the stored value, `null` resets it to the product's
-   * (both to `null` on a custom line), and a value sets it — api-cloudrun's
-   * `lineDenorms` is the one author of that rule.
+   * here. `null` resets it to the product's (`null` on a custom line), and a
+   * value sets it — api-cloudrun's `lineDenorms` is the one author of that rule.
    */
-  coa_revenue?: COARevenueType | null;
-  /** @see `OrderDocLineItemType.uid_tracking_category` — set/keep/clear exactly as `coa_revenue`. */
-  uid_tracking_category?: string | null;
+  coa_revenue: COARevenueType | null;
+  /** @see `OrderDocLineItemType.uid_tracking_category` — set/clear exactly as `coa_revenue`. */
+  uid_tracking_category: string | null;
   /** @see `OrderDocLineItemType.uid_tax_class_override` — operator-authored, so it is accepted here. */
-  uid_tax_class_override?: string | null;
+  uid_tax_class_override: string | null;
   /**
    * @see `OrderDocLineItemType.exchanged_for`. Declared on the INPUT because this
    * is a `z.object`: an undeclared key is STRIPPED, so without it every order PUT
    * would silently drop an exchange's link to the damaged row it goes out against.
    */
-  exchanged_for?: ExchangedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
 }
 
 // Un-annotated for `_zod.propValues` — see `_dividers.ts`. `z.object`, not
@@ -2065,24 +2054,26 @@ const OrderItemLineInner = z.object({
   uid: ItemUid,
   type: z.enum(DOC_LINE_ITEM_TYPES),
   // Catalog product name — not customer data. See `OrderDocLineItem.name`.
-  name: z.string().meta({ pii: "none" }).optional(),
+  // Bounded to match the stored `LineItemCore.name`, so a refusal lands at the
+  // boundary rather than at `validateBeforeWrite` (core#102's rule).
+  name: z.string().min(1).max(100).meta({ pii: "none", initial: "" }),
   // Line-item text — equipment and service wording, of a piece with a PO number
   // or a product name. Not customer data. See the note on
   // `OrderDocLineItem.description` for why this is tagged rather than left bare.
-  description: z.string().meta({ pii: "none" }).optional(),
-  quantity: z.int().optional(),
-  price: ItemPrice.optional(),
-  stock_method: StockMethodEnum.optional(),
+  description: z.string().meta({ pii: "none" }),
+  quantity: z.int().min(0),
+  price: ItemPrice,
+  stock_method: StockMethodEnum,
   path: z.array(ItemUid),
-  inclusion_type: InclusionTypeEnum.nullable().optional(),
-  zero_priced: z.boolean().nullable().optional(),
-  quantity_per_parent: z.number().min(0).nullable().optional(),
-  order_number: z.int().optional(),
-  uid_order: FirestoreId.optional(),
-  coa_revenue: COARevenueEnum.nullable().optional(),
-  uid_tracking_category: FirestoreId.nullable().optional(),
-  uid_tax_class_override: FirestoreId.nullable().optional(),
-  exchanged_for: ExchangedForList.optional(),
+  inclusion_type: InclusionTypeEnum.nullable(),
+  zero_priced: z.boolean().nullable(),
+  quantity_per_parent: z.number().min(0).nullable(),
+  order_number: z.int().nullable(),
+  uid_order: FirestoreId.nullable(),
+  coa_revenue: COARevenueEnum.nullable(),
+  uid_tracking_category: FirestoreId.nullable(),
+  uid_tax_class_override: FirestoreId.nullable(),
+  exchanged_for: ExchangedForList,
 }).superRefine(checkItemPriceFormula);
 
 /** Zod schema for a billable order line (input). */
@@ -2092,8 +2083,8 @@ export const OrderItemLine: z.ZodType<OrderItemLineType> = OrderItemLineInner.su
 export interface OrderItemDestinationType {
   uid: string;
   type: "destination";
-  name?: string;
-  description?: string;
+  name: string;
+  description: string;
   path: string[];
 }
 
@@ -2106,9 +2097,10 @@ export interface OrderItemDestinationType {
 const OrderItemDestinationInner = z.strictObject({
   uid: ItemUid,
   type: z.literal("destination"),
-  // Venue label, not a person. See `DestinationDividerArm.name`.
-  name: z.string().meta({ pii: "none" }).optional(),
-  description: z.string().meta({ pii: "none" }).optional(),
+  // Venue label, not a person. See `DestinationDividerArm.name`. Required, as
+  // every key of a submitted row (ruling 204 Q7); `""` is a value.
+  name: z.string().max(200).meta({ pii: "none" }),
+  description: z.string().meta({ pii: "none" }),
   path: z.array(ItemUid),
   // `.nullable()`, not merely `.optional()` (api-cloudrun#492). The divider
   // BUILDER writes `?? null`, so the stored shape carries an explicit `null`
@@ -2131,8 +2123,8 @@ export const OrderItemDestination: z.ZodType<OrderItemDestinationType> = OrderIt
 export interface OrderItemGroupType {
   uid: string;
   type: "group";
-  name?: string;
-  description?: string;
+  name: string;
+  description: string;
   path: string[];
 }
 
@@ -2140,9 +2132,10 @@ export interface OrderItemGroupType {
 const OrderItemGroupInner = z.strictObject({
   uid: ItemUid,
   type: z.literal("group"),
-  // Section header drawn from the catalog. See `GroupDividerArm.name`.
-  name: z.string().meta({ pii: "none" }).optional(),
-  description: z.string().meta({ pii: "none" }).optional(),
+  // Section header drawn from the catalog. See `GroupDividerArm.name`. Required
+  // and bounded as the stored arm (ruling 204 Q7).
+  name: z.string().min(1).max(100).meta({ pii: "none" }),
+  description: z.string().meta({ pii: "none" }),
   path: z.array(ItemUid),
 });
 
@@ -2429,8 +2422,8 @@ export interface OrderDocItemPriceType {
    * that carry no formula, and absent everywhere else. See
    * {@link checkLinePrice}, which enforces the biconditional.
    */
-  base_percent?: number | null;
-  replacement_cents?: number | null;
+  base_percent: number | null;
+  replacement_cents: number | null;
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
@@ -2452,11 +2445,11 @@ export interface OrderDocItemPriceType {
   /**
    * The line's stated GROSS over its `quantity`, before `discount` — a STATED
    * line (one-document-model ruling 189; `StatedCore`, `schemas/_line-money.ts`).
-   * Absent or `null` is a RATE line, priced from `rates × counts`: every line
-   * stored before ruling 189. Set, `subtotal_cents` is this total and the net is
-   * it less `discount.amount_cents` (D7), and a quantity edit keeps the total.
+   * `null` is a RATE line, priced from `rates × counts`: every line stored
+   * before ruling 189. Set, `subtotal_cents` is this total and the net is it
+   * less `discount.amount_cents` (D7), and a quantity edit keeps the total.
    */
-  stated_cents?: number | null;
+  stated_cents: number | null;
 }
 
 export const OrderDocItemPrice: z.ZodType<OrderDocItemPriceType> = z.strictObject({
@@ -2464,11 +2457,11 @@ export const OrderDocItemPrice: z.ZodType<OrderDocItemPriceType> = z.strictObjec
   // Merged WHOLE, like `charge_windows`: the entries carry no `uid`.
   rates: z.array(RateSnapshotSchema).meta({ shared: "value", propagate: true, label: "Rate" }),
   counts: z.array(TierCountSchema).meta({ derived: true }),
-  base_percent: z.number().nullable().optional().meta({ propagate: true }),
-  // `.nullable().optional()` and NOT defaulted: a null replacement means "this
+  base_percent: z.number().nullable().meta({ propagate: true }),
+  // `.nullable()` and NOT defaulted: a null replacement means "this
   // line has no replacement value", which is not the fact `0` states, and
   // `checkItemContract`'s `forbidden` arm reads the difference.
-  replacement_cents: z.int().nullable().optional().meta({ column: true, label: "Replacement" }),
+  replacement_cents: z.int().nullable().meta({ column: true, label: "Replacement" }),
   // `xero: true` on the three keys the quote body prices a line from (F16), the
   // blocks tagged at the KEY as on the invoice line.
   subtotal_cents: z.int().meta({ column: true, label: "Subtotal", derived: true, xero: true }),
@@ -2512,14 +2505,16 @@ export interface OrderDocLineItemType {
   quantity: number;
   price: OrderDocItemPriceType;
   stock_method: StockMethodType;
-  order_number?: number;
-  uid_order?: string;
+  /** Required, `null` where no order number is stamped (ruling 204 Q1a). */
+  order_number: number | null;
+  /** Required, `null` where no order is stamped (ruling 204 Q1a). */
+  uid_order: string | null;
   path: string[];
-  inclusion_type?: "default" | "mandatory" | "optional" | null;
+  inclusion_type: "default" | "mandatory" | "optional" | null;
   zero_priced: boolean | null;
   /** @see `LineItemCore.quantity_per_parent` (`schemas/_items.ts`) — the per-parent ratio, stamped at expansion. */
-  quantity_per_parent?: number | null;
-  crms_id?: number | null;
+  quantity_per_parent: number | null;
+  crms_id: number | null;
   /**
    * Revenue chart-of-accounts code, denormalized from the product at write time
    * — **where the line's income posts in Xero**.
@@ -2584,7 +2579,7 @@ export interface OrderDocLineItemType {
    * It replaced the retired `taxed_as` type override: the 2026-09-15 backfill
    * translated `taxed_as: "none"` into the Non-Taxable class here.
    */
-  uid_tax_class_override?: string | null;
+  uid_tax_class_override: string | null;
   /**
    * Set on a mid-rental EXCHANGE LINE: the DAMAGED rows this one goes
    * out against, with how many units each — see `ExchangedForList`. Only valid
@@ -2610,8 +2605,11 @@ export interface OrderDocLineItemType {
    *
    * Stored as `replaces` until api-cloudrun#1147 renamed it (backfilled
    * 2026-10-01; prod and dev held no exchange row).
+   *
+   * `[]` on every line that is not an exchange (ruling 204: a list's empty value
+   * is `[]` and the key is required). A refine reads a CLAIM as `length > 0`.
    */
-  exchanged_for?: ExchangedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
 }
 
 // Un-annotated so `_zod.propValues` survives for `z.discriminatedUnion` below;
@@ -2635,12 +2633,14 @@ const OrderDocLineItemInner = z.strictObject({
   // keeps the fee an ordinary line item, which is the whole point of W1's
   // collapse of the separate fee arm, rather than earning it a contract axis.
   stock_method: StockMethodEnum.meta({ column: true, label: "Stock Method", propagate: true }),
-  order_number: z.int().optional().meta({ column: true, label: "Order #", propagate: true }),
-  uid_order: FirestoreId.optional().meta({ propagate: true }),
-  inclusion_type: z.enum(INCLUSION_TYPES_NULLABLE).nullable().optional().meta({ column: true, label: "Inclusion" }),
+  // Required with `null` (ruling 204 Q1a): stamped on every line in both
+  // projects at the window, `.nullable()` by owner ruling.
+  order_number: z.int().nullable().meta({ column: true, label: "Order #", propagate: true }),
+  uid_order: FirestoreId.nullable().meta({ propagate: true }),
+  inclusion_type: z.enum(INCLUSION_TYPES_NULLABLE).nullable().meta({ column: true, label: "Inclusion" }),
   // `propagate: false` — the CRMS line id is a different record on each document.
   // Untagged since 6e-0b4 K2.2: the quote body looks a line's product up by `uid`.
-  crms_id: z.int().nullable().optional().meta({ propagate: false }),
+  crms_id: z.int().nullable().meta({ propagate: false }),
   // The account + the tracking category — one declaration shared with the
   // invoice line (`_items.ts`), both `propagate: true`. That reverses
   // manager#309's `propagate: false`: the invoice follows its order line on both
@@ -2649,9 +2649,9 @@ const OrderDocLineItemInner = z.strictObject({
   // The class snapshot + the operator's class override — one declaration
   // shared with the invoice line (`_items.ts`).
   ...LineTaxCore,
-  // Plain `.optional()`, matching `substituted_for` and `path_extension_for`:
-  // only an exchange line carries it. See the interface docblock.
-  exchanged_for: ExchangedForList.optional().meta({ shared: "value" }),
+  // Required, `[]` on a line that is not an exchange (ruling 204). See the
+  // interface docblock.
+  exchanged_for: ExchangedForList.meta({ shared: "value" }),
 }).superRefine(checkItemContract).superRefine(checkZeroPricedAmount).superRefine(checkFormulaLineMoney);
 
 export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = OrderDocLineItemInner;

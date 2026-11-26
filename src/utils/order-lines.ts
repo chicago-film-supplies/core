@@ -333,8 +333,9 @@ export interface OrderLineBuildOptions extends LinePriceSnapshotContext {
    */
   inheritedAncestry?: string[];
   /**
-   * Stamped as `uid_order` when present, and omitted entirely when not — the
-   * invoice surfaces have no such field.
+   * Stamped as `uid_order`; `null` when absent. Every order-line key is stated
+   * (ruling 204), so an order line built without one says `null`; an invoice
+   * projection drops the order-only keys by name.
    *
    * This replaced a `provenance: { field, value }` pair whose only caller ever
    * passed `field: "uid_order"`. The generalization cost more than it bought: a
@@ -342,6 +343,8 @@ export interface OrderLineBuildOptions extends LinePriceSnapshotContext {
    * whole-object cast this module used to end every builder with.
    */
   uidOrder?: string;
+  /** Stamped as `order_number`; `null` when absent (the server allocates a new order's number). */
+  orderNumber?: number;
   /**
    * The class a line whose product carries no `uid_tax_class` is stamped with —
    * the active class defaulting its `type`, the same fallback the API's
@@ -386,7 +389,8 @@ export function buildOrderLineFromProduct(
     quantity: opts.quantity,
     stock_method: facts.stock_method,
     crms_id: doc.crms_id ?? null,
-    ...(opts.uidOrder ? { uid_order: opts.uidOrder } : {}),
+    order_number: opts.orderNumber ?? null,
+    uid_order: opts.uidOrder ?? null,
     path: [...(opts.inheritedAncestry ?? [])],
     // A top-level line is not a component of anything, and the server writes
     // both as an explicit `null` — so the optimistic row matches the echo.
@@ -401,6 +405,8 @@ export function buildOrderLineFromProduct(
     // server stamp (`LinePostingCore`).
     coa_revenue: facts.coa_revenue,
     uid_tracking_category: doc.uid_tracking_category ?? null,
+    uid_tax_class_override: null,
+    exchanged_for: [],
     price: {
       price_formula: facts.price.price_formula,
       rates: facts.price.rates,
@@ -408,6 +414,7 @@ export function buildOrderLineFromProduct(
       counts: [],
       base_percent: facts.price.base_percent,
       replacement_cents: facts.price.replacement_cents,
+      stated_cents: null,
       discount: null,
       subtotal_cents: 0,
       subtotal_discounted_cents: 0,
@@ -447,6 +454,8 @@ export interface CustomLineBuildOptions {
   uid_tax_class: string;
   /** @see {@link OrderLineBuildOptions.uidOrder} */
   uidOrder?: string;
+  /** @see {@link OrderLineBuildOptions.orderNumber} */
+  orderNumber?: number;
 }
 
 /**
@@ -466,7 +475,8 @@ export function buildCustomOrderLine(opts: CustomLineBuildOptions): OrderDocLine
     quantity: opts.quantity ?? 1,
     stock_method: "none",
     crms_id: null,
-    ...(opts.uidOrder ? { uid_order: opts.uidOrder } : {}),
+    order_number: opts.orderNumber ?? null,
+    uid_order: opts.uidOrder ?? null,
     path: [],
     inclusion_type: null,
     zero_priced: null,
@@ -475,11 +485,15 @@ export function buildCustomOrderLine(opts: CustomLineBuildOptions): OrderDocLine
     // No product to post as: Xero still gets 4800 via the api's posting account and `xeroLineRefs`.
     coa_revenue: null,
     uid_tracking_category: null,
+    uid_tax_class_override: null,
+    exchanged_for: [],
     price: {
       price_formula: priceFormulaRefOf(opts.formula),
       rates: customRates(opts.formula, opts.rates),
       counts: [],
+      base_percent: null,
       replacement_cents: isRental ? 0 : null,
+      stated_cents: null,
       discount: null,
       subtotal_cents: 0,
       subtotal_discounted_cents: 0,
@@ -504,7 +518,7 @@ export function buildCustomOrderLine(opts: CustomLineBuildOptions): OrderDocLine
  * makes the docblock true.
  */
 export function buildCustomInvoiceLine(
-  opts: Omit<CustomLineBuildOptions, "uidOrder">,
+  opts: Omit<CustomLineBuildOptions, "uidOrder" | "orderNumber">,
 ): InvoiceDocLineItemType {
   return {
     uid: "custom-" + crypto.randomUUID(),
@@ -514,13 +528,24 @@ export function buildCustomInvoiceLine(
     quantity: opts.quantity ?? 1,
     path: [],
     zero_priced: null,
+    quantity_per_parent: null,
     uid_tax_class: opts.uid_tax_class,
+    uid_tax_class_override: null,
     coa_revenue: null,
     uid_tracking_category: null,
+    xero_id: null,
+    crms_id: null,
+    substituted_for: [],
+    out_of_service: [],
+    path_source_item: null,
+    units_from: null,
+    exchanged_for: [],
     price: {
       price_formula: priceFormulaRefOf(opts.formula),
       rates: customRates(opts.formula, opts.rates),
       counts: [],
+      base_percent: null,
+      stated_cents: null,
       discount: null,
       subtotal_cents: 0,
       subtotal_discounted_cents: 0,
@@ -769,7 +794,9 @@ export function buildOrderComponentLines(
       // `"bulk"` for every component regardless — so a no-stock component
       // rendered availability it does not have until the server echo landed.
       stock_method: facts.stock_method,
-      ...(opts.uidOrder ? { uid_order: opts.uidOrder } : {}),
+      order_number: opts.orderNumber ?? null,
+      uid_order: opts.uidOrder ?? null,
+      crms_id: null,
       path,
       inclusion_type: comp.inclusion_type as OrderDocLineItemType["inclusion_type"],
       zero_priced: facts.zero_priced,
@@ -784,13 +811,17 @@ export function buildOrderComponentLines(
       // existed states none and reads `null` until the save returns.
       coa_revenue: facts.coa_revenue,
       uid_tracking_category: comp.uid_tracking_category ?? null,
+      uid_tax_class_override: null,
+      exchanged_for: [],
       price: {
-        // No `base_percent` key: a component line never wrote one, and a
-        // writer's key set is a claim about its stored lines.
+        // Every key stated (ruling 204): a component line is never a percent
+        // fee nor a stated line.
         price_formula: facts.price.price_formula,
         rates: facts.price.rates,
         counts: [],
+        base_percent: null,
         replacement_cents: facts.price.replacement_cents,
+        stated_cents: null,
         discount: null,
         subtotal_cents: 0,
         subtotal_discounted_cents: 0,

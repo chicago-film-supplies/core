@@ -296,7 +296,7 @@ export interface FulfillmentLineSource {
   readonly type: FulfillmentLineItemType["type"];
   readonly name: string;
   readonly description?: string | null;
-  readonly stock_method?: FulfillmentLineItemType["stock_method"];
+  readonly stock_method: FulfillmentLineItemType["stock_method"];
   /** Already resolved to the answer the ROW should state — see {@link substitutionRootZeroPriced} and {@link fulfillmentSourceOfComponent}. */
   readonly zero_priced?: boolean | null;
   /**
@@ -341,9 +341,9 @@ export interface FulfillmentLineOrderFacts {
  * merge compares a projected line against the stored one, so a key whose
  * PRESENCE moved with its VALUE would make a catalog edit a permanent diff.
  *
- * Optional keys (`stock_method`, `order_number`, `uid_order`, `exchanged_for`)
- * are omitted when the source does not carry them — the stored documents
- * depend on it. `quantity_ordered` is always stated.
+ * **Every key is stated** (ruling 204): a source that does not carry an
+ * attribution, a ratio or an exchange states its empty value (`null`, `[]`).
+ * `stock_method` has no empty value, so the source must state it.
  */
 export function projectFulfillmentLine(
   source: FulfillmentLineSource,
@@ -360,19 +360,16 @@ export function projectFulfillmentLine(
     path,
     zero_priced: source.zero_priced ?? null,
     quantity_ordered: orderFacts.quantity_ordered ?? null,
+    // Every key stated with its empty value (ruling 204): the window's backfill
+    // stated `null` where a pre-stamp line lacked the ratio, so a projected
+    // `null` equals its stored self.
+    quantity_per_parent: source.quantity_per_parent ?? null,
+    stock_method: source.stock_method,
+    order_number: orderFacts.order_number ?? null,
+    uid_order: orderFacts.uid_order ?? null,
+    substituted_for: [],
+    exchanged_for: (orderFacts.exchanged_for ?? []).map((e) => ({ path: [...e.path], quantity: e.quantity, reason: e.reason })),
   };
-  // CONDITIONAL, unlike `zero_priced`: every line stored before the stamp
-  // existed lacks the key, and its order line lacks it too, so emitting `null`
-  // for an absent source would make every pre-stamp row differ from its stored
-  // self on a field neither ever set. The key's presence follows the SOURCE's,
-  // never its value — the stamp is a snapshot, so a value never comes and goes.
-  if (source.quantity_per_parent !== undefined) line.quantity_per_parent = source.quantity_per_parent;
-  if (source.stock_method !== undefined) line.stock_method = source.stock_method;
-  if (orderFacts.order_number !== undefined) line.order_number = orderFacts.order_number;
-  if (orderFacts.uid_order !== undefined) line.uid_order = orderFacts.uid_order;
-  if (orderFacts.exchanged_for !== undefined) {
-    line.exchanged_for = orderFacts.exchanged_for.map((e) => ({ path: [...e.path], quantity: e.quantity, reason: e.reason }));
-  }
   return line;
 }
 

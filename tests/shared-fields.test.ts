@@ -18,6 +18,7 @@ import {
   mergeSharedFields,
   orderFulfillmentSharedFields,
   resolveMergedPairDates,
+  sameSharedValue,
   type SharedField,
   type SharedFieldClassification,
 } from "../src/utils/shared-fields.ts";
@@ -615,10 +616,9 @@ Deno.test("mergeSharedFields: when the order did not change, the row comes back 
     const prev = invoiceLine(r);
     const down = structuredClone(prev);
     for (const path of mergeableLeaves(LINE_FIELDS, prev)) if (r() < 0.3) set(down, path, vary(get(prev, path), r));
-    // The order spells "nothing" as an absent key where the invoice stores null.
-    const prevSparse = structuredClone(prev);
-    delete prevSparse.price.base_percent;
-    const { merged } = mergeSharedFields(LINE_FIELDS, prevSparse, structuredClone(prevSparse), down);
+    // Both documents state every key (ruling 204), so the order's "nothing" is
+    // the invoice's `null`; absent ≡ `null` itself is pinned on `sameSharedValue`.
+    const { merged } = mergeSharedFields(LINE_FIELDS, prev, structuredClone(prev), down);
     assertEquals(merged, down);
     assertEquals(Object.keys(merged.price).sort(), Object.keys(down.price).sort());
   }
@@ -676,4 +676,41 @@ Deno.test("mergeSharedFields: pair dates merge per leaf and never touch the deri
   assertEquals(merged.dates.delivery_start, "2026-10-03T00:00:00.000-05:00");
   assertEquals(merged.dates.collection_start, "2026-10-09T00:00:00.000-05:00");
   assertEquals(merged.dates.days_active, 4, "derived, left for the day count to recompute");
+});
+
+// ── The one comparison rule reads a Timestamp's INSTANT, in any of its forms ──
+
+/** A firebase-admin `Timestamp`'s shape: own `_seconds`/`_nanoseconds`, public getters. */
+class AdminLikeTimestamp {
+  constructor(readonly _seconds: number, readonly _nanoseconds: number) {}
+  get seconds(): number {
+    return this._seconds;
+  }
+  get nanoseconds(): number {
+    return this._nanoseconds;
+  }
+}
+
+Deno.test("sameSharedValue: one instant compares equal in all three of its forms", () => {
+  const admin = new AdminLikeTimestamp(1_764_000_000, 500);
+  const client = { seconds: 1_764_000_000, nanoseconds: 500 };
+  const cloned = { _seconds: 1_764_000_000, _nanoseconds: 500 };
+  // The premise: `Object.keys` sees DIFFERENT keys for the admin form and the client form.
+  assertEquals(Object.keys(admin), ["_seconds", "_nanoseconds"]);
+  assertEquals(Object.keys(client), ["seconds", "nanoseconds"]);
+  for (const [a, b] of [[admin, client], [admin, cloned], [client, cloned]]) {
+    assert(sameSharedValue({ at: a }, { at: b }), "one instant, two forms, must compare equal");
+  }
+});
+
+Deno.test("sameSharedValue: absent and null are one statement, at any depth", () => {
+  assert(sameSharedValue({ a: null }, {}));
+  assert(sameSharedValue({ p: { a: 1, b: null } }, { p: { a: 1 } }));
+  assert(!sameSharedValue({ a: 0 }, {}), "control: 0 is a value, not nothing");
+});
+
+Deno.test("sameSharedValue: a different instant still compares UNEQUAL (control)", () => {
+  const admin = new AdminLikeTimestamp(1_764_000_000, 500);
+  assert(!sameSharedValue({ at: admin }, { at: { seconds: 1_764_000_000, nanoseconds: 501 } }));
+  assert(!sameSharedValue({ at: admin }, { at: new AdminLikeTimestamp(1_764_000_001, 500) }));
 });

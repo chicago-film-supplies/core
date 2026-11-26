@@ -51,6 +51,7 @@ import {
 } from "../schemas/mod.ts";
 import { applyDiscountTerms, formulaPartMoney, lineKindOf } from "../schemas/_line-money.ts";
 import { pairItemsAcrossRebuild, type PathedItem } from "./item-pairing.ts";
+import { sameSharedValue } from "./shared-fields.ts";
 
 // ── Grains and sides ─────────────────────────────────────────────────
 
@@ -110,11 +111,12 @@ export interface LineEditKeys {
 }
 
 /**
- * Keys a client names a formula by, read as one fact: the formula's uid
- * (`price.uid_price_formula`, or an echoed `price.price_formula.uid`). The
- * snapshot's `name` and `basis` are the writer's to re-derive (`ItemPriceType`).
+ * The formula snapshot's re-derived half: a client names a formula by
+ * `price.price_formula.uid` alone (ruling 204 R3, one spelling on both sides),
+ * which is an ordinary compared key; the snapshot's `name` and `basis` are the
+ * writer's to re-derive (`ItemPriceType`).
  */
-const FORMULA_KEYS: ReadonlySet<string> = new Set(["price.uid_price_formula", "price.price_formula.name", "price.price_formula.basis"]);
+const FORMULA_KEYS: ReadonlySet<string> = new Set(["price.price_formula.name", "price.price_formula.basis"]);
 /** A row's identity, never an edit: `path` pairs it, `uid` names its product (`cfs-items`). */
 const IDENTITY_KEYS: ReadonlySet<string> = new Set(["uid", "path"]);
 
@@ -145,7 +147,7 @@ interface Def {
   values?: unknown[];
   entries?: Record<string, unknown>;
 }
-const defOf = (n: z.ZodType) => (n as unknown as { _zod: { def: Def } })._zod.def;
+const defOf = (n: z.ZodType) => (n as { _zod: { def: Def } })._zod.def;
 /** Past optional/nullable/default wrappers and pipes, to the node that has a shape (or the array). */
 function unwrapNode(node: z.ZodType): z.ZodType {
   let n = node;
@@ -218,27 +220,9 @@ function getKey(row: LineLike, key: string): unknown {
   return at;
 }
 
-/** Canonical form for a comparison: keys sorted, absent and `null` both dropped. */
-function canonical(value: unknown): unknown {
-  if (value === undefined || value === null) return null;
-  if (Array.isArray(value)) return value.map(canonical);
-  if (typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const k of Object.keys(value as object).sort()) {
-      const v = canonical((value as Record<string, unknown>)[k]);
-      if (v !== null) out[k] = v;
-    }
-    return out;
-  }
-  return value;
-}
+// The one comparison rule (ruling 204 F4.5), shared with the merge and the pair diff.
+const same = sameSharedValue;
 
-const same = (a: unknown, b: unknown) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
-
-/** The formula a row names: a submitted `uid_price_formula`, else its snapshot's uid. */
-function formulaUid(row: LineLike): unknown {
-  return getKey(row, "price.uid_price_formula") ?? getKey(row, "price.price_formula.uid") ?? null;
-}
 
 /**
  * **What a submitted row changes against its stored pair** — by VALUE, over the
@@ -258,11 +242,6 @@ export function diffLine(grain: LineEditGrain, stored: LineLike, submitted: Line
     const from = getKey(stored, key);
     const to = getKey(submitted, key);
     if (!same(from, to)) fields.push({ key, from: from ?? null, to: to ?? null });
-  }
-  const fromFormula = formulaUid(stored);
-  const toFormula = formulaUid(submitted);
-  if (toFormula !== null && !same(fromFormula, toFormula)) {
-    fields.push({ key: "price.price_formula.uid", from: fromFormula, to: toFormula });
   }
   return { fields };
 }
@@ -309,8 +288,6 @@ export type LineEditResult =
   | { ok: true; line: LineLike }
   | { ok: false; refusals: LineEditRefusal[] };
 
-/** Keys whose `null` is written as ABSENT: a rate line states no gross (`DECLARED_ONLY_WHEN_SET`, `utils/orders.ts`). */
-const NULL_IS_ABSENT: ReadonlySet<string> = new Set(["price.stated_cents"]);
 /** Keys whose change moves a STATED line's money: the rate event (D7). */
 const STATED_MONEY_KEYS: ReadonlySet<string> = new Set(["price.stated_cents", "quantity", "price.discount.rate", "price.discount.type"]);
 /** Keys that put money or a posting on a row. */
@@ -323,10 +300,8 @@ function setKey(row: LineLike, key: string, value: unknown): void {
     if (at[seg] === null || typeof at[seg] !== "object") at[seg] = {};
     at = at[seg] as Record<string, unknown>;
   }
-  const last = segs[segs.length - 1];
-  if (value === null && NULL_IS_ABSENT.has(key)) delete at[last];
-  else if (value === null && !(last in at)) return; // absent stays absent: a never-set key gains no `null`
-  else at[last] = value;
+  // Written explicitly, `null` included: a row states every key (ruling 204).
+  at[segs[segs.length - 1]] = value;
 }
 
 /** A line's product uid, or `null` on a custom line (`custom-…`, `payableLineUid`). */

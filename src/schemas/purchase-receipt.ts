@@ -96,7 +96,7 @@ export interface PurchaseReceiptLineItemType {
   /** @see `LineItemCore.zero_priced` (`schemas/_items.ts`). */
   zero_priced: boolean | null;
   /** @see `LineItemCore.quantity_per_parent` (`schemas/_items.ts`). */
-  quantity_per_parent?: number | null;
+  quantity_per_parent: number | null;
   /** The purchase line's path — the row identity, at order depth. */
   path: string[];
   /**
@@ -120,9 +120,10 @@ export interface PurchaseReceiptLineItemType {
    * purchase like any shared value, but a row whose booking grain holds live
    * custody keeps its stored list, as the fulfillment row does. Untagged: the
    * purchase line's `shared: "value"` tag classifies it. Refused on a `sale` row
-   * (a Buy is not hired, so nothing goes back on an exchange).
+   * (a Buy is not hired, so nothing goes back on an exchange). `[]` off an
+   * exchange line (ruling 204): a claim is a non-empty list.
    */
-  exchanged_for?: ExchangedForEntryType[];
+  exchanged_for: ExchangedForEntryType[];
 }
 
 // Un-annotated so `_zod.propValues` survives for the discriminated union below
@@ -131,12 +132,12 @@ const PurchaseReceiptLineItemInner = z.strictObject({
   type: z.enum(PURCHASE_PRODUCT_ITEM_TYPES).meta({ column: true, label: "Type" }),
   ...LineItemCore,
   quantity_ordered: z.int().min(0).nullable(),
-  // See the interface docblock. `seed: false`, as on the purchase line.
-  exchanged_for: ExchangedForList.optional().meta({ seed: false }),
+  // See the interface docblock. Required, `[]` off an exchange line (ruling 204).
+  exchanged_for: ExchangedForList,
   // Vacuous at this grain, as on the fulfillment: no `price`, so it returns
   // early. Attached so the custody grains read identically.
 }).superRefine(checkZeroPricedAmount).superRefine((row, ctx) => {
-  if (row.type === "sale" && row.exchanged_for !== undefined) {
+  if (row.type === "sale" && row.exchanged_for.length > 0) {
     ctx.addIssue({
       code: "custom",
       path: ["exchanged_for"],

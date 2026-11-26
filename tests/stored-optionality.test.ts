@@ -93,20 +93,9 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   //    null = a bill with no due date, a value = the mirror. Tighten to bare
   //    `.nullable()` once the dev and prod backfills have run.
   ["purchase-bills.due_date_fs", "mid-expand"],
-  // ── `price.stated_cents` — ONE declaration on every priced line of every grain
-  //    (`StatedCore`, `schemas/_line-money.ts`; one-document-model rulings 39,
-  //    145, 189). Absent and null are the same fact, a RATE line: the receivable
-  //    writers omit the key on a rate line rather than stamp `null` (spec S1: no
-  //    stored line changes, nothing is backfilled), so the instance shared with the
-  //    payable lines cannot be bare `.nullable()`. Array members, so no `orderBy`
-  //    census reaches them; `api-cloudrun/scripts/census-line-echo.ts` counted
-  //    them by a full scan (2026-11-24: 0 flat payable lines without a value).
-  ["purchases.items[].price.stated_cents", "array-member-uncensusable"],
-  ["purchase-bills.items[].price.stated_cents", "array-member-uncensusable"],
-  ["purchase-credits.items[].price.stated_cents", "array-member-uncensusable"],
-  ["credit-notes.items[].price.stated_cents", "array-member-uncensusable"],
-  ["orders.items[].price.stated_cents", "array-member-uncensusable"],
-  ["invoices.items[].price.stated_cents", "array-member-uncensusable"],
+  // ── Ruling 204 (2026-11-26) took every line key off this list: a row states
+  //    every key, `null`/`[]` for none, and the window's backfill wrote them.
+  //    Four stay, by design — the payable back-pointers below.
   // The note's `destinations` carry the invoice pair's shape, so its array
   // members' nullable-optional leaves come with it.
   ["credit-notes.destinations[].collection.address.address_coordinates", "array-member-uncensusable"],
@@ -114,12 +103,6 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["credit-notes.destinations[].delivery.address.address_coordinates", "array-member-uncensusable"],
   ["credit-notes.destinations[].delivery.address.user_coordinates", "array-member-uncensusable"],
   ["credit-notes.destinations[].jurisdiction", "array-member-uncensusable"],
-  // D7: a part's first unit of its source line. Absent on a line that is no part, and on a pre-D7 one.
-  ["purchase-bills.items[].units_from", "array-member-uncensusable"],
-  ["purchase-credits.items[].units_from", "array-member-uncensusable"],
-  // Ruling 174: the same field on the receivable lines, one declaration (`UnitsFromField`).
-  ["invoices.items[].units_from", "array-member-uncensusable"],
-  ["credit-notes.items[].units_from", "array-member-uncensusable"],
   // ── pending-census — measurable with `orderBy`, awaiting the both-environment
   //    census before any of them is tightened. The directly actionable set.
   ["bookings.destinations.collection.address.address_coordinates", "pending-census"],
@@ -184,25 +167,17 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   //    tightened. (`sources[].label` is `DocSource.label`, also api-cloudrun#853.)
   ["cards.sources[].label", "array-member-uncensusable"],
   ["comments.sources[].label", "array-member-uncensusable"],
-  ["credit-notes.items[].price.base_percent", "array-member-uncensusable"],
   ["credit-notes.sources[].label", "array-member-uncensusable"],
   ["fulfillments.destinations[].collection.address.address_coordinates", "array-member-uncensusable"],
   ["fulfillments.destinations[].collection.address.user_coordinates", "array-member-uncensusable"],
   ["fulfillments.destinations[].delivery.address.address_coordinates", "array-member-uncensusable"],
   ["fulfillments.destinations[].delivery.address.user_coordinates", "array-member-uncensusable"],
   ["fulfillments.destinations[].jurisdiction", "array-member-uncensusable"],
-  // core#131 — the per-parent kit ratio. Absent on every line written before the
-  // stamp, PERMANENTLY: there is no backfill (pre-stamp lines cut proportionally),
-  // so do not tighten these three on a census of new writes.
-  ["fulfillments.items[].quantity_per_parent", "array-member-uncensusable"],
   ["invoices.destinations[].collection.address.address_coordinates", "array-member-uncensusable"],
   ["invoices.destinations[].collection.address.user_coordinates", "array-member-uncensusable"],
   ["invoices.destinations[].delivery.address.address_coordinates", "array-member-uncensusable"],
   ["invoices.destinations[].delivery.address.user_coordinates", "array-member-uncensusable"],
   ["invoices.destinations[].jurisdiction", "array-member-uncensusable"],
-  ["invoices.items[].quantity_per_parent", "array-member-uncensusable"],
-  ["invoices.items[].price.base_percent", "array-member-uncensusable"],
-  ["invoices.items[].xero_id", "array-member-uncensusable"],
   ["orders.destinations[].collection.address.address_coordinates", "array-member-uncensusable"],
   ["orders.destinations[].collection.address.user_coordinates", "array-member-uncensusable"],
   ["orders.destinations[].delivery.address.address_coordinates", "array-member-uncensusable"],
@@ -216,7 +191,6 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["purchase-receipts.destinations[].collection.address.user_coordinates", "array-member-uncensusable"],
   ["purchase-receipts.destinations[].delivery.address.address_coordinates", "array-member-uncensusable"],
   ["purchase-receipts.destinations[].delivery.address.user_coordinates", "array-member-uncensusable"],
-  ["purchase-receipts.items[].quantity_per_parent", "array-member-uncensusable"],
   ["purchase-bills.destinations[].collection.address.address_coordinates", "array-member-uncensusable"],
   ["purchase-bills.destinations[].collection.address.user_coordinates", "array-member-uncensusable"],
   ["purchase-bills.destinations[].delivery.address.address_coordinates", "array-member-uncensusable"],
@@ -226,21 +200,16 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["purchase-credits.destinations[].delivery.address.address_coordinates", "array-member-uncensusable"],
   ["purchase-credits.destinations[].delivery.address.user_coordinates", "array-member-uncensusable"],
   ["orders.destinations[].jurisdiction", "array-member-uncensusable"],
-  ["orders.items[].quantity_per_parent", "array-member-uncensusable"],
-  ["orders.items[].inclusion_type", "array-member-uncensusable"],
-  ["orders.items[].price.base_percent", "array-member-uncensusable"],
-  ["orders.items[].price.replacement_cents", "array-member-uncensusable"],
-  ["purchases.items[].price.replacement_cents", "array-member-uncensusable"],
   ["out-of-service.sources[].label", "array-member-uncensusable"],
   ["purchase-credits.sources[].label", "array-member-uncensusable"],
-  // one-document-model Phase 1 — the payable lines spread the SHARED head and
-  // tax core, so they inherit the receivable twins' optionality (the same
-  // instances). `quantity_per_parent` is a kit ratio a purchase line never
-  // carries. (A bill/credit line's `xero_line_id` is plain `.optional()`:
-  // absent is the one "unpaired" spelling, so it is not catalogued here.)
-  ["purchase-bills.items[].quantity_per_parent", "array-member-uncensusable"],
-  ["purchase-credits.items[].quantity_per_parent", "array-member-uncensusable"],
-  ["purchases.items[].quantity_per_parent", "array-member-uncensusable"],
+  // ── structurally-absent — ruling 204 Q2. Bills and supplier credits share ONE
+  //    row schema, and a bill line carries no back-pointer (`checkPurchaseBill`
+  //    refuses the keys) while every credit line states both (`checkPurchaseCredit`
+  //    requires them, `null` on an unpointed line). The `reverses_billing` precedent.
+  ["purchase-bills.items[].path_billing_item", "structurally-absent"],
+  ["purchase-bills.items[].uid_billing", "structurally-absent"],
+  ["purchase-credits.items[].path_billing_item", "structurally-absent"],
+  ["purchase-credits.items[].uid_billing", "structurally-absent"],
   ["out-of-service.stores[].locations[].max", "array-member-uncensusable"],
   ["products.component_of[].price.replacement_cents", "array-member-uncensusable"],
   ["products.components[].price.replacement_cents", "array-member-uncensusable"],
@@ -259,10 +228,7 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["bookings.crms_product_id", "crms-pending-removal"],
   ["credit-notes.organization.crms_id", "crms-pending-removal"],
   ["invoices.crms_id", "crms-pending-removal"],
-  ["invoices.items[].crms_id", "crms-pending-removal"],
-  ["invoices.items[].crms_opportunity_id", "crms-pending-removal"],
   ["invoices.organization.crms_id", "crms-pending-removal"],
-  ["orders.items[].crms_id", "crms-pending-removal"],
   ["orders.organization.crms_id", "crms-pending-removal"],
   ["out-of-service.crms_id", "crms-pending-removal"],
   ["out-of-service.crms_stock_level_id", "crms-pending-removal"],
@@ -281,12 +247,7 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   // Tax classes (api-cloudrun#993) — expand step. Line `uid_tax_class` has been
   // contracted to required (both grains); the override and the product-side
   // fields are still in transit.
-  ["invoices.items[].uid_tax_class_override", "mid-expand"],
-  ["orders.items[].uid_tax_class_override", "mid-expand"],
   // The same `LineTaxCore` instance, spread by the payable lines (one-document-model Phase 1).
-  ["purchase-bills.items[].uid_tax_class_override", "mid-expand"],
-  ["purchase-credits.items[].uid_tax_class_override", "mid-expand"],
-  ["purchases.items[].uid_tax_class_override", "mid-expand"],
   ["products.tax_class_name", "mid-expand"],
   ["products.uid_tax_class", "mid-expand"],
   ["webshop-products.tax_class_name", "mid-expand"],

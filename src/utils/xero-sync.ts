@@ -100,11 +100,11 @@ interface Def {
 }
 
 function def(node: z.ZodType): Def {
-  return (node as unknown as { _zod: { def: Def } })._zod.def;
+  return (node as { _zod: { def: Def } })._zod.def;
 }
 
 function propValues(node: z.ZodType): Record<string, Set<unknown>> | undefined {
-  return (node as unknown as { _zod?: { propValues?: Record<string, Set<unknown>> } })._zod?.propValues;
+  return (node as { _zod?: { propValues?: Record<string, Set<unknown>> } })._zod?.propValues;
 }
 
 const TRANSPARENT = new Set(["optional", "default", "nullable", "prefault", "catch", "readonly", "nonoptional"]);
@@ -304,7 +304,7 @@ export function billingXeroSyncStatus<S extends Side>(
   // nothing. The receivable side is never linked.
   if (
     ACTION_SIDES[side].authorship(doc) === "linked" &&
-    invoiceIsFrozen(doc as unknown as BillingXeroDocuments["payable"])
+    invoiceIsFrozen(doc as BillingXeroDocuments["payable"])
   ) return "not_applicable";
   const pushed = state?.pushed_hash ?? null;
   if (tracks === "once_pushed" && (!doc.xero_id || pushed === null)) return "not_applicable";

@@ -1,8 +1,9 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { fdwPrice, fixedPrice } from "./helpers/formulas.ts";
 import { getInitialValues } from "../src/schemas/initial.ts";
 import { CreateOrderInput, Discount, DiscountInput, DocDestination, EXCHANGE_DISPOSITIONS, isLineItem, ItemPrice, OrderDocDates, OrderDocItem, type OrderDocItemType, OrderDocItemPrice, OrderItem, OrderSchema, UpdateOrderInput } from "../src/schemas/order.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
+import { orderLine as seededOrderLine, orderLineInput } from "./helpers/lines.ts";
 
 // `uid_thread` is a branded `ThreadId`; the schema walk seeds string leaves as
 // `""`, which it rejects. Supply a real id, as every prod doc carries one.
@@ -28,18 +29,21 @@ const priceBase = { ...getInitialValues(OrderDocItemPrice), ...fdwPrice(0, 5) } 
  * `price.replacement`, which keeps a case about anything else minimal.
  */
 const docLine = (over: Record<string, unknown> = {}) => ({
-  uid: "testprod100000000000",
-  type: "rental",
-  name: "Camera",
-  description: "",
-  quantity: 1,
-  stock_method: "none",
-  zero_priced: null,
-  uid_tax_class: "TaxC1assDefau1tAAAAA",
-  coa_revenue: 4000,
-  uid_tracking_category: null,
-  price: priceBase,
-  path: [],
+  // Every key stated by the shared seed (ruling 204); the case's own keys below.
+  ...seededOrderLine({
+    uid: "testprod100000000000",
+    type: "rental",
+    name: "Camera",
+    description: "",
+    quantity: 1,
+    stock_method: "none",
+    zero_priced: null,
+    uid_tax_class: "TaxC1assDefau1tAAAAA",
+    coa_revenue: 4000,
+    uid_tracking_category: null,
+    price: { ...fdwPrice(0, 5), replacement_cents: null },
+    path: [],
+  }),
   ...over,
 });
 
@@ -100,8 +104,8 @@ Deno.test("CreateOrderInput validates a complete input", () => {
     status: "draft",
     destinations: [validDestination],
     items: [
-      { uid: "dest1000000000000000", type: "destination", name: "Chicago", path: [] },
-      { uid: "testitem100000000000", type: "rental", name: "Camera", quantity: 2, path: ["dest1000000000000000"] },
+      INPUT_DIVIDER,
+      inputLine({ name: "Camera", quantity: 2, path: ["dest1000000000000000"] }),
     ],
     subject: "Film shoot",
   };
@@ -115,8 +119,8 @@ Deno.test("CreateOrderInput: a new order starts in a plan status — never activ
     status,
     destinations: [validDestination],
     items: [
-      { uid: "dest1000000000000000", type: "destination", name: "Chicago", path: [] },
-      { uid: "testitem100000000000", type: "rental", name: "Camera", quantity: 2, path: ["dest1000000000000000"] },
+      INPUT_DIVIDER,
+      inputLine({ name: "Camera", quantity: 2, path: ["dest1000000000000000"] }),
     ],
     subject: "Film shoot",
   });
@@ -396,8 +400,8 @@ Deno.test("CreateOrderInput rejects invalid item inclusion_type", () => {
     status: "draft",
     destinations: [validDestination],
     items: [
-      { uid: "dest1000000000000000", type: "destination", name: "Chicago", path: [] },
-      { uid: "testitem100000000000", type: "rental", path: ["dest1000000000000000"], inclusion_type: "invalid" },
+      INPUT_DIVIDER,
+      inputLine({ path: ["dest1000000000000000"], inclusion_type: "invalid" }),
     ],
   };
   assertEquals(CreateOrderInput.safeParse(input).success, false);
@@ -410,8 +414,8 @@ Deno.test("CreateOrderInput accepts null inclusion_type", () => {
     status: "draft",
     destinations: [validDestination],
     items: [
-      { uid: "dest1000000000000000", type: "destination", name: "Chicago", path: [] },
-      { uid: "testitem100000000000", type: "rental", path: ["dest1000000000000000"], inclusion_type: null },
+      INPUT_DIVIDER,
+      inputLine({ path: ["dest1000000000000000"], inclusion_type: null }),
     ],
   };
   assertEquals(CreateOrderInput.safeParse(input).success, true);
@@ -424,8 +428,8 @@ Deno.test("CreateOrderInput rejects a fractional item rate", () => {
     status: "draft",
     destinations: [validDestination],
     items: [
-      { uid: "dest1000000000000000", type: "destination", name: "Chicago", path: [] },
-      { uid: "testitem100000000000", type: "rental", path: ["dest1000000000000000"], price: { rates: [{ rate_key: "week", amount_cents: 0.5 }] } },
+      INPUT_DIVIDER,
+      inputLine({ path: ["dest1000000000000000"], price: { rates: [{ rate_key: "week", amount_cents: 0.5 }] } }),
     ],
   };
   assertEquals(CreateOrderInput.safeParse(input).success, false);
@@ -438,8 +442,8 @@ Deno.test("CreateOrderInput rejects invalid item discount type", () => {
     status: "draft",
     destinations: [validDestination],
     items: [
-      { uid: "dest1000000000000000", type: "destination", name: "Chicago", path: [] },
-      { uid: "testitem100000000000", type: "rental", path: ["dest1000000000000000"], price: { discount: { rate: 10, type: "invalid" } } },
+      INPUT_DIVIDER,
+      inputLine({ path: ["dest1000000000000000"], price: { discount: { rate: 10, type: "invalid" } } }),
     ],
   };
   assertEquals(CreateOrderInput.safeParse(input).success, false);
@@ -452,17 +456,15 @@ Deno.test("CreateOrderInput accepts item with discount and taxes", () => {
     status: "draft",
     destinations: [validDestination],
     items: [
-      { uid: "dest1000000000000000", type: "destination", name: "Chicago", path: [] },
-      {
-        uid: "testitem100000000000",
-        type: "rental",
-        path: ["dest1000000000000000"],
+      INPUT_DIVIDER,
+      inputLine({
         price: {
           ...fdwPrice(10000, 5),
           discount: { rate: 20, type: "percent" },
+          // A derived key (ruling 204 Q3): stripped, never read.
           taxes: [{ uid: "testchirentaltax0000" }],
         },
-      },
+      }),
     ],
   };
   assertEquals(CreateOrderInput.safeParse(input).success, true);
@@ -475,8 +477,8 @@ Deno.test("CreateOrderInput accepts item with null discount", () => {
     status: "draft",
     destinations: [validDestination],
     items: [
-      { uid: "dest1000000000000000", type: "destination", name: "Chicago", path: [] },
-      { uid: "testitem100000000000", type: "rental", path: ["dest1000000000000000"], price: { discount: null } },
+      INPUT_DIVIDER,
+      inputLine({ path: ["dest1000000000000000"], price: { discount: null } }),
     ],
   };
   assertEquals(CreateOrderInput.safeParse(input).success, true);
@@ -489,8 +491,8 @@ Deno.test("CreateOrderInput rejects float quantity on items", () => {
     status: "draft",
     destinations: [validDestination],
     items: [
-      { uid: "dest1000000000000000", type: "destination", name: "Chicago", path: [] },
-      { uid: "testitem100000000000", type: "rental", path: ["dest1000000000000000"], quantity: 1.5 },
+      INPUT_DIVIDER,
+      inputLine({ path: ["dest1000000000000000"], quantity: 1.5 }),
     ],
   };
   assertEquals(CreateOrderInput.safeParse(input).success, false);
@@ -552,6 +554,21 @@ Deno.test("UpdateOrderInput accepts partial update", () => {
 Deno.test("UpdateOrderInput rejects missing version", () => {
   assertEquals(UpdateOrderInput.safeParse({}).success, false);
 });
+
+/** A destination divider as a client sends it: every key stated (ruling 204 Q7). */
+const INPUT_DIVIDER = { uid: "dest1000000000000000", type: "destination", name: "Chicago", description: "", path: [] };
+
+/**
+ * A line as a client sends it: the shared seed (every key stated, ruling 204),
+ * this file's defaults, then the case's own keys — `price` merged over the
+ * seeded price, so a case naming one price key still states the rest. Untyped
+ * overrides on purpose: a negative case states a value the schema must refuse.
+ */
+const inputLine = (over: Record<string, unknown> = {}) => {
+  const base = orderLineInput({ uid: "testitem100000000000", type: "rental", name: "Camera", quantity: 2, path: ["dest1000000000000000"] });
+  const price = over.price;
+  return { ...base, ...over, price: { ...base.price, ...(typeof price === "object" && price !== null ? price : {}) } };
+};
 
 // ── OrderSchema (document) ───────────────────────────────────────
 
@@ -619,7 +636,7 @@ Deno.test("OrderSchema validates a complete document", () => {
         description: "",
         path: ["11111111-1111-4111-8111-111111111111"],
       },
-      {
+      docLine({
         uid: "testprod100000000000",
         type: "rental",
         name: "Camera",
@@ -630,7 +647,7 @@ Deno.test("OrderSchema validates a complete document", () => {
         coa_revenue: 4000,
         uid_tracking_category: null,
         price: {
-          ...priceBase,
+          ...docLine().price,
           ...fdwPrice(10000, 5),
           replacement_cents: 500000,
           subtotal_cents: 20000,
@@ -646,7 +663,7 @@ Deno.test("OrderSchema validates a complete document", () => {
         },
         stock_method: "bulk",
         zero_priced: null,
-      },
+      }),
     ],
     query_by_items: ["testprod100000000000"],
     query_by_contacts: ["testcontact100000000"],
@@ -1146,7 +1163,7 @@ Deno.test("Discount: the rate error names the field, not the object", () => {
 
 // ── transaction_fee: one claimant, one price shape ───────────────────
 
-const feeLine = {
+const feeLine = docLine({
   uid: "77LKBYcC09u1PZFhxmDJ",
   type: "transaction_fee",
   name: "Credit Card Processing Fee",
@@ -1163,8 +1180,8 @@ const feeLine = {
   // A `percent_of_total` fee carries its rate in `base_percent` (a 4dp
   // percentage), never in `base_cents` — D1's split, enforced by
   // `checkPriceBaseUnit`. 3% here, not $3.00.
-  price: { ...priceBase, price_formula: null, rates: [], counts: [], base_percent: 3 },
-};
+  price: { ...docLine().price, price_formula: null, rates: [], counts: [], base_percent: 3 },
+});
 
 Deno.test("OrderDocItem: a transaction_fee is an ordinary line item", () => {
   const r = OrderDocItem.safeParse(feeLine);
@@ -1306,14 +1323,7 @@ Deno.test("OrderItem: a divider cannot carry a price or a quantity", () => {
   // The flat input schema accepted every line field on every type, so this
   // payload parsed and only failed at `validateBeforeWrite`, as an
   // `unrecognized_keys` complaint about the STORED shape.
-  const bad = OrderItem.safeParse({
-    uid: "dest1000000000000000",
-    type: "destination",
-    name: "Chicago",
-    path: [],
-    quantity: 3,
-    price: { ...fdwPrice(10000, 5) },
-  });
+  const bad = OrderItem.safeParse({ ...INPUT_DIVIDER, quantity: 3, price: { ...fdwPrice(10000, 5) } });
   assertEquals(bad.success, false);
   assertEquals(bad.error?.issues[0].code, "unrecognized_keys");
 
@@ -1332,16 +1342,11 @@ Deno.test("OrderItem: a line item still ships back with its stored extras", () =
   // from a store holding stored doc items, so a line arrives carrying computed
   // price fields, `crms_id` and `taxes_base`. Those are stripped, as they always
   // were; tightening this arm would 400 every such client.
-  const ok = OrderItem.safeParse({
-    uid: "testitem100000000000",
-    type: "rental",
-    name: "Camera",
-    quantity: 2,
-    path: ["dest1000000000000000"],
+  const ok = OrderItem.safeParse(inputLine({
     price: { ...fdwPrice(10000, 5), subtotal_cents: 20000, total_cents: 22000, taxes: [{ uid: "tax10000000000000000" }] },
     crms_id: 4021,
     taxes_base: [{ uid: "tax10000000000000000", name: "Chicago", rate: 9, type: "percent" }],
-  });
+  }));
   assertEquals(ok.success, true);
   const parsed = ok.data as { crms_id?: unknown; taxes_base?: unknown };
   assertEquals(parsed.crms_id, undefined);
@@ -1349,24 +1354,18 @@ Deno.test("OrderItem: a line item still ships back with its stored extras", () =
 });
 
 Deno.test("OrderItem: percent_of_total is inexpressible on an input line too", () => {
-  const bad = OrderItem.safeParse({
-    uid: "testitem100000000000",
-    type: "rental",
-    name: "Camera",
-    path: [],
-    price: { base_percent: 3 },
-  });
+  const bad = OrderItem.safeParse(inputLine({ path: [], price: { price_formula: null, rates: [], base_percent: 3 } }));
   assertEquals(bad.success, false);
   assertEquals(bad.error?.issues[0].path, ["price", "base_percent"]);
 
   assertEquals(
-    OrderItem.safeParse({
+    OrderItem.safeParse(inputLine({
       uid: "testfee1000000000000",
       type: "transaction_fee",
       name: "Card Fee",
       path: [],
-      price: { base_percent: 3 },
-    }).success,
+      price: { price_formula: null, rates: [], base_percent: 3 },
+    })).success,
     true,
   );
 });
@@ -1376,13 +1375,7 @@ Deno.test("OrderItem: the input does NOT enforce the replacement axis", () => {
   // reads off the product, not off the payload. Enforcing it here would reject a
   // legal rental line for an unstocked product. Storage still enforces it.
   assertEquals(
-    OrderItem.safeParse({
-      uid: "testitem100000000000",
-      type: "rental",
-      name: "Camera",
-      path: [],
-      price: { ...fdwPrice(10000, 5) },
-    }).success,
+    OrderItem.safeParse(inputLine({ path: [], stock_method: "bulk", price: { ...fdwPrice(10000, 5), replacement_cents: null } })).success,
     true,
   );
 });
@@ -1418,12 +1411,16 @@ Deno.test("OrderDocItem: a stored line must STATE both posting keys (`LinePostin
   }
 });
 
-Deno.test("OrderItem input: both posting keys are optional and nullable (missing = keep, null = reset)", () => {
-  const base = { uid: "testitem100000000000", type: "rental", path: [] };
-  for (const over of [{}, { coa_revenue: null, uid_tracking_category: null }, { coa_revenue: 4100, uid_tracking_category: "TrackCat000000000001" }]) {
-    const r = OrderItem.safeParse({ ...base, ...over });
+Deno.test("OrderItem input: both posting keys are REQUIRED and nullable (null = reset; missing is a 400, ruling 204)", () => {
+  for (const over of [{ coa_revenue: null, uid_tracking_category: null }, { coa_revenue: 4100, uid_tracking_category: "TrackCat000000000001" }]) {
+    const r = OrderItem.safeParse(inputLine(over));
     assertEquals(r.success, true, JSON.stringify(over));
     assertEquals(r.success && Object.keys(over).every((k) => k in r.data), true, "a stated key reaches the handler, not stripped");
+  }
+  for (const key of ["coa_revenue", "uid_tracking_category"] as const) {
+    const { [key]: _dropped, ...withoutKey } = inputLine();
+    const r = OrderItem.safeParse(withoutKey);
+    assertEquals(r.error?.issues.map((i) => i.path.join(".")), [key], `${key} omitted is refused by name`);
   }
 });
 
@@ -1500,26 +1497,27 @@ const Y_LINE = "testprod200000000000";
 /** A priced order line — the minimum `OrderDocLineItem` parses. */
 function orderLine(uid: string, path: string[], extra: Record<string, unknown> = {}) {
   return {
-    uid,
-    type: "rental",
-    name: "Light",
-    description: "",
-    path,
-    quantity: 1,
-    uid_tax_class: "TaxC1assDefau1tAAAAA",
-    coa_revenue: 4000,
-    uid_tracking_category: null,
-    price: {
-      ...priceBase,
-      ...fdwPrice(10000, 1),
-      replacement_cents: 500000,
-      subtotal_cents: 10000,
-      subtotal_discounted_cents: 10000,
-      taxes: [],
-      total_cents: 10000,
-    },
-    stock_method: "bulk",
-    zero_priced: null,
+    ...seededOrderLine({
+      uid,
+      type: "rental",
+      name: "Light",
+      description: "",
+      path,
+      quantity: 1,
+      uid_tax_class: "TaxC1assDefau1tAAAAA",
+      coa_revenue: 4000,
+      uid_tracking_category: null,
+      price: {
+        ...fdwPrice(10000, 1),
+        replacement_cents: 500000,
+        subtotal_cents: 10000,
+        subtotal_discounted_cents: 10000,
+        taxes: [],
+        total_cents: 10000,
+      },
+      stock_method: "bulk",
+      zero_priced: null,
+    }),
     ...extra,
   };
 }
@@ -1566,12 +1564,11 @@ Deno.test("🔴 OrderSchema ACCEPTS `exchanged_for` naming a parent-leg row the 
 Deno.test("OrderItem (input) carries `exchanged_for` through a parse", () => {
   // 🔴 The input is a `z.object`, so an undeclared key is STRIPPED: without the
   // declaration every order PUT would succeed and drop the exchange's link.
-  const parsed = OrderItem.safeParse({
+  const parsed = OrderItem.safeParse(inputLine({
     uid: Y_LINE,
-    type: "rental",
     path: [EXCHANGE_PAIR, Y_LINE],
     exchanged_for: [{ path: [PARENT_PAIR, X_LINE], quantity: 1, reason: "damaged" }],
-  });
+  }));
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
   assertEquals((parsed.success ? parsed.data as { exchanged_for?: unknown[] } : {}).exchanged_for?.length, 1);
 });
@@ -1595,7 +1592,7 @@ Deno.test("S8c-5: a stored order line carrying the old `exchanged_for` is refuse
 Deno.test("S8c-5: OrderItem (input) STRIPS an old-named `exchanged_for` — it is no longer an input channel", () => {
   // The input is a `z.object` (the house rule), so an old name is dropped
   // rather than refused. Every writer moved to `exchanged_for` in S8c step 2.
-  const parsed = OrderItem.safeParse({ uid: Y_LINE, type: "rental", path: [EXCHANGE_PAIR, Y_LINE], replaces: EXCHANGE_ENTRY });
+  const parsed = OrderItem.safeParse(inputLine({ uid: Y_LINE, path: [EXCHANGE_PAIR, Y_LINE], replaces: EXCHANGE_ENTRY }));
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
   assertEquals("replaces" in (parsed.success ? parsed.data : {}), false);
 });
@@ -1608,6 +1605,7 @@ Deno.test("S8c-5: OrderItem (input) STRIPS an old-named `exchanged_for` — it i
 // save. The snapshot is now an input spelling; the echoed computed keys are
 // still stripped, and so is any extra key inside the snapshot (stripping twin).
 const STORED_LINE_PRICE = {
+  stated_cents: null,
   base_percent: null,
   replacement_cents: 0,
   subtotal_cents: 127400,
@@ -1623,10 +1621,13 @@ const STORED_LINE_PRICE = {
 
 Deno.test("ItemPrice: a stored-form echo keeps price_formula and strips the computed keys", () => {
   const r = ItemPrice.safeParse(STORED_LINE_PRICE);
-  assertEquals(r.success, true);
-  const out = r.data as Record<string, unknown>;
+  assert(r.success, JSON.stringify(r.error?.issues));
+  const out = r.data;
   assertEquals(out.price_formula, STORED_LINE_PRICE.price_formula);
-  for (const k of ["counts", "subtotal_discounted_cents", "taxes_base"]) assertEquals(k in out, false, k);
+  // Every DERIVED key is stripped (ruling 204 Q3), the computed money included.
+  for (const k of ["counts", "subtotal_cents", "subtotal_discounted_cents", "taxes", "taxes_base", "total_cents"]) {
+    assertEquals(k in out, false, k);
+  }
 });
 
 Deno.test("ItemPrice: an extra key inside the echoed snapshot is stripped, not refused", () => {
@@ -1635,8 +1636,9 @@ Deno.test("ItemPrice: an extra key inside the echoed snapshot is stripped, not r
   assertEquals(r.data?.price_formula, STORED_LINE_PRICE.price_formula);
 });
 
-Deno.test("ItemPrice: uid_price_formula disagreeing with the echoed snapshot is refused", () => {
+Deno.test("ItemPrice: the retired `uid_price_formula` alias is stripped, never read — the snapshot is the one spelling (ruling 204 R3)", () => {
   const r = ItemPrice.safeParse({ ...STORED_LINE_PRICE, uid_price_formula: "FixedPriceFormula000" });
-  assertEquals(r.success, false);
-  assertEquals(r.error?.issues.map((i) => i.path.join(".")), ["price_formula.uid"]);
+  assert(r.success, JSON.stringify(r.error?.issues));
+  assertEquals("uid_price_formula" in r.data, false);
+  assertEquals(r.data.price_formula, STORED_LINE_PRICE.price_formula);
 });

@@ -39,13 +39,14 @@ import type {
   DocDestinationType,
   InvoiceDocDestinationType,
   InvoiceDocItemType,
+  InvoiceDocLineItemType,
   Purchase,
   PurchaseDocDestination,
   PurchaseDocumentRow,
   PurchaseItem,
   Side,
 } from "../schemas/mod.ts";
-import { isLineItemType, purchaseItemBasis, purchaseLines } from "../schemas/mod.ts";
+import { isInvoiceLineItem, isLineItemType, purchaseItemBasis, purchaseLines } from "../schemas/mod.ts";
 import type { LineItem } from "./orders.ts";
 import type { TierCount } from "./price-formulas.ts";
 import { chicagoDayAtTimeOf } from "./dates.ts";
@@ -102,39 +103,54 @@ interface RemainderSide<S extends Side> {
   billablePairs(initiator: RemainderInitiators[S], asOf: string): RemainderInitiators[S]["destinations"];
 }
 
+/**
+ * An order LINE projected onto the invoice, typed as a line: the projector
+ * returns the whole row union, and the remainder only ever projects lines here,
+ * so a divider reaching it is a defect, not a cast to paper over.
+ */
+function projectInvoiceLine(item: LineItem, scope: string): InvoiceDocLineItemType {
+  const row = projectOrderItemToInvoiceItem(item, scope);
+  if (!isInvoiceLineItem(row)) throw new Error(`billing remainder: ${item.uid} is a ${row.type} divider, not a line`);
+  return row;
+}
+
 const RECEIVABLE_REMAINDER: RemainderSide<"receivable"> = {
-  scopeDivider: (order) =>
-    ({ uid: order.uid, type: "order", name: `Order #${order.number}`, description: "", path: [order.uid] }) as InvoiceDocItemType,
+  scopeDivider: (order): InvoiceDocItemType => ({
+    uid: order.uid,
+    type: "order",
+    name: `Order #${order.number}`,
+    description: "",
+    path: [order.uid],
+  }),
   projectDivider: (item, scope) => projectOrderItemToInvoiceItem(item, scope),
   projectLine: (item, scope, quantity, from) => {
-    const line = {
-      ...projectOrderItemToInvoiceItem({ ...item, quantity } as LineItem, scope),
-      ...(from > 0 ? { units_from: from } : {}),
-    } as InvoiceDocItemType;
+    const line: InvoiceDocLineItemType = {
+      ...projectInvoiceLine({ ...item, quantity }, scope),
+      // A whole line states `null` (ruling 204), a part its first unit.
+      units_from: from > 0 ? from : null,
+    };
     // A STATED order line's part carries its slice of the line's stored gross and
     // cents through the one part door (D7, spec C5), never the whole gross. A
     // rate part needs nothing: the pricer prices its formula at `units_from`.
     if (item.price == null || lineKindOf(item as { price: { stated_cents?: number | null } }) === "rate") return line;
-    const part = partOf(item as unknown as PartSourceLike, from, from + quantity);
-    return withPart(line as unknown as PartSourceLike, quantity, part, from > 0 ? from : null) as unknown as InvoiceDocItemType;
+    const part = partOf(item as PartSourceLike, from, from + quantity);
+    return withPart(line as PartSourceLike, quantity, part, from > 0 ? from : null) as InvoiceDocItemType;
   },
   extensionLine: (billed, item, scope, path, quantity, counts) => {
-    const projected = projectOrderItemToInvoiceItem({
+    if (billed.price == null) throw new Error(`billing remainder: billed row ${billed.uid} carries no price`);
+    const projected = projectInvoiceLine({
       ...billed,
       uid: item.uid,
       path: item.path,
       quantity,
       price: { ...billed.price, counts: [...counts] },
-    } as LineItem, scope);
+    }, scope);
     // An extension section bills more days of a leg; it is not an exchange, so a
     // copied exchange line keeps no take-back list (its pair's `exchange` is
     // nulled, and `checkInvoiceExchangedFor` refuses the field off one). Nor is it
-    // a part: it bills time, not units.
-    const { exchanged_for: _exchange, units_from: _part, ...line } = projected as InvoiceDocItemType & {
-      exchanged_for?: unknown;
-      units_from?: unknown;
-    };
-    return { ...line, path } as InvoiceDocItemType;
+    // a part: it bills time, not units. Both stated empty (ruling 204).
+    const line: InvoiceDocLineItemType = { ...projected, exchanged_for: [], units_from: null, path };
+    return line;
   },
   projectPair: (scope, pair) => toInvoiceDestinationPair(scope, pair),
   billablePairs: (order) => order.destinations,
@@ -142,24 +158,31 @@ const RECEIVABLE_REMAINDER: RemainderSide<"receivable"> = {
 
 const PAYABLE_REMAINDER: RemainderSide<"payable"> = {
   scopeDivider: (purchase) => purchaseScopeDivider(purchase),
-  projectDivider: (item, scope) => ({ ...item, path: [scope, ...(item.path ?? [])] }) as unknown as PurchaseDocumentRow,
-  projectLine: (item, scope, quantity, from) => ({
-    ...projectPurchaseLineToBillLine(item as unknown as PurchaseItem, { uid_purchase: scope, quantity, from }),
+  // A projected destination section is a full-window one (ruling 204, class C).
+  projectDivider: (item, scope) =>
+    ({
+      ...item,
+      path: [scope, ...(item.path ?? [])],
+      ...(item.type === "destination" ? { path_extension_for: null } : {}),
+    }) as PurchaseDocumentRow,
+  projectLine: (item, scope, quantity, from) => {
+    const line = projectPurchaseLineToBillLine(item as PurchaseItem, { uid_purchase: scope, quantity, from });
     // A flat line already states it (its slice's marker); a TIME line prices from it (ruling 174).
-    ...(from > 0 ? { units_from: from } : {}),
-  }) as PurchaseDocumentRow,
+    return from > 0 ? { ...line, units_from: from } : line;
+  },
   extensionLine: (billed, item, scope, path, quantity, counts) => {
     // The purchase line's head, the BILLED ROW's terms (ruling 175).
-    const source = item as unknown as PurchaseItem;
-    const terms = billed.price as unknown as Pick<PurchaseItem["price"], "price_formula" | "rates" | "discount">;
+    const source = item as PurchaseItem;
+    const terms = billed.price as Pick<PurchaseItem["price"], "price_formula" | "rates" | "discount">;
     const line = projectPurchaseLineToBillLine(
       { ...source, price: { ...source.price, price_formula: terms.price_formula, rates: terms.rates, discount: terms.discount } } as PurchaseItem,
       { uid_purchase: scope, quantity, from: 0, counts: [...counts] },
     );
-    const { units_from: _part, exchanged_for: _exchange, ...rest } = line as typeof line & { units_from?: unknown; exchanged_for?: unknown };
-    return { ...rest, path } as unknown as PurchaseDocumentRow;
+    // Not a part, not an exchange: both stated empty (ruling 204), on the arms that carry them.
+    const row: PurchaseDocumentRow = { ...line, units_from: null, ...("exchanged_for" in line ? { exchanged_for: [] } : {}), path };
+    return row;
   },
-  projectPair: (scope, pair) => ({ uid_source: scope, ...pair }) as unknown as PurchaseDocDestination,
+  projectPair: (scope, pair) => ({ uid_source: scope, ...pair }) as PurchaseDocDestination,
   billablePairs: (purchase, asOf) => clipOpenHires(purchase, asOf),
 };
 
@@ -291,7 +314,7 @@ function assembleSource<S extends Side>(
   mintUid: () => string,
 ): { items: RemainderRows[S]["row"][]; destinations: RemainderRows[S]["pair"][] } {
   const S = initiator.uid;
-  const initiatorItems = initiator.items as unknown as readonly LineItem[];
+  const initiatorItems = initiator.items as readonly LineItem[];
   const items: RemainderRows[S]["row"][] = [data.scopeDivider(initiator)];
   for (const item of initiatorItems) {
     if (!isLineItemType(item.type)) {

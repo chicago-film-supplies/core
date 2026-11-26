@@ -669,7 +669,7 @@ function scopeCustody(doc: DiffCustody): ScopedLines {
   const byKey = new Map<string, LineItem>();
   for (const it of items) {
     if (isDividerItemType(it.type)) continue;
-    byKey.set(key(it.path), it as unknown as LineItem);
+    byKey.set(key(it.path), it as LineItem);
   }
   return { byKey, anchors: collectSubstitutionAnchors(items as readonly MaybeSubstitution[]), claims: new Map() };
 }
@@ -988,7 +988,7 @@ function compareScope(
     const m = new Map<string, DocDestinationType>();
     for (const p of side.doc.destinations as readonly (DocDestinationType | InvoiceDocDestinationType)[]) {
       // A billing document's pairs name the initiator they bill (the side's scope key).
-      if (isBilling(side) && (p as unknown as { uid_source?: string }).uid_source !== orderUid) continue;
+      if (isBilling(side) && (p as { uid_source?: string }).uid_source !== orderUid) continue;
       m.set(p.uid, p);
     }
     return m;
@@ -1056,7 +1056,7 @@ function compareScope(
     if (orderSide === undefined || liveAnchors.length === 0) return new Map<string, number>();
     const direct = new Map<string, number>();
     for (const a of liveAnchors) direct.set(key(a.substitutedFor), (direct.get(key(a.substitutedFor)) ?? 0) + a.quantity);
-    return substitutionCredit((orderSide.doc as Order).items as unknown as LineItem[], direct);
+    return substitutionCredit((orderSide.doc as Order).items as LineItem[], direct);
   })();
   const expectedFulfillmentQuantity = (rel: string, downstreamRow: LineItem, orderRow: LineItem): number | undefined => {
     if (downstream === undefined || !isCustody(downstream) || liveAnchors.length === 0) return undefined;
@@ -1212,7 +1212,7 @@ interface DiffSideData {
  * flat line's money is the account's question.
  */
 function linkedTimeLineMoney(billingLine: LineItem, billingDoc: DiffBilling): DocumentDiffField[] {
-  const line = billingLine as unknown as PurchaseDocumentItem;
+  const line = billingLine as PurchaseDocumentItem;
   if ((billingDoc as PurchaseBill).origin !== "linked" || line.price?.price_formula.basis !== "time") return [];
   const expected = formulaMoneyMismatch(line.price, line.quantity, line.amount_cents);
   if (expected === null) return [];
@@ -1236,7 +1236,7 @@ const DIFF_SIDES: Readonly<Record<Side, DiffSideData>> = {
         : orderOutOfServiceInputs(initiator as Order, custodyDoc as Fulfillment | undefined, s.outOfService, s.invoices ?? []),
     line: {
       projectLine: (initiatorLine, _billingLine, initiatorUid) =>
-        projectOrderItemToInvoiceItem(initiatorLine, initiatorUid) as unknown as LineItem,
+        projectOrderItemToInvoiceItem(initiatorLine, initiatorUid) as LineItem,
       sharedLineFields: () => orderInvoiceSharedFields().line,
       ownMoney: () => [],
     },
@@ -1260,7 +1260,7 @@ const DIFF_SIDES: Readonly<Record<Side, DiffSideData>> = {
       // projection: the diff ignores the `stated_total` group, so a partial
       // replacement bill would otherwise report `out_of_service` on every row.
       projectLine: (initiatorLine, billingLine) =>
-        projectPurchaseLineForBill(initiatorLine as unknown as PurchaseItem, billingLine.quantity ?? 0) as unknown as LineItem,
+        projectPurchaseLineForBill(initiatorLine as PurchaseItem, billingLine.quantity ?? 0) as unknown as LineItem,
       sharedLineFields: purchaseBillSharedLineFields,
       ownMoney: linkedTimeLineMoney,
     },
@@ -1273,7 +1273,7 @@ function scopeInitiator(items: readonly { type: string; path: readonly string[] 
   const byKey = new Map<string, LineItem>();
   for (const it of items) {
     if (isDividerItemType(it.type as OrderDocItemType["type"])) continue;
-    byKey.set(key(it.path), it as unknown as LineItem);
+    byKey.set(key(it.path), it as LineItem);
   }
   return { byKey, anchors: [], claims: new Map() };
 }
@@ -1288,7 +1288,7 @@ function scopeInitiator(items: readonly { type: string; path: readonly string[] 
 function scopeBilling(doc: DiffBilling, initiator: DiffInitiator): ScopedLines {
   const initiatorUid = initiator.uid;
   const initiatorKeys = new Set((initiator.items as readonly { path: readonly string[] }[]).map((it) => key(it.path)));
-  const items = doc.items as unknown as InvoiceItem[];
+  const items = doc.items as InvoiceItem[];
   const byKey = new Map<string, LineItem>();
   const rel: MaybeSubstitution[] = [];
   const extensionTargets = extensionSectionTargets(items, initiatorUid);
@@ -1301,7 +1301,7 @@ function scopeBilling(doc: DiffBilling, initiator: DiffInitiator): ScopedLines {
     // records IS its purchase line (W4R), and is compared as one. Keyed on the
     // link (`billsOutOfService`), never on the `replacement` type.
     if (billsOutOfService(it) && !initiatorKeys.has(key(relPath))) continue;
-    byKey.set(key(relPath), it as unknown as LineItem);
+    byKey.set(key(relPath), it as LineItem);
     if ("substituted_for" in it) rel.push({ path: relPath, substituted_for: it.substituted_for });
   }
   const claims = new Map<string, string>();
@@ -1314,8 +1314,8 @@ function scopeBilling(doc: DiffBilling, initiator: DiffInitiator): ScopedLines {
 /** The destination legs a billing document's scope authored itself (core#124), on both sides. */
 function authoredLegs(side: Side, doc: DiffBilling, initiator: DiffInitiator): Set<string> {
   const scopeType = BILLING_FOLD[side].scopeType;
-  const scoped = (doc.items as unknown as InvoiceItem[]).filter((it) => it.path[0] === initiator.uid && it.type !== scopeType);
-  const roots = invoiceAuthoredSubtrees(scoped, initiator.items as unknown as LineItem[], initiator.uid);
+  const scoped = (doc.items as InvoiceItem[]).filter((it) => it.path[0] === initiator.uid && it.type !== scopeType);
+  const roots = invoiceAuthoredSubtrees(scoped, initiator.items as LineItem[], initiator.uid);
   const types = new Map(scoped.map((it) => [key(it.path.slice(1)), it.type]));
   return new Set(roots.filter((r) => r.length === 1 && types.get(key(r)) === "destination").map((r) => r[0]));
 }
@@ -1451,13 +1451,13 @@ export function computeDocumentDiffs(
     const billing = allBilling.filter((b) => data.scopesOf(b).includes(uid));
     const fold = billedByPath(
       side,
-      { uid, items: initiator.items as unknown as LineItem[] },
+      { uid, items: initiator.items as LineItem[] },
       billing as never[],
       data.credits(sources, uid) as never[],
     );
     const account = accountInitiator(
       side,
-      initiator as unknown as AccountedInitiator,
+      initiator as AccountedInitiator,
       fold,
       data.custodyInput(custodyDoc),
       data.outOfServiceInput(initiator, custodyDoc, sources),
@@ -1554,7 +1554,7 @@ export function computeDocumentDiffs(
   const scopeUids = data.scopesOf(doc);
   // A row under no initiator scope is the document's own.
   const firstInitiator = [...initiatorByUid.values()][0];
-  for (const it of doc.items as unknown as InvoiceItem[]) {
+  for (const it of doc.items as InvoiceItem[]) {
     if (isDividerItemType(it.type) || scopeUids.includes(it.path[0])) continue;
     if (firstInitiator !== undefined) push(out.lines, key(it.path), { kind: "not_on_source", source: refOf(kinds.initiator, firstInitiator), fields: [] });
   }
@@ -1619,10 +1619,10 @@ function creditKeys(notes: readonly DocumentDiffCreditNote[], invoices: readonly
     const orderUid = path[0];
     const order = orderByUid.get(orderUid);
     if (invoice === undefined || order === undefined) return null;
-    const scoped = (invoice.items as readonly InvoiceDocItemType[]).filter((it) => it.path[0] === orderUid) as unknown as InvoiceItem[];
+    const scoped = (invoice.items as readonly InvoiceDocItemType[]).filter((it) => it.path[0] === orderUid) as InvoiceItem[];
     // A moved row (core#125) bills its claimed order line even inside an authored group.
     if (orderLineClaims(scoped, orderUid).has(key(path.slice(1)))) return true;
-    return !isInInvoiceAuthoredSubtree(path, orderUid, invoiceAuthoredSubtrees(scoped, order.items as unknown as LineItem[], orderUid));
+    return !isInInvoiceAuthoredSubtree(path, orderUid, invoiceAuthoredSubtrees(scoped, order.items as LineItem[], orderUid));
   };
   const rows: CreditKeys["rows"] = new Map();
   const unkeyed: DocumentUnkeyedCredit[] = [];
@@ -1682,7 +1682,7 @@ function fileCredits(out: DocumentDiffMap, keys: CreditKeys, viewing: { kind: Do
     let claims = claimsByInvoice.get(invoice.uid);
     if (!claims) {
       const scoped = (invoice.items as readonly InvoiceDocItemType[]).filter((it) => it.path[0] === orderUid);
-      claimsByInvoice.set(invoice.uid, claims = orderLineClaims(scoped as unknown as InvoiceItem[], orderUid));
+      claimsByInvoice.set(invoice.uid, claims = orderLineClaims(scoped as InvoiceItem[], orderUid));
     }
     return claims;
   };

@@ -138,7 +138,7 @@ export function purchaseLineKey(uidPurchase: string, path: readonly string[]): s
 }
 
 /** A row's `substituted_for`: only the product arm (a sale or rental line) carries one. */
-function substitutedForOf(row: PurchaseDocumentItem): PurchaseDocumentProductItem["substituted_for"] {
+function substitutedForOf(row: PurchaseDocumentItem): PurchaseDocumentProductItem["substituted_for"] | undefined {
   return "substituted_for" in row ? row.substituted_for : undefined;
 }
 
@@ -159,7 +159,7 @@ export function purchaseLineCovers(purchase: Pick<Purchase, "status">, item: Pur
  * its open hires CLIPPED at the document date when the account must meter them.
  */
 export function purchaseInitiator(purchase: Pick<Purchase, "uid" | "items" | "destinations">): AccountedInitiator {
-  return { uid: purchase.uid, items: purchase.items as unknown as readonly LineItem[], destinations: purchase.destinations };
+  return { uid: purchase.uid, items: purchase.items as readonly LineItem[], destinations: purchase.destinations };
 }
 
 /**
@@ -461,24 +461,24 @@ function projectedLineHead(item: PurchaseItem, uidPurchase: string) {
     description: item.description,
     path: [uidPurchase, ...item.path],
     zero_priced: item.zero_priced,
-    ...(item.quantity_per_parent !== undefined ? { quantity_per_parent: item.quantity_per_parent } : {}),
+    quantity_per_parent: item.quantity_per_parent,
     ledger_account: item.ledger_account,
     uid_tracking_category: item.uid_tracking_category,
     uid_tax_class: item.uid_tax_class,
-    ...(item.uid_tax_class_override !== undefined ? { uid_tax_class_override: item.uid_tax_class_override } : {}),
-    ...exchangedForProjection(item),
+    uid_tax_class_override: item.uid_tax_class_override,
+    // Every key stated with its empty value (ruling 204): the move pointer is the
+    // bill writer's (server-owned), the Xero line id the link writer's.
+    path_source_item: null,
+    xero_line_id: null,
   };
 }
 
 /**
  * An exchange line's take-back list on its bill line (C16, ruling 82):
- * purchase-relative, as on the purchase, and presence-faithful — a purchase `[]`
- * stays `[]`, an absent key stays absent — so no stored bill key set moves.
+ * purchase-relative, as on the purchase. A sale line states `[]`.
  */
-function exchangedForProjection(item: PurchaseItem): { exchanged_for?: ExchangedForEntryType[] } {
-  return item.type === "rental" && item.exchanged_for !== undefined
-    ? { exchanged_for: item.exchanged_for.map((e) => ({ ...e, path: [...e.path] })) }
-    : {};
+function exchangedForProjection(item: PurchaseItem): ExchangedForEntryType[] {
+  return item.type === "rental" ? item.exchanged_for.map((e) => ({ ...e, path: [...e.path] })) : [];
 }
 
 /**
@@ -496,10 +496,13 @@ function exchangedForProjection(item: PurchaseItem): { exchanged_for?: Exchanged
 function attributionOf(
   item: PurchaseItem,
   quantity: number,
-): { out_of_service?: OutOfServiceEntryType[] } {
+): { out_of_service?: OutOfServiceEntryType[]; substituted_for?: SubstitutedForEntryType[]; exchanged_for?: ExchangedForEntryType[] } {
   switch (item.type) {
+    // The product arm's own keys, at their values (ruling 204): a projection
+    // stands in for nothing, and takes the purchase line's exchange list.
     case "sale":
     case "rental":
+      return { substituted_for: [], exchanged_for: exchangedForProjection(item) };
     case "service":
       return {};
     case "replacement":
@@ -573,15 +576,46 @@ export function projectPurchaseLineToBillLine(
     taxes: item.price.taxes,
     taxes_base: item.price.taxes_base,
   });
-  return {
-    type: item.type,
+  return lineOfArm(item, {
     ...projectedLineHead(item, opts.uid_purchase),
-    ...attributionOf(item, opts.quantity),
     quantity: opts.quantity,
     amount_cents,
     units_from: before,
     price,
-  } as PurchaseDocumentItem;
+  }, opts.quantity);
+}
+
+/** The keys every arm of a projected bill line carries, built by its caller. */
+type ProjectedLineCore = ReturnType<typeof projectedLineHead> & {
+  quantity: number;
+  amount_cents: number;
+  units_from: number | null;
+  price: PurchaseDocumentLinePrice;
+};
+
+/**
+ * A projected bill line, in its ARM's shape: each arm states exactly its stored
+ * arm's keys (ruling 204), so the compiler — not a cast — says a key is missing.
+ */
+function lineOfArm(item: PurchaseItem, core: ProjectedLineCore, quantity: number): PurchaseDocumentItem {
+  switch (item.type) {
+    case "sale":
+    case "rental":
+      return { type: item.type, ...core, substituted_for: [], exchanged_for: exchangedForProjection(item) };
+    case "service":
+      return { type: "service", ...core, ledger_account: item.ledger_account };
+    case "replacement":
+      return {
+        type: "replacement",
+        ...core,
+        ledger_account: item.ledger_account,
+        out_of_service: fitOutOfServiceEntries(item.out_of_service, quantity),
+      };
+    default: {
+      const unreachable: never = item;
+      throw new Error(`lineOfArm: unknown purchase item ${JSON.stringify(unreachable)}`);
+    }
+  }
 }
 
 /**
@@ -601,32 +635,19 @@ function projectTimeLine(item: PurchaseItem, opts: ProjectBillLineOptions, units
     taxes: [],
     ...(item.price.taxes_base !== undefined ? { taxes_base: item.price.taxes_base.map((t) => ({ ...t })) } : {}),
     counts: (opts.counts ?? []).map((t) => ({ ...t })),
+    // A rate line states no total (ruling 204: `null`, never absent).
+    stated_cents: null,
     subtotal_cents: 0,
     subtotal_discounted_cents: 0,
     total_cents: 0,
   };
-  const head = {
+  return lineOfArm(item, {
     ...projectedLineHead(item, opts.uid_purchase),
-    ...attributionOf(item, opts.quantity),
     quantity: opts.quantity,
     amount_cents: 0,
-    ...(unitsFrom !== undefined ? { units_from: unitsFrom } : {}),
+    units_from: unitsFrom ?? null,
     price,
-  };
-  switch (item.type) {
-    case "sale":
-    case "rental":
-      return { type: item.type, ...head };
-    case "service":
-      return { type: "service", ...head, ledger_account: item.ledger_account };
-    case "replacement":
-      // Restated: `attributionOf`'s return type cannot say the replacement arm always carries the list.
-      return { type: "replacement", ...head, out_of_service: fitOutOfServiceEntries(item.out_of_service, opts.quantity), ledger_account: item.ledger_account };
-    default: {
-      const unreachable: never = item;
-      throw new Error(`projectTimeLine: unknown purchase item ${JSON.stringify(unreachable)}`);
-    }
-  }
+  }, opts.quantity);
 }
 
 /** A purchase's `purchase` divider on a bill or credit — named `PO-n`, its uid the purchase's. */
@@ -781,7 +802,11 @@ function purchaseScopeBlock(
   for (const row of purchase.items) {
     const local = row.path.join("/");
     if (row.type === "destination" || row.type === "group") {
-      if (wanted.has(local)) rows.push({ ...row, path: [purchase.uid, ...row.path] });
+      if (wanted.has(local)) {
+        rows.push(row.type === "destination"
+          ? { ...row, path: [purchase.uid, ...row.path], path_extension_for: null }
+          : { ...row, path: [purchase.uid, ...row.path] });
+      }
       continue;
     }
     const line = byLocal.get(local);
@@ -905,18 +930,17 @@ export function projectPurchaseLineForBill(item: PurchaseItem, quantity: number)
     name: item.name,
     description: item.description,
     zero_priced: item.zero_priced,
-    ...(item.quantity_per_parent !== undefined ? { quantity_per_parent: item.quantity_per_parent } : {}),
+    quantity_per_parent: item.quantity_per_parent,
     ledger_account: item.ledger_account,
     uid_tracking_category: item.uid_tracking_category,
     uid_tax_class: item.uid_tax_class,
-    ...(item.uid_tax_class_override !== undefined ? { uid_tax_class_override: item.uid_tax_class_override } : {}),
+    uid_tax_class_override: item.uid_tax_class_override,
     price: {
       price_formula: item.price.price_formula,
       rates: item.price.rates,
       discount: partOf(item, 0, quantity).discount,
     },
     ...attributionOf(item, quantity),
-    ...exchangedForProjection(item),
   };
 }
 
@@ -930,7 +954,8 @@ export function projectPurchaseLineForBill(item: PurchaseItem, quantity: number)
  * `{quantity, amount_cents}` and keeps both (`shared_group: "stated_total"`).
  */
 export function projectPurchaseRowForBill(row: PurchaseRow, uidPurchase: string): PurchaseDocumentRow {
-  if (row.type === "destination" || row.type === "group") return { ...row, path: [uidPurchase, ...row.path] };
+  if (row.type === "group") return { ...row, path: [uidPurchase, ...row.path] };
+  if (row.type === "destination") return { ...row, path: [uidPurchase, ...row.path], path_extension_for: null };
   return projectPurchaseLineToBillLine(row, { uid_purchase: uidPurchase, quantity: row.quantity, from: 0 });
 }
 

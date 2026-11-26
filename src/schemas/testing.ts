@@ -96,6 +96,8 @@ interface ZodDef {
   format?: string;
   in?: z.ZodType;
   options?: z.ZodType[];
+  /** A `z.discriminatedUnion`'s discriminator key. */
+  discriminator?: string;
   parts?: readonly (string | number | boolean | z.ZodType)[];
   defaultValue?: unknown;
   checks?: readonly unknown[];
@@ -351,8 +353,9 @@ function build(node: z.ZodType, ctx: Ctx, depth: number): unknown {
       return {};
 
     case "union": {
-      // First arm that accepts its own built value. Deliberately not a
-      // caller-selectable arm — no call site across 200+ files wanted one.
+      // First arm that accepts its own built value. A ROOT discriminated union
+      // is caller-selectable by its discriminator (`armFor`, in `construct`);
+      // a nested union is not.
       let fallback: unknown = OMIT;
       for (const arm of d.options ?? []) {
         const v = build(arm, ctx, depth + 1);
@@ -616,6 +619,26 @@ function formatFailure(error: z.ZodError, wantedNow: boolean, gaveNow: boolean):
 
 // ── Entry points ─────────────────────────────────────────────────────
 
+/**
+ * **The arm a ROOT discriminated union is built from**: the one whose
+ * discriminator accepts the overrides' value for it, else the schema itself
+ * (its first accepting arm, as before). Without it, `getTestDoc(Union, { type:
+ * "sale" })` built the FIRST arm's keys and only overrode `type`, so the seed
+ * lacked every key of the arm named — line-row fixtures for every union input
+ * (ruling 204) need the arm they name. The whole union still parses the result.
+ */
+function armFor(schema: z.ZodType, overrides: unknown): z.ZodType {
+  const d = def(schema);
+  if (d.type !== "union" || d.discriminator === undefined || !isPlainObject(overrides)) return schema;
+  const value = overrides[d.discriminator];
+  if (value === undefined) return schema;
+  for (const arm of d.options ?? []) {
+    const key = def(arm).shape?.[d.discriminator];
+    if (key?.safeParse(value).success) return arm;
+  }
+  return schema;
+}
+
 function construct<S extends z.ZodType>(
   schema: S,
   overrides: unknown,
@@ -623,7 +646,7 @@ function construct<S extends z.ZodType>(
   full: boolean,
 ): z.output<S> {
   const ctx: Ctx = { full, now: options?.now, wantedNow: false };
-  const built = build(schema, ctx, 0);
+  const built = build(armFor(schema, overrides), ctx, 0);
   if (!isPlainObject(built)) {
     throw new TypeError("getTestDoc requires an object schema");
   }

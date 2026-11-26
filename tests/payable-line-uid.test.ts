@@ -9,6 +9,7 @@ import { assert, assertEquals, assertThrows } from "@std/assert";
 import { PurchaseBillRowInput, PurchaseItemInput } from "../src/schemas/mod.ts";
 import { payableInputUidIssue, payableLineUid, payableLineUidIssue } from "../src/utils/purchases.ts";
 import { rekeyPayableLines, rekeyPayablePointer } from "../src/utils/purchase-documents.ts";
+import { billProductLineInput, billServiceLineInput, purchaseLineInput } from "./helpers/lines.ts";
 
 const PAIR_A = "9a1b2c3d-0000-4000-8000-000000000901";
 const PAIR_B = "9a1b2c3d-0000-4000-8000-000000000902";
@@ -58,30 +59,30 @@ Deno.test("payableInputUidIssue: a sale or rental names its product by its uid; 
 // ── the input refines ──────────────────────────────────────────────
 
 Deno.test("PurchaseItemInput: a catalog line names its product by its uid, and a custom- uid is refused at `uid`", () => {
-  const line = { type: "sale", uid: VEST, path: [PAIR_A, VEST], quantity: 1, price: { stated_cents: 100 } };
+  const line = purchaseLineInput("sale", { uid: VEST, path: [PAIR_A, VEST], quantity: 1, price: { stated_cents: 100 } });
   assert(PurchaseItemInput.safeParse(line).success, "control");
   const custom = PurchaseItemInput.safeParse({ ...line, uid: `custom-${old(1)}`, path: [PAIR_A, `custom-${old(1)}`] });
   assertEquals(custom.error?.issues.map((i) => i.path.join(".")), ["uid"]);
-  const rental = PurchaseItemInput.safeParse({ ...line, type: "rental", uid: `custom-${old(1)}`, path: [PAIR_A, `custom-${old(1)}`] });
+  const rental = PurchaseItemInput.safeParse(purchaseLineInput("rental", { uid: `custom-${old(1)}`, path: [PAIR_A, `custom-${old(1)}`], quantity: 1 }));
   assertEquals(rental.error?.issues.map((i) => i.path.join(".")), ["uid"]);
   // A retired `uid_product` on a sale line is stripped, never stored.
   const echoed = PurchaseItemInput.safeParse({ ...line, uid_product: VEST });
   assert(echoed.success && !("uid_product" in echoed.data), "a sale input carries no uid_product");
-  const replacement = { type: "replacement", uid: old(2), path: [PAIR_A, old(2)], name: "Lost unit", ledger_account: 5300, out_of_service: [{ uid: "testoos0000000000001", quantity: 1 }] };
+  const replacement = purchaseLineInput("replacement", { uid: old(2), path: [PAIR_A, old(2)], name: "Lost unit", ledger_account: 5300, quantity: 1, out_of_service: [{ uid: "testoos0000000000001", quantity: 1 }] });
   assert(PurchaseItemInput.safeParse(replacement).success, "the writer derives the twin or mints its custom- uid");
   // A service names its catalog product by its uid too; an attribution key is stripped.
-  const service = PurchaseItemInput.safeParse({ type: "service", uid: VEST, path: [PAIR_A, VEST], name: "Freight", ledger_account: 5300, uid_product: VEST });
+  const service = PurchaseItemInput.safeParse({ ...purchaseLineInput("service", { uid: VEST, path: [PAIR_A, VEST], name: "Freight", ledger_account: 5300 }), uid_product: VEST });
   assert(service.success && !("uid_product" in service.data), "no line input carries uid_product");
 });
 
 Deno.test("PurchaseBillRowInput: a sale or rental row names its product by its uid", () => {
-  const row = { type: "rental", uid: VEST, path: [PURCHASE, PAIR_A, VEST] };
+  const row = billProductLineInput("rental", { uid: VEST, path: [PURCHASE, PAIR_A, VEST] });
   assert(PurchaseBillRowInput.safeParse(row).success, "control");
   const custom = PurchaseBillRowInput.safeParse({ ...row, uid: `custom-${old(1)}`, path: [PURCHASE, PAIR_A, `custom-${old(1)}`] });
   assertEquals(custom.error?.issues.map((i) => i.path.join(".")), ["uid"]);
   const stripped = PurchaseBillRowInput.safeParse({ ...row, uid_product: VEST });
   assert(stripped.success && !("uid_product" in stripped.data), "no bill row carries uid_product");
-  const service = PurchaseBillRowInput.safeParse({ type: "service", uid: `custom-${old(2)}`, path: [PURCHASE, PAIR_A, `custom-${old(2)}`], uid_product: VEST });
+  const service = PurchaseBillRowInput.safeParse({ ...billServiceLineInput({ uid: `custom-${old(2)}`, path: [PURCHASE, PAIR_A, `custom-${old(2)}`] }), uid_product: VEST });
   assert(service.success && !("uid_product" in service.data), "a service row's included");
 });
 

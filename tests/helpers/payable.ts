@@ -32,8 +32,23 @@ import { tsAt } from "./timestamp.ts";
 /** The Fixed formula snapshot every flat payable line carries. */
 export const FIXED_REF: PriceFormulaRef = { uid: "FixedFormula00000000", name: "Fixed", basis: "flat" };
 
-/** A flat payable line price for a stated net of `amountCents`. */
+/**
+ * A PURCHASE line price for a stated net of `amountCents`: every key stated
+ * (ruling 204) — `stated_cents` `null` on a time line, `replacement_cents`
+ * `null` unless a subrent test states one.
+ */
 export function payablePrice(
+  amountCents: number,
+  opts: { discount?: DiscountType | null; taxes?: PriceModifierType[]; formula?: PriceFormulaRef } = {},
+) {
+  return { ...payableDocPrice(amountCents, opts), replacement_cents: null as number | null };
+}
+
+/**
+ * A BILL or CREDIT line price — {@link payablePrice} without `replacement_cents`,
+ * which only a purchase line carries (the strict document arm refuses it).
+ */
+export function payableDocPrice(
   amountCents: number,
   opts: { discount?: DiscountType | null; taxes?: PriceModifierType[]; formula?: PriceFormulaRef } = {},
 ) {
@@ -48,19 +63,12 @@ export function payablePrice(
     // The meter's own output (ruling 108): a flat line's one tier; a time line
     // states its own counts where it has any.
     counts: (formula.basis === "time" ? [] : [{ rate_key: "flat", num: 1, den: 1 }]) as TierCountType[],
-    ...(formula.basis === "time" ? {} : { stated_cents: amountCents + (discount?.amount_cents ?? 0) }),
+    // A time line states no gross: `null`, never absent (ruling 204).
+    stated_cents: formula.basis === "time" ? null : amountCents + (discount?.amount_cents ?? 0),
     subtotal_cents: amountCents + (discount?.amount_cents ?? 0),
     subtotal_discounted_cents: amountCents,
     total_cents: amountCents + taxes.reduce((sum, t) => sum + t.amount_cents, 0),
   };
-}
-
-/** {@link payablePrice}, for a bill or credit line (the same counts since ruling 108). */
-export function payableDocPrice(
-  amountCents: number,
-  opts: { discount?: DiscountType | null; taxes?: PriceModifierType[]; formula?: PriceFormulaRef } = {},
-) {
-  return payablePrice(amountCents, opts);
 }
 
 /**
@@ -75,12 +83,12 @@ export function withPayableMoney<T>(line: T): T {
   const discount = (l.price.discount ?? null) as DiscountType | null;
   const taxes = (l.price.taxes ?? []) as PriceModifierType[];
   const formula = (l.price.price_formula ?? FIXED_REF) as PriceFormulaRef;
-  const money = payablePrice(l.amount_cents ?? 0, { discount, taxes, formula });
+  const money = payableDocPrice(l.amount_cents ?? 0, { discount, taxes, formula });
   return {
     ...line,
     price: {
       ...l.price,
-      ...(formula.basis === "time" ? {} : { stated_cents: money.stated_cents }),
+      stated_cents: money.stated_cents,
       subtotal_cents: money.subtotal_cents,
       subtotal_discounted_cents: money.subtotal_discounted_cents,
       total_cents: money.total_cents,
@@ -151,15 +159,25 @@ export function purchaseDivider(uid: string, name = "Chicago") {
 }
 
 /**
+ * {@link purchaseDivider} as a bill or supplier credit carries it, at `path`
+ * under its purchase divider: a billing destination divider states
+ * `path_extension_for`, `null` off a date-extension section (ruling 204).
+ */
+export function billDivider(uid: string, path: string[], name = "Chicago") {
+  return { ...purchaseDivider(uid, name), path, path_extension_for: null };
+}
+
+/**
  * A supplier credit's rows as its writer stores them: every LINE row states
  * `reverses_billing` (ruling 84, beta B), `true` unless the row already says
- * otherwise — the writer's R4 answer for a line placed on a purchase line.
+ * otherwise — the writer's R4 answer for a line placed on a purchase line — and
+ * both back-pointers, `null` unless the row names a bill row (ruling 204 Q2).
  */
 export function asCreditRows<R extends { type: string }>(rows: readonly R[]): R[] {
   return rows.map((r) =>
-    r.type === "purchase" || r.type === "destination" || r.type === "group" || r.type === "billing" || "reverses_billing" in r
+    r.type === "purchase" || r.type === "destination" || r.type === "group" || r.type === "billing"
       ? r
-      : { ...r, reverses_billing: true }
+      : { uid_billing: null, path_billing_item: null, reverses_billing: true, ...r }
   );
 }
 

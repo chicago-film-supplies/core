@@ -102,7 +102,7 @@ Deno.test("the AR remainder cuts a STATED order line's part as its SLICE of the 
     2,
     1,
   );
-  assertEquals("stated_cents" in (rate as unknown as Row).price, false, "a rate part's key set is a rate line's");
+  assertEquals((rate as unknown as Row).price.stated_cents, null, "a rate part states no gross: `null` (ruling 204)");
 });
 
 // ── The order → invoice sync (S2, C4) ──────────────────────────────
@@ -142,12 +142,12 @@ Deno.test("sync: an untouched PART (units 0–1 of 3) is re-sliced from the orde
   assertEquals(at(kept).price.discount?.amount_cents, 123);
 });
 
-Deno.test("sync: a RATE line's stored key set is unchanged — no stated_cents key appears", () => {
+Deno.test("sync: a RATE line states no gross — `stated_cents` stays `null` (ruling 204)", () => {
   const rate = (base: number) =>
     ({ ...statedLine(0, 3, 0), price: { ...fdwPrice(base, 5), subtotal_cents: base * 3, subtotal_discounted_cents: base * 3, discount: null, taxes: [], total_cents: base * 3, replacement_cents: 1000 } }) as unknown as LineItem;
   const prev = [dest, rate(1000)];
   const next = [dest, rate(2000)];
   const out = syncOrderToInvoiceSelective(prev, next, buildOrderScopedItems(prev, O), O);
-  assertEquals("stated_cents" in at(out).price, false);
+  assertEquals(at(out).price.stated_cents, null);
   assert(at(out).price !== undefined);
 });

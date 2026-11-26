@@ -69,8 +69,17 @@ export type Discount = DiscountType;
 /** @see {@link PriceModifierType} from `@cfs/core/schemas` */
 export type PriceModifier = PriceModifierType;
 
-/** @see {@link OrderDocItemPriceType} from `@cfs/core/schemas` */
-export type PriceObject = OrderDocItemPriceType;
+/**
+ * @see {@link OrderDocItemPriceType} from `@cfs/core/schemas` — the shadow every
+ * priced grain's line price satisfies. `replacement_cents` and `base_percent`
+ * are not on every grain's price (an invoice line has no replacement, a payable
+ * line no percent fee), so the shadow keeps them optional; each stored schema
+ * requires its own keys (ruling 204).
+ */
+export type PriceObject = Omit<OrderDocItemPriceType, "replacement_cents" | "base_percent"> & {
+  replacement_cents?: number | null;
+  base_percent?: number | null;
+};
 
 /**
  * A tax RATE in the pricing shape — what `pricingTaxesOf` projects the
@@ -141,7 +150,7 @@ export interface LineItem {
    */
   exchanged_for?: ExchangedForEntryType[];
   description?: string;
-  order_number?: number;
+  order_number?: number | null;
   uid_order?: string | null;
   /**
    * Revenue chart-of-accounts code — **where the line's income POSTS in Xero**.
@@ -1655,14 +1664,6 @@ export const INVOICE_DECLARED_PRICE_KEYS: Record<DeclaredPriceKey<InvoiceDocItem
   stated_cents: true,
 };
 
-/**
- * Declared keys written only when SET: absent and `null` are one fact for each
- * (a rate line), and normalizing to `null` would widen the key set of every
- * line a writer re-prices. So a line stored before ruling 189 keeps its exact
- * key set, and a stated line drops the key when it turns back into a rate line.
- */
-const DECLARED_ONLY_WHEN_SET: ReadonlySet<string> = new Set(["stated_cents"]);
-
 /** What a writer must have resolved before it can declare a price. */
 interface DeclaredPriceInput {
   price_formula: PriceFormulaRef | null;
@@ -1671,57 +1672,43 @@ interface DeclaredPriceInput {
   counts?: TierCount[];
   base_percent?: number | null;
   replacement_cents?: number | null;
-  /** The stated gross (ruling 189); absent or `null` on a rate line. */
+  /** The stated gross (ruling 189); `null` on a rate line. */
   stated_cents?: number | null;
 }
 
 /**
- * An order line's declared price half, every nullable key present — except
- * `stated_cents`, present only on a STATED line (`DECLARED_ONLY_WHEN_SET`).
+ * An order line's declared price half: EVERY declared key of the stored price,
+ * read off `OrderDocItemPriceType` (so a key added there is a compile error in
+ * the builder below), each stated — `null` for none (ruling 204: a stored row
+ * states every key, so a rate line states `stated_cents: null`).
  */
-export interface OrderDeclaredPrice {
-  price_formula: PriceFormulaRef | null;
-  rates: RateSnapshot[];
-  counts: TierCount[];
-  base_percent: number | null;
-  replacement_cents: number | null;
-  stated_cents?: number;
-}
+export type OrderDeclaredPrice = Pick<OrderDocItemPriceType, DeclaredPriceKey<OrderDocItemPriceType>>;
 
-/** An invoice line's declared price half, every nullable key present. */
-export type InvoiceDeclaredPrice = Omit<OrderDeclaredPrice, "replacement_cents">;
-
-function pickDeclared(keys: Record<string, true>, price: DeclaredPriceInput): Record<string, unknown> {
-  const src = price as unknown as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
-  // `?? null` on every nullable key: absent and `null` mean the same thing for
-  // each. `counts` is an array, so an unmetered line declares `[]`.
-  for (const k of Object.keys(keys)) {
-    if (DECLARED_ONLY_WHEN_SET.has(k)) {
-      if (src[k] != null) out[k] = src[k];
-      continue;
-    }
-    out[k] = src[k] ?? (k === "counts" ? [] : null);
-  }
-  return out;
-}
+/** An invoice line's declared price half — see {@link OrderDeclaredPrice}. */
+export type InvoiceDeclaredPrice = Pick<InvoiceDocItemPriceType, DeclaredPriceKey<InvoiceDocItemPriceType>>;
 
 /**
- * Copy exactly {@link ORDER_DECLARED_PRICE_KEYS} off an input price, normalizing
- * an absent nullable key to `null`. Extra keys (computed money, `discount`,
- * `taxes`) are ignored — they are the pricer's, not the caller's.
+ * Copy exactly the declared keys off an input price, normalizing an absent
+ * nullable key to `null`. Extra keys (computed money, `discount`, `taxes`) are
+ * ignored — they are the pricer's, not the caller's.
  *
  * ⚠️ **Every order line therefore carries `base_percent`** — `null` on all but a
- * percent-of-total fee line. That matches what `buildOrderLineFromProduct` already
- * stages.
+ * percent-of-total fee line — and `stated_cents`, `null` on a rate line.
  */
 export function declaredOrderPrice(price: DeclaredPriceInput): OrderDeclaredPrice {
-  return pickDeclared(ORDER_DECLARED_PRICE_KEYS, price) as unknown as OrderDeclaredPrice;
+  return { ...declaredInvoicePrice(price), replacement_cents: price.replacement_cents ?? null };
 }
 
-/** Copy exactly {@link INVOICE_DECLARED_PRICE_KEYS} — see {@link declaredOrderPrice}. */
+/** Copy exactly the invoice's declared keys — see {@link declaredOrderPrice}. */
 export function declaredInvoicePrice(price: DeclaredPriceInput): InvoiceDeclaredPrice {
-  return pickDeclared(INVOICE_DECLARED_PRICE_KEYS, price) as unknown as InvoiceDeclaredPrice;
+  return {
+    price_formula: price.price_formula,
+    rates: price.rates,
+    // An unmetered line declares `[]`.
+    counts: price.counts ?? [],
+    base_percent: price.base_percent ?? null,
+    stated_cents: price.stated_cents ?? null,
+  };
 }
 
 /**

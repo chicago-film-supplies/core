@@ -5,11 +5,53 @@
  * with a counter per arm (`cfs-money` § The sweep discipline).
  */
 import { assert, assertEquals, assertNotEquals } from "@std/assert";
-import type { z } from "zod";
+import { z } from "zod";
 import { fdwPrice } from "./helpers/formulas.ts";
 import { payableLine } from "./helpers/payable.ts";
 import {
+  billingDestinationDivider,
+  billProductLine,
+  billProductLineInput,
+  billReplacementLine,
+  billReplacementLineInput,
+  billServiceLine,
+  billServiceLineInput,
+  creditNoteLine,
+  fulfillmentLine,
+  fulfillmentLineInput,
+  invoiceLine as seededInvoiceLine,
+  invoiceLineInput,
+  orderLine as seededOrderLine,
+  orderLineInput,
+  purchaseDividerInput,
+  purchaseLineInput,
+  receiptLine,
+} from "./helpers/lines.ts";
+import {
+  CreditNoteDocLineItem,
+  FulfillmentItemInputLine,
+  FulfillmentLineItem,
+  InvoiceDocDestinationItem,
+  InvoiceDocLineItem,
+  InvoiceItemInputDestination,
+  InvoiceItemInputGroup,
+  InvoiceItemInputLine,
+  InvoiceItemInputOrder,
   isLineItemType,
+  OrderDocLineItem,
+  OrderItemDestination,
+  OrderItemGroup,
+  OrderItemLine,
+  PurchaseBillRowInput,
+  PurchaseDocumentProductItemSchema,
+  PurchaseDocumentReplacementItemSchema,
+  PurchaseDocumentServiceItemSchema,
+  PurchaseReceiptLineItem,
+  PurchaseRentalItemSchema,
+  PurchaseReplacementItemSchema,
+  PurchaseRowInput,
+  PurchaseSaleItemSchema,
+  PurchaseServiceItemSchema,
   UpdateInvoiceInput,
   UpdateOrderInput,
   UpdatePurchaseBillInput,
@@ -24,6 +66,7 @@ import {
   type LineEditContext,
   type LineEditGrain,
   lineEditKeys,
+  lineEditSide,
   type LineLike,
 } from "../src/utils/line-edit.ts";
 import { projectOrderItemToInvoiceItem } from "../src/utils/invoices.ts";
@@ -48,22 +91,25 @@ function orderLine(over: { quantity?: number; stated?: number; discount?: { rate
   const quantity = over.quantity ?? 3;
   const discount = over.discount ?? null;
   const gross = over.stated ?? 1000 * quantity;
+  // The shared seed states every key (ruling 204); spread so the typed row reads as a `LineLike`.
   return {
-    uid: LIGHT, type: "rental", name: "Light", description: "", quantity, path: [D, LIGHT],
-    stock_method: "bulk", zero_priced: false, uid_tax_class: "TaxC1assDefau1tAAAAA",
-    coa_revenue: 4000, uid_tracking_category: null, crms_id: null,
-    price: {
-      ...fdwPrice(1000, 5),
-      base_percent: null,
-      replacement_cents: 1000,
-      ...(over.stated !== undefined ? { stated_cents: over.stated } : {}),
-      subtotal_cents: gross,
-      subtotal_discounted_cents: gross - (discount?.amount_cents ?? 0),
-      discount,
-      taxes: [],
-      taxes_base: [],
-      total_cents: gross - (discount?.amount_cents ?? 0),
-    },
+    ...seededOrderLine({
+      uid: LIGHT, type: "rental", name: "Light", description: "", quantity, path: [D, LIGHT],
+      stock_method: "bulk", zero_priced: false, uid_tax_class: "TaxC1assDefau1tAAAAA",
+      coa_revenue: 4000, uid_tracking_category: null, crms_id: null,
+      price: {
+        ...fdwPrice(1000, 5),
+        base_percent: null,
+        replacement_cents: 1000,
+        stated_cents: over.stated ?? null,
+        subtotal_cents: gross,
+        subtotal_discounted_cents: gross - (discount?.amount_cents ?? 0),
+        discount,
+        taxes: [],
+        taxes_base: [],
+        total_cents: gross - (discount?.amount_cents ?? 0),
+      },
+    }),
   };
 }
 const invoiceLine = (over: Parameters<typeof orderLine>[0] = {}): LineLike =>
@@ -103,7 +149,10 @@ Deno.test("lineEditKeys: read off the schemas, per input ARM — input keys in, 
         assert(!keys.includes(k), `${grain}/${type} must not compare ${k}`);
       }
     }
-    assertEquals(serverOwned, ["units_from"], `${grain}: the server-owned keys`);
+    // The bill's move pointer is server-owned too (ruling 204 Q6); the payable
+    // grains read the purchase AND the bill stored schemas, so both carry it.
+    const want = lineEditSide(grain) === "payable" ? ["path_source_item", "units_from"] : ["units_from"];
+    assertEquals(serverOwned, want, `${grain}: the server-owned keys`);
   }
   assert(lineEditKeys("order").compared.rental.includes("coa_revenue"));
   assert(lineEditKeys("bill").compared.sale.includes("ledger_account"));
@@ -189,7 +238,7 @@ Deno.test("applyLineEdit: the kind switches — stating a total on a rate line, 
   assertEquals(priceOf(stated).stated_cents, 2000);
   assertEquals(priceOf(stated).discount?.amount_cents, 200, "the switch is a rate event on the new gross");
   const back = edit("order", stated, { ...echo("order", stated), price: { ...priceOf(echo("order", stated)), stated_cents: null } });
-  assertEquals("stated_cents" in priceOf(back), false, "a rate line carries no gross key");
+  assertEquals(priceOf(back).stated_cents, null, "a rate line states no gross: `null`, never dropped (ruling 204)");
   assertEquals(priceOf(back).discount?.amount_cents, 300, "the formula's money: 3 × $10.00 at 10%");
 });
 
@@ -325,4 +374,104 @@ Deno.test("partOf reads a stated line's STORED cents, not a re-applied rate (D7)
   const line = { quantity: 3, price: { rates: [], counts: [], stated_cents: 1000, discount: { rate: 10, type: "percent" as const, amount_cents: 101 } } };
   assertEquals([0, 1, 2].map((k) => partOf(line as never, k, k + 1).discount?.amount_cents).reduce((a, b) => a! + b!, 0), 101);
   assertNotEquals(applyDiscountTerms(1000, 3, { rate: 10, type: "percent" }).discount?.amount_cents, 101);
+});
+
+// ── Ruling 204: a row states EVERY key — the drop-one-key property (F4.9) ──────
+
+/**
+ * The checker: every key of a VALID row (and every key of its `price`), deleted
+ * one at a time, must be refused with issues at exactly that key's path. Returns
+ * the keys whose deletion was NOT refused that way — empty means the row's
+ * shape states every key.
+ *
+ * ⚠️ The rows come from the shared seeds (`./helpers/lines.ts`), which state
+ * every key by construction, so the rows themselves prove nothing about the
+ * schema; the DELETION is the assertion, which is why the seeds may be used here.
+ */
+function keysNotRequired(schema: z.ZodType, row: Record<string, unknown>, allowed: ReadonlySet<string> = new Set()): string[] {
+  const control = schema.safeParse(row);
+  if (!control.success) return [`<control row does not parse: ${control.error.issues.map((i) => i.path.join(".")).join(", ")}>`];
+  const misses: string[] = [];
+  const tryDrop = (keyPath: string[], dropped: Record<string, unknown>) => {
+    const key = keyPath.join(".");
+    if (allowed.has(key)) return;
+    const r = schema.safeParse(dropped);
+    const paths = r.success ? [] : [...new Set(r.error.issues.map((i) => i.path.join(".")))];
+    if (paths.length !== 1 || paths[0] !== key) misses.push(`${key} → ${r.success ? "accepted" : JSON.stringify(paths)}`);
+  };
+  for (const key of Object.keys(row)) {
+    const { [key]: _dropped, ...rest } = row;
+    tryDrop([key], rest);
+  }
+  const price = row.price;
+  if (typeof price === "object" && price !== null && !Array.isArray(price)) {
+    for (const key of Object.keys(price)) {
+      const { [key]: _dropped, ...rest } = price as Record<string, unknown>;
+      tryDrop(["price", key], { ...row, price: rest });
+    }
+  }
+  return misses;
+}
+
+/** Keys a row may still omit, each for a reason ruling 204 states. */
+const STILL_OPTIONAL: ReadonlySet<string> = new Set([
+  // DERIVED: absence means "this writer does not author it" (F4.5).
+  "price.taxes_base",
+]);
+
+Deno.test("ruling 204: every key of every line arm is REQUIRED — drop any one and the parse names exactly it", async (t) => {
+  const arms: Array<[string, z.ZodType, Record<string, unknown>]> = [
+    // stored rows
+    ["order line", OrderDocLineItem, { ...seededOrderLine() }],
+    ["invoice line", InvoiceDocLineItem, { ...seededInvoiceLine() }],
+    ["fulfillment line", FulfillmentLineItem, { ...fulfillmentLine() }],
+    ["receipt line", PurchaseReceiptLineItem, { ...receiptLine() }],
+    ["AR credit line", CreditNoteDocLineItem, { ...creditNoteLine() }],
+    ["purchase sale", PurchaseSaleItemSchema, { ...payableLine("sale") }],
+    ["purchase rental", PurchaseRentalItemSchema, { ...payableLine("rental") }],
+    ["purchase service", PurchaseServiceItemSchema, { ...payableLine("service") }],
+    ["purchase replacement", PurchaseReplacementItemSchema, { ...payableLine("replacement") }],
+    ["bill sale/rental", PurchaseDocumentProductItemSchema, { ...billProductLine() }],
+    ["bill service", PurchaseDocumentServiceItemSchema, { ...billServiceLine() }],
+    ["bill replacement", PurchaseDocumentReplacementItemSchema, { ...billReplacementLine() }],
+    ["billing destination divider", InvoiceDocDestinationItem, { ...billingDestinationDivider() }],
+    // input rows
+    ["order line input", OrderItemLine, { ...orderLineInput() }],
+    ["invoice line input", InvoiceItemInputLine, { ...invoiceLineInput() }],
+    ["fulfillment line input", FulfillmentItemInputLine, { ...fulfillmentLineInput() }],
+    ["purchase sale input", PurchaseRowInput, { ...purchaseLineInput("sale") }],
+    ["purchase rental input", PurchaseRowInput, { ...purchaseLineInput("rental") }],
+    ["purchase service input", PurchaseRowInput, { ...purchaseLineInput("service") }],
+    ["purchase replacement input", PurchaseRowInput, { ...purchaseLineInput("replacement") }],
+    ["bill sale input", PurchaseBillRowInput, { ...billProductLineInput("sale") }],
+    ["bill service input", PurchaseBillRowInput, { ...billServiceLineInput() }],
+    ["bill replacement input", PurchaseBillRowInput, { ...billReplacementLineInput() }],
+    ["order destination divider input", OrderItemDestination, { uid: D, type: "destination", name: "", description: "", path: [D] }],
+    ["order group divider input", OrderItemGroup, { uid: D, type: "group", name: "G", description: "", path: [D] }],
+    ["invoice destination divider input", InvoiceItemInputDestination, { uid: D, type: "destination", name: "", description: "", path: [D], path_extension_for: null }],
+    ["invoice group divider input", InvoiceItemInputGroup, { uid: D, type: "group", name: "G", description: "", path: [D] }],
+    ["invoice order divider input", InvoiceItemInputOrder, { uid: O, type: "order", name: "", description: "", path: [O] }],
+    ["purchase destination divider input", PurchaseRowInput, { ...purchaseDividerInput("destination") }],
+    ["purchase group divider input", PurchaseRowInput, { ...purchaseDividerInput("group") }],
+    ["bill purchase divider input", PurchaseBillRowInput, { type: "purchase", uid: P, path: [P], name: "PO-1" }],
+    ["bill destination divider input", PurchaseBillRowInput, { type: "destination", uid: D, path: [P, D], name: "", path_extension_for: null }],
+    ["bill group divider input", PurchaseBillRowInput, { type: "group", uid: D, path: [P, D], name: "G" }],
+  ];
+  for (const [label, schema, row] of arms) {
+    await t.step(label, () => {
+      assertEquals(keysNotRequired(schema, row, STILL_OPTIONAL), [], `${label}: these keys may be omitted`);
+    });
+  }
+  // Non-vacuity: the walk reached the keys ruling 204 is about.
+  const invoiceKeys = Object.keys(seededInvoiceLine());
+  for (const k of ["units_from", "path_source_item", "out_of_service", "exchanged_for", "substituted_for", "quantity_per_parent", "xero_id"]) {
+    assert(invoiceKeys.includes(k), `the invoice seed states ${k}`);
+  }
+});
+
+Deno.test("ruling 204 control: the checker FAILS a key relaxed to `.optional().default([])` — it can see a miss", () => {
+  const planted = z.strictObject({ uid: z.string(), list: z.array(z.string()).optional().default([]) });
+  assertEquals(keysNotRequired(planted, { uid: "x", list: [] }), ["list → accepted"]);
+  const strict = z.strictObject({ uid: z.string(), list: z.array(z.string()) });
+  assertEquals(keysNotRequired(strict, { uid: "x", list: [] }), [], "and passes the same key required");
 });

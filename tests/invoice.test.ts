@@ -5,6 +5,7 @@ import { ACCEPTS_PAYMENT_STATUSES, canOperatorTransition, CreateInvoiceInput, IN
 import { deriveInvoiceStatus } from "../src/utils/invoices.ts";
 import { unplacedEndpoints } from "../src/schemas/mod.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
+import { invoiceLineInput } from "./helpers/lines.ts";
 
 /**
  * The old `derivePaymentStatus(status, paid, due, credited)` argument order over
@@ -90,6 +91,26 @@ const ORDER_DIVIDER = {
   description: "",
   path: ["testorder10000000000"],
 };
+
+/**
+ * A line as a client sends it: the shared seed (every key stated, ruling 204),
+ * this file's defaults, then the case's keys — `price` merged over the seeded
+ * price. Untyped overrides on purpose: a negative case states a refused value.
+ */
+const inputLine = (over: Record<string, unknown> = {}) => {
+  const base = invoiceLineInput({ uid: "item1000000000000000", type: "rental", name: "Spot Light", quantity: 1, path: ["item1000000000000000"] });
+  const price = over.price;
+  return { ...base, ...over, price: { ...base.price, ...(typeof price === "object" && price !== null ? price : {}) } };
+};
+
+/** A divider as a client sends it: every key stated (ruling 204 Q7). */
+const inputDivider = (type: "destination" | "group" | "order", over: Record<string, unknown>) => ({
+  type,
+  name: type === "group" ? "Group" : "",
+  description: "",
+  ...(type === "destination" ? { path_extension_for: null } : {}),
+  ...over,
+});
 
 const validLine = {
   ...lineItemBase,
@@ -310,7 +331,6 @@ Deno.test("InvoiceSchema accepts legacy CRMS fields", () => {
     },
     items: [ORDER_DIVIDER, {
       ...validLine,
-      crms_opportunity_id: 100,
       crms_id: 42,
     }],
   };
@@ -391,6 +411,7 @@ Deno.test("InvoiceSchema accepts destination item in items array", () => {
         name: "Main Venue",
         description: "",
         path: [],
+        path_extension_for: null,
       },
       validLine,
     ],
@@ -409,6 +430,7 @@ Deno.test("InvoiceSchema accepts mixed items (line + group + destination)", () =
         name: "Main Venue",
         description: "",
         path: [],
+        path_extension_for: null,
       },
       {
         uid: "550e8400-e29b-41d4-a716-446655440000",
@@ -517,9 +539,9 @@ Deno.test("CreateInvoiceInput accepts items with path and destination fields", (
     query_by_orders: ["order100000000000000"],
     organization: { uid: "org10000000000000000" },
     items: [
-      { uid: "dest1000000000000000", type: "destination", name: "Venue", path: ["dest1000000000000000"] },
-      { uid: "group100000000000000", type: "group", name: "Lighting", path: ["dest1000000000000000", "group100000000000000"] },
-      { uid: "item1000000000000000", type: "rental", name: "Spot Light", path: ["dest1000000000000000", "group100000000000000"] },
+      inputDivider("destination", { uid: "dest1000000000000000", name: "Venue", path: ["dest1000000000000000"] }),
+      inputDivider("group", { uid: "group100000000000000", name: "Lighting", path: ["dest1000000000000000", "group100000000000000"] }),
+      inputLine({ path: ["dest1000000000000000", "group100000000000000"] }),
     ],
   };
   assertEquals(CreateInvoiceInput.safeParse(input).success, true);
@@ -605,6 +627,7 @@ Deno.test("InvoiceSchema accepts full multi-order hierarchy", () => {
         name: "Main Venue",
         description: "",
         path: ["550e8400-e29b-41d4-a716-446655440010"],
+        path_extension_for: null,
       },
       {
         ...validLine,
@@ -643,9 +666,9 @@ Deno.test("CreateInvoiceInput accepts order divider items", () => {
     query_by_orders: ["order100000000000000"],
     organization: { uid: "org10000000000000000" },
     items: [
-      { uid: "orderdiv100000000000", type: "order", name: "Order #1001", path: ["orderdiv100000000000"] },
-      { uid: "dest1000000000000000", type: "destination", name: "Venue", path: ["orderdiv100000000000"] },
-      { uid: "item1000000000000000", type: "rental", name: "Spot Light", path: ["orderdiv100000000000", "dest1000000000000000"] },
+      inputDivider("order", { uid: "orderdiv100000000000", name: "Order #1001", path: ["orderdiv100000000000"] }),
+      inputDivider("destination", { uid: "dest1000000000000000", name: "Venue", path: ["orderdiv100000000000"] }),
+      inputLine({ path: ["orderdiv100000000000", "dest1000000000000000"] }),
     ],
   };
   assertEquals(CreateInvoiceInput.safeParse(input).success, true);
@@ -687,7 +710,7 @@ Deno.test("CreateInvoiceInput: a divider cannot carry a price or a quantity", ()
     uid: "newinv10000000000000",
     query_by_orders: ["order100000000000000"],
     organization: { uid: "org10000000000000000" },
-    items: [{ uid: "order100000000000000", type: "order", name: "Order #1", path: ["order100000000000000"], quantity: 2, price: { ...fdwPrice(1000, 5) } }],
+    items: [inputDivider("order", { uid: "order100000000000000", name: "Order #1", path: ["order100000000000000"], quantity: 2, price: { ...fdwPrice(1000, 5) } })],
   });
   assertEquals(bad.success, false);
   assertEquals(bad.error?.issues[0].code, "unrecognized_keys");
@@ -698,16 +721,12 @@ Deno.test("UpdateInvoiceInput: a line ships back with its stored extras", () => 
   // reject. A stored invoice line carries xero_id/crms_id/computed price fields.
   const ok = UpdateInvoiceInput.safeParse({
     version: 1,
-    items: [{
-      uid: "item1000000000000000",
-      type: "rental",
-      name: "Spot Light",
-      quantity: 1,
+    items: [inputLine({
       path: ["order100000000000000"],
       price: { ...fdwPrice(10000, 5), subtotal_cents: 10000, total_cents: 10900 },
       xero_id: "550e8400-e29b-41d4-a716-446655440099",
       crms_id: 4021,
-    }],
+    })],
   });
   assertEquals(ok.success, true);
   const item = (ok.data as unknown as { items: Array<Record<string, unknown>> }).items[0];
@@ -720,7 +739,7 @@ Deno.test("UpdateInvoiceInput: a line ships back with its stored extras", () => 
 Deno.test("UpdateInvoiceInput: percent_of_total is inexpressible on an input line", () => {
   const bad = UpdateInvoiceInput.safeParse({
     version: 1,
-    items: [{ uid: "item1000000000000000", type: "rental", path: ["item1000000000000000"], price: { base_percent: 3 } }],
+    items: [inputLine({ price: { price_formula: null, rates: [], base_percent: 3 } })],
   });
   assertEquals(bad.success, false);
   assertEquals(bad.error?.issues[0].path, ["items", 0, "price", "base_percent"]);
@@ -735,7 +754,7 @@ Deno.test("CreateInvoiceInput: an invoice may still start with a line item", () 
       uid: "newinv10000000000000",
       query_by_orders: ["order100000000000000"],
       organization: { uid: "org10000000000000000" },
-      items: [{ uid: "item1000000000000000", type: "service", name: "Delivery", path: ["item1000000000000000"] }],
+      items: [inputLine({ type: "service", name: "Delivery" })],
     }).success,
     true,
   );
@@ -1209,22 +1228,14 @@ Deno.test("InvoiceSchema requires params_context on a pdf_versions row", () => {
 
 // ── substituted_for (manager#399, manager#414) ──────────────────
 
-Deno.test("substituted_for: absent is the ordinary state, and it parses", () => {
-  // The field is `.optional()` and NOT `.nullable()`, deliberately — see the
-  // declaration's own docblock. The consequence to pin is that the ~8,900 stored
-  // lines that predate it, and every line that is not a substitution, are valid
-  // exactly as they stand. That is what makes this an ADD with no backfill and
-  // no write-refusing window, unlike a removal.
-  const { substituted_for: _absent, ...withoutKey } = {
-    ...lineItemBase,
-    uid: "Item0000000000000001",
-    type: "rental",
-    name: "Light",
-    path: ["Item0000000000000001"],
-  } as Record<string, unknown>;
-  assert(!("substituted_for" in withoutKey));
-  const parsed = InvoiceDocLineItem.safeParse(withoutKey);
+Deno.test("substituted_for: `[]` is the ordinary state, and an ABSENT key is refused (ruling 204)", () => {
+  // Every line states the key; a line that stands in for nothing states `[]`.
+  const line = { ...lineItemBase, uid: "Item0000000000000001", type: "rental", name: "Light", path: ["Item0000000000000001"], substituted_for: [] };
+  const parsed = InvoiceDocLineItem.safeParse(line);
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
+  const { substituted_for: _absent, ...withoutKey } = line;
+  const refused = InvoiceDocLineItem.safeParse(withoutKey);
+  assertEquals(refused.error?.issues.map((i) => i.path.join(".")), ["substituted_for"]);
 });
 
 Deno.test("substituted_for: an entry list is accepted and NULL is refused", () => {
@@ -1276,12 +1287,11 @@ Deno.test("substituted_for: the INPUT schema accepts it, or every PUT drops it",
   // request, and the divergence record is simply gone from the stored document.
   const parsed = UpdateInvoiceInput.safeParse({
     version: 1,
-    items: [{
+    items: [inputLine({
       uid: "Item0000000000000002",
-      type: "rental",
       path: ["Item0000000000000002"],
       substituted_for: [{ path: ["Destination000000001", "Item0000000000000001"], quantity: 1 }],
-    }],
+    })],
   });
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
   const items = (parsed.success ? parsed.data.items : []) as unknown as Array<Record<string, unknown>>;
@@ -1386,11 +1396,16 @@ Deno.test("path: required on every invoice input arm, matching the order grain (
   // other two spread an already-pathed line; a newly created divider is built
   // `path: []` and re-pathed in the same updater; and `repriceInvoiceItems`
   // `cloneDeep`s and touches prices only.
+  // Each arm a full row (ruling 204) minus `path`, so the path is the only defect.
+  const pathless = (row: Record<string, unknown>) => {
+    const { path: _path, ...rest } = row;
+    return rest;
+  };
   const arms: Array<[string, Record<string, unknown>]> = [
-    ["line", { uid: "Item0000000000000002", type: "rental" }],
-    ["destination", { uid: "Destination000000001", type: "destination" }],
-    ["group", { uid: "Group000000000000001", type: "group" }],
-    ["order", { uid: "Order000000000000001", type: "order" }],
+    ["line", pathless(inputLine({ uid: "Item0000000000000002" }))],
+    ["destination", pathless(inputDivider("destination", { uid: "Destination000000001" }))],
+    ["group", pathless(inputDivider("group", { uid: "Group000000000000001" }))],
+    ["order", pathless(inputDivider("order", { uid: "Order000000000000001" }))],
   ];
   for (const [label, base] of arms) {
     await t.step(`${label}: REFUSED without a path`, () => {
@@ -1453,15 +1468,15 @@ Deno.test("InvoiceSchema accepts a replacement line billing a movement-keyed out
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
 
   // The request body's line — what POST /invoices parses.
-  const input = InvoiceItemInputLine.safeParse({
+  const input = InvoiceItemInputLine.safeParse(inputLine({
     uid: "item2000000000000000",
     type: "replacement",
     path: ["item2000000000000000"],
     out_of_service: [{ uid: recordUid, quantity: 1 }],
-  });
+  }));
   assertEquals(input.success, true, JSON.stringify(input.success ? {} : input.error.issues));
   assertEquals(
-    InvoiceItemInputLine.safeParse({ uid: "item2000000000000000", type: "replacement", path: ["item2000000000000000"], out_of_service: [{ uid: "not an id", quantity: 1 }] }).success,
+    InvoiceItemInputLine.safeParse(inputLine({ uid: "item2000000000000000", type: "replacement", path: ["item2000000000000000"], out_of_service: [{ uid: "not an id", quantity: 1 }] })).success,
     false,
   );
 
@@ -1481,7 +1496,7 @@ Deno.test("out_of_service is valid on a replacement or service line and no other
   const stored = (type: string) =>
     InvoiceSchema.safeParse({ ...validInvoice, items: [ORDER_DIVIDER, line, withType(type)], query_by_out_of_service: [oos] });
   const input = (type: string) =>
-    InvoiceItemInputLine.safeParse({ uid: "item2000000000000000", type, path: ["item2000000000000000"], out_of_service: [{ uid: oos, quantity: 1 }] });
+    InvoiceItemInputLine.safeParse(inputLine({ uid: "item2000000000000000", type, path: ["item2000000000000000"], out_of_service: [{ uid: oos, quantity: 1 }] }));
 
   // A cleaning/maintenance charge is a service line (api-cloudrun#1163).
   const service = stored("service");
@@ -1563,12 +1578,30 @@ Deno.test("InvoiceItemInputLine: a stored-form price echo keeps price_formula", 
     uid: "custom-ca5a8b1c-eb0c-46fa-9db3-c3f9ff64ced6",
     type: "rental",
     name: "Desk Lamp",
+    description: "",
     quantity: 26,
     path: ["custom-ca5a8b1c-eb0c-46fa-9db3-c3f9ff64ced6"],
-    price: { price_formula: formula, rates: [{ rate_key: "week", amount_cents: 3500 }], counts: [{ rate_key: "week", num: 7, den: 5 }] },
+    price: {
+      price_formula: formula,
+      rates: [{ rate_key: "week", amount_cents: 3500 }],
+      counts: [{ rate_key: "week", num: 7, den: 5 }],
+      base_percent: null,
+      discount: null,
+      stated_cents: null,
+    },
+    coa_revenue: null,
+    uid_tracking_category: null,
+    uid_tax_class_override: null,
+    substituted_for: [],
+    zero_priced: null,
+    quantity_per_parent: null,
+    out_of_service: [],
+    path_source_item: null,
+    units_from: null,
+    exchanged_for: [],
   });
-  assertEquals(r.success, true, JSON.stringify(r.error?.issues));
-  const price = (r.data as { price?: Record<string, unknown> }).price!;
+  assert(r.success, JSON.stringify(r.error?.issues));
+  const price = r.data.price;
   assertEquals(price.price_formula, formula);
   assertEquals("counts" in price, false);
 });
@@ -1592,8 +1625,8 @@ Deno.test("W4R: out_of_service shares sum to the line's quantity, are unique by 
   assertEquals(paths({ out_of_service: [{ uid: A, quantity: 1 }, { uid: B, quantity: 1 }] }, [A, B]), ["items.2.out_of_service"]);
   // A record twice: refused at the second entry's uid.
   assertEquals(paths({ out_of_service: [{ uid: A, quantity: 0 }, { uid: A, quantity: 1 }] }, [A]), ["items.2.out_of_service.1.uid"]);
-  // Empty: refused (absent is "bills no record").
-  assertEquals(paths({ out_of_service: [] }, []), ["items.2.out_of_service"]);
+  // Empty: the invoice line's "bills no record" — every line states the key (ruling 204).
+  assertEquals(paths({ out_of_service: [] }, []), []);
   // The pre-W4R single link was retired at W4K's contract publish: a strict
   // stored line refuses it as an unknown key, alone or beside the list.
   assertEquals(paths({ uid_out_of_service: A }, []), ["items.2"]);
@@ -1606,22 +1639,21 @@ Deno.test("W4R: out_of_service shares sum to the line's quantity, are unique by 
   });
   assertEquals(rental.success ? [] : rental.error.issues.map((i) => i.path.join(".")), ["items.2.out_of_service"]);
 
-  // The input line: the same rules, and a line stating no quantity is not summed (the writer fills it).
-  const input = (link: Record<string, unknown>, quantity?: number) =>
-    InvoiceItemInputLine.safeParse({
+  // The input line: the same rules. Every input line states its quantity (ruling 204).
+  const input = (link: Record<string, unknown>, quantity: number) =>
+    InvoiceItemInputLine.safeParse(inputLine({
       uid: "item2000000000000000",
       type: "replacement",
       path: ["item2000000000000000"],
-      ...(quantity === undefined ? {} : { quantity }),
+      quantity,
       ...link,
-    });
-  const inputPaths = (link: Record<string, unknown>, quantity?: number) => {
+    }));
+  const inputPaths = (link: Record<string, unknown>, quantity: number) => {
     const r = input(link, quantity);
     return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
   };
   assertEquals(inputPaths({ out_of_service: [{ uid: A, quantity: 2 }, { uid: B, quantity: 1 }] }, 3), []);
   assertEquals(inputPaths({ out_of_service: [{ uid: A, quantity: 2 }] }, 3), ["out_of_service"]);
-  assertEquals(inputPaths({ out_of_service: [{ uid: A, quantity: 2 }] }), []);
   // An input line is `z.object`: a stale client's retired key is stripped, not refused.
   const stale = input({ uid_out_of_service: A, out_of_service: [{ uid: A, quantity: 2 }] }, 2);
   assert(stale.success);

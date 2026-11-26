@@ -554,7 +554,7 @@ export function voidRefusal<S extends Side>(
     return `${noun} ${doc.number} has a live ${data.nouns.credit} raised from it; void the ${data.nouns.credit} first`;
   }
   const stranded = initiators.some((p) => {
-    const initiator = p.initiator as unknown as AccountedInitiator;
+    const initiator = p.initiator as AccountedInitiator;
     const others = p.billing.filter((b) => (b as { uid: string }).uid !== doc.uid);
     const named = billedByPath(side, initiator, [doc as unknown as BillingFoldDocuments[S]["billing"]], []);
     const after = billedByPath(side, initiator, others, p.credits);
@@ -669,7 +669,7 @@ export function creditableLines<S extends Side>(
   const { offered } = creditRows(billing.items);
   const allRows = billing.items.filter((r) => isLineItemType(r.type)) as unknown as { uid: string; path: string[]; quantity: number }[];
   const keyed = { uid: billing.uid, rows: allRows };
-  const notes = ctx.credits as unknown as readonly { status: string; items: readonly (KeyableCreditLine | CreditDividerRow)[] }[];
+  const notes = ctx.credits as readonly { status: string; items: readonly (KeyableCreditLine | CreditDividerRow)[] }[];
   // One credit liveness rule on both sides (ruling 171): the contract's column.
   const live = notes.filter((n) => creditIsLive(n));
   const credited = new Map<string, TimeAmount>();
@@ -685,7 +685,7 @@ export function creditableLines<S extends Side>(
     // remaining-to-bill, never as something a credit draws on. A second fold, as
     // `voidRefusal` folds a filtered `billing`: one fold cannot give both answers.
     const pool = p.billing.filter((b) => billingInCreditPool(b));
-    const fold = billedByPath(side, p.initiator as unknown as AccountedInitiator, pool, p.credits);
+    const fold = billedByPath(side, p.initiator as AccountedInitiator, pool, p.credits);
     folds.set(p.initiator.uid, {
       keys: new Set(p.initiator.items.map((i) => pathKey(i.path))),
       pool: (path) => Math.max(0, fold.byPath.get(pathKey(path))?.quantity ?? 0),
@@ -757,7 +757,7 @@ export function creditRefusal<S extends Side>(
   }
   const rows = billing.items.filter((r) => isLineItemType(r.type)) as unknown as { uid: string; path: string[]; quantity: number; price?: OfferRow["price"] }[];
   const offered = new Map(creditableLines(side, billing, ctx).map((l) => [pathKey(l.path), l]));
-  const { keyed, unmatched, unpointed } = keyCreditLines({ uid: billing.uid, rows: rows as unknown as KeyedBillingRow[] }, requested);
+  const { keyed, unmatched, unpointed } = keyCreditLines({ uid: billing.uid, rows: rows as KeyedBillingRow[] }, requested);
   for (const line of [...unmatched, ...unpointed]) {
     return `crediting ${line.quantity} of "${line.name}" exceeds what ${noun} ${billing.number} billed (0)`;
   }
@@ -837,7 +837,7 @@ export function creditParts<S extends Side>(
   const rows = billing.items.filter((r) => isLineItemType(r.type));
   const root = rows.find((r) => pathKey(r.path) === pathKey(path));
   if (root === undefined || n <= 0) return [];
-  const notes = credits as unknown as readonly { status: string; items: readonly (KeyableCreditLine | CreditDividerRow)[] }[];
+  const notes = credits as readonly { status: string; items: readonly (KeyableCreditLine | CreditDividerRow)[] }[];
   const keyedRows = rows as unknown as { uid: string; path: string[] }[];
   const c = rowCreditedBefore({ uid: billing.uid, rows: keyedRows }, root, notes as never).quantity;
   const out: CreditPart[] = [{ path: [...root.path], uid: root.uid, quantity: n, bound: false }];
@@ -1203,8 +1203,8 @@ export function lineActionKey(action: DocumentActionId, path: readonly string[])
  * "nothing to bill" for an open hire billed once while the builder bills its time.
  */
 function initiatorAccount<S extends Side>(side: S, initiator: InitiatorOfferDocuments[S], ctx: InitiatorOfferContext<S>): InitiatorAccount {
-  const billable = billableInitiator(side, initiator as unknown as RemainderInitiators[S], ctx.now);
-  return accountBilling(side, billable as unknown as AccountedInitiator, ctx.billing, ctx.credits, ctx.accounting);
+  const billable = billableInitiator(side, initiator as RemainderInitiators[S], ctx.now);
+  return accountBilling(side, billable as AccountedInitiator, ctx.billing, ctx.credits, ctx.accounting);
 }
 
 /**

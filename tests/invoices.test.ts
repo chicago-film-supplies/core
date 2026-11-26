@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { fdwPrice, fixedPrice, legacyPrice } from "./helpers/formulas.ts";
-import { getInitialValues, InvoiceDocLineItem, SETTLED_STATUSES, InvoiceDocOrderItem, isInvoiceLineItem, OrderDocDestinationItem, OrderDocGroupItem } from "../src/schemas/mod.ts";
+import { getInitialValues, InvoiceDocLineItem, SETTLED_STATUSES, InvoiceDocDestinationItem, InvoiceDocOrderItem, isInvoiceLineItem, OrderDocDestinationItem, OrderDocGroupItem } from "../src/schemas/mod.ts";
 import { computeItemPaths, rederiveDocumentTotalsForAudit, validateItemPaths } from "../src/utils/orders.ts";
 import type { OrderInvoiceFieldSync } from "../src/utils/invoices.ts";
 import {
@@ -169,6 +169,7 @@ const destItem: InvoiceDocItemType = {
   uid_delivery: DEL_1,
   uid_collection: null,
   path: [ORDER_DIV_1, DEST_1],
+  path_extension_for: null,
 } as InvoiceDocItemType;
 
 const lineItem1: InvoiceDocItemType = {
@@ -367,7 +368,8 @@ Deno.test("buildOrderScopedItems preserves destination shape via OrderDocDestina
     },
   ];
   const [projected] = buildOrderScopedItems(orderItems, ORDER_DIV_1);
-  const result = OrderDocDestinationItem.safeParse(projected);
+  // An invoice section, so the INVOICE arm: it states `path_extension_for` (ruling 204).
+  const result = InvoiceDocDestinationItem.safeParse(projected);
   assertEquals(result.success, true, JSON.stringify(result.success ? {} : result.error.issues, null, 2));
 });
 
@@ -418,7 +420,6 @@ Deno.test("carryForwardOverrides preserves xero_id, and the account resets to th
 const ALL_SIX_OVERRIDES = {
   xero_id: "00000000-0000-4000-8000-0000000000a1",
   crms_id: 8812,
-  crms_opportunity_id: 5501,
 } as const;
 
 /**
@@ -464,7 +465,7 @@ Deno.test("carryForwardOverrides leaves the rebuilt value alone where the existi
       name: "Light",
       quantity: 1,
       path: [],
-      crms_opportunity_id: 999,
+      xero_id: "rebuilt-xero-id",
       coa_revenue: 4200,
     },
   ] as InvoiceDocItemType[];
@@ -473,7 +474,7 @@ Deno.test("carryForwardOverrides leaves the rebuilt value alone where the existi
 
   const out = carryForwardOverrides(rebuilt, existing)[0] as unknown as Record<string, unknown>;
   assertEquals(out.crms_id, 8812); // carried forward
-  assertEquals(out.crms_opportunity_id, 999); // rebuilt value survives, not clobbered
+  assertEquals(out.xero_id, "rebuilt-xero-id"); // rebuilt value survives, not clobbered
   assertEquals(out.coa_revenue, 4200); // rebuilt value survives, not clobbered
 });
 
@@ -510,8 +511,6 @@ Deno.test("fail-closed companion: the pre-2026-08-10 FOUR-field carry-forward di
   // which is indistinguishable from "this line has no CRMS id" downstream.
   assertEquals(right.crms_id, 8812);
   assertEquals(wrong.crms_id, null);
-  assertEquals(right.crms_opportunity_id, 5501);
-  assertEquals(wrong.crms_opportunity_id, null);
   assertEquals(
     JSON.stringify(right) === JSON.stringify(wrong),
     false,
@@ -1841,8 +1840,9 @@ Deno.test("buildInvoiceDestinationDivider accepts an explicit path and matches t
   const destUid = crypto.randomUUID();
   const divider = buildInvoiceDestinationDivider({ uid: destUid, name: "Venue" }, [ORDER_DIV_1, destUid]);
   assertEquals(divider.path, [ORDER_DIV_1, destUid]);
-  const parsed = OrderDocDestinationItem.safeParse(divider);
+  const parsed = InvoiceDocDestinationItem.safeParse(divider);
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues, null, 2));
+  assertEquals(divider.path_extension_for, null, "a projected section is a full-window one");
 });
 
 // ── resyncInvoiceLines ───────────────
@@ -2365,11 +2365,11 @@ Deno.test("projectOrderItemToInvoiceItem: the export IS what the sync path proje
   }
 });
 
-Deno.test("projectOrderItemToInvoiceItem: quantity_per_parent is carried only when the order line states it (core#131)", () => {
+Deno.test("projectOrderItemToInvoiceItem: quantity_per_parent is always stated, null for a pre-stamp line (core#131, ruling 204 Q1b)", () => {
   const line = RESYNC_ORDER_ITEMS.find((i) => isInvoiceLineItem({ type: i.type } as InvoiceDocItemType))!;
   const { quantity_per_parent: _drop, ...preStamp } = line as LineItem;
-  // A pre-stamp line gains no key, so the pair it already has stays key-set equal.
-  assert(!("quantity_per_parent" in projectOrderItemToInvoiceItem(preStamp as LineItem, ORDER_DIV_1)));
+  // The window stated `null` on both documents' pre-stamp lines, so the pair stays equal.
+  assertEquals((projectOrderItemToInvoiceItem(preStamp as LineItem, ORDER_DIV_1) as { quantity_per_parent?: number | null }).quantity_per_parent, null);
   for (const qpp of [null, 0, 0.5]) {
     const projected = projectOrderItemToInvoiceItem({ ...line, quantity_per_parent: qpp } as LineItem, ORDER_DIV_1);
     assertEquals((projected as { quantity_per_parent?: number | null }).quantity_per_parent, qpp);
@@ -3125,7 +3125,7 @@ Deno.test("substituted_for sync: X deleted from the order takes a merged Y's sta
   const invoice = [scopedLine({ uid: ITEM_Y, name: "Y", quantity: 4, path: Y_PATH }, [{ path: X_PATH, quantity: 2 }])];
   const result = syncOrderToInvoiceSelective([orderX(2), orderY(2)], [orderY(2)], invoice, ORDER_DIV_1);
   assertEquals(qtyByName(result), ["Y:2"]);
-  assertEquals(entriesOf(result[0]), undefined, "a spent entry is stripped, not written back");
+  assertEquals(entriesOf(result[0]), [], "a spent entry is cleared to `[]` (ruling 204), not written back");
 });
 
 // ⚠️ Passes before the entry arm too — the removed-items pass already dropped a

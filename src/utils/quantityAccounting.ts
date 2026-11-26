@@ -140,7 +140,6 @@ import type {
   PurchaseReceiptItemType,
   Side,
 } from "../schemas/mod.ts";
-import { withRowSourcePath } from "../schemas/mod.ts";
 import { billsOutOfService, isDividerItemType, isLineItemType } from "../schemas/mod.ts";
 import {
   extensionSectionTargets,
@@ -358,9 +357,9 @@ export function countsTime(counts: readonly { num: number; den: number }[] | nul
 export interface KeyableCreditLine {
   quantity: number;
   /** The billing document the line credits (ruling 34). Set with {@link path_billing_item}. */
-  uid_billing?: string;
+  uid_billing?: string | null;
   /** The billing row it credits: that row's `path` on that document. */
-  path_billing_item?: readonly string[];
+  path_billing_item?: readonly string[] | null;
   price?: { counts?: readonly { num: number; den: number }[] };
 }
 
@@ -453,7 +452,7 @@ export interface KeyedCredit<L extends KeyableCreditLine = KeyableCreditLine, R 
 export function creditLinePointer(
   line: KeyableCreditLine,
 ): { uid: string; path: readonly string[] } | null {
-  if (line.uid_billing !== undefined && line.path_billing_item !== undefined && line.path_billing_item.length > 0) {
+  if (line.uid_billing != null && line.path_billing_item != null && line.path_billing_item.length > 0) {
     return { uid: line.uid_billing, path: line.path_billing_item };
   }
   return null;
@@ -823,12 +822,12 @@ function receivableNetCents(row: { price?: unknown }): number {
  * carries no rates) is sliced from its stored money.
  */
 function receivablePartCents(row: InvoiceItem, before: number, after: number): number {
-  return billingRowPart(row as unknown as BillingRowMoneyLike, before, after).net_cents;
+  return billingRowPart(row as BillingRowMoneyLike, before, after).net_cents;
 }
 
 /** A payable row as the fold's typed accessors read it. */
 function payableRow(row: InvoiceItem): PurchaseDocumentItem {
-  return row as unknown as PurchaseDocumentItem;
+  return row as PurchaseDocumentItem;
 }
 
 /** The receivable side: orders, invoices, credit notes. */
@@ -856,7 +855,7 @@ export const RECEIVABLE_BILLING_FOLD: BillingFoldSide<AccountedInvoice, Accounte
   billingRows: (doc) => ({ items: doc.items ?? [], destinations: doc.destinations ?? [] }),
   rowNetCents: receivableNetCents,
   partCents: receivablePartCents,
-  creditRows: (doc) => ({ items: doc.items as unknown as InvoiceItem[], destinations: doc.destinations ?? [] }),
+  creditRows: (doc) => ({ items: doc.items as InvoiceItem[], destinations: doc.destinations ?? [] }),
 };
 
 /** The payable side: purchases, bills, supplier credits. */
@@ -880,11 +879,11 @@ export const PAYABLE_BILLING_FOLD: BillingFoldSide<PayableFoldBill, PayableFoldC
     crms_id: null,
     amount_due_cents: null,
   }),
-  billingRows: (doc) => ({ items: doc.items as unknown as InvoiceItem[], destinations: doc.destinations }),
+  billingRows: (doc) => ({ items: doc.items as InvoiceItem[], destinations: doc.destinations }),
   rowNetCents: (row) => payableRow(row).amount_cents ?? 0,
   // The one part door (ruling 178), as the receivable side reads it.
   partCents: receivablePartCents,
-  creditRows: (doc) => ({ items: doc.items as unknown as InvoiceItem[], destinations: doc.destinations ?? [] }),
+  creditRows: (doc) => ({ items: doc.items as InvoiceItem[], destinations: doc.destinations ?? [] }),
 };
 
 /**
@@ -1156,8 +1155,9 @@ export function billedByPath<S extends Side>(
             entry.cents += cents;
             if (ctx.billing && !entry.documents.includes(ctx.documentUid)) entry.documents.push(ctx.documentUid);
           } else {
-            // The move pointer is the billing row's, never the line's.
-            const row = withRowSourcePath(item, undefined);
+            // The move pointer is the billing row's, never the line's: the
+            // summed line is initiator-shaped, so the key is dropped, not nulled.
+            const { path_source_item: _pointer, ...row } = item;
             summed.set(k, { line: { ...row, path: placed }, quantity: units, cents, documents: ctx.billing ? [ctx.documentUid] : [] });
           }
           for (let depth = 2; depth < rel.length; depth++) {
@@ -1450,7 +1450,7 @@ export function custodyRows(doc: Fulfillment | PurchaseReceipt): Map<string, Cus
     if (isDividerItemType(it.type)) continue;
     const rel = it.path.join("/");
     if (anchors.some((a) => a.path.join("/") === rel || a.substitutedFor.join("/") === rel)) continue;
-    const item = it as unknown as LineItem;
+    const item = it as LineItem;
     out.set(rel, { quantity: item.quantity ?? 0, item });
   }
   return out;
@@ -1475,12 +1475,12 @@ export function orderOutOfServiceInputs(
   const rowByBooking = new Map<string, string>();
   for (const doc of [order, fulfillment]) {
     if (doc === undefined) continue;
-    for (const { path, bookingId } of bookingIdsByPath(doc as unknown as Order)) {
+    for (const { path, bookingId } of bookingIdsByPath(doc as Order)) {
       if (!rowByBooking.has(bookingId)) rowByBooking.set(bookingId, path.join("/"));
     }
   }
   const invoicedByRecord = billedOutOfService(
-    invoices.filter((i) => i.status !== "void") as unknown as ReplacementBillingInvoice[],
+    invoices.filter((i) => i.status !== "void") as ReplacementBillingInvoice[],
   );
   return billable.map((record) => {
     // ⚠️ Deliberately NOT every terminal bucket (api-cloudrun#1360, D6).
@@ -1566,7 +1566,7 @@ export interface AccountedInitiator {
 /** A line's units `(0, |n|]` at its own terms, signed with `n`: the one function (ruling 39), per what its money IS (ruling 88). */
 function unitsMoney(side: Side, item: LineItem, n: number): number {
   if (n === 0 || !isPreTaxItem(item)) return 0;
-  return Math.sign(n) * BILLING_FOLD[side].partCents(item as unknown as InvoiceItem, 0, Math.abs(n));
+  return Math.sign(n) * BILLING_FOLD[side].partCents(item as InvoiceItem, 0, Math.abs(n));
 }
 
 /** An exchange unit: sent in place of a lost, damaged or dirty one (decision 8). */
@@ -1640,7 +1640,7 @@ export function accountInitiator(
     for (const g of groups) extensionCents += subtotalCents({ ...g.item, quantity: g.quantity } as LineItem, g.extension_counts);
 
     const expected = kind === "stated"
-      ? BILLING_FOLD[side].partCents(item as unknown as InvoiceItem, 0, Math.max(0, billedUnits))
+      ? BILLING_FOLD[side].partCents(item as InvoiceItem, 0, Math.max(0, billedUnits))
       : null;
 
     const naming: string[] = [];
@@ -1684,7 +1684,7 @@ export function accountInitiator(
             // through (ruling 88, F14 item 6): AR's rate pricer reads `rates ×
             // counts`, so a FLAT payable row (no rates) previewed $0 under it and
             // throws once it states its flat tier (ruling 108).
-            preview_cents: billingRowPart(row.item as unknown as BillingRowMoneyLike, 0, take).net_cents,
+            preview_cents: billingRowPart(row.item as BillingRowMoneyLike, 0, take).net_cents,
           });
         }
         if (left > 0) refused.push(`${left} unit(s) over-billed beyond any attributable billing row in the credit pool`);

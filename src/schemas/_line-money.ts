@@ -215,14 +215,14 @@ export function formulaPartMoney(
  * - On a STATED line it is the marker the initiator → billing sync reads to tell
  *   an untouched part (still exactly its slice) from an overridden one; the
  *   stated gross is the money.
- * - Absent or `null` reads as 0: a whole line, as every line written before it.
+ * - `null` reads as 0: a whole line, as every line written before it. Required
+ *   with an explicit `null` (ruling 204): a submitted row states every key.
  */
 //
 // `server_owned` (ruling 197): only the remainder builder and the sync's part
 // follow author it, so a submitted row may echo it but never change it
 // (`@cfs/core/utils/line-edit`).
-export const UnitsFromField: z.ZodType<number | null | undefined> = z.int().min(0).nullable().optional().meta({
-  seed: false,
+export const UnitsFromField: z.ZodType<number | null> = z.int().min(0).nullable().meta({
   server_owned: true,
 });
 
@@ -260,8 +260,8 @@ export const STATED_TOTAL_GROUP = "stated_total";
  * ⚠️ Not on the `@cfs/core/schemas` barrel: no consumer assembles a price from
  * parts. An INPUT schema declares its own untagged twin.
  */
-export const StatedCore: { stated_cents: z.ZodType<number | null | undefined> } = {
-  stated_cents: z.int().min(0).nullable().optional().meta({
+export const StatedCore: { stated_cents: z.ZodType<number | null> } = {
+  stated_cents: z.int().min(0).nullable().meta({
     column: true,
     label: "Stated",
     propagate: true,

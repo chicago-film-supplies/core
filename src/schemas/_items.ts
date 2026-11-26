@@ -120,7 +120,7 @@ export const LineItemCore: {
   quantity: z.ZodNumber;
   path: z.ZodArray<z.ZodType<string>>;
   zero_priced: z.ZodNullable<z.ZodBoolean>;
-  quantity_per_parent: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+  quantity_per_parent: z.ZodNullable<z.ZodNumber>;
 } = {
   // `xero: true` (one-document-model F16): every Xero line body reads it — the
   // invoice and bill edit bodies key their lines by it and the bill names the
@@ -260,17 +260,18 @@ export const LineItemCore: {
   // flag, by the same rule the order projections follow: the difference IS the
   // signal.
   //
-  // `null` on a top-level line. ABSENT on every line written before the stamp
-  // existed, permanently: there is no backfill and no catalog fallback, so a
-  // pre-stamp component reads as a mismatch and cuts proportionally
-  // (`kitCutQuantities`). A ratio is only ever read THROUGH its parent, so a
+  // `null` on a top-level line, and on every line written before the stamp
+  // existed (ruling 204 Q1b: the window's backfill stated `null` where the key
+  // was absent; there is no catalog fallback), so a pre-stamp component reads
+  // as a mismatch and cuts proportionally (`kitCutQuantities`). Required with
+  // an explicit `null` (ruling 204): a submitted row states every key. A ratio is only ever read THROUGH its parent, so a
   // stamp with no parent (a line dragged out of its kit) is inert and a stamp
   // under the wrong parent reads as a mismatch — no writer rule nulls it.
   //
   // Line items only, never bookings: a booking merges every line with the same
   // (order, product, leg, ancestry), whose copies may carry different hand
   // edits, so one ratio per booking is undefined.
-  quantity_per_parent: z.number().min(0).nullable().optional().meta({ propagate: true }),
+  quantity_per_parent: z.number().min(0).nullable().meta({ propagate: true }),
 };
 
 /**
@@ -298,10 +299,10 @@ export const LineItemCore: {
  */
 export const LineTaxCore: {
   uid_tax_class: z.ZodType<string>;
-  uid_tax_class_override: z.ZodOptional<z.ZodNullable<z.ZodType<string>>>;
+  uid_tax_class_override: z.ZodNullable<z.ZodType<string>>;
 } = {
   uid_tax_class: FirestoreId.meta({ propagate: true }),
-  uid_tax_class_override: FirestoreId.nullable().optional().meta({ propagate: true }),
+  uid_tax_class_override: FirestoreId.nullable().meta({ propagate: true }),
 };
 
 /** The {@link LineTaxCore} keys, for code that copies the levers between grains. */

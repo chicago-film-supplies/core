@@ -35,6 +35,7 @@
  */
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { fdwPrice } from "./helpers/formulas.ts";
+import { invoiceLine } from "./helpers/lines.ts";
 import {
   LEDGER_POSTING_FIELDS,
   LedgerPostingCore,
@@ -161,7 +162,9 @@ Deno.test("checkZeroPricedAmount now runs when an INVOICE DOCUMENT parses", () =
   // whether a zero-priced line carried a charge. Asserted through the ITEM
   // UNION, which is what the document actually parses with — testing the
   // exported alias would have passed for that entire period.
+  // The shared seed states every key (ruling 204); this case's own keys over it.
   const line = (over: Record<string, unknown> = {}) => ({
+    ...invoiceLine(),
     uid: "abcdefghij0123456789",
     type: "rental",
     name: "Light",
@@ -173,6 +176,7 @@ Deno.test("checkZeroPricedAmount now runs when an INVOICE DOCUMENT parses", () =
     coa_revenue: 4000,
     uid_tracking_category: null,
     price: {
+      ...invoiceLine().price,
       ...fdwPrice(1000, 1),
       subtotal_cents: 1000,
       subtotal_discounted_cents: 1000,
@@ -285,11 +289,12 @@ Deno.test("LINE_TAX_FIELDS names exactly LineTaxCore's keys, and is not vacuous"
   assert(LINE_TAX_FIELDS.length === 2);
 });
 
-Deno.test("pickLineTaxFields: the class is required, the override keeps its key set", () => {
+Deno.test("pickLineTaxFields: the class is required, the override is always stated (ruling 204)", () => {
   assertThrows(() => pickLineTaxFields({ uid: "line1" }), Error, "has no uid_tax_class");
   assertThrows(() => pickLineTaxFields({ uid: "line1", uid_tax_class: null }), Error, "has no uid_tax_class");
   assertEquals(pickLineTaxFields({ uid: "line1", uid_tax_class: "classuid00000000000a" }), {
     uid_tax_class: "classuid00000000000a",
+    uid_tax_class_override: null,
   });
   assertEquals(
     pickLineTaxFields({ uid: "line1", uid_tax_class: "classuid00000000000a", uid_tax_class_override: null }),

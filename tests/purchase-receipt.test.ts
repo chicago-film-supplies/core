@@ -40,8 +40,10 @@ function line(over: Partial<PurchaseReceiptLineItemType> = {}): PurchaseReceiptL
     description: "",
     quantity: 4,
     zero_priced: null,
+    quantity_per_parent: null,
     path: [LEG, PRODUCT],
     quantity_ordered: 4,
+    exchanged_for: [],
     ...over,
   };
 }
