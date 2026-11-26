@@ -53082,6 +53082,8 @@ interface CreditLinePrice {
   price_formula: PriceFormulaRef | null;
   rates: RateSnapshot[];
   counts: TierCount[];
+  base_percent: null;
+  stated_cents: null;
 }
 ```
 

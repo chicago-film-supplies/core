@@ -25476,7 +25476,7 @@
         {
           "kind": "interface",
           "name": "CreditLinePrice",
-          "declaration": "interface CreditLinePrice {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshot[];\n  counts: TierCount[];\n}",
+          "declaration": "interface CreditLinePrice {\n  price_formula: PriceFormulaRef | null;\n  rates: RateSnapshot[];\n  counts: TierCount[];\n  base_percent: null;\n  stated_cents: null;\n}",
           "doc": "The stored price of one credit-note line: the invoice line's declared half plus money."
         },
         {

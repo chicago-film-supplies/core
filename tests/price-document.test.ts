@@ -367,9 +367,12 @@ Deno.test("priceCreditNote: credits a discounted, taxed line at the credited qua
     [20000, 18000, 2000, 20700],
   );
   assertEquals(price.taxes.map((t) => [t.uid, t.amount_cents]), [["chi-rental-tax", 2700]]);
+  // Ruling 204: the stored credit price states `base_percent` and `stated_cents`, both `null`.
   assertEquals(Object.keys(price).sort(), [
-    "counts", "discount", "price_formula", "rates", "subtotal_cents", "subtotal_discounted_cents", "taxes", "total_cents",
+    "base_percent", "counts", "discount", "price_formula", "rates", "stated_cents", "subtotal_cents",
+    "subtotal_discounted_cents", "taxes", "total_cents",
   ]);
+  assertEquals([price.base_percent, price.stated_cents], [null, null]);
   assertEquals(r.totals, {
     discount_amount_cents: 2000, subtotal_cents: 20000, subtotal_discounted_cents: 18000,
     taxes: [{ uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent", amount_cents: 2700 }],

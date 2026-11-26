@@ -277,7 +277,7 @@ export interface PriceDocumentExtension {
  * extension lines from their window, minimum included.
  */
 export function invoiceExtensionSections(
-  items: readonly { type: string; path: readonly string[]; path_extension_for?: readonly string[] }[],
+  items: readonly { type: string; path: readonly string[]; path_extension_for?: readonly string[] | null }[],
 ): PriceDocumentExtension[] {
   return items
     .filter((it) => it.type === "destination" && (it.path_extension_for?.length ?? 0) > 0)
@@ -1453,6 +1453,14 @@ export interface CreditLinePrice extends LinePriceMoney {
   price_formula: PriceFormulaRef | null;
   rates: RateSnapshot[];
   counts: TierCount[];
+  /**
+   * Stated with its empty value (ruling 204): a credit is a part of a billing
+   * row, priced from that row's money, never a percent-of-total fee and never a
+   * stated gross of its own — exactly what the pre-204 writer stored ABSENT and
+   * the window backfilled to `null`.
+   */
+  base_percent: null;
+  stated_cents: null;
 }
 
 /** What {@link priceCreditNote} returns. */
@@ -1580,8 +1588,8 @@ export function priceCreditNote(
           total_cents: part.amount_cents + lineTaxes.reduce((sum, t) => sum + t.amount_cents, 0),
         },
         unitItem,
-      ) as CreditLinePrice;
-      prices.push(price);
+      ) as Omit<CreditLinePrice, "base_percent" | "stated_cents">;
+      prices.push({ ...price, base_percent: null, stated_cents: null });
       unitsFrom.push(part.units_from);
       priced.push({ ...unitItem, price } as LineItem);
       continue;
@@ -1591,8 +1599,8 @@ export function priceCreditNote(
       { price_formula: line.price.price_formula, rates: [...line.price.rates], counts },
       priceLine(item, taxes, credited_counts !== undefined || extension !== undefined),
       item,
-    ) as CreditLinePrice;
-    prices.push(price);
+    ) as Omit<CreditLinePrice, "base_percent" | "stated_cents">;
+    prices.push({ ...price, base_percent: null, stated_cents: null });
     unitsFrom.push(null);
     priced.push({ ...item, price } as LineItem);
   }
