@@ -7335,7 +7335,7 @@
         {
           "kind": "interface",
           "name": "UpdateInvoiceInputType",
-          "declaration": "interface UpdateInvoiceInputType {\n  organization?: typeLiteral;\n  status?: InvoiceStatusType;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDestinationInputType[];\n  date?: string;\n  due_date?: string | null;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n  version: number;\n}",
+          "declaration": "interface UpdateInvoiceInputType {\n  organization?: typeLiteral;\n  status?: \"issued\";\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDestinationInputType[];\n  date?: string;\n  due_date?: string | null;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n  version: number;\n}",
           "doc": "Input schema for PUT /invoices/:uid — partial update."
         },
         {
@@ -11925,7 +11925,7 @@
         {
           "kind": "interface",
           "name": "UpdateInvoiceInputType",
-          "declaration": "interface UpdateInvoiceInputType {\n  organization?: typeLiteral;\n  status?: InvoiceStatusType;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDestinationInputType[];\n  date?: string;\n  due_date?: string | null;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n  version: number;\n}",
+          "declaration": "interface UpdateInvoiceInputType {\n  organization?: typeLiteral;\n  status?: \"issued\";\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDestinationInputType[];\n  date?: string;\n  due_date?: string | null;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n  version: number;\n}",
           "doc": "Input schema for PUT /invoices/:uid — partial update."
         },
         {
@@ -20738,7 +20738,15 @@
           "kind": "function",
           "name": "billingActionsFor",
           "signature": "billingActionsFor(side: S, doc: indexedAccess, ctx: BillingOfferContext<S>): DocumentActionOffer[]",
-          "doc": "**Every action an operator may take on this billing document** (F15 items 3–4).\n\n- `issue` — `canOperatorTransition(…, \"issued\")`, on both sides: a pushed bill\n  is born `draft` (one-document-model rulings 41, 160) and issued as an invoice\n  is, with no branch.\n- `void` — {@link voidRefusal}.\n- `close` — {@link closeRefusal}.\n- `add_payment` — the status `accepts_payment`, something is due and the side\n  takes settlement on it (a card bill does not); `max_cents` is the amount due.\n- `allocate_credit` — the document has credit room (due, and the side takes credit on it).\n- `reverse_settlement` — one offer per reversible row ({@link reversalRefusal}); a\n  $0 document is un-closed by reversing its closure row (ruling 115).\n- `add_credit` — a status live in Xero with credit left on a line ({@link creditableLines}).\n- `edit_items` — always; `frozen_classes` from `INVOICE_FIELD_FREEZE`, both sides.\n- `edit_date` / `edit_counterparty` — while their field class is not frozen.\n- `push_to_xero` — {@link pushRefusal}.\n\nGaps ({@link ACTION_GAPS}) are never offered.",
+          "doc": "**Every action an operator may take on this billing document** (F15 items 3–4).\n\n- `issue` — {@link issueRefusal}, on both sides: a pushed bill is born\n  `draft` (one-document-model rulings 41, 160) and issued as an invoice is,\n  with no branch; an empty draft is not offered it (api-cloudrun#1536).\n- `void` — {@link voidRefusal}.\n- `close` — {@link closeRefusal}.\n- `add_payment` — the status `accepts_payment`, something is due and the side\n  takes settlement on it (a card bill does not); `max_cents` is the amount due.\n- `allocate_credit` — the document has credit room (due, and the side takes credit on it).\n- `reverse_settlement` — one offer per reversible row ({@link reversalRefusal}); a\n  $0 document is un-closed by reversing its closure row (ruling 115).\n- `add_credit` — a status live in Xero with credit left on a line ({@link creditableLines}).\n- `edit_items` — always; `frozen_classes` from `INVOICE_FIELD_FREEZE`, both sides.\n- `edit_date` / `edit_counterparty` — while their field class is not frozen.\n- `push_to_xero` — {@link pushRefusal}.\n\nGaps ({@link ACTION_GAPS}) are never offered.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "billingHoldsLines",
+          "signature": "billingHoldsLines(items: readonly typeLiteral[]): boolean",
+          "doc": "**Does this billing document hold a line Xero would post?** One rule, both\nsides (one-document-model ruling 33; api-cloudrun#1536): a line row that is\nnot a payable kit header (`isKitHeaderLine`, `ledger_account: null`; an\ninvoice line carries no `ledger_account`, so no receivable row is excluded).\nThe api's `assertBillingHoldsLines` asks it of the document AS IT WILL BE\nSTORED; {@link issueRefusal} asks it of the stored one.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -20803,6 +20811,14 @@
           "name": "initiatorLineTouched",
           "signature": "initiatorLineTouched(side: Side, line: Pick<LineAccount, \"named\" | \"item\">, custody: InitiatorLineCustody): boolean",
           "doc": "**Has anything happened to this line that makes it history as well as an\norder?** Ruling 102: the account NAMES it (a live billing row, a substitute\nstanding in for it, a live credit that took something back), or, on a line\nthat moves custody, custody has moved units for it. A touched line is neither\nremoved nor moved across bases.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "issueRefusal",
+          "signature": "issueRefusal(side: Side, doc: Pick<OfferBillingCore, \"status\" | \"items\">): string | null",
+          "doc": "Why an operator may not issue this billing document, or `null` when it may —\none rule for an invoice and a bill: the status admits `issued`, and the\ndocument holds a line ({@link billingHoldsLines}). A draft may be empty (a\ndividers-only create, api-cloudrun#1536), but Xero keeps a document's\nexisting lines when an edit sends none, so an empty one is never issued.",
           "paramTags": [],
           "returnsTag": null
         },

@@ -1909,7 +1909,13 @@ export interface UpdateInvoiceInputType {
    * resolved `jurisdiction_claim` and `tax_exempt` move with the organization.
    */
   organization?: { uid: string };
-  status?: InvoiceStatusType;
+  /**
+   * The one operator transition a PUT makes: `"issued"`, the bill's
+   * `UpdatePurchaseBillInput.status` (one-document-model ruling 188). A void is
+   * `POST /invoices/{uid}/void` (`VoidBillingInput`); `paid` / `part_paid` are
+   * derived from settlements; `draft` is never returned to.
+   */
+  status?: "issued";
   /**
    * The EXEMPTION axis. Absent = leave unchanged; `false` = this invoice
    * asserts none. No `null` arm, for the reason on `UpdateOrderInput`.
@@ -1991,7 +1997,7 @@ export interface UpdateInvoiceInputType {
 export const UpdateInvoiceInput: z.ZodType<UpdateInvoiceInputType> = z.object({
   // Mirrors `UpdateOrderInput.organization` exactly — see the interface.
   organization: z.object({ uid: FirestoreId }).optional(),
-  status: InvoiceStatus.optional(),
+  status: z.literal("issued").optional(),
   tax_exempt: z.boolean().optional(),
   uid_store: FirestoreId.nullable().optional(),
   items: z.array(InvoiceItemInputSchema).optional(),

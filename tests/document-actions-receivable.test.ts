@@ -700,3 +700,12 @@ Deno.test("an InvoiceActionRefusal names its action", () => {
   }
   throw new Error("expected a refusal");
 });
+
+Deno.test("issue: an EMPTY draft invoice is not offered Issue, and the assert refuses it (api-cloudrun#1536)", () => {
+  const empty = invoice("draft", { items: [DIVIDER] });
+  assertEquals(has(invoiceActionsFor(empty), "issue"), false);
+  assertThrows(() => assertInvoiceAction(empty, {}, { action: "issue" }), DocumentActionRefusal, "holds no lines");
+  // The default fixture holds one line under its divider.
+  assertEquals(has(invoiceActionsFor(invoice("draft")), "issue"), true);
+  assertInvoiceAction(invoice("draft"), {}, { action: "issue" });
+});

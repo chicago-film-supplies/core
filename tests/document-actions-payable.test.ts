@@ -759,3 +759,18 @@ Deno.test("creditableBillLines: the straddling credit the rule refuses is the on
   ];
   assertEquals([net(segmented, "x"), net(segmented, "y")], [0, 0]);
 });
+
+Deno.test("issue: an EMPTY draft bill is not offered Issue, and the assert refuses it (api-cloudrun#1536)", () => {
+  const ctx = ctx6d([]);
+  const issues = (b: PurchaseBill) => purchaseBillActionsFor(b, ctx).some((o) => o.action === "issue");
+  const divider = { uid: PU, type: "purchase", path: [PU] } as unknown as PurchaseDocumentItem;
+  const empty = bill6d("E", [divider], { status: "draft" });
+  // A kit header alone posts nothing to Xero, so it holds no line.
+  const headerOnly = bill6d("H", [divider, row(["k"], 1, { ledger_account: null })], { status: "draft" });
+  const oneLine = bill6d("L", [divider, row(["x"], 1)], { status: "draft" });
+  assertEquals([issues(empty), issues(headerOnly), issues(oneLine)], [false, false, true]);
+  assertThrows(() => cat.assertBillingAction("payable", asBill(empty), { action: "issue" }), DocumentActionRefusal, "holds no lines");
+  cat.assertBillingAction("payable", asBill(oneLine), { action: "issue" });
+  // The status arm still decides first: an issued bill with a line is not offered Issue.
+  assertEquals(issues(bill6d("I", [divider, row(["x"], 1)])), false);
+});

@@ -472,6 +472,32 @@ function reversalRefusal(row: OfferSettlement, rows: readonly OfferSettlement[])
   return null;
 }
 
+/**
+ * **Does this billing document hold a line Xero would post?** One rule, both
+ * sides (one-document-model ruling 33; api-cloudrun#1536): a line row that is
+ * not a payable kit header (`isKitHeaderLine`, `ledger_account: null`; an
+ * invoice line carries no `ledger_account`, so no receivable row is excluded).
+ * The api's `assertBillingHoldsLines` asks it of the document AS IT WILL BE
+ * STORED; {@link issueRefusal} asks it of the stored one.
+ */
+export function billingHoldsLines(items: readonly { type: string }[]): boolean {
+  return items.some((row) => isLineItemType(row.type) && !isKitHeaderLine(row));
+}
+
+/**
+ * Why an operator may not issue this billing document, or `null` when it may —
+ * one rule for an invoice and a bill: the status admits `issued`, and the
+ * document holds a line ({@link billingHoldsLines}). A draft may be empty (a
+ * dividers-only create, api-cloudrun#1536), but Xero keeps a document's
+ * existing lines when an edit sends none, so an empty one is never issued.
+ */
+export function issueRefusal(side: Side, doc: Pick<OfferBillingCore, "status" | "items">): string | null {
+  const noun = ACTION_SIDES[side].nouns.billing;
+  if (!canOperatorTransition(doc.status, "issued")) return `${a(doc.status)} ${noun} cannot be issued`;
+  if (!billingHoldsLines(doc.items)) return `the ${noun} holds no lines: add a line before issuing it`;
+  return null;
+}
+
 /** Why `doc` may not be marked paid at $0, or `null` when it may — one rule for an invoice and a bill. */
 export function closeRefusal(
   side: Side,
@@ -830,9 +856,9 @@ export function creditParts<S extends Side>(
 /**
  * **Every action an operator may take on this billing document** (F15 items 3–4).
  *
- * - `issue` — `canOperatorTransition(…, "issued")`, on both sides: a pushed bill
- *   is born `draft` (one-document-model rulings 41, 160) and issued as an invoice
- *   is, with no branch.
+ * - `issue` — {@link issueRefusal}, on both sides: a pushed bill is born
+ *   `draft` (one-document-model rulings 41, 160) and issued as an invoice is,
+ *   with no branch; an empty draft is not offered it (api-cloudrun#1536).
  * - `void` — {@link voidRefusal}.
  * - `close` — {@link closeRefusal}.
  * - `add_payment` — the status `accepts_payment`, something is due and the side
@@ -858,7 +884,7 @@ export function billingActionsFor<S extends Side>(
   const offer = (action: DocumentActionId, extra: Omit<DocumentActionOffer, "key" | "action"> = {}) => {
     if (sideOffers(side, "billing", action)) offers.push({ key: action, action, ...extra });
   };
-  if (canOperatorTransition(doc.status, "issued")) offer("issue");
+  if (issueRefusal(side, doc) === null) offer("issue");
   if (voidRefusal(side, doc, ctx.credits, ctx.initiators) === null) offer("void");
   if (closeRefusal(side, doc) === null) offer("close");
   const due = doc.totals.amount_due_cents;
@@ -912,7 +938,7 @@ export function assertBillingAction<S extends Side>(
   const contract = statusContract(doc.status) ?? refuse(`${noun} status "${doc.status}" admits no action`);
   switch (request.action) {
     case "issue":
-      return why(canOperatorTransition(doc.status, "issued") ? null : `${a(doc.status)} ${noun} cannot be issued`);
+      return why(issueRefusal(side, doc));
     case "close":
       return why(closeRefusal(side, doc));
     case "edit_date":

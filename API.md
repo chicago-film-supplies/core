@@ -16422,7 +16422,7 @@ Input schema for PUT /invoices/:uid — partial update.
 ```ts
 interface UpdateInvoiceInputType {
   organization?: typeLiteral;
-  status?: InvoiceStatusType;
+  status?: "issued";
   tax_exempt?: boolean;
   uid_store?: string | null;
   items?: InvoiceItemInputType[];
@@ -25388,7 +25388,7 @@ Input schema for PUT /invoices/:uid — partial update.
 ```ts
 interface UpdateInvoiceInputType {
   organization?: typeLiteral;
-  status?: InvoiceStatusType;
+  status?: "issued";
   tax_exempt?: boolean;
   uid_store?: string | null;
   items?: InvoiceItemInputType[];
@@ -43871,9 +43871,9 @@ Refuse an initiator action the catalog does not offer. Operator routes only.
 
 **Every action an operator may take on this billing document** (F15 items 3–4).
 
-- `issue` — `canOperatorTransition(…, "issued")`, on both sides: a pushed bill
-  is born `draft` (one-document-model rulings 41, 160) and issued as an invoice
-  is, with no branch.
+- `issue` — {@link issueRefusal}, on both sides: a pushed bill is born
+  `draft` (one-document-model rulings 41, 160) and issued as an invoice is,
+  with no branch; an empty draft is not offered it (api-cloudrun#1536).
 - `void` — {@link voidRefusal}.
 - `close` — {@link closeRefusal}.
 - `add_payment` — the status `accepts_payment`, something is due and the side
@@ -43887,6 +43887,15 @@ Refuse an initiator action the catalog does not offer. Operator routes only.
 - `push_to_xero` — {@link pushRefusal}.
 
 Gaps ({@link ACTION_GAPS}) are never offered.
+
+### `billingHoldsLines(items: readonly typeLiteral[]): boolean`
+
+**Does this billing document hold a line Xero would post?** One rule, both
+sides (one-document-model ruling 33; api-cloudrun#1536): a line row that is
+not a payable kit header (`isKitHeaderLine`, `ledger_account: null`; an
+invoice line carries no `ledger_account`, so no receivable row is excluded).
+The api's `assertBillingHoldsLines` asks it of the document AS IT WILL BE
+STORED; {@link issueRefusal} asks it of the stored one.
 
 ### `closeRefusal(side: Side, doc: Pick<OfferBillingCore, "status" | "totals">): string | null`
 
@@ -43987,6 +43996,14 @@ order?** Ruling 102: the account NAMES it (a live billing row, a substitute
 standing in for it, a live credit that took something back), or, on a line
 that moves custody, custody has moved units for it. A touched line is neither
 removed nor moved across bases.
+
+### `issueRefusal(side: Side, doc: Pick<OfferBillingCore, "status" | "items">): string | null`
+
+Why an operator may not issue this billing document, or `null` when it may —
+one rule for an invoice and a bill: the status admits `issued`, and the
+document holds a line ({@link billingHoldsLines}). A draft may be empty (a
+dividers-only create, api-cloudrun#1536), but Xero keeps a document's
+existing lines when an edit sends none, so an empty one is never issued.
 
 ### `lineActionKey(action: DocumentActionId, path: readonly string[]): string`
 

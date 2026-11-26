@@ -1631,3 +1631,10 @@ Deno.test("W4R: out_of_service shares sum to the line's quantity, are unique by 
   assert(stripped.success);
   assertEquals(stripped.data.out_of_service, [{ uid: A, quantity: 1 }]);
 });
+
+Deno.test("UpdateInvoiceInput.status admits only \"issued\" (ruling 188): a void is its route", () => {
+  assertEquals(UpdateInvoiceInput.safeParse({ version: 1, status: "issued" }).success, true);
+  for (const status of ["void", "paid", "part_paid", "draft"]) {
+    assertEquals(UpdateInvoiceInput.safeParse({ version: 1, status }).success, false, status);
+  }
+});
