@@ -1319,8 +1319,6 @@ export interface Purchase {
   subject: string;
   /** The supplier's order or quote number, or `null`. */
   reference: string | null;
-  /** Internal note, or `null` for none. */
-  notes: string | null;
   /**
    * The lines under their dividers ({@link PurchaseRow}). Every line sits under
    * a destination divider, and each divider is answered by one pair in
@@ -1512,7 +1510,6 @@ export const PurchaseSchema: z.ZodType<Purchase> = z.strictObject({
   // Bare `z.string()`, as on the order, fulfillment and invoice (`tests/subject-parity.test.ts`).
   subject: z.string().meta({ pii: "mask", column: true, label: "Subject", linkTo: "purchaseDetail", propagate: true }),
   reference: z.string().max(200).nullable().meta({ column: true, label: "Reference", ...homonym }),
-  notes: z.string().meta({ pii: "mask", column: true, label: "Notes" }).nullable(),
   // A component (a charge placed under the product it costs, a kit's part)
   // states `zero_priced`, and only a component may be flagged — as on the order,
   // invoice, fulfillment and receipt (C15 item 1). The writer refused both
@@ -2062,7 +2059,6 @@ export interface CreatePurchaseInputType {
   date: string;
   subject?: string;
   reference?: string | null;
-  notes?: string | null;
   /**
    * The whole array in its order: dividers and lines. `computeItemPaths` authors
    * each stored path from the rows' positions and parents.
@@ -2085,7 +2081,6 @@ export const CreatePurchaseInput: z.ZodType<CreatePurchaseInputType> = z.object(
   date: chicagoStartOfDay(),
   subject: z.string().optional(),
   reference: z.string().max(200).nullable().optional(),
-  notes: z.string().meta({ pii: "mask" }).nullable().optional(),
   items: z.array(PurchaseRowInput).min(1),
   destinations: z.array(PurchaseDestinationInput).min(1, "At least one destination is required"),
   uuid_session: z.uuid(),
@@ -2116,7 +2111,6 @@ export interface UpdatePurchaseInputType {
   date?: string;
   subject?: string;
   reference?: string | null;
-  notes?: string | null;
   items?: PurchaseRowInputType[];
   destinations?: PurchaseDestinationInputType[];
   version: number;
@@ -2127,7 +2121,6 @@ export const UpdatePurchaseInput: z.ZodType<UpdatePurchaseInputType> = z.object(
   date: chicagoStartOfDay().optional(),
   subject: z.string().optional(),
   reference: z.string().max(200).nullable().optional(),
-  notes: z.string().meta({ pii: "mask" }).nullable().optional(),
   items: z.array(PurchaseRowInput).min(1).optional(),
   destinations: z.array(PurchaseDestinationInput).min(1, "At least one destination is required").optional(),
   version: z.int().min(0),

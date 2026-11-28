@@ -14,9 +14,7 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  * out of `query_by` and every search returns zero rows with no error. The same
  * line in `typesense/suppliers.ts` carries the full argument.
  *
- * `items.name` is indexed so "which PO has product X" is one query. `notes` is
- * deliberately NOT declared — free text no list column needs; add it when
- * someone wants to search on it.
+ * `items.name` is indexed so "which PO has product X" is one query.
  *
  * ⚠️ `reference` is `optional: true` because its Zod leaf is `.nullable()`:
  * the translate path omits a null rather than sending one, and a non-optional

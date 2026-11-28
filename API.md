@@ -3468,7 +3468,6 @@ interface CreatePurchaseInputType {
   date: string;
   subject?: string;
   reference?: string | null;
-  notes?: string | null;
   items: PurchaseRowInputType[];
   destinations: PurchaseDestinationInputType[];
   uuid_session: string;
@@ -11320,7 +11319,6 @@ interface Purchase {
   date_fs: FirestoreTimestampType;
   subject: string;
   reference: string | null;
-  notes: string | null;
   items: PurchaseRow[];
   destinations: PurchaseDestination[];
   totals: InitiatorTotalsType;
@@ -16800,7 +16798,6 @@ interface UpdatePurchaseInputType {
   date?: string;
   subject?: string;
   reference?: string | null;
-  notes?: string | null;
   items?: PurchaseRowInputType[];
   destinations?: PurchaseDestinationInputType[];
   version: number;
@@ -29710,7 +29707,6 @@ interface CreatePurchaseInputType {
   date: string;
   subject?: string;
   reference?: string | null;
-  notes?: string | null;
   items: PurchaseRowInputType[];
   destinations: PurchaseDestinationInputType[];
   uuid_session: string;
@@ -29877,7 +29873,6 @@ interface Purchase {
   date_fs: FirestoreTimestampType;
   subject: string;
   reference: string | null;
-  notes: string | null;
   items: PurchaseRow[];
   destinations: PurchaseDestination[];
   totals: InitiatorTotalsType;
@@ -30554,7 +30549,6 @@ interface UpdatePurchaseInputType {
   date?: string;
   subject?: string;
   reference?: string | null;
-  notes?: string | null;
   items?: PurchaseRowInputType[];
   destinations?: PurchaseDestinationInputType[];
   version: number;
@@ -36178,9 +36172,7 @@ string.
 out of `query_by` and every search returns zero rows with no error. The same
 line in `typesense/suppliers.ts` carries the full argument.
 
-`items.name` is indexed so "which PO has product X" is one query. `notes` is
-deliberately NOT declared — free text no list column needs; add it when
-someone wants to search on it.
+`items.name` is indexed so "which PO has product X" is one query.
 
 ⚠️ `reference` is `optional: true` because its Zod leaf is `.nullable()`:
 the translate path omits a null rather than sending one, and a non-optional

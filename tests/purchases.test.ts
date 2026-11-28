@@ -349,7 +349,6 @@ function purchase(over: Record<string, unknown> = {}) {
     date_fs: mockTimestamp,
     subject: "",
     reference: "Q-1182",
-    notes: null,
     items: rows ?? [purchaseDivider(D), ...items],
     destinations: [purchasePair(D, hasHire ? HIRE : null)],
     totals: flatTotals(140985),

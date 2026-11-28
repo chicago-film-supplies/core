@@ -437,7 +437,6 @@ function purchaseDoc(items: PurchaseItem[]): Purchase {
     date_fs: mockTimestamp,
     subject: "",
     reference: null,
-    notes: null,
     items: [purchaseDivider(DIV), ...items],
     destinations: [purchasePair(DIV, hire ? { start: jan(1), end: null } : null)],
     totals: purchaseTotals([purchaseDivider(DIV), ...items]),
