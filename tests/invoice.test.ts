@@ -26,7 +26,8 @@ const totalsBase = invoiceBase.totals as Record<string, unknown>;
 const lineSeed = getInitialValues(InvoiceDocLineItem);
 // The form seed names no formula (ruling 8): price lines on the Five-day week fixture.
 const priceBase = { ...lineSeed.price, ...fdwPrice(0, 5) };
-const lineItemBase = { ...lineSeed, uid_tax_class: "TaxC1assDefau1tAAAAA", price: priceBase };
+// A product line states its account (ruling 205): the form seed leaves `coa_revenue` null.
+const lineItemBase = { ...lineSeed, uid_tax_class: "TaxC1assDefau1tAAAAA", coa_revenue: 4000, price: priceBase };
 
 const validDocDates = {
   delivery_start: "2026-03-01T00:00:00.000-06:00",

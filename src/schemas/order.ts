@@ -16,6 +16,7 @@ import {
   type DocumentOrganizationSnapshotType,
   type AddressType,
   checkItemContract,
+  checkCustomLineAccount,
   checkZeroPricedAmount,
   checkZeroPricedComponents,
   checkZeroQuantityComponents,
@@ -2029,8 +2030,10 @@ export interface OrderItemLineType {
   uid_order: string | null;
   /**
    * @see `OrderDocLineItemType.coa_revenue` — operator-authored, so it is accepted
-   * here. `null` resets it to the product's (`null` on a custom line), and a
-   * value sets it — api-cloudrun's `lineDenorms` is the one author of that rule.
+   * here. The client STATES it (pre-filled from the product, 4800 on a custom
+   * line); no server fills it (ruling 205). `null` is legal only on a custom
+   * line until the one-document-model plan's Phase 8 ({@link checkCustomLineAccount}),
+   * and clearing a stored account is refused (`account_required`, `utils/line-edit.ts`).
    */
   coa_revenue: COARevenueType | null;
   /** @see `OrderDocLineItemType.uid_tracking_category` — set/clear exactly as `coa_revenue`. */
@@ -2074,7 +2077,7 @@ const OrderItemLineInner = z.object({
   uid_tracking_category: FirestoreId.nullable(),
   uid_tax_class_override: FirestoreId.nullable(),
   exchanged_for: ExchangedForList,
-}).superRefine(checkItemPriceFormula);
+}).superRefine(checkItemPriceFormula).superRefine(checkCustomLineAccount);
 
 /** Zod schema for a billable order line (input). */
 export const OrderItemLine: z.ZodType<OrderItemLineType> = OrderItemLineInner.superRefine(checkZeroPricedAmount);
@@ -2652,7 +2655,7 @@ const OrderDocLineItemInner = z.strictObject({
   // Required, `[]` on a line that is not an exchange (ruling 204). See the
   // interface docblock.
   exchanged_for: ExchangedForList.meta({ shared: "value" }),
-}).superRefine(checkItemContract).superRefine(checkZeroPricedAmount).superRefine(checkFormulaLineMoney);
+}).superRefine(checkItemContract).superRefine(checkCustomLineAccount).superRefine(checkZeroPricedAmount).superRefine(checkFormulaLineMoney);
 
 export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = OrderDocLineItemInner;
 

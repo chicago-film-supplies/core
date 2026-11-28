@@ -311,6 +311,7 @@ Deno.test("buildOrderScopedItems projects order-only fields off line items", () 
   const orderItems: LineItem[] = [
     {
       uid: ITEM_1,
+      coa_revenue: 4000, // a product line states its account (ruling 205)
       type: "rental", uid_tax_class: TAX_CLASS,
       name: "Light",
       quantity: 2,
@@ -569,6 +570,7 @@ Deno.test("syncOrderItems projects order-only fields off new items (strict schem
     },
     {
       uid: ITEM_1,
+      coa_revenue: 4000, // a product line states its account (ruling 205)
       type: "rental", uid_tax_class: TAX_CLASS,
       name: "Light",
       quantity: 1,
@@ -616,6 +618,7 @@ Deno.test("syncOrderToInvoiceSelective projects new items to invoice-line-item s
   const newOrderItems: LineItem[] = [
     {
       uid: ITEM_1,
+      coa_revenue: 4000, // a product line states its account (ruling 205)
       type: "rental", uid_tax_class: TAX_CLASS,
       name: "Light",
       quantity: 1,
@@ -730,6 +733,7 @@ Deno.test("`price.taxes_base` reaches an invoice by PROJECTION, and the merge ne
   // has. Asserting the merge carried it was asserting G2 back into existence.
   const prevItem = orderShapedLine();
   const withBase = orderShapedLine({
+    coa_revenue: 4000,
     price: {
       taxes_base: [{ uid: "chirentaltax00000001", name: "Chicago Rental Tax", rate: 15, type: "percent" }],
     } as unknown as LineItem["price"],
@@ -2769,7 +2773,7 @@ Deno.test("syncOrderDestinationsSelective never emits an UNDEFINED field", () =>
 // every line, which is exactly what makes this different from `coa_revenue`,
 // `taxed_as` and `price.taxes_base` above.
 Deno.test("manager#421 stage one: the invoice line SCHEMA accepts zero_priced", () => {
-  const line = { ...(buildOrderScopedItems([orderShapedLine()], ORDER_DIV_1)[0] as InvoiceItem) };
+  const line = { ...(buildOrderScopedItems([orderShapedLine({ coa_revenue: 4000 })], ORDER_DIV_1)[0] as InvoiceItem) };
   // ⚠️ The flag comes with every rate at 0, and that is invariant (1) rather than
   // fixture housekeeping. This arm originally set the flag ALONE on a priced
   // line — legal when it was written, because nothing tied the flag to the
@@ -3264,7 +3268,7 @@ Deno.test("syncOrderToInvoiceSelective keeps a SERVICE line billing a cleaning/m
 });
 
 Deno.test("InvoiceDocLineItem refuses out_of_service on a non-replacement line, and the retired uid_out_of_service anywhere", () => {
-  const projected = buildOrderScopedItems([orderShapedLine()], ORDER_DIV_1)[0];
+  const projected = buildOrderScopedItems([orderShapedLine({ coa_revenue: 4000 })], ORDER_DIV_1)[0];
   const link = [{ uid: "Oos00000000000000001", quantity: (projected as InvoiceItem).quantity }];
   const onRental = InvoiceDocLineItem.safeParse({ ...projected, out_of_service: link });
   assertEquals(onRental.success, false);

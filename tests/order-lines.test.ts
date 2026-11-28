@@ -53,7 +53,7 @@ function product(over: Partial<ProductDocument> = {}): ProductDocument {
     active: true,
     component_only: false,
     updated_at: 0,
-    price: { ...catalogPrice(FIVE_DAY_WEEK, 10000), replacement_cents: 50000 },
+    price: { ...catalogPrice(FIVE_DAY_WEEK, 10000), replacement_cents: 50000, coa_revenue: 4000 },
     ...over,
   };
 }
@@ -82,7 +82,7 @@ const REAL_ORDER_UID = "Ord3rAAAAAAAAAAAAAAA";
 
 Deno.test("buildOrderLineFromProduct emits a schema-valid line, ancestry-only path", () => {
   const line = buildOrderLineFromProduct(
-    product({ uid: REAL_PRODUCT_UID, price: { ...catalogPrice(FIVE_DAY_WEEK, 10000), replacement_cents: 50000 } }),
+    product({ uid: REAL_PRODUCT_UID, price: { ...catalogPrice(FIVE_DAY_WEEK, 10000), replacement_cents: 50000, coa_revenue: 4000 } }),
     { ...OPTS, quantity: 3, uidOrder: REAL_ORDER_UID },
   );
 

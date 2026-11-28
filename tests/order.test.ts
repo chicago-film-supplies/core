@@ -1400,8 +1400,12 @@ Deno.test("OrderDocItem: a stored line that omits zero_priced is refused — the
   );
 });
 
-Deno.test("OrderDocItem: a stored line must STATE both posting keys (`LinePostingCore`), `null` allowed", () => {
-  assertEquals(OrderDocItem.safeParse({ ...docLine(), coa_revenue: null, uid_tracking_category: null }).success, true, "control: nulls parse");
+Deno.test("OrderDocItem: a stored line must STATE both posting keys (`LinePostingCore`); `coa_revenue: null` only on a custom line (ruling 205)", () => {
+  assertEquals(OrderDocItem.safeParse({ ...docLine(), uid_tracking_category: null }).success, true, "control: a null category parses on a product line");
+  const productNull = OrderDocItem.safeParse({ ...docLine(), coa_revenue: null });
+  assertEquals(productNull.error?.issues.map((i) => i.path.join(".")), ["coa_revenue"], "a product line states its account");
+  const custom = "custom-0b9e2f4a-0000-4000-8000-000000000009";
+  assertEquals(OrderDocItem.safeParse({ ...docLine(), uid: custom, path: [custom], coa_revenue: null, uid_tracking_category: null }).success, true, "a custom line keeps its null until Phase 8");
   for (const key of ["coa_revenue", "uid_tracking_category"] as const) {
     const withoutKey = { ...docLine() } as Record<string, unknown>;
     delete withoutKey[key];
@@ -1411,8 +1415,10 @@ Deno.test("OrderDocItem: a stored line must STATE both posting keys (`LinePostin
   }
 });
 
-Deno.test("OrderItem input: both posting keys are REQUIRED and nullable (null = reset; missing is a 400, ruling 204)", () => {
-  for (const over of [{ coa_revenue: null, uid_tracking_category: null }, { coa_revenue: 4100, uid_tracking_category: "TrackCat000000000001" }]) {
+Deno.test("OrderItem input: both posting keys are REQUIRED (missing is a 400, ruling 204); `coa_revenue: null` only on a custom line (ruling 205)", () => {
+  const custom = "custom-0b9e2f4a-0000-4000-8000-000000000009";
+  assertEquals(OrderItem.safeParse(inputLine({ coa_revenue: null })).error?.issues.map((i) => i.path.join(".")), ["coa_revenue"], "no server fill: a product line states its account");
+  for (const over of [{ uid_tracking_category: null }, { uid: custom, coa_revenue: null, uid_tracking_category: null }, { coa_revenue: 4100, uid_tracking_category: "TrackCat000000000001" }]) {
     const r = OrderItem.safeParse(inputLine(over));
     assertEquals(r.success, true, JSON.stringify(over));
     assertEquals(r.success && Object.keys(over).every((k) => k in r.data), true, "a stated key reaches the handler, not stripped");

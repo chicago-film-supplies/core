@@ -43,6 +43,7 @@ function line(uid: string, path: string[], quantity = 1, baseCents = 1000): Line
   return {
     uid, type: "rental", name: uid, description: "", quantity, path,
     stock_method: "reserve", zero_priced: false, uid_tax_class: "TaxC1assDefau1tAAAAA",
+    coa_revenue: 4000, // a product line states its account (ruling 205)
     price: {
       ...fdwPrice(baseCents, 5),
       subtotal_cents: baseCents * quantity,

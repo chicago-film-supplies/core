@@ -82,8 +82,7 @@ const P = "purchaseUid000000000";
 const LIGHT = "prodLight00000000000";
 
 const CTX: LineEditContext = {
-  products: new Map([[LIGHT, { account: 4000, uid_tracking_category: "trackcat000000000001" }]]),
-  default_account: 4800,
+  products: new Map([[LIGHT, { uid_tracking_category: "trackcat000000000001" }]]),
 };
 
 /** A receivable order line: a RATE line by default, STATED when `stated` is given. */
@@ -267,20 +266,59 @@ Deno.test("applyLineEdit: refusals land on the row's field (rulings 195, 197; th
   assertEquals(codes("purchase", bought, { ...echo("purchase", bought), price: { ...priceOf(echo("purchase", bought)), stated_cents: null } }), [
     "no_money_input price.stated_cents",
   ]);
+  // 205: a counted row's account may not be cleared.
+  assertEquals(codes("order", rate, { ...echo("order", rate), coa_revenue: null }), ["account_required coa_revenue"]);
   // The vocabulary is closed and every code above is in it.
-  assertEquals([...LINE_EDIT_REFUSALS].sort(), ["discount_exceeds_gross", "no_money_input", "server_owned", "uncounted_row"]);
+  assertEquals([...LINE_EDIT_REFUSALS].sort(), ["account_required", "discount_exceeds_gross", "no_money_input", "server_owned", "uncounted_row"]);
 });
 
-Deno.test("applyLineEdit: a cleared account resets to the product's, or the side's default without a product (ruling 196)", () => {
-  const stored = { ...orderLine(), coa_revenue: 4140 };
-  assertEquals(edit("order", stored, { ...echo("order", stored), coa_revenue: null }).coa_revenue, 4000);
+Deno.test("applyLineEdit: a cleared account is REFUSED on both sides, never reset; a cleared category still resets (ruling 205, withdrawing 196)", () => {
+  const refused = (grain: LineEditGrain, stored: LineLike, key: "coa_revenue" | "ledger_account") => {
+    const r = applyLineEdit(grain, stored, diffLine(grain, stored, { ...echo(grain, stored), [key]: null }), CTX);
+    return r.ok ? `reset to ${r.line[key]}` : r.refusals.map((x) => `${x.code} ${x.path.join(".")}`).join();
+  };
+  // Every billing grain, receivable and payable: no server fills an account.
+  assertEquals(refused("order", { ...orderLine(), coa_revenue: 4140 }, "coa_revenue"), "account_required coa_revenue");
+  assertEquals(refused("invoice", invoiceLine(), "coa_revenue"), "account_required coa_revenue");
+  assertEquals(refused("purchase", purchaseLine(), "ledger_account"), "account_required ledger_account");
+  assertEquals(refused("bill", billLine(), "ledger_account"), "account_required ledger_account");
+  // A custom line that has no product is refused too (no side default either).
   const custom = { ...orderLine(), uid: "custom-0b9e2f4a-0000-4000-8000-000000000009", coa_revenue: 4140 };
-  assertEquals(edit("order", custom, { ...echo("order", custom), coa_revenue: null }).coa_revenue, 4800);
+  assertEquals(refused("order", custom, "coa_revenue"), "account_required coa_revenue");
+  // ...but a custom line's STORED `null` (until Phase 8 states 4800) echoes as no change.
+  const legacy = { ...custom, coa_revenue: null };
+  const echoed = applyLineEdit("order", legacy, diffLine("order", legacy, echo("order", legacy)), CTX);
+  assert(echoed.ok && echoed.line === legacy, "an echoed stored null is no edit");
+  // Choosing an account is still an edit, on both sides.
+  assertEquals(edit("order", legacy, { ...echo("order", legacy), coa_revenue: 4800 }).coa_revenue, 4800);
+  assertEquals(edit("purchase", purchaseLine(), { ...echo("purchase", purchaseLine()), ledger_account: 1400 }).ledger_account, 1400);
+  // An uncounted kit header keeps its own rule: its `null` is the header mark, not a clear.
+  const header = purchaseLine({ ledger_account: null });
+  assert(applyLineEdit("purchase", header, diffLine("purchase", header, echo("purchase", header)), CTX).ok);
+  // The tracking category is NOT the account: a clear still resets to the product's (S15's own text).
   const tracked = { ...orderLine(), uid_tracking_category: "trackcat000000000002" };
   assertEquals(edit("order", tracked, { ...echo("order", tracked), uid_tracking_category: null }).uid_tracking_category, "trackcat000000000001");
-  // The bill's old "posts to an account, so it cannot clear one" refusal is gone.
-  const bought = purchaseLine();
-  assertEquals(edit("purchase", bought, { ...echo("purchase", bought), ledger_account: null }).ledger_account, 4800);
+});
+
+Deno.test("checkCustomLineAccount: a receivable line's `coa_revenue` is null only on a custom line — stored and input, order and invoice (ruling 205)", () => {
+  const CUSTOM = "custom-0b9e2f4a-0000-4000-8000-000000000009";
+  const issuePaths = (schema: z.ZodType, row: LineLike) => {
+    const r = schema.safeParse(row);
+    return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
+  };
+  const cases: [string, z.ZodType, () => LineLike, LineEditGrain | null][] = [
+    ["stored order line", OrderDocLineItem, () => orderLine(), null],
+    ["stored invoice line", InvoiceDocLineItem, () => invoiceLine(), null],
+    ["order input", inputElement("order"), () => echo("order", orderLine()), "order"],
+    ["invoice input", inputElement("invoice"), () => echo("invoice", invoiceLine()), "invoice"],
+  ];
+  for (const [label, schema, row] of cases) {
+    // Control: the base row parses, so a failure below is the refine's.
+    assertEquals(issuePaths(schema, row()), [], `${label}: the base row parses`);
+    assertEquals(issuePaths(schema, { ...row(), coa_revenue: null }), ["coa_revenue"], `${label}: a product line with no account`);
+    assertEquals(issuePaths(schema, { ...row(), uid: CUSTOM, coa_revenue: null }), [], `${label}: a custom line keeps its null until Phase 8`);
+    assertEquals(issuePaths(schema, { ...row(), uid: CUSTOM, coa_revenue: 4800 }), [], `${label}: a custom line may state 4800`);
+  }
 });
 
 // ── diffItems (ruling 192) ─────────────────────────────────────────

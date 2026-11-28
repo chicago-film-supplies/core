@@ -1530,6 +1530,33 @@ export function checkZeroPricedAmount(
 }
 
 /**
+ * **A receivable line's `coa_revenue` is `null` only on a custom line**
+ * (one-document-model ruling 205, the receivable form of ruling 204's S15): no
+ * server fills an account, so a product line states the account it posts to —
+ * the client pre-fills its product's. Attached to the order and invoice line,
+ * stored AND input, beside {@link checkItemPriceFormula}.
+ *
+ * A custom line (`custom-…`) may still store `null` until the plan's Phase 8
+ * states it as 4800, which is what Xero posts for it today (`xeroLineRefs`,
+ * `utils/xero-sync.ts`). Census 2026-11-27: every stored `null` in prod, dev
+ * and `test` is on a custom line (124 order and 10 invoice lines in prod).
+ *
+ * Reads `uid`, so it is an OBJECT-level refine: the shared `LinePostingCore`
+ * field instance stays untouched (`tests/item-shape-parity.test.ts`).
+ */
+export function checkCustomLineAccount(
+  item: { uid: string; coa_revenue?: number | null },
+  ctx: z.RefinementCtx,
+): void {
+  if (item.coa_revenue !== null || item.uid.startsWith("custom-")) return;
+  ctx.addIssue({
+    code: "custom",
+    path: ["coa_revenue"],
+    message: `A product line states the account it posts to; "${item.uid}" has none. Choose an account (its product's is the default).`,
+  });
+}
+
+/**
  * The minimum an item has to expose for the two ARRAY-level `zero_priced`
  * invariants. Structural rather than one of the three stored item unions,
  * because the whole point is that an order item, an invoice item and a

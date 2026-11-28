@@ -17,6 +17,7 @@ import {
   checkItemPriceFormula,
   checkLinePrice,
   checkLinePriceInput,
+  checkCustomLineAccount,
   checkZeroPricedAmount,
   checkZeroPricedComponents,
   COARevenueEnum,
@@ -774,7 +775,7 @@ const InvoiceDocLineItemInner = z.strictObject({
   path_source_item: z.array(ItemUid).min(1).nullable(),
   units_from: UnitsFromField,
   exchanged_for: ExchangedForList,
-}).superRefine(checkItemPriceFormula).superRefine(checkZeroPricedAmount)
+}).superRefine(checkItemPriceFormula).superRefine(checkCustomLineAccount).superRefine(checkZeroPricedAmount)
   .superRefine(checkOutOfServiceLineType);
 
 // 🔴 `checkZeroPricedAmount` moved onto the **Inner** const on 2026-09-09, and
@@ -1546,7 +1547,7 @@ export interface InvoiceItemInputLineType {
   quantity: number;
   price: InvoiceItemInputPriceType;
   path: string[];
-  /** @see `OrderItemLineType.coa_revenue` — the same set/clear rule. */
+  /** @see `OrderItemLineType.coa_revenue` — the same rule: stated by the client, `null` only on a custom line (ruling 205). */
   coa_revenue: COARevenueType | null;
   /** @see `OrderItemLineType.uid_tracking_category` — the same set/clear rule. */
   uid_tracking_category: string | null;
@@ -1651,7 +1652,7 @@ const InvoiceItemInputLineInner = z.object({
   path_source_item: z.array(ItemUid).min(1).nullable(),
   units_from: UnitsFromField,
   exchanged_for: ExchangedForListInput,
-}).superRefine(checkItemPriceFormula).superRefine(checkOutOfServiceLineType);
+}).superRefine(checkItemPriceFormula).superRefine(checkCustomLineAccount).superRefine(checkOutOfServiceLineType);
 
 /** Zod schema for a billable invoice line (input). */
 export const InvoiceItemInputLine: z.ZodType<InvoiceItemInputLineType> =

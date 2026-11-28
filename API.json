@@ -7987,6 +7987,14 @@
         },
         {
           "kind": "function",
+          "name": "checkCustomLineAccount",
+          "signature": "checkCustomLineAccount(item: typeLiteral, ctx: z.RefinementCtx): void",
+          "doc": "**A receivable line's `coa_revenue` is `null` only on a custom line**\n(one-document-model ruling 205, the receivable form of ruling 204's S15): no\nserver fills an account, so a product line states the account it posts to —\nthe client pre-fills its product's. Attached to the order and invoice line,\nstored AND input, beside {@link checkItemPriceFormula}.\n\nA custom line (`custom-…`) may still store `null` until the plan's Phase 8\nstates it as 4800, which is what Xero posts for it today (`xeroLineRefs`,\n`utils/xero-sync.ts`). Census 2026-11-27: every stored `null` in prod, dev\nand `test` is on a custom line (124 order and 10 invoice lines in prod).\n\nReads `uid`, so it is an OBJECT-level refine: the shared `LinePostingCore`\nfield instance stays untouched (`tests/item-shape-parity.test.ts`).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "checkDatedRates",
           "signature": "checkDatedRates(rates: readonly DatedRate[], ctx: z.RefinementCtx): void",
           "doc": "Refine adapter for {@link datedRatesIssues}, for a `rates` array node.",
@@ -10180,6 +10188,14 @@
           "name": "billsOutOfService",
           "signature": "billsOutOfService(line: OutOfServiceLinkCarrier): boolean",
           "doc": "Whether a line bills an out-of-service record at all. Reads a CLAIM as a\nnon-empty list: an invoice line states `[]` (ruling 204), a payable line\nomits the key, and both bill no record.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "checkCustomLineAccount",
+          "signature": "checkCustomLineAccount(item: typeLiteral, ctx: z.RefinementCtx): void",
+          "doc": "**A receivable line's `coa_revenue` is `null` only on a custom line**\n(one-document-model ruling 205, the receivable form of ruling 204's S15): no\nserver fills an account, so a product line states the account it posts to —\nthe client pre-fills its product's. Attached to the order and invoice line,\nstored AND input, beside {@link checkItemPriceFormula}.\n\nA custom line (`custom-…`) may still store `null` until the plan's Phase 8\nstates it as 4800, which is what Xero posts for it today (`xeroLineRefs`,\n`utils/xero-sync.ts`). Census 2026-11-27: every stored `null` in prod, dev\nand `test` is on a custom line (124 order and 10 invoice lines in prod).\n\nReads `uid`, so it is an OBJECT-level refine: the shared `LinePostingCore`\nfield instance stays untouched (`tests/item-shape-parity.test.ts`).",
           "paramTags": [],
           "returnsTag": null
         },
@@ -22643,7 +22659,7 @@
         {
           "kind": "variable",
           "name": "LINE_EDIT_REFUSALS",
-          "declaration": "const LINE_EDIT_REFUSALS: readonly [\"server_owned\", \"discount_exceeds_gross\", \"uncounted_row\", \"no_money_input\"];",
+          "declaration": "const LINE_EDIT_REFUSALS: readonly [\"server_owned\", \"discount_exceeds_gross\", \"uncounted_row\", \"no_money_input\", \"account_required\"];",
           "doc": "The closed refusal vocabulary (an explicit tuple, core#43)."
         },
         {
@@ -22661,7 +22677,7 @@
         {
           "kind": "interface",
           "name": "LineEditContext",
-          "declaration": "interface LineEditContext {\n  products: ReadonlyMap<string, LinePostingDefault>;\n  default_account: number;\n}",
+          "declaration": "interface LineEditContext {\n  products: ReadonlyMap<string, LinePostingDefault>;\n}",
           "doc": "What a pure function cannot read for itself."
         },
         {
@@ -22709,8 +22725,8 @@
         {
           "kind": "interface",
           "name": "LinePostingDefault",
-          "declaration": "interface LinePostingDefault {\n  account: number | null;\n  uid_tracking_category: string | null;\n}",
-          "doc": "The posting defaults a cleared account resets to (ruling 196)."
+          "declaration": "interface LinePostingDefault {\n  uid_tracking_category: string | null;\n}",
+          "doc": "The posting default a cleared TRACKING CATEGORY resets to. There is no\naccount here: a cleared account is refused, never reset (ruling 205, which\nwithdrew ruling 196's reset — \"default to the catalog\" is the client's)."
         },
         {
           "kind": "interface",
@@ -22728,7 +22744,7 @@
           "kind": "function",
           "name": "applyLineEdit",
           "signature": "applyLineEdit(grain: LineEditGrain, stored: LineLike, change: LineChange, ctx: LineEditContext): LineEditResult",
-          "doc": "**Apply one change to one stored row** — the edited row, or every refusal.\n\n- A change to a `server_owned` key is refused (ruling 197).\n- An UNCOUNTED row ({@link LINE_EDIT_SIDES}) takes no money and no account.\n- A cleared account or tracking category resets to the product's, or to the\n  side's default account on a line with no product (ruling 196).\n- **A STATED line:** a change to its gross, quantity or discount terms — or a\n  switch to stated — restates its discount cents through `applyDiscountTerms`\n  on its gross at its quantity (D7, the one rate event); a quantity edit keeps\n  the gross. A payable line's `amount_cents` is the net.\n- **A RATE line:** its money is `rates × counts`; a switch from stated needs\n  rates (`no_money_input`). A payable line's `amount_cents` is the net where\n  its counts are stated.\n- A discount larger than the gross is refused on both sides (ruling 195).",
+          "doc": "**Apply one change to one stored row** — the edited row, or every refusal.\n\n- A change to a `server_owned` key is refused (ruling 197).\n- An UNCOUNTED row ({@link LINE_EDIT_SIDES}) takes no money and no account.\n- A COUNTED row's account may not be cleared (`account_required`, ruling\n  205): no server fills an account, on either side. An echoed stored `null`\n  (a custom receivable line, until Phase 8 states 4800) is no change.\n- A cleared tracking category resets to the product's (none on a custom line).\n- **A STATED line:** a change to its gross, quantity or discount terms — or a\n  switch to stated — restates its discount cents through `applyDiscountTerms`\n  on its gross at its quantity (D7, the one rate event); a quantity edit keeps\n  the gross. A payable line's `amount_cents` is the net.\n- **A RATE line:** its money is `rates × counts`; a switch from stated needs\n  rates (`no_money_input`). A payable line's `amount_cents` is the net where\n  its counts are stated.\n- A discount larger than the gross is refused on both sides (ruling 195).",
           "paramTags": [],
           "returnsTag": null
         },

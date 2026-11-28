@@ -249,11 +249,12 @@ export function diffLine(grain: LineEditGrain, stored: LineLike, submitted: Line
 // ── applyLineEdit ────────────────────────────────────────────────────
 
 /** The closed refusal vocabulary (an explicit tuple, core#43). */
-export const LINE_EDIT_REFUSALS: readonly ["server_owned", "discount_exceeds_gross", "uncounted_row", "no_money_input"] = [
+export const LINE_EDIT_REFUSALS: readonly ["server_owned", "discount_exceeds_gross", "uncounted_row", "no_money_input", "account_required"] = [
   "server_owned",
   "discount_exceeds_gross",
   "uncounted_row",
   "no_money_input",
+  "account_required",
 ];
 /** One of {@link LINE_EDIT_REFUSALS}. */
 export type LineEditRefusalCode = typeof LINE_EDIT_REFUSALS[number];
@@ -265,22 +266,22 @@ export interface LineEditRefusal {
   message: string;
 }
 
-/** The posting defaults a cleared account resets to (ruling 196). */
+/**
+ * The posting default a cleared TRACKING CATEGORY resets to. There is no
+ * account here: a cleared account is refused, never reset (ruling 205, which
+ * withdrew ruling 196's reset — "default to the catalog" is the client's).
+ */
 export interface LinePostingDefault {
-  account: number | null;
   uid_tracking_category: string | null;
 }
 
 /** What a pure function cannot read for itself. */
 export interface LineEditContext {
   /**
-   * The product's posting defaults per product uid, for a cleared account or
-   * tracking category (ruling 196). A line whose uid is absent here is reset to
-   * the side's default.
+   * The product's posting default per product uid, for a cleared tracking
+   * category. A line whose uid is absent here (a custom line) resets to none.
    */
   products: ReadonlyMap<string, LinePostingDefault>;
-  /** The side's default account, for a line with no product. */
-  default_account: number;
 }
 
 /** {@link applyLineEdit}'s answer. */
@@ -315,8 +316,10 @@ function productUidOf(line: LineLike): string | null {
  *
  * - A change to a `server_owned` key is refused (ruling 197).
  * - An UNCOUNTED row ({@link LINE_EDIT_SIDES}) takes no money and no account.
- * - A cleared account or tracking category resets to the product's, or to the
- *   side's default account on a line with no product (ruling 196).
+ * - A COUNTED row's account may not be cleared (`account_required`, ruling
+ *   205): no server fills an account, on either side. An echoed stored `null`
+ *   (a custom receivable line, until Phase 8 states 4800) is no change.
+ * - A cleared tracking category resets to the product's (none on a custom line).
  * - **A STATED line:** a change to its gross, quantity or discount terms — or a
  *   switch to stated — restates its discount cents through `applyDiscountTerms`
  *   on its gross at its quantity (D7, the one rate event); a quantity edit keeps
@@ -345,6 +348,9 @@ export function applyLineEdit(
     if (uncounted && (putsMoney || (f.key === side.account && f.to !== null))) {
       refusals.push({ code: "uncounted_row", path, message: "an uncounted row carries no account or amount" });
     }
+    if (!uncounted && f.key === side.account && f.to === null) {
+      refusals.push({ code: "account_required", path, message: "a line states the account it posts to; choose one rather than clearing it" });
+    }
   }
   if (refusals.length > 0) return { ok: false, refusals };
   if (change.fields.length === 0) return { ok: true, line: stored };
@@ -361,11 +367,10 @@ export function applyLineEdit(
   }
   const changed = new Set(change.fields.map((f) => f.key));
 
-  // Ruling 196: a cleared posting key resets to the product's (or the side's default).
+  // A cleared tracking category resets to the product's. A cleared account was refused above (ruling 205).
   if (!uncounted) {
     const product = productUidOf(line);
     const defaults = product === null ? undefined : ctx.products.get(product);
-    if (changed.has(side.account) && line[side.account] == null) line[side.account] = defaults?.account ?? ctx.default_account;
     if (changed.has("uid_tracking_category") && line.uid_tracking_category == null) {
       line.uid_tracking_category = defaults?.uid_tracking_category ?? null;
     }

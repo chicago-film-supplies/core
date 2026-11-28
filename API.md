@@ -17807,6 +17807,22 @@ Xero-quote writeback, the invoice mirror) do not normalize; they preserve the
 stored legs and items, so they stay legal only because the corpus already
 is. The only paths out of draft run through `updateOrder`, which normalizes.
 
+### `checkCustomLineAccount(item: typeLiteral, ctx: z.RefinementCtx): void`
+
+**A receivable line's `coa_revenue` is `null` only on a custom line**
+(one-document-model ruling 205, the receivable form of ruling 204's S15): no
+server fills an account, so a product line states the account it posts to —
+the client pre-fills its product's. Attached to the order and invoice line,
+stored AND input, beside {@link checkItemPriceFormula}.
+
+A custom line (`custom-…`) may still store `null` until the plan's Phase 8
+states it as 4800, which is what Xero posts for it today (`xeroLineRefs`,
+`utils/xero-sync.ts`). Census 2026-11-27: every stored `null` in prod, dev
+and `test` is on a custom line (124 order and 10 invoice lines in prod).
+
+Reads `uid`, so it is an OBJECT-level refine: the shared `LinePostingCore`
+field instance stays untouched (`tests/item-shape-parity.test.ts`).
+
 ### `checkDatedRates(rates: readonly DatedRate[], ctx: z.RefinementCtx): void`
 
 Refine adapter for {@link datedRatesIssues}, for a `rates` array node.
@@ -21792,6 +21808,22 @@ interface ZeroPricedItemLike {
 Whether a line bills an out-of-service record at all. Reads a CLAIM as a
 non-empty list: an invoice line states `[]` (ruling 204), a payable line
 omits the key, and both bill no record.
+
+### `checkCustomLineAccount(item: typeLiteral, ctx: z.RefinementCtx): void`
+
+**A receivable line's `coa_revenue` is `null` only on a custom line**
+(one-document-model ruling 205, the receivable form of ruling 204's S15): no
+server fills an account, so a product line states the account it posts to —
+the client pre-fills its product's. Attached to the order and invoice line,
+stored AND input, beside {@link checkItemPriceFormula}.
+
+A custom line (`custom-…`) may still store `null` until the plan's Phase 8
+states it as 4800, which is what Xero posts for it today (`xeroLineRefs`,
+`utils/xero-sync.ts`). Census 2026-11-27: every stored `null` in prod, dev
+and `test` is on a custom line (124 order and 10 invoice lines in prod).
+
+Reads `uid`, so it is an OBJECT-level refine: the shared `LinePostingCore`
+field instance stays untouched (`tests/item-shape-parity.test.ts`).
 
 ### `checkItemContract(item: typeLiteral, ctx: z.RefinementCtx): void`
 
@@ -47455,7 +47487,7 @@ const LINE_EDIT_GRAINS: readonly ["order", "invoice", "purchase", "bill"];
 The closed refusal vocabulary (an explicit tuple, core#43).
 
 ```ts
-const LINE_EDIT_REFUSALS: readonly ["server_owned", "discount_exceeds_gross", "uncounted_row", "no_money_input"];
+const LINE_EDIT_REFUSALS: readonly ["server_owned", "discount_exceeds_gross", "uncounted_row", "no_money_input", "account_required"];
 ```
 
 ### `LINE_EDIT_SIDES`
@@ -47485,7 +47517,6 @@ What a pure function cannot read for itself.
 ```ts
 interface LineEditContext {
   products: ReadonlyMap<string, LinePostingDefault>;
-  default_account: number;
 }
 ```
 
@@ -47558,11 +47589,12 @@ type LineLike = typeLiteral;
 
 ### `LinePostingDefault`
 
-The posting defaults a cleared account resets to (ruling 196).
+The posting default a cleared TRACKING CATEGORY resets to. There is no
+account here: a cleared account is refused, never reset (ruling 205, which
+withdrew ruling 196's reset — "default to the catalog" is the client's).
 
 ```ts
 interface LinePostingDefault {
-  account: number | null;
   uid_tracking_category: string | null;
 }
 ```
@@ -47593,8 +47625,10 @@ const SERVER_OWNED_META_KEY: "server_owned";
 
 - A change to a `server_owned` key is refused (ruling 197).
 - An UNCOUNTED row ({@link LINE_EDIT_SIDES}) takes no money and no account.
-- A cleared account or tracking category resets to the product's, or to the
-  side's default account on a line with no product (ruling 196).
+- A COUNTED row's account may not be cleared (`account_required`, ruling
+  205): no server fills an account, on either side. An echoed stored `null`
+  (a custom receivable line, until Phase 8 states 4800) is no change.
+- A cleared tracking category resets to the product's (none on a custom line).
 - **A STATED line:** a change to its gross, quantity or discount terms — or a
   switch to stated — restates its discount cents through `applyDiscountTerms`
   on its gross at its quantity (D7, the one rate event); a quantity edit keeps

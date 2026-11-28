@@ -405,6 +405,7 @@ export {
   ITEM_CONTRACTS,
   itemContract,
   checkItemContract,
+  checkCustomLineAccount,
   checkItemPriceFormula,
   checkLinePrice,
   checkLinePriceInput,
