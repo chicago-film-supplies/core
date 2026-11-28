@@ -4174,7 +4174,7 @@
           "kind": "variable",
           "name": "OrderItemLine",
           "declaration": "const OrderItemLine: z.ZodType<OrderItemLineType>;",
-          "doc": "Zod schema for a billable order line (input)."
+          "doc": "Zod schema for a billable order line (input). The bare Inner, exactly as\n`InvoiceItemInputLine` is: the input union `OrderItem` is built from\n`OrderItemLineInner`, so a refine attached here would run only for a caller\nparsing this alias directly — it carried `checkZeroPricedAmount`, which never\nchecked an order input. Storage enforces that rule (`OrderDocLineItemInner`)."
         },
         {
           "kind": "interface",
@@ -12686,7 +12686,7 @@
           "kind": "variable",
           "name": "OrderItemLine",
           "declaration": "const OrderItemLine: z.ZodType<OrderItemLineType>;",
-          "doc": "Zod schema for a billable order line (input)."
+          "doc": "Zod schema for a billable order line (input). The bare Inner, exactly as\n`InvoiceItemInputLine` is: the input union `OrderItem` is built from\n`OrderItemLineInner`, so a refine attached here would run only for a caller\nparsing this alias directly — it carried `checkZeroPricedAmount`, which never\nchecked an order input. Storage enforces that rule (`OrderDocLineItemInner`)."
         },
         {
           "kind": "interface",

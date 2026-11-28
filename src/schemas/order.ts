@@ -2079,8 +2079,14 @@ const OrderItemLineInner = z.object({
   exchanged_for: ExchangedForList,
 }).superRefine(checkItemPriceFormula).superRefine(checkCustomLineAccount);
 
-/** Zod schema for a billable order line (input). */
-export const OrderItemLine: z.ZodType<OrderItemLineType> = OrderItemLineInner.superRefine(checkZeroPricedAmount);
+/**
+ * Zod schema for a billable order line (input). The bare Inner, exactly as
+ * `InvoiceItemInputLine` is: the input union `OrderItem` is built from
+ * `OrderItemLineInner`, so a refine attached here would run only for a caller
+ * parsing this alias directly — it carried `checkZeroPricedAmount`, which never
+ * checked an order input. Storage enforces that rule (`OrderDocLineItemInner`).
+ */
+export const OrderItemLine: z.ZodType<OrderItemLineType> = OrderItemLineInner;
 
 /** A destination divider as a client sends it. */
 export interface OrderItemDestinationType {

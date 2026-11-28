@@ -94,6 +94,7 @@ Deno.test("ProductSchema validates with components", () => {
         price: {
           ...datedPrice(FIXED, 0),
           replacement_cents: 10000,
+          coa_revenue: 4000,
           discountable: false,
         },
       },
@@ -163,7 +164,7 @@ Deno.test("ProductSchema rejects rental component without price.replacement_cent
         stock_method: "bulk",
         crms_id: 200,
         quantity: 2,
-        price: { ...datedPrice(FIXED, 0), discountable: false },
+        price: { ...datedPrice(FIXED, 0), coa_revenue: 4000, discountable: false },
       },
     ],
   };
@@ -185,7 +186,7 @@ Deno.test("ProductSchema accepts rental component with stock_method none and no 
         stock_method: "none",
         crms_id: 200,
         quantity: 1,
-        price: { ...datedPrice(FIXED, 0), discountable: false },
+        price: { ...datedPrice(FIXED, 0), coa_revenue: 4000, discountable: false },
       },
     ],
   };
@@ -327,6 +328,7 @@ Deno.test("CreateProductInput requires price.replacement_cents for rental compon
     quantity: 2,
     price: {
       ...datedPrice(FIXED, 0),
+      coa_revenue: 4000,
       discountable: false,
     },
   };
@@ -512,9 +514,10 @@ Deno.test("price.coa_revenue is REQUIRED on the document and on BOTH inputs", ()
     false,
   );
 
-  // ⚠️ And it stays OPTIONAL on a component — `updateProduct` deletes it from
-  // every webshop component copy, because the public catalogue carries no
-  // ledger account.
+  // And it is REQUIRED on a component too (ruling 205): a component line built
+  // from the entry states the account it posts to. The public catalogue still
+  // carries none — its component is a different schema (`WebshopComponentSchema`),
+  // built key by key by api-cloudrun's `mapComponentToWebshop`.
   const component = {
     uid: "testcomp100000000000",
     path: ["testproduct100000000"],
@@ -523,9 +526,12 @@ Deno.test("price.coa_revenue is REQUIRED on the document and on BOTH inputs", ()
     stock_method: "bulk",
     crms_id: 200,
     quantity: 2,
-    price: { ...datedPrice(FIXED, 0), replacement_cents: 10000, discountable: false },
+    price: { ...datedPrice(FIXED, 0), replacement_cents: 10000, coa_revenue: 4000, discountable: false },
   };
   assertEquals(ComponentSchema.safeParse(component).success, true);
+  const { coa_revenue: _c, ...componentPriceWithoutCoa } = component.price;
+  const refused = ComponentSchema.safeParse({ ...component, price: componentPriceWithoutCoa });
+  assertEquals(refused.error?.issues.map((i) => i.path.join(".")), ["price.coa_revenue"]);
 });
 
 Deno.test("components require inclusion_type, price_overridden and zero_priced; component_of requires none", () => {
@@ -559,7 +565,7 @@ Deno.test("components require inclusion_type, price_overridden and zero_priced; 
     stock_method: "bulk",
     crms_id: 200,
     quantity: 2,
-    price: { ...datedPrice(FIXED, 0), replacement_cents: 10000, discountable: false },
+    price: { ...datedPrice(FIXED, 0), replacement_cents: 10000, coa_revenue: 4000, discountable: false },
   };
 
   assertEquals(ComponentSchema.safeParse(backRef).success, true);
@@ -614,7 +620,7 @@ const componentBaseForEcho = {
   stock_method: "bulk",
   crms_id: 300,
   quantity: 1,
-  price: { ...datedPrice(FIXED, 2500), replacement_cents: 10000, discountable: false },
+  price: { ...datedPrice(FIXED, 2500), replacement_cents: 10000, coa_revenue: 4000, discountable: false },
 };
 
 const storedComponent = {
@@ -628,7 +634,7 @@ const storedComponent = {
   inclusion_type: "default",
   zero_priced: false,
   price_overridden: ["rates"],
-  price: { ...datedPrice(FIXED, 1500), replacement_cents: 10000, discountable: false },
+  price: { ...datedPrice(FIXED, 1500), replacement_cents: 10000, coa_revenue: 4000, discountable: false },
 };
 
 Deno.test("an echoed stored product's components parse through both inputs, price_overridden stripped (api-cloudrun#879)", () => {
@@ -711,7 +717,7 @@ Deno.test("an authored component quantity is ≥ 0 with at most 4 decimals; the 
     inclusion_type: "default",
     zero_priced: false,
     price_overridden: [],
-    price: { ...datedPrice(FIXED, 0), replacement_cents: 10000, discountable: false },
+    price: { ...datedPrice(FIXED, 0), replacement_cents: 10000, coa_revenue: 4000, discountable: false },
   };
   const parses = (quantity: number) => AuthoredComponentSchema.safeParse({ ...authored, quantity }).success;
 
@@ -757,7 +763,7 @@ const componentBase = {
   stock_method: "bulk",
   crms_id: 200,
   quantity: 2,
-  price: { ...datedPrice(FIXED, 0), replacement_cents: 10000, discountable: false },
+  price: { ...datedPrice(FIXED, 0), replacement_cents: 10000, coa_revenue: 4000, discountable: false },
 };
 
 Deno.test("a component may be priced on any formula, with at least one rate", () => {
@@ -941,7 +947,7 @@ Deno.test("core#78: a component price cannot declare percent_of_total, nor a bas
     stock_method: "bulk",
     crms_id: 200,
     quantity: 2,
-    price: { ...datedPrice(FIXED, 0), replacement_cents: 10000, discountable: false },
+    price: { ...datedPrice(FIXED, 0), replacement_cents: 10000, coa_revenue: 4000, discountable: false },
   };
   // The control: the same component parses, so each refusal below is the price's alone.
   assertEquals(ComponentSchema.safeParse(component).success, true);

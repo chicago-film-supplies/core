@@ -9400,7 +9400,11 @@ interface OrderItemGroupType {
 
 ### `OrderItemLine`
 
-Zod schema for a billable order line (input).
+Zod schema for a billable order line (input). The bare Inner, exactly as
+`InvoiceItemInputLine` is: the input union `OrderItem` is built from
+`OrderItemLineInner`, so a refine attached here would run only for a caller
+parsing this alias directly — it carried `checkZeroPricedAmount`, which never
+checked an order input. Storage enforces that rule (`OrderDocLineItemInner`).
 
 ```ts
 const OrderItemLine: z.ZodType<OrderItemLineType>;
@@ -26950,7 +26954,11 @@ interface OrderItemGroupType {
 
 ### `OrderItemLine`
 
-Zod schema for a billable order line (input).
+Zod schema for a billable order line (input). The bare Inner, exactly as
+`InvoiceItemInputLine` is: the input union `OrderItem` is built from
+`OrderItemLineInner`, so a refine attached here would run only for a caller
+parsing this alias directly — it carried `checkZeroPricedAmount`, which never
+checked an order input. Storage enforces that rule (`OrderDocLineItemInner`).
 
 ```ts
 const OrderItemLine: z.ZodType<OrderItemLineType>;

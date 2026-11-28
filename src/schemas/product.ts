@@ -213,7 +213,13 @@ export interface ProductComponent {
     /** Accepted only as `null`: a copied product price carries the key, and a component is never a percent fee. */
     base_percent?: null;
     replacement_cents?: number | null;
-    coa_revenue?: COARevenueType;
+    /**
+     * REQUIRED (ruling 205): the component product's account, copied with its
+     * price, so a component line built from this entry states its account.
+     * Census 2026-11-27: present on every stored component (prod 236, dev 253,
+     * `test` 181). The webshop mirror's own component type omits it by design.
+     */
+    coa_revenue: COARevenueType;
     discountable: boolean;
   };
 }
@@ -633,7 +639,8 @@ const componentPriceShape = {
   // strictObject; a component is never a percent fee, so it is null or absent.
   base_percent: z.null().optional(),
   replacement_cents: z.int().nullable().optional().meta({ label: "Replacement" }),
-  coa_revenue: COARevenueEnum.optional(),
+  // Required (ruling 205): a component line states the account it posts to.
+  coa_revenue: COARevenueEnum,
   discountable: z.boolean(),
 };
 
