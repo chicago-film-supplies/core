@@ -411,7 +411,7 @@ export const INVOICE_FIELD_FREEZE: Readonly<
     // Not shown either way: the accepted settled edits changed only Tracking.
     xero_accepts_on_settled: false,
     members: {
-      receivable: ["reference", "subject", "notes", "due_date", "name", "description"],
+      receivable: ["reference", "subject", "due_date", "name", "description"],
       payable: ["reference", "due_date", "name", "description"],
     },
   },
@@ -1161,8 +1161,8 @@ export interface Invoice {
    *
    * ⚠️ `CreateInvoiceInputType.subject` stays `.optional()`: a CLIENT may omit
    * it and the writer supplies `""`. Normalize at the writer, require at
-   * storage — the same split `reference` and `notes` below describe, which
-   * differ only in that their absence really is `null` at every grain.
+   * storage — the same split `reference` below describes, which differs
+   * only in that its absence really is `null` at every grain.
    */
   subject: string;
   /**
@@ -1180,25 +1180,6 @@ export interface Invoice {
    * the writer supplies `null`. Normalize at the writer, require at storage.
    */
   reference: string | null;
-  /**
-   * The only notes field, and customer-facing — it replaced the
-   * `external_notes` / `internal_notes` pair. `internal_notes` moved to a
-   * comment on the document's own thread, where it is searchable, attributable
-   * and repliable; `external_notes` was renamed to this.
-   *
-   * REQUIRED and bare `.nullable()`, matching `subject` / `reference` above.
-   * This is the `orders.crms_id` shape in `core/CLAUDE.md` § *Making a field
-   * REQUIRED*, not a tightening waiting on a census: `createInvoice` writes
-   * `notes: input.notes ?? null`, so the WRITER produces the explicit `null`,
-   * and `null` is a real answer — *no notes recorded* — rather than "unknown".
-   * The predecessor pair was `.nullable().optional()` only because nothing
-   * normalized it; key-presence was already 100% (1,037/1,037) on the strength
-   * of `external_notes: input.external_notes ?? null` alone.
-   *
-   * `CreateInvoiceInputType.notes` stays optional: a CLIENT may omit it and the
-   * writer supplies `null`. Normalize at the writer, require at storage.
-   */
-  notes: string | null;
   organization: DocumentOrganizationSnapshotType;
   /**
    * Required, and possibly empty — but only for a STANDALONE invoice. The lower
@@ -1363,8 +1344,6 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
     linkTo: "invoiceDetail",
     xero: true,
   }),
-  notes: z.string().meta({ pii: "mask", column: true, label: "Notes" })
-    .nullable(),
   organization: DocumentOrganizationSnapshot,
   // No `.default([])`, and the lower bound is CONDITIONAL and lives on the
   // document `.refine()` at the bottom of this schema — see the interface,
@@ -1826,7 +1805,6 @@ export interface CreateInvoiceInputType {
   due_date?: string;
   subject?: string;
   reference?: string | null;
-  notes?: string | null;
 }
 
 /** Input schema for creating an invoice. */
@@ -1846,18 +1824,6 @@ export const CreateInvoiceInput: z.ZodType<CreateInvoiceInputType> = z.object({
   subject: z.string().optional(),
   // Bounded at the stored maximum (core#102); `Invoice.reference` is `.max(255)`.
   reference: z.string().max(255).nullable().optional(),
-  // ⚠️ `.nullable()`, not merely `.optional()` — api-cloudrun#492's shape, one
-  // schema over. The STORED arm is bare `.nullable()`, so
-  // `getInitialValues(InvoiceSchema)` seeds this as `null`, and the manager
-  // drafts an invoice by projecting that seed straight back through this input.
-  // Accepting only `undefined` therefore 400s on a payload the system itself
-  // produced — `expected string, received null` — making invoice drafting
-  // unreachable from the manager's own flow.
-  //
-  // Widening what the BOUNDARY accepts and nothing downstream: every reader
-  // already treats `null` and absent identically, and a widening cannot break an
-  // older client because it never rejects what was previously valid.
-  notes: z.string().meta({ pii: "mask" }).nullable().optional(),
 });
 
 /** Input schema for PUT /invoices/:uid — partial update. */
@@ -1872,7 +1838,7 @@ export interface UpdateInvoiceInputType {
    *
    * ⚠️ **OPTIONAL, not required.** This is a partial update and the manager's
    * `buildDiff` ships only dirty keys, so requiring it would 400 every
-   * `notes`-only PUT.
+   * `subject`-only PUT.
    *
    * ⚠️ **There is deliberately no clear verb.** An invoice always bills
    * somebody; `null` would have no meaning.
@@ -1963,7 +1929,6 @@ export interface UpdateInvoiceInputType {
   due_date?: string | null;
   subject?: string;
   reference?: string | null;
-  notes?: string | null;
   version: number;
 }
 
@@ -1984,18 +1949,6 @@ export const UpdateInvoiceInput: z.ZodType<UpdateInvoiceInputType> = z.object({
   subject: z.string().optional(),
   // Bounded at the stored maximum (core#102); `Invoice.reference` is `.max(255)`.
   reference: z.string().max(255).nullable().optional(),
-  // ⚠️ `.nullable()`, not merely `.optional()` — api-cloudrun#492's shape, one
-  // schema over. The STORED arm is bare `.nullable()`, so
-  // `getInitialValues(InvoiceSchema)` seeds this as `null`, and the manager
-  // drafts an invoice by projecting that seed straight back through this input.
-  // Accepting only `undefined` therefore 400s on a payload the system itself
-  // produced — `expected string, received null` — making invoice drafting
-  // unreachable from the manager's own flow.
-  //
-  // Widening what the BOUNDARY accepts and nothing downstream: every reader
-  // already treats `null` and absent identically, and a widening cannot break an
-  // older client because it never rejects what was previously valid.
-  notes: z.string().meta({ pii: "mask" }).nullable().optional(),
   version: z.int().min(0),
 });
 

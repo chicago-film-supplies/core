@@ -633,14 +633,6 @@ export interface CreditNote {
   date: string;
   date_fs: FirestoreTimestampType;
   reference: string | null;
-  /**
-   * The only notes field, and customer-facing — it replaced the
-   * `external_notes` / `internal_notes` pair, on the same terms as
-   * {@link Invoice.notes}. REQUIRED and bare `.nullable()` because
-   * `createCreditNote` writes `notes: input.notes ?? null`; `null` means *no
-   * notes recorded*.
-   */
-  notes: string | null;
   organization: DocumentOrganizationSnapshotType;
   /** Lines and, on a note raised from billing rows, their dividers (ruling 107). */
   items: CreditNoteDocItemType[];
@@ -820,7 +812,6 @@ export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
   // 13 of 13 in both projects already carry the key (`createCreditNote`
   // writes `reference: input.reference ?? null`).
   reference: z.string().nullable().meta({ column: true, label: "Reference", linkTo: "creditNoteDetail" }),
-  notes: z.string().meta({ pii: "mask", column: true, label: "Notes" }).nullable(),
   organization: DocumentOrganizationSnapshot,
   // `tax_profile` was DELETED here — api-cloudrun#596 item 3's contract third,
   // applied to prod (2,317 documents) and dev on 2026-08-22. The three steps
@@ -927,7 +918,6 @@ export interface CreateCreditNoteInputType {
   date: string;
   items: CreateCreditNoteItemInputType[];
   reference?: string | null;
-  notes?: string | null;
   /**
    * Names the order whose over-billing this note gives back (api-cloudrun#1028).
    * Turns on the order-level guard AND stamps every line `reverses_billing`.
@@ -953,7 +943,6 @@ export const CreateCreditNoteInput: z.ZodType<CreateCreditNoteInputType> = z.obj
     ledger_account: COACode.optional(),
   })).min(1),
   reference: z.string().max(255).nullable().optional(),
-  notes: z.string().meta({ pii: "mask" }).nullable().optional(),
   overbilling_of_order: FirestoreId.optional(),
   uuid_session: z.uuid(),
 });

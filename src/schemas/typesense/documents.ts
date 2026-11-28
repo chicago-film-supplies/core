@@ -203,7 +203,6 @@ export interface InvoiceDocument {
   number_orders_str?: string[];
   subject?: string;
   reference?: string;
-  notes?: string;
   organization: {
     uid?: string;
     name: string;
@@ -269,7 +268,6 @@ export interface CreditNoteDocument {
   status: string;
   reason: string;
   reference?: string;
-  notes?: string;
   organization: {
     uid?: string;
     name: string;

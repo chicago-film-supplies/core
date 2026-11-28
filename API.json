@@ -1353,7 +1353,7 @@
         {
           "kind": "interface",
           "name": "CreateCreditNoteInputType",
-          "declaration": "interface CreateCreditNoteInputType {\n  uid_billing: string;\n  reason: SettlementReasonType;\n  date: string;\n  items: CreateCreditNoteItemInputType[];\n  reference?: string | null;\n  notes?: string | null;\n  overbilling_of_order?: string;\n  uuid_session: string;\n}",
+          "declaration": "interface CreateCreditNoteInputType {\n  uid_billing: string;\n  reason: SettlementReasonType;\n  date: string;\n  items: CreateCreditNoteItemInputType[];\n  reference?: string | null;\n  overbilling_of_order?: string;\n  uuid_session: string;\n}",
           "doc": "**Input for raising an AR credit note** (`POST /credit-notes`): name the\ninvoice and its rows and quantities, and the server prices the note from them.\nThe supplier twin is `CreatePurchaseCreditInput`; both are raised from a\nbilling document named by **`uid_billing`** (one-document-model ruling 169,\nthe stored credit line's own pointer name, ruling 34). Promoted from the api's\nroute-local `InvoiceCreditBody` (`api-cloudrun/src/routes/creditNotes.ts`) and\nrewritten onto core's fragments: a calendar `date` is `chicagoStartOfDay()`,\nids are `FirestoreId` / `ItemUid`, a rate key is `RateKey`, an account is\n`COACode`.\n\n⚠️ **A stripping `z.object`, deliberately.** A caller still sending a retired\nfield (`uid_invoice`, the client-money `items[].price` / `totals` /\n`organization`) has it STRIPPED rather than refused, which is what lets the\nmanager send both `uid_invoice` and `uid_billing` across the rename with no\nrelease ordering, and a body carrying only the retired name is a 400 naming\n`uid_billing`."
         },
         {
@@ -1413,7 +1413,7 @@
         {
           "kind": "interface",
           "name": "CreateInvoiceInputType",
-          "declaration": "interface CreateInvoiceInputType {\n  uid: string;\n  query_by_orders: string[];\n  organization: typeLiteral;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDestinationInputType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n}",
+          "declaration": "interface CreateInvoiceInputType {\n  uid: string;\n  query_by_orders: string[];\n  organization: typeLiteral;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDestinationInputType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n}",
           "doc": "Input schema for POST /invoices — create an invoice from orders."
         },
         {
@@ -1737,7 +1737,7 @@
         {
           "kind": "interface",
           "name": "CreditNote",
-          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  items: CreditNoteDocItemType[];\n  destinations: InvoiceDocDestinationType[];\n  totals: CreditNoteDocTotals;\n  remaining_credit_cents: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  items: CreditNoteDocItemType[];\n  destinations: InvoiceDocDestinationType[];\n  totals: CreditNoteDocTotals;\n  remaining_credit_cents: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A credit note issued to an organization."
         },
         {
@@ -2967,7 +2967,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  query_by_out_of_service?: string[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotalsType;\n  xero_id: string | null;\n  pdf_versions: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  query_by_out_of_service?: string[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotalsType;\n  xero_id: string | null;\n  pdf_versions: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -7365,7 +7365,7 @@
         {
           "kind": "interface",
           "name": "UpdateInvoiceInputType",
-          "declaration": "interface UpdateInvoiceInputType {\n  organization?: typeLiteral;\n  status?: \"issued\";\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDestinationInputType[];\n  date?: string;\n  due_date?: string | null;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n  version: number;\n}",
+          "declaration": "interface UpdateInvoiceInputType {\n  organization?: typeLiteral;\n  status?: \"issued\";\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDestinationInputType[];\n  date?: string;\n  due_date?: string | null;\n  subject?: string;\n  reference?: string | null;\n  version: number;\n}",
           "doc": "Input schema for PUT /invoices/:uid — partial update."
         },
         {
@@ -11771,7 +11771,7 @@
         {
           "kind": "interface",
           "name": "CreateInvoiceInputType",
-          "declaration": "interface CreateInvoiceInputType {\n  uid: string;\n  query_by_orders: string[];\n  organization: typeLiteral;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDestinationInputType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n}",
+          "declaration": "interface CreateInvoiceInputType {\n  uid: string;\n  query_by_orders: string[];\n  organization: typeLiteral;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDestinationInputType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n}",
           "doc": "Input schema for POST /invoices — create an invoice from orders."
         },
         {
@@ -11795,7 +11795,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  query_by_out_of_service?: string[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotalsType;\n  xero_id: string | null;\n  pdf_versions: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  query_by_out_of_service?: string[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotalsType;\n  xero_id: string | null;\n  pdf_versions: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -11999,7 +11999,7 @@
         {
           "kind": "interface",
           "name": "UpdateInvoiceInputType",
-          "declaration": "interface UpdateInvoiceInputType {\n  organization?: typeLiteral;\n  status?: \"issued\";\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDestinationInputType[];\n  date?: string;\n  due_date?: string | null;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n  version: number;\n}",
+          "declaration": "interface UpdateInvoiceInputType {\n  organization?: typeLiteral;\n  status?: \"issued\";\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDestinationInputType[];\n  date?: string;\n  due_date?: string | null;\n  subject?: string;\n  reference?: string | null;\n  version: number;\n}",
           "doc": "Input schema for PUT /invoices/:uid — partial update."
         },
         {
@@ -15077,7 +15077,7 @@
         {
           "kind": "interface",
           "name": "CreateCreditNoteInputType",
-          "declaration": "interface CreateCreditNoteInputType {\n  uid_billing: string;\n  reason: SettlementReasonType;\n  date: string;\n  items: CreateCreditNoteItemInputType[];\n  reference?: string | null;\n  notes?: string | null;\n  overbilling_of_order?: string;\n  uuid_session: string;\n}",
+          "declaration": "interface CreateCreditNoteInputType {\n  uid_billing: string;\n  reason: SettlementReasonType;\n  date: string;\n  items: CreateCreditNoteItemInputType[];\n  reference?: string | null;\n  overbilling_of_order?: string;\n  uuid_session: string;\n}",
           "doc": "**Input for raising an AR credit note** (`POST /credit-notes`): name the\ninvoice and its rows and quantities, and the server prices the note from them.\nThe supplier twin is `CreatePurchaseCreditInput`; both are raised from a\nbilling document named by **`uid_billing`** (one-document-model ruling 169,\nthe stored credit line's own pointer name, ruling 34). Promoted from the api's\nroute-local `InvoiceCreditBody` (`api-cloudrun/src/routes/creditNotes.ts`) and\nrewritten onto core's fragments: a calendar `date` is `chicagoStartOfDay()`,\nids are `FirestoreId` / `ItemUid`, a rate key is `RateKey`, an account is\n`COACode`.\n\n⚠️ **A stripping `z.object`, deliberately.** A caller still sending a retired\nfield (`uid_invoice`, the client-money `items[].price` / `totals` /\n`organization`) has it STRIPPED rather than refused, which is what lets the\nmanager send both `uid_invoice` and `uid_billing` across the rename with no\nrelease ordering, and a body carrying only the retired name is a 400 naming\n`uid_billing`."
         },
         {
@@ -15101,7 +15101,7 @@
         {
           "kind": "interface",
           "name": "CreditNote",
-          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  items: CreditNoteDocItemType[];\n  destinations: InvoiceDocDestinationType[];\n  totals: CreditNoteDocTotals;\n  remaining_credit_cents: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  items: CreditNoteDocItemType[];\n  destinations: InvoiceDocDestinationType[];\n  totals: CreditNoteDocTotals;\n  remaining_credit_cents: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A credit note issued to an organization."
         },
         {
@@ -16377,7 +16377,7 @@
         {
           "kind": "interface",
           "name": "CreditNoteDocument",
-          "declaration": "interface CreditNoteDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  status: string;\n  reason: string;\n  reference?: string;\n  notes?: string;\n  organization: typeLiteral;\n  items?: Array<typeLiteral>;\n  totals?: typeLiteral;\n  remaining_credit_cents?: number;\n  remaining_credit_cents_str?: string;\n  xero_id?: string;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  created_at?: number;\n  updated_at?: number;\n}",
+          "declaration": "interface CreditNoteDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  status: string;\n  reason: string;\n  reference?: string;\n  organization: typeLiteral;\n  items?: Array<typeLiteral>;\n  totals?: typeLiteral;\n  remaining_credit_cents?: number;\n  remaining_credit_cents_str?: string;\n  xero_id?: string;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  created_at?: number;\n  updated_at?: number;\n}",
           "doc": "Typesense document type for credit notes."
         },
         {
@@ -16407,7 +16407,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocument",
-          "declaration": "interface InvoiceDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  crms_id?: number;\n  crms_id_str?: string;\n  status: string;\n  number_orders?: number[];\n  number_orders_str?: string[];\n  subject?: string;\n  reference?: string;\n  notes?: string;\n  organization: typeLiteral;\n  items?: Array<typeLiteral>;\n  destinations?: Array<typeLiteral>;\n  totals?: typeLiteral;\n  crms_opportunity_ids?: number[];\n  xero_id?: string;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  due_date_fs?: number;\n  created_at?: number;\n  updated_at?: number;\n}",
+          "declaration": "interface InvoiceDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  crms_id?: number;\n  crms_id_str?: string;\n  status: string;\n  number_orders?: number[];\n  number_orders_str?: string[];\n  subject?: string;\n  reference?: string;\n  organization: typeLiteral;\n  items?: Array<typeLiteral>;\n  destinations?: Array<typeLiteral>;\n  totals?: typeLiteral;\n  crms_opportunity_ids?: number[];\n  xero_id?: string;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  due_date_fs?: number;\n  created_at?: number;\n  updated_at?: number;\n}",
           "doc": "Typesense document type for invoices."
         },
         {

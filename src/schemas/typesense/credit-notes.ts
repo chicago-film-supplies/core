@@ -19,9 +19,9 @@ import { typesenseAddressFields } from "./types.ts";
  */
 export const creditNotes: TypesenseCollectionConfig = {
   alias: "credit-notes",
-  version: 4,
+  version: 5,
   firestoreCollection: "credit-notes",
-  collectionName: "credit-notes_v4",
+  collectionName: "credit-notes_v5",
   // ENABLED 2026-08-07. This was `false` with a note saying "flip in Phase 6,
   // alongside the search UI", and it is worth recording why that instruction was
   // superseded rather than simply followed: **its stated reason had expired.**
@@ -50,7 +50,7 @@ export const creditNotes: TypesenseCollectionConfig = {
   // that did not exist when it ran.
   enabled: true,
   schema: {
-    name: "credit-notes_v4",
+    name: "credit-notes_v5",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -62,7 +62,6 @@ export const creditNotes: TypesenseCollectionConfig = {
       // free text the way it is in Odoo.
       { name: "reason", type: "string", facet: true },
       { name: "reference", type: "string", stem: true, sort: true, optional: true },
-      { name: "notes", type: "string", stem: true, optional: true },
       { name: "organization", type: "object" },
       { name: "organization.uid", type: "string", facet: false, optional: true },
       { name: "organization.name", type: "string", sort: true, stem: true, facet: false },

@@ -315,7 +315,6 @@ Deno.test("InvoiceSchema accepts optional fields", () => {
     ...validInvoice,
     subject: "March rental",
     reference: "PO-123",
-    notes: "Thanks!",
     due_date: "2026-04-01T00:00:00.000-05:00",
   };
   assertEquals(InvoiceSchema.safeParse(doc).success, true);
@@ -468,16 +467,16 @@ Deno.test("InvoiceSchema accepts transaction_fees in totals", () => {
   assertEquals(InvoiceSchema.safeParse(doc).success, true);
 });
 
-Deno.test("BOTH invoice input arms accept `notes` as `null` — the seed's own shape", () => {
+Deno.test("BOTH invoice input arms accept `reference` as `null` — the seed's own shape", () => {
   // 🔴 The round-trip, not a hand-built payload: `getInitialValues` reads the
-  // STORED schema, where `notes` is bare `.nullable()`, so it seeds it as
+  // STORED schema, where `reference` is bare `.nullable()`, so it seeds it as
   // `null`. The manager drafts an invoice by projecting that seed straight
   // through these input arms. While they were `.optional()` alone, the system
   // refused a payload it had produced itself — `expected string, received null`
   // — and invoice drafting was unreachable from the manager's own flow.
   //
   // ⚠️ Asserting on the SEED is what makes this test honest. Writing
-  // `{ notes: null }` by hand would pass the moment someone re-tightened the arm
+  // `{ reference: null }` by hand would pass the moment someone re-tightened the arm
   // and changed the seed to match, which is the fixed-point trap: a check that
   // can only ever agree with the thing it is checking.
   //
@@ -486,15 +485,19 @@ Deno.test("BOTH invoice input arms accept `notes` as `null` — the seed's own s
   // about the SEED reaching the input arms, not about which field carries it,
   // and the stored arm going from `.nullable().optional()` to bare `.nullable()`
   // does not change what `getInitialValues` produces for it.
+  //
+  // ⭐ And survived `notes`' own removal (2026-11-28, one-document-model ruling
+  // 209 / core#152): retargeted to `reference`, which has the same shape — bare
+  // `.nullable()` stored, `.nullable().optional()` on both input arms.
   const seed = getInitialValues(InvoiceSchema) as Record<string, unknown>;
-  assertEquals(seed.notes, null, "the stored seed really is null");
+  assertEquals(seed.reference, null, "the stored seed really is null");
 
   const base = {
     uid: "testinvoice000000001",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
     query_by_orders: ["testorder10000000001"],
-    notes: seed.notes,
+    reference: seed.reference,
   };
   const created = CreateInvoiceInput.safeParse(base);
   assertEquals(
@@ -504,10 +507,10 @@ Deno.test("BOTH invoice input arms accept `notes` as `null` — the seed's own s
   );
 
   // ⚠️ The UPDATE arm had the identical gap and is easy to fix only on the
-  // create side — an operator clearing a note sends `null` here.
+  // create side — an operator clearing a reference sends `null` here.
   const updated = UpdateInvoiceInput.safeParse({
     version: 0,
-    notes: null,
+    reference: null,
   });
   assertEquals(
     updated.success,

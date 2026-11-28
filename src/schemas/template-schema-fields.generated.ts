@@ -236,7 +236,6 @@ export const templateSchemaFields: Partial<
     { path: "due_date", type: "string?" },
     { path: "subject", type: "string" },
     { path: "reference", type: "string | null" },
-    { path: "notes", type: "string | null" },
     { path: "organization", type: "object" },
     { path: "organization.uid", type: "string | null" },
     { path: "organization.path", type: "object[]" },

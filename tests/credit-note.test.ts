@@ -39,7 +39,6 @@ function makeCreditNote(overrides: Record<string, unknown> = {}) {
     // so the key must be PRESENT even when there is nothing to say. This is a
     // hand-spelled literal rather than a `getInitialValues` seed, which is why
     // the compiler could not point at it and the suite had to.
-    notes: null,
     organization: {
       uid: ORG,
       // Required since core#77 — every stored snapshot carries the frozen chain.

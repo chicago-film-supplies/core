@@ -239,7 +239,7 @@ Deno.test("billingXeroSyncStatus receivable: every line leaf the body reads move
 
 Deno.test("billingXeroSyncStatus receivable: settlement and bookkeeping writes do not read as drift", () => {
   const state = { pushed_hash: inv() };
-  const moved = invoice({ version: 9, status: "part_paid", totals: { total_cents: 5010, amount_paid_cents: 1000 }, notes: "called" });
+  const moved = invoice({ version: 9, status: "part_paid", totals: { total_cents: 5010, amount_paid_cents: 1000 } });
   assertEquals(billingXeroSyncStatus("receivable", moved, state), "in_sync");
   // A line key the body does not read.
   const untouched = invoice({ items: [{ uid: "o", type: "order", path: ["o"] }, { ...line("tent", 5000), order_number: 7 }] });

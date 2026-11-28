@@ -3050,7 +3050,6 @@ interface CreateCreditNoteInputType {
   date: string;
   items: CreateCreditNoteItemInputType[];
   reference?: string | null;
-  notes?: string | null;
   overbilling_of_order?: string;
   uuid_session: string;
 }
@@ -3161,7 +3160,6 @@ interface CreateInvoiceInputType {
   due_date?: string;
   subject?: string;
   reference?: string | null;
-  notes?: string | null;
 }
 ```
 
@@ -3859,7 +3857,6 @@ interface CreditNote {
   date: string;
   date_fs: FirestoreTimestampType;
   reference: string | null;
-  notes: string | null;
   organization: DocumentOrganizationSnapshotType;
   items: CreditNoteDocItemType[];
   destinations: InvoiceDocDestinationType[];
@@ -6605,7 +6602,6 @@ interface Invoice {
   due_date_fs?: FirestoreTimestampType;
   subject: string;
   reference: string | null;
-  notes: string | null;
   organization: DocumentOrganizationSnapshotType;
   destinations: InvoiceDocDestinationType[];
   items: InvoiceDocItemType[];
@@ -16462,7 +16458,6 @@ interface UpdateInvoiceInputType {
   due_date?: string | null;
   subject?: string;
   reference?: string | null;
-  notes?: string | null;
   version: number;
 }
 ```
@@ -24946,7 +24941,6 @@ interface CreateInvoiceInputType {
   due_date?: string;
   subject?: string;
   reference?: string | null;
-  notes?: string | null;
 }
 ```
 
@@ -25023,7 +25017,6 @@ interface Invoice {
   due_date_fs?: FirestoreTimestampType;
   subject: string;
   reference: string | null;
-  notes: string | null;
   organization: DocumentOrganizationSnapshotType;
   destinations: InvoiceDocDestinationType[];
   items: InvoiceDocItemType[];
@@ -25514,7 +25507,6 @@ interface UpdateInvoiceInputType {
   due_date?: string | null;
   subject?: string;
   reference?: string | null;
-  notes?: string | null;
   version: number;
 }
 ```
@@ -31988,7 +31980,6 @@ interface CreateCreditNoteInputType {
   date: string;
   items: CreateCreditNoteItemInputType[];
   reference?: string | null;
-  notes?: string | null;
   overbilling_of_order?: string;
   uuid_session: string;
 }
@@ -32043,7 +32034,6 @@ interface CreditNote {
   date: string;
   date_fs: FirestoreTimestampType;
   reference: string | null;
-  notes: string | null;
   organization: DocumentOrganizationSnapshotType;
   items: CreditNoteDocItemType[];
   destinations: InvoiceDocDestinationType[];
@@ -34884,7 +34874,6 @@ interface CreditNoteDocument {
   status: string;
   reason: string;
   reference?: string;
-  notes?: string;
   organization: typeLiteral;
   items?: Array<typeLiteral>;
   totals?: typeLiteral;
@@ -34994,7 +34983,6 @@ interface InvoiceDocument {
   number_orders_str?: string[];
   subject?: string;
   reference?: string;
-  notes?: string;
   organization: typeLiteral;
   items?: Array<typeLiteral>;
   destinations?: Array<typeLiteral>;
