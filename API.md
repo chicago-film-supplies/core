@@ -43610,9 +43610,12 @@ holds this file to `SIDE_FREE_FILES`, so a `side ===` here fails the suite.
 1. 🔴 **Operator policy is not legality.** The `assert*` functions belong on
    operator routes only — never on the Xero webhook, the reap, void-from-cancel
    or a status derivation. Xero is the authority on payments.
-2. **Fail closed.** Every context is REQUIRED: an absent list used to read as
+2. **Fail closed.** Every offer context is REQUIRED: an absent list used to read as
    "nothing billed" (and offered a removal) or "unknown" (and offered a remainder
    the server then refused). A status outside the vocabulary offers nothing.
+   The one exception is {@link initiatorBillingAdvisory}, which reports rather
+   than offers: its documents may be `null` (NOT READ), and a `null` answers
+   "not computed" with a reason, never a figure.
 3. **An offer is a snapshot** of the documents it was handed; the server
    re-checks inside its transaction.
 
@@ -43848,12 +43851,76 @@ interface DocumentActionOffer {
 
 _(class — see source)_
 
+### `INITIATOR_ADVISORY_SEVERITY`
+
+Each code's severity, fixed per code: the writer states it once, so both sides' menus fold it alike.
+
+```ts
+const INITIATOR_ADVISORY_SEVERITY: Readonly<Record<InitiatorAdvisoryCode, "warning" | "info">>;
+```
+
 ### `InitiatorActionRequest`
 
 What an operator route asks to do from an initiator.
 
 ```ts
 type InitiatorActionRequest = typeLiteral | typeLiteral;
+```
+
+### `InitiatorAdvisoryCode`
+
+What the advisory reports. A line may carry more than one line code: each is its own fact.
+
+```ts
+type InitiatorAdvisoryCode = "custody_unbilled" | "billing_on_canceled" | "credits_unkeyed" | "line_unbilled" | "line_overbilled" | "stated_money_mismatch" | "line_billed_short" | "billed_beyond_initiator";
+```
+
+### `InitiatorAdvisoryContext`
+
+What {@link initiatorBillingAdvisory} needs. Unlike the offer contexts (module
+rule 2), the documents may be `null`, meaning **not read** — not yet loaded, or
+not readable by this viewer (a viewer without `creditNotes.read`). That is the
+`LossRecordView.billed` meaning (`utils/custody.ts`), never "looked, and it is
+gone". A `null` makes the advisory answer `computed: false` with a reason, never
+a figure: an advisory has no server behind it to refuse an over-answer.
+
+```ts
+interface InitiatorAdvisoryContext {
+  billing: indexedAccess | null;
+  credits: indexedAccess | null;
+  accounting: AccountingContext | null;
+  custody: ReadonlyMap<string, InitiatorLineCustody>;
+  now: string;
+}
+```
+
+### `InitiatorAdvisoryFinding`
+
+One advisory finding.
+
+```ts
+interface InitiatorAdvisoryFinding {
+  code: InitiatorAdvisoryCode;
+  paths: string[][];
+  rows: typeLiteral[];
+  documents: string[];
+}
+```
+
+### `InitiatorAdvisoryUnansweredReason`
+
+Why the advisory did not answer.
+
+```ts
+type InitiatorAdvisoryUnansweredReason = "billing_unread" | "credits_unread" | "accounting_unread" | "unaligned" | "crms_blocked";
+```
+
+### `InitiatorBillingAdvisory`
+
+{@link initiatorBillingAdvisory}'s answer.
+
+```ts
+type InitiatorBillingAdvisory = typeLiteral | typeLiteral;
 ```
 
 ### `InitiatorLineCustody`
@@ -44135,6 +44202,27 @@ offers follow the initiator-level ones, in line order.
 - per line: `close_item`; `remove_item` and `change_basis` on an untouched
   line ({@link initiatorLineTouched}), `change_basis` only on a line with a
   formula. A kit header (payable) may be removed while nothing under it is touched.
+
+### `initiatorBillingAdvisory(side: S, initiator: indexedAccess, ctx: InitiatorAdvisoryContext<S>): InitiatorBillingAdvisory`
+
+**Is this initiator billed right?** — one answer for both sides' billing menus
+(one-document-model ruling 210), read off the SAME account the offers read
+({@link initiatorActionsFor}: `billableInitiator` at `now`), so "N Lines Left"
+and `create_remaining_billing` cannot disagree. It reports and offers nothing:
+a remedy is an offer's.
+
+In order:
+1. billing not read → not computed;
+2. a canceled initiator: `billing_on_canceled` while a billing document is live, else clean;
+3. no live billing document (a draft is live, a void is not): `custody_unbilled`
+   where custody moved a line whose type moves custody, else clean — answered
+   without the credits, as before custody moves owing nothing is the normal state;
+4. credits or accounting not read → not computed: no count without what nets it;
+5. the account's refusal, split by reason (`unaligned` first, then `crms_blocked`);
+6. `credits_unkeyed`, then each non-kit-header line's codes, then `billed_beyond_initiator`.
+
+Field, substitution, move and out-of-service differences are not findings:
+they stay on their rows (the document diff).
 
 ### `initiatorLineTouched(side: Side, line: Pick<LineAccount, "named" | "item">, custody: InitiatorLineCustody): boolean`
 

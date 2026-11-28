@@ -709,3 +709,112 @@ Deno.test("issue: an EMPTY draft invoice is not offered Issue, and the assert re
   assertEquals(has(invoiceActionsFor(invoice("draft")), "issue"), true);
   assertInvoiceAction(invoice("draft"), {}, { action: "issue" });
 });
+
+// ── the initiator's billing advisory (ruling 210), receivable side ───
+
+const ADV_WINDOW = { start: "2026-09-06T00:00:00.000-05:00", end: "2026-09-11T00:00:00.000-05:00" };
+const ADV_PAIR = { uid: "dest", dates: { charge_windows: [ADV_WINDOW] } };
+/** A rental line at `path`, priced as core#120's fixture prices it. */
+const advLine = (uid: string, path: string[], quantity: number) => ({
+  uid, type: "rental", name: uid, description: "", quantity, path,
+  stock_method: "reserve", zero_priced: false, uid_tax_class: "TaxC1assDefau1tAAAAA",
+  price: { ...fdwPrice(1000, 5), subtotal_cents: 0, subtotal_discounted_cents: 0, discount: null, taxes: [], total_cents: 0, replacement_cents: 1000 },
+});
+const DEST_DIVIDER = { uid: "dest", type: "destination", name: "Venue", description: "", path: ["dest"] };
+/** An order with one leg holding `lines` ([uid, quantity]). */
+const advOrder = (lines: [string, number][], status: OfferOrder["status"] = "active") =>
+  ({ ...order(status), items: [DEST_DIVIDER, ...lines.map(([u, q]) => advLine(u, ["dest", u], q))], destinations: [ADV_PAIR] }) as unknown as OfferOrder;
+/** An invoice of the order billing `lines` ([uid, quantity]) on its leg. */
+const advInvoice = (uid: string, lines: [string, number][], o: Record<string, unknown> = {}) => ({
+  uid, status: "issued", crms_id: null,
+  items: [
+    { uid: "ord", type: "order", name: "Order", description: "", path: ["ord"] },
+    { uid: "dest", type: "destination", name: "Venue", description: "", path: ["ord", "dest"] },
+    ...lines.map(([u, q]) => advLine(u, ["ord", "dest", u], q)),
+  ],
+  destinations: [{ ...ADV_PAIR, uid_source: "ord" }],
+  ...o,
+}) as unknown as AccountedInvoice;
+const ADV_ACCOUNTING = { formulas: FORMULAS, holidays: [] };
+const adviseOrder = (
+  o: OfferOrder,
+  c: { invoices?: readonly AccountedInvoice[] | null; notes?: readonly unknown[] | null; accounting?: typeof ADV_ACCOUNTING | null; custody?: Record<string, number> } = {},
+) =>
+  cat.initiatorBillingAdvisory("receivable", o, {
+    billing: c.invoices === undefined ? [] : c.invoices,
+    credits: (c.notes === undefined ? [] : c.notes) as never,
+    accounting: c.accounting === undefined ? ADV_ACCOUNTING : c.accounting,
+    custody: new Map(Object.entries(c.custody ?? {}).map(([k, received]) => [k, { received, returned: 0 }])),
+    now: "2026-11-18T12:00:00.000-06:00",
+  });
+const advCodes = (a: cat.InitiatorBillingAdvisory) => a.computed ? a.findings.map((f) => f.code) : [`not computed: ${a.reason}`];
+
+Deno.test("advisory (receivable): custody moved per LINE with no live invoice warns; a void invoice is none, a draft is one", () => {
+  const o = advOrder([["cam", 2]]);
+  assertEquals(advCodes(adviseOrder(o)), []);
+  const moved = adviseOrder(o, { custody: { "dest/cam": 2 } });
+  assertEquals([advCodes(moved), moved.computed && moved.findings[0].paths], [["custody_unbilled"], [["dest", "cam"]]]);
+  assertEquals(advCodes(adviseOrder(o, { invoices: [advInvoice("v", [["cam", 2]], { status: "void" })], custody: { "dest/cam": 2 } })), ["custody_unbilled"]);
+  assertEquals(advCodes(adviseOrder(o, { invoices: [advInvoice("d", [["cam", 2]], { status: "draft" })], custody: { "dest/cam": 2 } })), []);
+});
+
+Deno.test("advisory (receivable): line codes on an order billed across invoices", () => {
+  // cam billed 3 of 2 (over), lens billed 1 of 4 (short), tripod billed nowhere.
+  const o = advOrder([["cam", 2], ["lens", 4], ["tripod", 1]]);
+  const a = adviseOrder(o, { invoices: [advInvoice("inv-a", [["cam", 3]]), advInvoice("inv-b", [["lens", 1]])] });
+  assertEquals(advCodes(a), ["line_unbilled", "line_overbilled", "line_billed_short"]);
+  const paths = (code: cat.InitiatorAdvisoryCode) => a.computed ? a.findings.find((f) => f.code === code)?.paths : undefined;
+  assertEquals([paths("line_unbilled"), paths("line_overbilled"), paths("line_billed_short")], [[["dest", "tripod"]], [["dest", "cam"]], [["dest", "lens"]]]);
+  assertEquals([a.computed && a.severity, a.computed && a.remaining_lines], ["warning", 2]);
+});
+
+Deno.test("advisory (receivable): a line the invoice carries and the order does not is info, at its order-relative path", () => {
+  const a = adviseOrder(advOrder([["cam", 2]]), { invoices: [advInvoice("inv-a", [["cam", 2], ["extra", 1]])] });
+  assertEquals(advCodes(a), ["billed_beyond_initiator"]);
+  const f = a.computed ? a.findings[0] : undefined;
+  assertEquals([f?.paths, f?.documents, f?.rows, a.computed && a.severity], [[["dest", "extra"]], ["inv-a"], [], "info"]);
+});
+
+Deno.test("advisory (receivable): unread credit notes or pricing, and a CRMS-authored invoice, answer 'not computed'", () => {
+  const o = advOrder([["cam", 2]]);
+  const billed = [advInvoice("inv-a", [["cam", 1]])];
+  assertEquals(advCodes(adviseOrder(o, { invoices: null })), ["not computed: billing_unread"]);
+  assertEquals(advCodes(adviseOrder(o, { invoices: billed, notes: null })), ["not computed: credits_unread"]);
+  assertEquals(advCodes(adviseOrder(o, { invoices: billed, accounting: null })), ["not computed: accounting_unread"]);
+  assertEquals(advCodes(adviseOrder(o, { invoices: [advInvoice("inv-c", [["cam", 1]], { crms_id: 42 })] })), ["not computed: crms_blocked"]);
+});
+
+Deno.test("advisory (receivable): a canceled order reports a live invoice against it, and nothing else", () => {
+  const o = advOrder([["cam", 2]], "canceled");
+  assertEquals(advCodes(adviseOrder(o, { custody: { "dest/cam": 2 } })), []);
+  const a = adviseOrder(o, { invoices: [advInvoice("inv-a", [["cam", 1]])] });
+  assertEquals([advCodes(a), a.computed && a.findings[0].documents], [["billing_on_canceled"], ["inv-a"]]);
+});
+
+Deno.test("advisory (receivable): remaining_lines > 0 exactly when the catalog offers create_remaining_billing", () => {
+  const cases: [OfferOrder, AccountedInvoice[]][] = [
+    [advOrder([["cam", 2]]), []],
+    [advOrder([["cam", 2]]), [advInvoice("a", [["cam", 1]])]],
+    [advOrder([["cam", 2]]), [advInvoice("a", [["cam", 2]])]],
+    [advOrder([["cam", 2]]), [advInvoice("a", [["cam", 3]])]],
+    [advOrder([["cam", 2], ["lens", 1]]), [advInvoice("a", [["cam", 2]])]],
+  ];
+  for (const [o, invoices] of cases) {
+    const a = adviseOrder(o, { invoices });
+    const offered = orderInvoiceActionsFor(o, { invoices, creditNotes: [], accounting: ADV_ACCOUNTING }).some((x) => x.action === "create_remaining_billing");
+    assertEquals(a.computed && (a.remaining_lines ?? 0) > 0, offered, JSON.stringify(invoices.map((i) => i.items.length)));
+  }
+});
+
+Deno.test("advisory (receivable): an exchange line is shown, never owed — it raises neither unbilled nor billed short", () => {
+  const swap = { ...advLine("swap", ["dest", "swap"], 1), exchanged_for: [{ path: ["dest", "cam"], quantity: 1, reason: "damaged" }] };
+  const o = { ...advOrder([["cam", 2]]), items: [...advOrder([["cam", 2]]).items, swap] } as unknown as OfferOrder;
+  assertEquals(advCodes(adviseOrder(o, { invoices: [advInvoice("inv-a", [["cam", 2]])] })), []);
+});
+
+Deno.test("advisory (receivable): an invoice whose structure does not match the order answers 'not computed: unaligned'", () => {
+  // The order holds cam under a group; the invoice bills cam on the bare leg, at a path the order lacks.
+  const group = { uid: "grp", type: "group", name: "Cameras", description: "", path: ["dest", "grp"] };
+  const o = { ...order("active"), items: [DEST_DIVIDER, group, advLine("cam", ["dest", "grp", "cam"], 2)], destinations: [ADV_PAIR] } as unknown as OfferOrder;
+  assertEquals(advCodes(adviseOrder(o, { invoices: [advInvoice("inv-a", [["cam", 2]])] })), ["not computed: unaligned"]);
+});

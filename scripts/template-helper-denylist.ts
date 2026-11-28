@@ -720,6 +720,10 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "creditRefusal",
     "creditableLines",
     "initiatorActionsFor",
+    // Ruling 210's billing advisory is not a write, but it reads every billing
+    // document, every credit and each line's custody at once; a template renders
+    // one document and holds none of them.
+    "initiatorBillingAdvisory",
     "initiatorLineTouched",
     "issueRefusal",
     "lineActionKey",

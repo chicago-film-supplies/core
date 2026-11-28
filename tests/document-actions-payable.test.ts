@@ -774,3 +774,131 @@ Deno.test("issue: an EMPTY draft bill is not offered Issue, and the assert refus
   // The status arm still decides first: an issued bill with a line is not offered Issue.
   assertEquals(issues(bill6d("I", [divider, row(["x"], 1)])), false);
 });
+
+// ── the initiator's billing advisory (ruling 210), payable side ──────
+
+/**
+ * A buy line priced at 100¢ a unit, what every fixture bill charges a unit, so a
+ * billed line's money agrees with its stated price and only the case that means
+ * to raises `stated_money_mismatch`.
+ */
+const paid = (o: Record<string, unknown> = {}) => {
+  const quantity = (o.quantity as number | undefined) ?? 3;
+  return buy({ price: payablePrice(100 * quantity, { formula: priceFormulaRefOf(FIXED) }), ...o, quantity });
+};
+
+/** The advisory on a fixture purchase; `null` documents are NOT READ. */
+const advise = (
+  purchase: OldPurchase,
+  o: { bills?: PurchaseBill[] | null; credits?: PurchaseCredit[] | null; accounting?: typeof ACCOUNTING | null; got?: Got } = {},
+) =>
+  cat.initiatorBillingAdvisory("payable", asPurchase(purchase), {
+    billing: o.bills === undefined ? billedBills(purchase.items) : o.bills,
+    credits: o.credits === undefined ? [] : o.credits,
+    accounting: o.accounting === undefined ? ACCOUNTING : o.accounting,
+    custody: custodyOf(o.got ?? {}),
+    now: NOW,
+  });
+const codes = (a: cat.InitiatorBillingAdvisory) => a.computed ? a.findings.map((f) => f.code) : [`not computed: ${a.reason}`];
+const pathsOf = (a: cat.InitiatorBillingAdvisory, code: cat.InitiatorAdvisoryCode) =>
+  a.computed ? a.findings.find((f) => f.code === code)?.paths ?? [] : [];
+
+Deno.test("advisory (payable): every code's severity is stated once, in the table", () => {
+  const all: cat.InitiatorAdvisoryCode[] = [
+    "custody_unbilled", "billing_on_canceled", "credits_unkeyed", "line_unbilled",
+    "line_overbilled", "stated_money_mismatch", "line_billed_short", "billed_beyond_initiator",
+  ];
+  assertEquals(Object.keys(cat.INITIATOR_ADVISORY_SEVERITY).sort(), [...all].sort());
+});
+
+Deno.test("advisory (payable): unread billing, credits or accounting answer 'not computed', never a figure", () => {
+  const p = po([paid({ billed: 1 })]);
+  assertEquals(codes(advise(p, { bills: null })), ["not computed: billing_unread"]);
+  assertEquals(codes(advise(p, { credits: null })), ["not computed: credits_unread"]);
+  assertEquals(codes(advise(p, { accounting: null })), ["not computed: accounting_unread"]);
+});
+
+Deno.test("advisory (payable): no live billing — custody moved on a custody line warns; before custody, nothing", () => {
+  const p = po([paid(), charge()]);
+  const clean = advise(p, { bills: [] });
+  assertEquals([codes(clean), clean.computed && clean.severity], [[], null]);
+  const moved = advise(p, { bills: [], got: { b: { received: 1 } } });
+  assertEquals([codes(moved), pathsOf(moved, "custody_unbilled"), moved.computed && moved.severity], [["custody_unbilled"], [["b"]], "warning"]);
+  // A charge moves no custody: a custody entry on it is not "custody moved".
+  assertEquals(codes(advise(p, { bills: [], got: { c: { received: 1 } } })), []);
+  // Answered without the credits: owing nothing before custody needs none of them.
+  assertEquals(codes(advise(p, { bills: [], credits: null, got: { b: { received: 1 } } })), ["custody_unbilled"]);
+});
+
+Deno.test("advisory (payable): a void bill is no live billing; a draft is", () => {
+  const p = po([paid()]);
+  const got = { b: { received: 3 } };
+  assertEquals(codes(advise(p, { bills: [voidBill("v", [["b", 3]], { voided_at: mockTimestamp })], got })), ["custody_unbilled"]);
+  assertEquals(codes(advise(p, { bills: [voidBill("d", [["b", 3]], { status: "draft" })], got })), []);
+});
+
+Deno.test("advisory (payable): a canceled purchase reports only a live bill against it", () => {
+  assertEquals(codes(advise(po([paid()], "canceled"), { bills: [], got: { b: { received: 1 } } })), []);
+  const billed = advise(po([paid({ billed: 1 })], "canceled"));
+  assertEquals(codes(billed), ["billing_on_canceled"]);
+  assertEquals(billed.computed && billed.findings[0].documents, ["billed"]);
+});
+
+Deno.test("advisory (payable): line codes — unbilled, billed short, over-billed — with their severities", () => {
+  const p = po([paid({ uid: "x", path: ["x"], billed: 1 }), paid({ uid: "y", path: ["y"], billed: 4 }), paid({ uid: "z", path: ["z"] })]);
+  const a = advise(p);
+  assertEquals(codes(a), ["line_unbilled", "line_overbilled", "line_billed_short"]);
+  assertEquals([pathsOf(a, "line_unbilled"), pathsOf(a, "line_overbilled"), pathsOf(a, "line_billed_short")], [[["z"]], [["y"]], [["x"]]]);
+  assertEquals(a.computed && a.severity, "warning");
+  // Info alone: a line billed short is normal in passing.
+  const short = advise(po([paid({ billed: 1 })]));
+  assertEquals([codes(short), short.computed && short.severity], [["line_billed_short"], "info"]);
+  // Fully billed: clean.
+  const full = advise(po([paid({ billed: 3 })]));
+  assertEquals([codes(full), full.computed && full.severity, full.computed && full.remaining_lines], [[], null, 0]);
+});
+
+Deno.test("advisory (payable): a billed row no leg can be named for keeps its DOCUMENT path, beside its bill", () => {
+  const p = po([paid({ uid: "x", path: ["x"], quantity: 5 })]);
+  const extra = bill6d("A", [row(["x"], 5), row(["w"], 2)]);
+  const a = advise(p, { bills: [extra] });
+  assertEquals(codes(a), ["billed_beyond_initiator"]);
+  const f = a.computed ? a.findings[0] : undefined;
+  // The fixture purchase names no single destination, so the row cannot be placed on a
+  // leg: it has no initiator-relative path, and keeps its document's (scope divider first).
+  assertEquals([f?.paths, f?.documents, f?.rows], [[], ["A"], [{ document_uid: "A", path: [PU, "w"] }]]);
+  assertEquals(a.computed && a.severity, "info");
+});
+
+Deno.test("advisory (payable): a credit the fold cannot key is reported, never silently netted", () => {
+  const p = po([paid({ uid: "x", path: ["x"], quantity: 5 })]);
+  const bill = bill6d("A", [row(["x"], 5)]);
+  // A credit naming a line bill A does not carry: no row to net it against.
+  const stray = { ...credit6d([named("A", ["gone"], 1)]), uid: "cr-stray" } as PurchaseCredit;
+  const a = advise(p, { bills: [bill], credits: [stray] });
+  assertEquals(codes(a).includes("credits_unkeyed"), true);
+  assertEquals(a.computed && a.findings.find((f) => f.code === "credits_unkeyed")?.documents, ["cr-stray"]);
+});
+
+Deno.test("advisory (payable): remaining_lines > 0 exactly when the catalog offers create_remaining_billing", () => {
+  const fixtures: [OldPurchase, Got][] = [
+    [po([paid()]), {}],
+    [po([paid({ billed: 1 })]), {}],
+    [po([paid({ billed: 3 })]), {}],
+    [po([paid({ billed: 4 })]), {}],
+    [po([paid({ uid: "x", path: ["x"], billed: 3 }), paid({ uid: "z", path: ["z"] })]), { z: { received: 1 } }],
+    [po([timeCharge({ billed: 1 })]), {}],
+    [po([subrent({ billed: 1 })]), { s: { received: 2 } }],
+  ];
+  for (const [p, got] of fixtures) {
+    const a = advise(p, { got });
+    const offered = offersOf(p as ReturnType<typeof po>, got).some((o) => o.action === "create_remaining_billing");
+    assertEquals(a.computed && (a.remaining_lines ?? 0) > 0, offered, JSON.stringify(p.items));
+  }
+});
+
+Deno.test("advisory (payable): a stated line billed for other money than its units cost", () => {
+  // Stated at $0 for 3, billed 100¢ a unit: what the bill charges is not what the units cost.
+  const a = advise(po([buy({ billed: 3 })]));
+  assertEquals([codes(a), pathsOf(a, "stated_money_mismatch")], [["stated_money_mismatch"], [["b"]]]);
+});

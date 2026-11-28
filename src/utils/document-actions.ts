@@ -28,9 +28,12 @@
  * 1. 🔴 **Operator policy is not legality.** The `assert*` functions belong on
  *    operator routes only — never on the Xero webhook, the reap, void-from-cancel
  *    or a status derivation. Xero is the authority on payments.
- * 2. **Fail closed.** Every context is REQUIRED: an absent list used to read as
+ * 2. **Fail closed.** Every offer context is REQUIRED: an absent list used to read as
  *    "nothing billed" (and offered a removal) or "unknown" (and offered a remainder
  *    the server then refused). A status outside the vocabulary offers nothing.
+ *    The one exception is {@link initiatorBillingAdvisory}, which reports rather
+ *    than offers: its documents may be `null` (NOT READ), and a `null` answers
+ *    "not computed" with a reason, never a figure.
  * 3. **An offer is a snapshot** of the documents it was handed; the server
  *    re-checks inside its transaction.
  *
@@ -98,6 +101,7 @@ import {
   billedByPath,
   BILLING_FOLD,
   type BillingFoldDocuments,
+  type BillingFoldSide,
   billingNamesLine,
   buildOverbillingCredits,
   compareTime,
@@ -252,7 +256,7 @@ export const ACTION_GAPS: Readonly<Record<Side, Readonly<Partial<Record<Document
     },
     credit_overbilling: {
       reason: "supplier over-billing is credited from the bill (ruling 112); no over-billing supplier-credit route exists",
-      removed_by: "unscheduled: owed an owner ruling",
+      removed_by: "the api over-billing supplier-credit route, granted by one-document-model ruling 119 (owner 2026-11-18): it rebuilds `buildOverbillingCredits` inside its transaction, one supplier credit per bill",
     },
   },
 };
@@ -1285,6 +1289,198 @@ export function initiatorActionsFor<S extends Side>(
     if (!lines.some((l) => under(l) && initiatorLineTouched(side, l, custodyOf(l.path)))) line("remove_item", header.path);
   }
   return offers;
+}
+
+// ── the initiator's billing advisory (ruling 210) ────────────────────
+
+/**
+ * What {@link initiatorBillingAdvisory} needs. Unlike the offer contexts (module
+ * rule 2), the documents may be `null`, meaning **not read** — not yet loaded, or
+ * not readable by this viewer (a viewer without `creditNotes.read`). That is the
+ * `LossRecordView.billed` meaning (`utils/custody.ts`), never "looked, and it is
+ * gone". A `null` makes the advisory answer `computed: false` with a reason, never
+ * a figure: an advisory has no server behind it to refuse an over-answer.
+ */
+export interface InitiatorAdvisoryContext<S extends Side> {
+  /** EVERY billing document linked to the initiator, live or not; `null` when not read. */
+  billing: InitiatorOfferContext<S>["billing"] | null;
+  /** EVERY credit against them; `null` when not read or not readable. */
+  credits: InitiatorOfferContext<S>["credits"] | null;
+  /** The formulas and holidays an extension is metered with; `null` while they load. */
+  accounting: AccountingContext | null;
+  /** Each line's custody, by its path joined with "/", on BOTH sides. A line with no entry has moved nothing. */
+  custody: ReadonlyMap<string, InitiatorLineCustody>;
+  /** The instant the advisory is made for, a Chicago instant: an open hire meters to it (`billableInitiator`). */
+  now: string;
+}
+
+/** What the advisory reports. A line may carry more than one line code: each is its own fact. */
+export type InitiatorAdvisoryCode =
+  /** Custody has moved units for a line, and no live billing document exists. Not on a canceled initiator. */
+  | "custody_unbilled"
+  /** A canceled initiator still has a live billing document. */
+  | "billing_on_canceled"
+  /** A credit reverses a line the fold could not attribute to a billing row, so nothing netted it (`InitiatorAccount.credits_unkeyed`). */
+  | "credits_unkeyed"
+  /** A line with units that no live billing row or credit names. Never an exchange line (shown, never owed). */
+  | "line_unbilled"
+  /** A line billed beyond what it holds: units, or time a shortened window took back. */
+  | "line_overbilled"
+  /** A stated line whose billed money is not what its billed units cost (`LineAccount.disagrees` holds `"money"`). */
+  | "stated_money_mismatch"
+  /** A named line a remainder would still bill: units or owed time left. Never an exchange line. */
+  | "line_billed_short"
+  /** Rows the billing documents carry that the initiator does not. */
+  | "billed_beyond_initiator";
+
+/** Why the advisory did not answer. */
+export type InitiatorAdvisoryUnansweredReason =
+  /** The billing documents were not read. */
+  | "billing_unread"
+  /** The credits were not read, or this viewer may not read them. */
+  | "credits_unread"
+  /** The formulas and holidays have not loaded. */
+  | "accounting_unread"
+  /** A billing document does not match the initiator's structure, so no line could be compared. */
+  | "unaligned"
+  /** A live billing document is CRMS-authored (receivable data). */
+  | "crms_blocked";
+
+/** Each code's severity, fixed per code: the writer states it once, so both sides' menus fold it alike. */
+export const INITIATOR_ADVISORY_SEVERITY: Readonly<Record<InitiatorAdvisoryCode, "warning" | "info">> = {
+  custody_unbilled: "warning",
+  billing_on_canceled: "warning",
+  credits_unkeyed: "warning",
+  line_unbilled: "warning",
+  line_overbilled: "warning",
+  stated_money_mismatch: "warning",
+  line_billed_short: "info",
+  billed_beyond_initiator: "info",
+};
+
+/** One advisory finding. */
+export interface InitiatorAdvisoryFinding {
+  code: InitiatorAdvisoryCode;
+  /** Initiator-relative line paths; empty on a document-level code. */
+  paths: string[][];
+  /**
+   * `billed_beyond_initiator`'s rows no leg could be named for, so they have no
+   * initiator-relative path: each at its DOCUMENT path, scope divider first,
+   * beside that document's uid. Empty otherwise.
+   */
+  rows: { document_uid: string; path: string[] }[];
+  /** The documents the finding is about (`credits_unkeyed`, `billing_on_canceled`, `billed_beyond_initiator`). Empty otherwise. */
+  documents: string[];
+}
+
+/** {@link initiatorBillingAdvisory}'s answer. */
+export type InitiatorBillingAdvisory =
+  | {
+    computed: true;
+    /** The highest severity among the findings; `null` when there are none. */
+    severity: "warning" | "info" | null;
+    findings: InitiatorAdvisoryFinding[];
+    /**
+     * Lines a remainder would bill, kit headers included: `create_remaining_billing`'s
+     * own predicate over the same account, so the count and the offer cannot
+     * disagree. `null` where no account was built (no live billing, accounting not loaded).
+     */
+    remaining_lines: number | null;
+  }
+  | { computed: false; reason: InitiatorAdvisoryUnansweredReason };
+
+const remainingLines = (account: InitiatorAccount): number => account.lines.filter((l) => l.remaining.bills).length;
+
+function advised(findings: InitiatorAdvisoryFinding[], remaining_lines: number | null): InitiatorBillingAdvisory {
+  const severities = findings.map((f) => INITIATOR_ADVISORY_SEVERITY[f.code]);
+  const severity = severities.includes("warning") ? "warning" : severities.includes("info") ? "info" : null;
+  return { computed: true, severity, findings, remaining_lines };
+}
+
+const finding = (code: InitiatorAdvisoryCode, o: Partial<Omit<InitiatorAdvisoryFinding, "code">> = {}): InitiatorAdvisoryFinding =>
+  ({ code, paths: o.paths ?? [], rows: o.rows ?? [], documents: o.documents ?? [] });
+
+/**
+ * **Is this initiator billed right?** — one answer for both sides' billing menus
+ * (one-document-model ruling 210), read off the SAME account the offers read
+ * ({@link initiatorActionsFor}: `billableInitiator` at `now`), so "N Lines Left"
+ * and `create_remaining_billing` cannot disagree. It reports and offers nothing:
+ * a remedy is an offer's.
+ *
+ * In order:
+ * 1. billing not read → not computed;
+ * 2. a canceled initiator: `billing_on_canceled` while a billing document is live, else clean;
+ * 3. no live billing document (a draft is live, a void is not): `custody_unbilled`
+ *    where custody moved a line whose type moves custody, else clean — answered
+ *    without the credits, as before custody moves owing nothing is the normal state;
+ * 4. credits or accounting not read → not computed: no count without what nets it;
+ * 5. the account's refusal, split by reason (`unaligned` first, then `crms_blocked`);
+ * 6. `credits_unkeyed`, then each non-kit-header line's codes, then `billed_beyond_initiator`.
+ *
+ * Field, substitution, move and out-of-service differences are not findings:
+ * they stay on their rows (the document diff).
+ */
+export function initiatorBillingAdvisory<S extends Side>(
+  side: S,
+  initiator: InitiatorOfferDocuments[S],
+  ctx: InitiatorAdvisoryContext<S>,
+): InitiatorBillingAdvisory {
+  if (ctx.billing === null) return { computed: false, reason: "billing_unread" };
+  const fold: BillingFoldSide<BillingFoldDocuments[S]["billing"], BillingFoldDocuments[S]["credit"]> = BILLING_FOLD[side];
+  const live = ctx.billing.filter((b) => fold.billingIsLive(b));
+  const accountOver = (credits: InitiatorOfferContext<S>["credits"], accounting: AccountingContext) =>
+    initiatorAccount(side, initiator, { billing: ctx.billing!, credits, accounting, custody: ctx.custody, now: ctx.now, replacement_units: 0, on_request_units: 0 });
+
+  if (initiator.status === "canceled") {
+    return live.length > 0
+      ? advised([finding("billing_on_canceled", { documents: live.map((b) => fold.billingHeader(b).uid) })], 0)
+      : advised([], 0);
+  }
+
+  if (live.length === 0) {
+    // With no live billing nothing nets, so an unread credit list cannot change the count.
+    const remaining = ctx.accounting === null ? null : remainingLines(accountOver(ctx.credits ?? [], ctx.accounting));
+    const moved = (initiator.items as readonly { type: string; path?: readonly string[] }[])
+      .filter((it) => isLineItemType(it.type) && it.path !== undefined && movesCustody(side, it.type) && (ctx.custody.get(pathKey(it.path))?.received ?? 0) > 0)
+      .map((it) => [...it.path!]);
+    return advised(moved.length > 0 ? [finding("custody_unbilled", { paths: moved })] : [], remaining);
+  }
+
+  if (ctx.credits === null) return { computed: false, reason: "credits_unread" };
+  if (ctx.accounting === null) return { computed: false, reason: "accounting_unread" };
+  const account = accountOver(ctx.credits, ctx.accounting);
+  if (account.unaligned.length > 0) return { computed: false, reason: "unaligned" };
+  if (account.crms_blocked) return { computed: false, reason: "crms_blocked" };
+
+  const findings: InitiatorAdvisoryFinding[] = [];
+  if (account.credits_unkeyed.length > 0) findings.push(finding("credits_unkeyed", { documents: [...account.credits_unkeyed] }));
+  const per = new Map<InitiatorAdvisoryCode, string[][]>();
+  const add = (code: InitiatorAdvisoryCode, path: readonly string[]) => {
+    if (!per.has(code)) per.set(code, []);
+    per.get(code)!.push([...path]);
+  };
+  for (const l of account.lines) {
+    if (isKitHeaderLine(l.item)) continue;
+    const owed = l.kind !== "exchange";
+    if (owed && !l.named && l.ordered > 0) add("line_unbilled", l.path);
+    if (l.overbilled.units > 0 || l.overbilled.shortened.length > 0) add("line_overbilled", l.path);
+    if (l.disagrees.has("money")) add("stated_money_mismatch", l.path);
+    if (owed && l.named && l.remaining.bills) add("line_billed_short", l.path);
+  }
+  for (const code of ["line_unbilled", "line_overbilled", "stated_money_mismatch", "line_billed_short"] as const) {
+    const paths = per.get(code);
+    if (paths) findings.push(finding(code, { paths }));
+  }
+  // A placed line is at an initiator-relative path; a skipped row has none, so it
+  // keeps its document's path beside the document's uid. The two never mix.
+  const { lines, documentUids, skipped } = account.document_only;
+  if (lines.length > 0 || skipped.length > 0) {
+    const paths = lines.map((item) => [...(item.path ?? [])]);
+    const documents = [...new Set([...paths.flatMap((p) => documentUids.get(pathKey(p)) ?? []), ...skipped.map((s) => s.documentUid)])];
+    const rows = skipped.map((s) => ({ document_uid: s.documentUid, path: [...s.path] }));
+    findings.push(finding("billed_beyond_initiator", { paths, rows, documents }));
+  }
+  return advised(findings, remainingLines(account));
 }
 
 /** What an operator route asks to do from an initiator. */

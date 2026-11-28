@@ -20614,7 +20614,7 @@
     },
     {
       "entrypoint": "@cfs/core/utils/document-actions",
-      "moduleDoc": "**The one action catalog, keyed by role** (one-document-model ruling 43; F15,\nrulings 110–118) — ONE answer, for the manager and the API alike and for both\nsides, to \"what may an operator do to this initiator, this billing document,\nor this credit?\".\n\nThree offer functions, one per ROLE, each over both sides and each returning\nonly ids from `DOCUMENT_ACTION_IDS` whose `roles` include its role:\n\n- {@link initiatorActionsFor} — on an order or a purchase, and its lines;\n- {@link billingActionsFor} — on an invoice or a bill;\n- {@link creditActionsFor} — on a credit note or a supplier credit;\n\nand an `assert*` per function, throwing {@link DocumentActionRefusal}, that the\nAPI runs on its OPERATOR routes, so a button cannot be offered that the server\nrefuses. It replaced `utils/invoice-actions.ts` and `utils/purchase-actions.ts`,\nboth deleted with F15.\n\n## The side is DATA, never a branch\n\nEverything that differs between the sides is a row of {@link ACTION_SIDES} (the\n`BILLING_FOLD` / `DIFF_SIDES` form), each with its reason, or an entry of\n{@link ACTION_GAPS} / {@link SIDE_ONLY_ACTIONS}. `tests/billing-fold-coverage.test.ts`\nholds this file to `SIDE_FREE_FILES`, so a `side ===` here fails the suite.\n\n## Rules every caller keeps\n\n1. 🔴 **Operator policy is not legality.** The `assert*` functions belong on\n   operator routes only — never on the Xero webhook, the reap, void-from-cancel\n   or a status derivation. Xero is the authority on payments.\n2. **Fail closed.** Every context is REQUIRED: an absent list used to read as\n   \"nothing billed\" (and offered a removal) or \"unknown\" (and offered a remainder\n   the server then refused). A status outside the vocabulary offers nothing.\n3. **An offer is a snapshot** of the documents it was handed; the server\n   re-checks inside its transaction.\n\n## Calling an `assert*` on a write path — what to hand it\n\nThe `assert*` takes a per-action REQUEST carrying only what that action reads,\nso no caller reads more than its transaction may:\n\n- 🔴 **`reverse_settlement` needs only the TARGET row and any row that NAMES\n  it** — never the whole settlement list. A range read inside the reversal's\n  transaction would block every concurrent appender, and a pre-read outside it\n  would decide on a stale Xero id (the #358 hoist-data-not-ids prohibition).\n- `close` and `add_payment` assert against the transaction's own snapshot of\n  the document: the totals they test can change under any read outside it.\n  `add_payment`'s cap is only as strong as that read — two concurrent payments\n  can still overpay between them, and the fold keeps that visible.",
+      "moduleDoc": "**The one action catalog, keyed by role** (one-document-model ruling 43; F15,\nrulings 110–118) — ONE answer, for the manager and the API alike and for both\nsides, to \"what may an operator do to this initiator, this billing document,\nor this credit?\".\n\nThree offer functions, one per ROLE, each over both sides and each returning\nonly ids from `DOCUMENT_ACTION_IDS` whose `roles` include its role:\n\n- {@link initiatorActionsFor} — on an order or a purchase, and its lines;\n- {@link billingActionsFor} — on an invoice or a bill;\n- {@link creditActionsFor} — on a credit note or a supplier credit;\n\nand an `assert*` per function, throwing {@link DocumentActionRefusal}, that the\nAPI runs on its OPERATOR routes, so a button cannot be offered that the server\nrefuses. It replaced `utils/invoice-actions.ts` and `utils/purchase-actions.ts`,\nboth deleted with F15.\n\n## The side is DATA, never a branch\n\nEverything that differs between the sides is a row of {@link ACTION_SIDES} (the\n`BILLING_FOLD` / `DIFF_SIDES` form), each with its reason, or an entry of\n{@link ACTION_GAPS} / {@link SIDE_ONLY_ACTIONS}. `tests/billing-fold-coverage.test.ts`\nholds this file to `SIDE_FREE_FILES`, so a `side ===` here fails the suite.\n\n## Rules every caller keeps\n\n1. 🔴 **Operator policy is not legality.** The `assert*` functions belong on\n   operator routes only — never on the Xero webhook, the reap, void-from-cancel\n   or a status derivation. Xero is the authority on payments.\n2. **Fail closed.** Every offer context is REQUIRED: an absent list used to read as\n   \"nothing billed\" (and offered a removal) or \"unknown\" (and offered a remainder\n   the server then refused). A status outside the vocabulary offers nothing.\n   The one exception is {@link initiatorBillingAdvisory}, which reports rather\n   than offers: its documents may be `null` (NOT READ), and a `null` answers\n   \"not computed\" with a reason, never a figure.\n3. **An offer is a snapshot** of the documents it was handed; the server\n   re-checks inside its transaction.\n\n## Calling an `assert*` on a write path — what to hand it\n\nThe `assert*` takes a per-action REQUEST carrying only what that action reads,\nso no caller reads more than its transaction may:\n\n- 🔴 **`reverse_settlement` needs only the TARGET row and any row that NAMES\n  it** — never the whole settlement list. A range read inside the reversal's\n  transaction would block every concurrent appender, and a pre-read outside it\n  would decide on a stale Xero id (the #358 hoist-data-not-ids prohibition).\n- `close` and `add_payment` assert against the transaction's own snapshot of\n  the document: the totals they test can change under any read outside it.\n  `add_payment`'s cap is only as strong as that read — two concurrent payments\n  can still overpay between them, and the fold keeps that visible.",
       "symbols": [
         {
           "kind": "variable",
@@ -20731,10 +20731,46 @@
           "doc": "A refused document action. The API maps it to a 400 `ACTION_REFUSED` naming\n`action` in its error middleware (`api-cloudrun/src/middleware/error.ts`), so a\nroute never builds one by hand."
         },
         {
+          "kind": "variable",
+          "name": "INITIATOR_ADVISORY_SEVERITY",
+          "declaration": "const INITIATOR_ADVISORY_SEVERITY: Readonly<Record<InitiatorAdvisoryCode, \"warning\" | \"info\">>;",
+          "doc": "Each code's severity, fixed per code: the writer states it once, so both sides' menus fold it alike."
+        },
+        {
           "kind": "typeAlias",
           "name": "InitiatorActionRequest",
           "declaration": "type InitiatorActionRequest = typeLiteral | typeLiteral;",
           "doc": "What an operator route asks to do from an initiator."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InitiatorAdvisoryCode",
+          "declaration": "type InitiatorAdvisoryCode = \"custody_unbilled\" | \"billing_on_canceled\" | \"credits_unkeyed\" | \"line_unbilled\" | \"line_overbilled\" | \"stated_money_mismatch\" | \"line_billed_short\" | \"billed_beyond_initiator\";",
+          "doc": "What the advisory reports. A line may carry more than one line code: each is its own fact."
+        },
+        {
+          "kind": "interface",
+          "name": "InitiatorAdvisoryContext",
+          "declaration": "interface InitiatorAdvisoryContext {\n  billing: indexedAccess | null;\n  credits: indexedAccess | null;\n  accounting: AccountingContext | null;\n  custody: ReadonlyMap<string, InitiatorLineCustody>;\n  now: string;\n}",
+          "doc": "What {@link initiatorBillingAdvisory} needs. Unlike the offer contexts (module\nrule 2), the documents may be `null`, meaning **not read** — not yet loaded, or\nnot readable by this viewer (a viewer without `creditNotes.read`). That is the\n`LossRecordView.billed` meaning (`utils/custody.ts`), never \"looked, and it is\ngone\". A `null` makes the advisory answer `computed: false` with a reason, never\na figure: an advisory has no server behind it to refuse an over-answer."
+        },
+        {
+          "kind": "interface",
+          "name": "InitiatorAdvisoryFinding",
+          "declaration": "interface InitiatorAdvisoryFinding {\n  code: InitiatorAdvisoryCode;\n  paths: string[][];\n  rows: typeLiteral[];\n  documents: string[];\n}",
+          "doc": "One advisory finding."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InitiatorAdvisoryUnansweredReason",
+          "declaration": "type InitiatorAdvisoryUnansweredReason = \"billing_unread\" | \"credits_unread\" | \"accounting_unread\" | \"unaligned\" | \"crms_blocked\";",
+          "doc": "Why the advisory did not answer."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InitiatorBillingAdvisory",
+          "declaration": "type InitiatorBillingAdvisory = typeLiteral | typeLiteral;",
+          "doc": "{@link initiatorBillingAdvisory}'s answer."
         },
         {
           "kind": "typeAlias",
@@ -20901,6 +20937,14 @@
           "name": "initiatorActionsFor",
           "signature": "initiatorActionsFor(side: S, initiator: indexedAccess, ctx: InitiatorOfferContext<S>): DocumentActionOffer[]",
           "doc": "**Every action an operator may take on this initiator and its lines.** Per-line\noffers follow the initiator-level ones, in line order.\n\n- `create_billing` — the initiator is not canceled; `bill_lines` names every\n  line with something to bill (ruling 114): a flat line's units the account\n  leaves (`remaining.units`), a TIME line its ordered units (what is left of its\n  time is the one remainder builder's, `buildRemainder`).\n- `create_remaining_billing` — the account finds a line the remainder would bill\n  ({@link remainingBilling}). An over-billed line is not one: it is `credit_overbilling`'s.\n- `create_replacement_billing` / `create_service_charge_billing` — their unit counts.\n- `credit_overbilling` — `buildOverbillingCredits` offers at least one note.\n- `close_remaining` — an active initiator with a closable line and, where the\n  side's close waits for returns, no subrented unit out; `outcome` says\n  whether it cancels.\n- `add_credit` — (payable, until ruling 112) any billing document exists.\n- per line: `close_item`; `remove_item` and `change_basis` on an untouched\n  line ({@link initiatorLineTouched}), `change_basis` only on a line with a\n  formula. A kit header (payable) may be removed while nothing under it is touched.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "initiatorBillingAdvisory",
+          "signature": "initiatorBillingAdvisory(side: S, initiator: indexedAccess, ctx: InitiatorAdvisoryContext<S>): InitiatorBillingAdvisory",
+          "doc": "**Is this initiator billed right?** — one answer for both sides' billing menus\n(one-document-model ruling 210), read off the SAME account the offers read\n({@link initiatorActionsFor}: `billableInitiator` at `now`), so \"N Lines Left\"\nand `create_remaining_billing` cannot disagree. It reports and offers nothing:\na remedy is an offer's.\n\nIn order:\n1. billing not read → not computed;\n2. a canceled initiator: `billing_on_canceled` while a billing document is live, else clean;\n3. no live billing document (a draft is live, a void is not): `custody_unbilled`\n   where custody moved a line whose type moves custody, else clean — answered\n   without the credits, as before custody moves owing nothing is the normal state;\n4. credits or accounting not read → not computed: no count without what nets it;\n5. the account's refusal, split by reason (`unaligned` first, then `crms_blocked`);\n6. `credits_unkeyed`, then each non-kit-header line's codes, then `billed_beyond_initiator`.\n\nField, substitution, move and out-of-service differences are not findings:\nthey stay on their rows (the document diff).",
           "paramTags": [],
           "returnsTag": null
         },
